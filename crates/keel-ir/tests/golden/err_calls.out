@@ -1,0 +1,4 @@
+verifier errors:
+  @twice: is declared or defined more than once
+  @main inst1 `v1 = call @putchar(v0)`: @putchar takes (i32), got (i64)
+  @main inst2 `v2 = call @twice(v1, v1)`: @twice takes (i32), got (i32, i32)

@@ -9,33 +9,30 @@ use std::fmt::Write;
 use std::path::Path;
 
 fn render(src: &str) -> String {
-    let funcs = match keel_ir::parse(src) {
-        Ok(funcs) => funcs,
+    let module = match keel_ir::parse(src) {
+        Ok(module) => module,
         Err(e) => return format!("parse error: {e}\n"),
     };
 
-    let printed: String = funcs.iter().map(|f| f.to_string()).collect();
+    let printed = module.to_string();
     let reparsed = keel_ir::parse(&printed)
         .unwrap_or_else(|e| panic!("printed IR does not parse: {e}\n{printed}"));
-    let reprinted: String = reparsed.iter().map(|f| f.to_string()).collect();
-    assert_eq!(printed, reprinted, "print -> parse -> print is not stable");
+    assert_eq!(
+        printed,
+        reparsed.to_string(),
+        "print -> parse -> print is not stable"
+    );
 
-    let mut out = String::new();
-    for (i, func) in funcs.iter().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
-        match keel_ir::verify(func) {
-            Ok(()) => out.push_str(&func.to_string()),
-            Err(errors) => {
-                writeln!(out, "verifier errors in @{}:", func.name).unwrap();
-                for e in errors {
-                    writeln!(out, "  {e}").unwrap();
-                }
+    match keel_ir::verify_module(&module) {
+        Ok(()) => printed,
+        Err(errors) => {
+            let mut out = String::from("verifier errors:\n");
+            for e in errors {
+                writeln!(out, "  {e}").unwrap();
             }
+            out
         }
     }
-    out
 }
 
 #[test]

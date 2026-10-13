@@ -5,16 +5,18 @@ pub mod dominators;
 pub mod entity;
 pub mod function;
 pub mod inst;
+pub mod module;
 pub mod parser;
 pub mod types;
 pub mod verifier;
 
 pub use entity::{Arena, EntityRef};
-pub use function::{CallConv, Function, Signature, StackSlotData, ValueData, ValueDef};
+pub use function::{CallConv, FuncDecl, Function, Signature, StackSlotData, ValueData, ValueDef};
 pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, UnaryOp};
+pub use module::Module;
 pub use parser::{ParseError, parse};
 pub use types::Type;
-pub use verifier::{VerifierError, verify};
+pub use verifier::{VerifierError, verify, verify_module};
 
 entity!(
     /// An SSA value: an instruction result or a block parameter.
@@ -30,6 +32,11 @@ entity!(
     /// A basic block.
     Block,
     "block"
+);
+entity!(
+    /// A function this function calls, declared in its `FuncDecl` table.
+    FuncRef,
+    "fn"
 );
 entity!(
     /// A fixed-size region of the function's stack frame.

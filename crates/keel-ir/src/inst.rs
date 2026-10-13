@@ -5,7 +5,7 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, StackSlot, Type, Value};
+use crate::{Block, FuncRef, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -45,6 +45,11 @@ pub enum InstData {
     Store {
         value: Value,
         addr: Value,
+    },
+    /// Calls a function; results follow its signature.
+    Call {
+        func: FuncRef,
+        args: Vec<Value>,
     },
     /// Address of a stack slot.
     StackAddr {
@@ -153,6 +158,7 @@ impl InstData {
             | InstData::StackAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
+            | InstData::Call { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Return { .. } => true,
@@ -194,7 +200,9 @@ impl InstData {
                 f(*cond);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
-            InstData::Return { args } => args.iter().copied().for_each(f),
+            InstData::Return { args } | InstData::Call { args, .. } => {
+                args.iter().copied().for_each(f)
+            }
         }
     }
 
@@ -217,7 +225,7 @@ impl InstData {
                 f(cond);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
-            InstData::Return { args } => args.iter_mut().for_each(f),
+            InstData::Return { args } | InstData::Call { args, .. } => args.iter_mut().for_each(f),
         }
     }
 }

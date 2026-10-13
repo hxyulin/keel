@@ -1,2 +1,2 @@
-verifier errors in @f:
-  inst3 `return v1`: use of v1 is not dominated by its definition
+verifier errors:
+  @f inst3 `return v1`: use of v1 is not dominated by its definition

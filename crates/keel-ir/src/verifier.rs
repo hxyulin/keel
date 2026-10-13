@@ -4,12 +4,13 @@
 //! and result types, block-call arguments against block parameters, and
 //! that every use is dominated by its definition. All errors are collected.
 
+use crate::Module;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
     BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Type, UnaryOp, Value,
     ValueDef,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +26,57 @@ impl fmt::Display for VerifierError {
     }
 }
 
+/// Verifies every function, that names are unique, and that each function's
+/// callees match the module's declarations.
+pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
+    let mut errors = Vec::new();
+    let mut seen = HashSet::new();
+    let names = module
+        .decls
+        .iter()
+        .map(|d| &d.name)
+        .chain(module.functions.iter().map(|f| &f.name));
+    for name in names {
+        if !seen.insert(name) {
+            errors.push(VerifierError {
+                location: format!("@{name}"),
+                message: "is declared or defined more than once".into(),
+            });
+        }
+    }
+    for func in &module.functions {
+        if let Err(func_errors) = verify(func) {
+            errors.extend(func_errors.into_iter().map(|e| VerifierError {
+                location: format!("@{} {}", func.name, e.location),
+                message: e.message,
+            }));
+        }
+        for (_, callee) in func.callees() {
+            let message = match module.signature(&callee.name) {
+                None => format!("calls @{}, which is not declared", callee.name),
+                Some(sig) if *sig != callee.sig => {
+                    format!(
+                        "calls @{} as {} but it is declared as {sig}",
+                        callee.name, callee.sig
+                    )
+                }
+                Some(_) => continue,
+            };
+            errors.push(VerifierError {
+                location: format!("@{}", func.name),
+                message,
+            });
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Verifies one function on its own; calls are checked against the
+/// signatures in its callee table.
 pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
     let cfg = ControlFlowGraph::compute(func);
     let domtree = DominatorTree::compute(func, &cfg);
@@ -241,6 +293,21 @@ impl Verifier<'_> {
                     self.inst_error(
                         inst,
                         format!("store address must be ptr, got {}", ty(*addr)),
+                    );
+                }
+            }
+            InstData::Call { func: callee, args } => {
+                let decl = func.callee(*callee);
+                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
+                if got != decl.sig.params {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "@{} takes ({}), got ({})",
+                            decl.name,
+                            type_list(&decl.sig.params),
+                            type_list(&got)
+                        ),
                     );
                 }
             }

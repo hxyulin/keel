@@ -1,0 +1,29 @@
+; @twice is called before it is defined; @pair returns two values.
+decl @putchar(i32) -> i32
+
+func @main() -> i32 {
+block0:
+    v0 = iconst.i32 33
+    v1 = call @twice(v0)
+    v2 = call @putchar(v1)
+    v3 = iconst.i64 7
+    v4, v5 = call @pair(v3)
+    call @nothing()
+    return v2
+}
+
+func @twice(i32) -> i32 {
+block0(v0: i32):
+    v1 = iadd v0, v0
+    return v1
+}
+
+func @pair(i64) -> (i64, i64) {
+block0(v0: i64):
+    return v0, v0
+}
+
+func @nothing() {
+block0:
+    return
+}

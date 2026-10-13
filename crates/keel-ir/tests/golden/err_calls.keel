@@ -1,0 +1,16 @@
+decl @putchar(i32) -> i32
+decl @twice(i32) -> i32
+
+func @main() -> i32 {
+block0:
+    v0 = iconst.i64 1
+    v1 = call @putchar(v0)
+    v2 = call @twice(v1, v1)
+    return v1
+}
+
+; Also declared above: a name may be used once.
+func @twice(i32) -> i32 {
+block0(v0: i32):
+    return v0
+}

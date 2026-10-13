@@ -4,7 +4,7 @@
 //! stay in one place.
 
 use crate::inst::{BlockCall, InstData};
-use crate::{Arena, Block, Inst, StackSlot, Type, Value};
+use crate::{Arena, Block, FuncRef, Inst, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -18,6 +18,35 @@ pub struct Signature {
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
     pub cc: CallConv,
+}
+
+impl fmt::Display for Signature {
+    /// `(i32, ptr) -> i64 cc(c)`
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("(")?;
+        write_list(f, &self.params)?;
+        f.write_str(")")?;
+        match self.returns.as_slice() {
+            [] => {}
+            [ty] => write!(f, " -> {ty}")?,
+            tys => {
+                f.write_str(" -> (")?;
+                write_list(f, tys)?;
+                f.write_str(")")?;
+            }
+        }
+        match self.cc {
+            CallConv::C => f.write_str(" cc(c)"),
+        }
+    }
+}
+
+/// A function known by name and signature: a module's `decl`, or an entry in
+/// a function's table of callees.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct FuncDecl {
+    pub name: String,
+    pub sig: Signature,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -64,6 +93,10 @@ pub struct Function {
     insts: Arena<Inst, InstNode>,
     values: Arena<Value, ValueData>,
     stack_slots: Arena<StackSlot, StackSlotData>,
+    /// Functions this one calls. Keeping their signatures here makes a
+    /// function self-contained: result types and verification of calls need
+    /// no module.
+    callees: Arena<FuncRef, FuncDecl>,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
 }
@@ -77,6 +110,7 @@ impl Function {
             insts: Arena::new(),
             values: Arena::new(),
             stack_slots: Arena::new(),
+            callees: Arena::new(),
             layout: Vec::new(),
         }
     }
@@ -91,6 +125,25 @@ impl Function {
 
     pub fn num_stack_slots(&self) -> usize {
         self.stack_slots.len()
+    }
+
+    /// Returns a reference for calling `name`, reusing an existing one.
+    pub fn import_function(&mut self, name: &str, sig: Signature) -> FuncRef {
+        if let Some((func_ref, _)) = self.callees.iter().find(|(_, d)| d.name == name) {
+            return func_ref;
+        }
+        self.callees.push(FuncDecl {
+            name: name.to_string(),
+            sig,
+        })
+    }
+
+    pub fn callee(&self, func_ref: FuncRef) -> &FuncDecl {
+        &self.callees[func_ref]
+    }
+
+    pub fn callees(&self) -> impl Iterator<Item = (FuncRef, &FuncDecl)> {
+        self.callees.iter()
     }
 
     /// Creates a block at the end of the layout.
@@ -112,40 +165,41 @@ impl Function {
 
     /// Appends an instruction to `block` and creates its result values.
     pub fn append_inst(&mut self, block: Block, data: InstData) -> Inst {
-        let result_ty = match &data {
+        let result_tys = match &data {
             InstData::Iconst { ty, .. }
             | InstData::Convert { ty, .. }
-            | InstData::Load { ty, .. } => Some(*ty),
-            InstData::StackAddr { .. } => Some(Type::Ptr),
-            InstData::Unary { arg, .. } => Some(self.value_type(*arg)),
-            InstData::Binary { args, .. } => Some(self.value_type(args[0])),
-            InstData::Select { args } => Some(self.value_type(args[1])),
-            InstData::Icmp { .. } => Some(Type::I8),
+            | InstData::Load { ty, .. } => vec![*ty],
+            InstData::StackAddr { .. } => vec![Type::Ptr],
+            InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
+            InstData::Binary { args, .. } => vec![self.value_type(args[0])],
+            InstData::Select { args } => vec![self.value_type(args[1])],
+            InstData::Icmp { .. } => vec![Type::I8],
+            InstData::Call { func, .. } => self.callees[*func].sig.returns.clone(),
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
-            | InstData::Return { .. } => None,
+            | InstData::Return { .. } => vec![],
         };
-        self.append_inst_with_result(block, data, result_ty)
+        self.append_inst_with_results(block, data, &result_tys)
     }
 
-    /// Like [`Function::append_inst`] with the result type supplied, for the
+    /// Like [`Function::append_inst`] with the result types supplied, for the
     /// parser, whose operands may not exist yet.
-    pub(crate) fn append_inst_with_result(
+    pub(crate) fn append_inst_with_results(
         &mut self,
         block: Block,
         data: InstData,
-        result_ty: Option<Type>,
+        result_tys: &[Type],
     ) -> Inst {
         let inst = self.insts.push(InstNode {
             data,
             results: Vec::new(),
             block,
         });
-        if let Some(ty) = result_ty {
+        for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
                 ty,
-                def: ValueDef::Result(inst, 0),
+                def: ValueDef::Result(inst, n as u16),
             });
             self.insts[inst].results.push(value);
         }
@@ -223,21 +277,7 @@ impl Function {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "func @{}(", self.name)?;
-        write_list(f, &self.sig.params)?;
-        f.write_str(")")?;
-        match self.sig.returns.as_slice() {
-            [] => {}
-            [ty] => write!(f, " -> {ty}")?,
-            tys => {
-                f.write_str(" -> (")?;
-                write_list(f, tys)?;
-                f.write_str(")")?;
-            }
-        }
-        match self.sig.cc {
-            CallConv::C => f.write_str(" cc(c) {\n")?,
-        }
+        writeln!(f, "func @{}{} {{", self.name, self.sig)?;
         for (ss, data) in self.stack_slots() {
             writeln!(
                 f,
@@ -293,6 +333,11 @@ impl Function {
         match self.inst_data(inst) {
             InstData::Iconst { ty, imm } => write!(f, "iconst.{ty} {imm}"),
             InstData::StackAddr { slot } => write!(f, "stack_addr {slot}"),
+            InstData::Call { func, args } => {
+                write!(f, "call @{}(", self.callees[*func].name)?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                f.write_str(")")
+            }
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
             InstData::Select { args } => {

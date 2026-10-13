@@ -1,0 +1,8 @@
+decl @putchar(i32) -> i32
+
+func @main() {
+block0:
+    v0 = iconst.i32 65
+    call @putchar(v0)
+    return
+}

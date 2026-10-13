@@ -1,4 +1,8 @@
-//! Parser for the text format produced by `Function`'s `Display` impl.
+//! Parser for the text format produced by `Module`'s `Display` impl.
+//!
+//! A file is one module: `decl` lines for external functions and `func`
+//! definitions, in any order. A call may name a function defined later, so
+//! functions are parsed first and built once every signature is known.
 //!
 //! The grammar is line-based: a block header or an instruction per line.
 //! `;` starts a comment. Values may be used before the line that defines them
@@ -11,8 +15,8 @@
 //!    parameters and results, in text order), infer result types, and build.
 
 use crate::{
-    BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, InstData, IntCC,
-    Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
+    BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, FuncDecl, FuncRef, Function,
+    InstData, IntCC, Module, Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -30,17 +34,46 @@ impl fmt::Display for ParseError {
     }
 }
 
-/// Parses every function in `src`.
-pub fn parse(src: &str) -> Result<Vec<Function>, ParseError> {
+/// Parses a module: declarations and functions.
+pub fn parse(src: &str) -> Result<Module, ParseError> {
     let tokens = lex(src)?;
     let mut parser = Parser { tokens, pos: 0 };
-    let mut funcs = Vec::new();
+    let mut decls = Vec::new();
+    let mut parsed = Vec::new();
     parser.skip_newlines();
     while !parser.at(&Tok::Eof) {
-        funcs.push(parser.function()?);
+        let (kw, loc) = parser.ident("`func` or `decl`")?;
+        match kw.as_str() {
+            "func" => parsed.push(parser.function()?),
+            "decl" => {
+                let name = parser.global("a function name like `@putchar`")?;
+                let sig = parser.signature()?;
+                parser.expect(Tok::Newline)?;
+                decls.push(FuncDecl { name, sig });
+            }
+            _ => {
+                return Err(error(
+                    loc,
+                    format!("expected `func` or `decl`, found `{kw}`"),
+                ));
+            }
+        }
         parser.skip_newlines();
     }
-    Ok(funcs)
+
+    // Duplicate names are left for the verifier; calls bind to the first.
+    let mut sigs: HashMap<&str, &Signature> = HashMap::new();
+    for decl in &decls {
+        sigs.entry(&decl.name).or_insert(&decl.sig);
+    }
+    for func in &parsed {
+        sigs.entry(&func.name).or_insert(&func.sig);
+    }
+    let functions = parsed
+        .iter()
+        .map(|func| build(func, &sigs))
+        .collect::<Result<_, _>>()?;
+    Ok(Module { decls, functions })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -164,8 +197,18 @@ struct ParsedBlock {
 }
 
 struct ParsedInst {
-    result: Option<Value>,
+    results: Vec<Value>,
     data: InstData,
+    loc: Loc,
+}
+
+/// A function as written, built once all signatures in the module are known.
+struct ParsedFunction {
+    name: String,
+    sig: Signature,
+    slots: Vec<StackSlotData>,
+    blocks: Vec<ParsedBlock>,
+    names: Names,
 }
 
 /// Temporary handles for one function: each distinct name gets one,
@@ -183,6 +226,9 @@ struct Names {
     block_defined: Vec<bool>,
     /// Stack slots, declared before the first block.
     slots: HashMap<String, StackSlot>,
+    /// Called functions, by name; resolved against the module when building.
+    callees: HashMap<String, FuncRef>,
+    callee_first_use: Vec<(String, Loc)>,
 }
 
 impl Names {
@@ -204,6 +250,16 @@ impl Names {
         }
         self.value_defs.push(v);
         Ok(v)
+    }
+
+    fn callee(&mut self, name: &str, loc: Loc) -> FuncRef {
+        if let Some(&f) = self.callees.get(name) {
+            return f;
+        }
+        let f = FuncRef::new(self.callee_first_use.len());
+        self.callees.insert(name.to_string(), f);
+        self.callee_first_use.push((name.to_string(), loc));
+        f
     }
 
     fn block(&mut self, name: &str, loc: Loc) -> Block {
@@ -305,18 +361,18 @@ impl Parser {
         Ok(tys)
     }
 
-    fn function(&mut self) -> Result<Function, ParseError> {
-        let (kw, loc) = self.ident("`func`")?;
-        if kw != "func" {
-            return Err(error(loc, format!("expected `func`, found `{kw}`")));
-        }
-        let name = match self.next() {
-            (Tok::Global(name), _) => name,
+    fn global(&mut self, wanted: &str) -> Result<String, ParseError> {
+        match self.next() {
+            (Tok::Global(name), _) => Ok(name),
             _ => {
                 self.pos -= 1;
-                return Err(self.unexpected("a function name like `@main`"));
+                Err(self.unexpected(wanted))
             }
-        };
+        }
+    }
+
+    /// `(i32, ptr) -> i64 cc(c)`; the return list and `cc(..)` are optional.
+    fn signature(&mut self) -> Result<Signature, ParseError> {
         let params = self.type_list()?;
         let returns = if self.eat(&Tok::Arrow) {
             if self.at(&Tok::Punct('(')) {
@@ -338,6 +394,17 @@ impl Parser {
             };
             self.expect(Tok::Punct(')'))?;
         }
+        Ok(Signature {
+            params,
+            returns,
+            cc,
+        })
+    }
+
+    /// Everything after `func`.
+    fn function(&mut self) -> Result<ParsedFunction, ParseError> {
+        let name = self.global("a function name like `@main`")?;
+        let sig = self.signature()?;
         self.expect(Tok::Punct('{'))?;
         self.expect(Tok::Newline)?;
 
@@ -357,17 +424,13 @@ impl Parser {
             blocks.push(self.block(&mut names)?);
             self.skip_newlines();
         }
-        build(
+        Ok(ParsedFunction {
             name,
-            Signature {
-                params,
-                returns,
-                cc,
-            },
+            sig,
             slots,
             blocks,
             names,
-        )
+        })
     }
 
     /// `ss0 = stack_slot <size>, align <align>`
@@ -452,11 +515,19 @@ impl Parser {
     }
 
     fn inst(&mut self, names: &mut Names) -> Result<ParsedInst, ParseError> {
-        let mut result = None;
-        if matches!(self.tokens[self.pos + 1].0, Tok::Punct('=')) {
-            let (name, loc) = self.ident("a result name")?;
-            self.pos += 1; // `=`
-            result = Some((name, loc));
+        // `v1 = ...` or, for calls, `v1, v2 = ...`.
+        let mut results = Vec::new();
+        if matches!(
+            self.tokens[self.pos + 1].0,
+            Tok::Punct('=') | Tok::Punct(',')
+        ) {
+            loop {
+                results.push(self.ident("a result name")?);
+                if self.eat(&Tok::Punct('=')) {
+                    break;
+                }
+                self.expect(Tok::Punct(','))?;
+            }
         }
         let (opcode, op_loc) = self.ident("an opcode")?;
         let (base, suffix) = match opcode.split_once('.') {
@@ -511,6 +582,29 @@ impl Parser {
                         }
                     };
                     InstData::Iconst { ty, imm }
+                }
+                "call" => {
+                    no_suffix()?;
+                    let (name, loc) = match self.next() {
+                        (Tok::Global(name), loc) => (name, loc),
+                        _ => {
+                            self.pos -= 1;
+                            return Err(self.unexpected("a function name like `@putchar`"));
+                        }
+                    };
+                    let func = names.callee(&name, loc);
+                    self.expect(Tok::Punct('('))?;
+                    let mut args = Vec::new();
+                    if !self.eat(&Tok::Punct(')')) {
+                        loop {
+                            args.push(self.value(names)?);
+                            if self.eat(&Tok::Punct(')')) {
+                                break;
+                            }
+                            self.expect(Tok::Punct(','))?;
+                        }
+                    }
+                    InstData::Call { func, args }
                 }
                 "stack_addr" => {
                     no_suffix()?;
@@ -589,25 +683,36 @@ impl Parser {
         };
         self.expect(Tok::Newline)?;
 
-        let has_result = !matches!(
-            data,
+        // A call's result count depends on the callee's signature, which is
+        // checked when building; every other instruction has 0 or 1 results.
+        let expected = match data {
+            InstData::Call { .. } => None,
             InstData::Store { .. }
-                | InstData::Jump { .. }
-                | InstData::Brif { .. }
-                | InstData::Return { .. }
-        );
-        let result = match (result, has_result) {
-            (Some((name, loc)), true) => Some(names.define_value(&name, loc)?),
-            (None, false) => None,
-            (Some(_), false) => return Err(error(op_loc, format!("`{base}` has no result"))),
-            (None, true) => {
+            | InstData::Jump { .. }
+            | InstData::Brif { .. }
+            | InstData::Return { .. } => Some(0),
+            _ => Some(1),
+        };
+        match (expected, results.len()) {
+            (Some(0), n) if n > 0 => return Err(error(op_loc, format!("`{base}` has no result"))),
+            (Some(1), 0) => {
                 return Err(error(
                     op_loc,
                     format!("`{base}` produces a result; write `vN = {base} ...`"),
                 ));
             }
-        };
-        Ok(ParsedInst { result, data })
+            (Some(1), n) if n > 1 => return Err(error(op_loc, format!("`{base}` has one result"))),
+            _ => {}
+        }
+        let results = results
+            .into_iter()
+            .map(|(name, loc)| names.define_value(&name, loc))
+            .collect::<Result<_, _>>()?;
+        Ok(ParsedInst {
+            results,
+            data,
+            loc: op_loc,
+        })
     }
 
     fn value(&mut self, names: &mut Names) -> Result<Value, ParseError> {
@@ -634,12 +739,16 @@ impl Parser {
 
 /// Renumbers temporary handles, infers result types and builds the function.
 fn build(
-    name: String,
-    sig: Signature,
-    slots: Vec<StackSlotData>,
-    blocks: Vec<ParsedBlock>,
-    names: Names,
+    parsed: &ParsedFunction,
+    sigs: &HashMap<&str, &Signature>,
 ) -> Result<Function, ParseError> {
+    let ParsedFunction {
+        name,
+        sig,
+        slots,
+        blocks,
+        names,
+    } = parsed;
     if let Some(i) = names.block_defined.iter().position(|&d| !d) {
         let (name, loc) = &names.block_first_use[i];
         return Err(error(*loc, format!("block `{name}` is never defined")));
@@ -662,15 +771,43 @@ fn build(
     // Result types, by temporary handle. Binary results take their first
     // operand's type, which may be defined later in the text, so iterate.
     let mut types: Vec<Option<Type>> = vec![None; value_map.len()];
-    for parsed in &blocks {
+    for parsed in blocks {
         for &(v, ty) in &parsed.params {
             types[v.index()] = Some(ty);
         }
     }
+
+    // Callees, in order of first use, which is their temporary numbering.
+    let mut callee_sigs = Vec::new();
+    for (callee, loc) in &names.callee_first_use {
+        let sig = sigs
+            .get(callee.as_str())
+            .ok_or_else(|| error(*loc, format!("function `@{callee}` is not declared")))?;
+        callee_sigs.push((callee, (*sig).clone()));
+    }
+    for inst in blocks.iter().flat_map(|b| &b.insts) {
+        if let InstData::Call { func, .. } = &inst.data {
+            let (callee, sig) = &callee_sigs[func.index()];
+            if sig.returns.len() != inst.results.len() {
+                return Err(error(
+                    inst.loc,
+                    format!(
+                        "`@{callee}` returns {} value(s), but {} result(s) are named",
+                        sig.returns.len(),
+                        inst.results.len()
+                    ),
+                ));
+            }
+            for (&v, &ty) in inst.results.iter().zip(&sig.returns) {
+                types[v.index()] = Some(ty);
+            }
+        }
+    }
+
     loop {
         let mut changed = false;
         for inst in blocks.iter().flat_map(|b| &b.insts) {
-            let Some(result) = inst.result else { continue };
+            let [result] = inst.results[..] else { continue };
             if types[result.index()].is_some() {
                 continue;
             }
@@ -695,22 +832,26 @@ fn build(
         }
     }
 
-    let mut func = Function::new(name, sig);
-    // Slots were numbered in declaration order, which is creation order.
+    let mut func = Function::new(name.clone(), sig.clone());
+    // Slots and callees were numbered in declaration order, which is
+    // creation order.
     for slot in slots {
         func.create_stack_slot(slot.size, slot.align);
     }
-    for _ in &blocks {
+    for (callee, sig) in callee_sigs {
+        func.import_function(callee, sig);
+    }
+    for _ in blocks {
         func.create_block();
     }
     for parsed in blocks {
         let block = block_map[parsed.block.index()];
-        for (v, ty) in parsed.params {
+        for &(v, ty) in &parsed.params {
             let created = func.append_block_param(block, ty);
             debug_assert_eq!(created, value_map[v.index()]);
         }
-        for inst in parsed.insts {
-            let mut data = inst.data;
+        for inst in &parsed.insts {
+            let mut data = inst.data.clone();
             data.for_each_operand_mut(|v| *v = value_map[v.index()]);
             match &mut data {
                 InstData::Jump { dest } => dest.block = block_map[dest.block.index()],
@@ -721,20 +862,24 @@ fn build(
                 }
                 _ => {}
             }
-            let result_ty = match inst.result {
-                Some(v) => Some(types[v.index()].ok_or_else(|| {
-                    let (name, loc) = &names.value_first_use[v.index()];
-                    error(
-                        *loc,
-                        format!("cannot infer the type of `{name}`: it depends on itself"),
-                    )
-                })?),
-                None => None,
-            };
-            let created = func.append_inst_with_result(block, data, result_ty);
-            debug_assert_eq!(
-                func.inst_results(created).first().copied(),
-                inst.result.map(|v| value_map[v.index()])
+            let result_tys = inst
+                .results
+                .iter()
+                .map(|&v| {
+                    types[v.index()].ok_or_else(|| {
+                        let (name, loc) = &names.value_first_use[v.index()];
+                        error(
+                            *loc,
+                            format!("cannot infer the type of `{name}`: it depends on itself"),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let created = func.append_inst_with_results(block, data, &result_tys);
+            debug_assert!(
+                func.inst_results(created)
+                    .iter()
+                    .eq(inst.results.iter().map(|v| &value_map[v.index()]))
             );
         }
     }

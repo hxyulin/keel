@@ -1,9 +1,9 @@
-verifier errors in @f:
-  inst0 `v3 = iadd v0, v1`: iadd takes two integers of the same type, got (i32, i64)
-  inst1 `v4 = load.i32 v1`: load address must be ptr, got i64
-  inst2 `v5 = sext.i16 v1`: sext must convert an integer to a wider integer, got i64 to i16
-  inst3 `v6 = trunc.i64 v0`: trunc must convert an integer to a narrower integer, got i32 to i64
-  inst4 `v7 = ptradd v2, v0`: ptradd takes (ptr, i64), got (ptr, i32)
-  inst5 `v8 = icmp.eq v2, v1`: icmp takes two integers or pointers of the same type, got (ptr, i64)
-  inst6 `v9 = iconst.ptr 0`: iconst type must be an integer, got ptr
-  inst7 `return v1`: returns (i64) but the signature returns (i32)
+verifier errors:
+  @f inst0 `v3 = iadd v0, v1`: iadd takes two integers of the same type, got (i32, i64)
+  @f inst1 `v4 = load.i32 v1`: load address must be ptr, got i64
+  @f inst2 `v5 = sext.i16 v1`: sext must convert an integer to a wider integer, got i64 to i16
+  @f inst3 `v6 = trunc.i64 v0`: trunc must convert an integer to a narrower integer, got i32 to i64
+  @f inst4 `v7 = ptradd v2, v0`: ptradd takes (ptr, i64), got (ptr, i32)
+  @f inst5 `v8 = icmp.eq v2, v1`: icmp takes two integers or pointers of the same type, got (ptr, i64)
+  @f inst6 `v9 = iconst.ptr 0`: iconst type must be an integer, got ptr
+  @f inst7 `return v1`: returns (i64) but the signature returns (i32)

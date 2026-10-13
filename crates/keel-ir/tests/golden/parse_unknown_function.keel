@@ -1,0 +1,5 @@
+func @main() -> i32 {
+block0:
+    v0 = call @nowhere()
+    return v0
+}

@@ -1,4 +1,4 @@
-verifier errors in @f:
-  block0: the entry block cannot be a branch target
-  inst0 `brif v1, block1(v0), block2`: block1 takes 2 argument(s), got 1
-  inst0 `brif v1, block1(v0), block2`: block2 takes 1 argument(s), got 0
+verifier errors:
+  @f block0: the entry block cannot be a branch target
+  @f inst0 `brif v1, block1(v0), block2`: block1 takes 2 argument(s), got 1
+  @f inst0 `brif v1, block1(v0), block2`: block2 takes 1 argument(s), got 0
