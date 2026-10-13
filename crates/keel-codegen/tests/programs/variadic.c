@@ -31,5 +31,6 @@ int main(void) {
     CHECK(k_tail(1, 2, 3, 4, 5, 6, 7, 8, -5, &target, (int64_t)70000), -5 + 1000 + 70000 + 8);
     CHECK(k_sum_three(4, 5, -6), 3);
     CHECK(k_printf("forwarded %d and %.2f and %s\n", 42, 2.5, "keel"), 31);
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

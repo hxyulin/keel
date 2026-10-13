@@ -55,5 +55,6 @@ int main(void) {
         CHECK(k_ret_u16(x), (uint16_t)x);
     }
     CHECK(k_use_ret(), -99);
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

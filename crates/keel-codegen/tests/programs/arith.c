@@ -86,5 +86,6 @@ int main(void) {
     CHECK(swap_loop(1, 2, 4), 12);
     CHECK(max64(-5, 3), 3);
     CHECK(max64(9, 3), 9);
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

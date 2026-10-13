@@ -232,5 +232,6 @@ int main(void) {
     SAME(gf3, wf3);
     /* keel to keel: make a struct, pass it on */
     CHECK(k_roundtrip(5), h_s16(&(S16){5, -15}) + h_big(&(Big){{-1, 4, 9, 14, 19}}));
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

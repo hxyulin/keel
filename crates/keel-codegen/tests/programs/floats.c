@@ -288,5 +288,6 @@ int main(void) {
     CHECK_D(c[7], (double)(float)(f24 + f1));
     CHECK_D(c[8], (double)all);
     CHECK_I(dbits(c[9]), (zero < nzero) + 2 * (big * big != big * big));
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

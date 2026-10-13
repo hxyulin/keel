@@ -44,5 +44,6 @@ int main(void) {
         CHECK(invariant(ns[i], ns[i]), invariant_model(ns[i], ns[i]));
         CHECK(invariant(-ns[i] - 1000, 9), invariant_model(-ns[i] - 1000, 9));
     }
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

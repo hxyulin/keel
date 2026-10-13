@@ -15,5 +15,6 @@ int main(void) {
             failures++;
         }
     }
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

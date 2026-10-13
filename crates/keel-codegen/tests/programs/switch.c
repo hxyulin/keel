@@ -90,5 +90,6 @@ int main(void) {
     for (int x = -300; x <= 300; x++) CHECK(narrow(x), model_narrow((int8_t)x));
     for (int64_t n = 0; n <= 10; n++) CHECK(machine(n), model_machine(n));
     CHECK(constant(), 1);
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

@@ -116,5 +116,6 @@ int main(void) {
         CHECK((double)k_call_small(x), (double)(-3 - 3000 + 5000 + (int64_t)(int32_t)x * 100000 + x));
     }
     k_print();
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }

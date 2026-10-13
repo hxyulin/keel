@@ -48,5 +48,6 @@ int main(void) {
         for (int64_t i = 0; i < n; i++) want += (uint64_t)(i & 0xff) * 0x0101010101010101ull;
         CHECK(memset_loop(n), want);
     }
-    return failures;
+    /* An exit status is taken mod 256. */
+    return failures != 0;
 }
