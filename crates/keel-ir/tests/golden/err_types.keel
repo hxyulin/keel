@@ -1,0 +1,11 @@
+func @f(i32, i64, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i64, v2: ptr):
+    v3 = iadd v0, v1
+    v4 = load.i32 v1
+    v5 = sext.i16 v1
+    v6 = trunc.i64 v0
+    v7 = ptradd v2, v0
+    v8 = icmp.eq v2, v1
+    v9 = iconst.ptr 0
+    return v1
+}

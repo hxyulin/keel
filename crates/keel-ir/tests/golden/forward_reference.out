@@ -1,0 +1,10 @@
+func @forward() -> i64 cc(c) {
+block0:
+    jump block2
+block1:
+    v0 = iadd v1, v1
+    return v0
+block2:
+    v1 = iconst.i64 21
+    jump block1
+}

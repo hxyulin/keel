@@ -1,0 +1,152 @@
+//! Control-flow graph edges and the dominator tree.
+//!
+//! Uses the iterative algorithm from Cooper, Harvey & Kennedy, "A Simple,
+//! Fast Dominance Algorithm" (2001): walk blocks in reverse postorder and
+//! intersect the dominators of each block's predecessors until nothing changes.
+
+use crate::{Block, EntityRef, Function};
+
+/// Predecessors and successors of each block, read from branch instructions.
+pub struct ControlFlowGraph {
+    preds: Vec<Vec<Block>>,
+    succs: Vec<Vec<Block>>,
+}
+
+impl ControlFlowGraph {
+    pub fn compute(func: &Function) -> Self {
+        let n = func.num_blocks();
+        let mut cfg = Self {
+            preds: vec![Vec::new(); n],
+            succs: vec![Vec::new(); n],
+        };
+        for block in func.blocks() {
+            for &inst in func.block_insts(block) {
+                for dest in func.inst_data(inst).branch_dests() {
+                    // A block reached twice (e.g. both arms of a `brif`) is
+                    // still one predecessor.
+                    if !cfg.succs[block.index()].contains(&dest.block) {
+                        cfg.succs[block.index()].push(dest.block);
+                        cfg.preds[dest.block.index()].push(block);
+                    }
+                }
+            }
+        }
+        cfg
+    }
+
+    pub fn preds(&self, block: Block) -> &[Block] {
+        &self.preds[block.index()]
+    }
+
+    pub fn succs(&self, block: Block) -> &[Block] {
+        &self.succs[block.index()]
+    }
+}
+
+pub struct DominatorTree {
+    /// Reachable blocks in reverse postorder; the entry block comes first.
+    rpo: Vec<Block>,
+    /// Position in `rpo` plus one; 0 means unreachable.
+    rpo_number: Vec<u32>,
+    /// Immediate dominator. `None` for the entry and unreachable blocks.
+    idom: Vec<Option<Block>>,
+}
+
+impl DominatorTree {
+    pub fn compute(func: &Function, cfg: &ControlFlowGraph) -> Self {
+        let n = func.num_blocks();
+        let mut tree = Self {
+            rpo: Vec::new(),
+            rpo_number: vec![0; n],
+            idom: vec![None; n],
+        };
+        let Some(entry) = func.entry_block() else {
+            return tree;
+        };
+
+        // Iterative DFS producing postorder.
+        let mut visited = vec![false; n];
+        let mut stack = vec![(entry, 0usize)];
+        visited[entry.index()] = true;
+        while let Some((block, next)) = stack.last_mut() {
+            let block = *block;
+            if let Some(&succ) = cfg.succs(block).get(*next) {
+                *next += 1;
+                if !visited[succ.index()] {
+                    visited[succ.index()] = true;
+                    stack.push((succ, 0));
+                }
+            } else {
+                tree.rpo.push(block);
+                stack.pop();
+            }
+        }
+        tree.rpo.reverse();
+        for (i, &block) in tree.rpo.iter().enumerate() {
+            tree.rpo_number[block.index()] = i as u32 + 1;
+        }
+
+        // The entry dominates itself while iterating; reset to `None` at the end.
+        tree.idom[entry.index()] = Some(entry);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for &block in &tree.rpo[1..] {
+                let mut new_idom = None;
+                for &pred in cfg.preds(block) {
+                    if tree.idom[pred.index()].is_none() {
+                        continue; // unreachable, or not processed yet
+                    }
+                    new_idom = Some(match new_idom {
+                        None => pred,
+                        Some(current) => tree.intersect(current, pred),
+                    });
+                }
+                if new_idom != tree.idom[block.index()] {
+                    tree.idom[block.index()] = new_idom;
+                    changed = true;
+                }
+            }
+        }
+        tree.idom[entry.index()] = None;
+        tree
+    }
+
+    fn intersect(&self, mut a: Block, mut b: Block) -> Block {
+        while a != b {
+            while self.rpo_number[a.index()] > self.rpo_number[b.index()] {
+                a = self.idom[a.index()].expect("processed block has an idom");
+            }
+            while self.rpo_number[b.index()] > self.rpo_number[a.index()] {
+                b = self.idom[b.index()].expect("processed block has an idom");
+            }
+        }
+        a
+    }
+
+    pub fn is_reachable(&self, block: Block) -> bool {
+        self.rpo_number[block.index()] != 0
+    }
+
+    pub fn idom(&self, block: Block) -> Option<Block> {
+        self.idom[block.index()]
+    }
+
+    /// Reachable blocks in reverse postorder.
+    pub fn rpo(&self) -> &[Block] {
+        &self.rpo
+    }
+
+    /// Whether every path from the entry to `b` passes through `a`.
+    /// A block dominates itself. Unreachable blocks dominate nothing.
+    pub fn dominates(&self, a: Block, mut b: Block) -> bool {
+        if !self.is_reachable(a) || !self.is_reachable(b) {
+            return false;
+        }
+        // Walk up from `b`; dominators always have smaller RPO numbers.
+        while self.rpo_number[b.index()] > self.rpo_number[a.index()] {
+            b = self.idom[b.index()].expect("non-entry reachable block has an idom");
+        }
+        a == b
+    }
+}

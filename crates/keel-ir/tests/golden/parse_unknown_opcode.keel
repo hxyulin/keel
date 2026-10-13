@@ -1,0 +1,5 @@
+func @f() cc(c) {
+block0:
+    v0 = frobnicate.i32 1
+    return
+}

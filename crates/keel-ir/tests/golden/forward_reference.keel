@@ -1,0 +1,13 @@
+; block1 is printed before block2 but only reached through it, so using v1
+; (defined in block2) is fine: block2 dominates block1.
+; Names need not be numbered in order; printing renumbers them.
+func @forward() -> i64 cc(c) {
+block0:
+    jump block2
+block1:
+    v9 = iadd v1, v1
+    return v9
+block2:
+    v1 = iconst.i64 21
+    jump block1
+}

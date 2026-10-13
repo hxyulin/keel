@@ -1,0 +1,2 @@
+verifier errors in @f:
+  block0: entry block parameters (i32) do not match the signature (i64)

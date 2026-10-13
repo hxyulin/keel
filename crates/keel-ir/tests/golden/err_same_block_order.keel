@@ -1,0 +1,7 @@
+; Within one block a value must be defined before it is used.
+func @f() -> i64 cc(c) {
+block0:
+    v1 = iadd v2, v2
+    v2 = iconst.i64 1
+    return v1
+}

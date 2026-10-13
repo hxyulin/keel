@@ -1,0 +1,1 @@
+parse error: 3:5: `iconst` produces a result; write `vN = iconst ...`

@@ -1,0 +1,7 @@
+func @f() cc(c) {
+block0:
+    return
+    jump block1
+block1:
+    v0 = iconst.i32 1
+}

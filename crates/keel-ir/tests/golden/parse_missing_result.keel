@@ -1,0 +1,5 @@
+func @f() cc(c) {
+block0:
+    iconst.i32 1
+    return
+}

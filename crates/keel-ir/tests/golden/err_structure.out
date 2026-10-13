@@ -1,0 +1,3 @@
+verifier errors in @f:
+  inst0 `return`: terminator in the middle of a block
+  block1: block does not end in a terminator

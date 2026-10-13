@@ -1,0 +1,4 @@
+func @f(i64) cc(c) {
+block0(v0: i32):
+    return
+}

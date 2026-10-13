@@ -1,0 +1,4 @@
+func @f() -> i64 cc(c) {
+block0:
+    return v7
+}

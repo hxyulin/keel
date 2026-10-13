@@ -1,0 +1,10 @@
+; v3 is defined only on the then-path but used after the join.
+func @f(i8) -> i64 cc(c) {
+block0(v0: i8):
+    brif v0, block1, block2
+block1:
+    v3 = iconst.i64 1
+    jump block2
+block2:
+    return v3
+}

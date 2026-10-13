@@ -102,6 +102,17 @@ impl Function {
             | InstData::Brif { .. }
             | InstData::Return { .. } => None,
         };
+        self.append_inst_with_result(block, data, result_ty)
+    }
+
+    /// Like [`Function::append_inst`] with the result type supplied, for the
+    /// parser, whose operands may not exist yet.
+    pub(crate) fn append_inst_with_result(
+        &mut self,
+        block: Block,
+        data: InstData,
+        result_ty: Option<Type>,
+    ) -> Inst {
         let inst = self.insts.push(InstNode {
             data,
             results: Vec::new(),
@@ -132,6 +143,11 @@ impl Function {
             value = next;
         }
         value
+    }
+
+    /// Number of blocks ever created; block indices are below this.
+    pub fn num_blocks(&self) -> usize {
+        self.blocks.len()
     }
 
     pub fn entry_block(&self) -> Option<Block> {
@@ -219,6 +235,17 @@ impl fmt::Display for Function {
 }
 
 impl Function {
+    /// Formats one instruction the way the printer does, e.g. `v3 = iadd v1, v2`.
+    pub fn display_inst(&self, inst: Inst) -> impl fmt::Display + '_ {
+        struct DisplayInst<'a>(&'a Function, Inst);
+        impl fmt::Display for DisplayInst<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.write_inst(f, self.1)
+            }
+        }
+        DisplayInst(self, inst)
+    }
+
     fn write_inst(&self, f: &mut fmt::Formatter<'_>, inst: Inst) -> fmt::Result {
         let results = self.inst_results(inst);
         if !results.is_empty() {

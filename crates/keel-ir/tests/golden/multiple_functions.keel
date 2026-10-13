@@ -1,0 +1,17 @@
+func @nothing() cc(c) {
+block0:
+    return
+}
+
+func @pair(i64) -> (i64, i64) cc(c) {
+block0(v0: i64):
+    return v0, v0
+}
+
+func @store_through(ptr, i16) cc(c) {
+block0(v0: ptr, v1: i16):
+    v2 = uext.i64 v1
+    v3 = trunc.i8 v2
+    store v3, v0
+    return
+}
