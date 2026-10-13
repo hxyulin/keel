@@ -1,0 +1,6 @@
+verifier errors:
+  @f inst0 `intrinsic memcpy(v0, v0, v1)`: intrinsic memcpy takes (ptr, ptr, i64), got (ptr, ptr, i32)
+  @f inst1 `intrinsic memset(v0, v1, v2)`: intrinsic memset takes (ptr, i8, i64), got (ptr, i32, i64)
+  @f inst2 `v3 = ptrtoint.i32 v0`: ptrtoint converts ptr to i64, got ptr to i32
+  @f inst3 `v4 = inttoptr.ptr v1`: inttoptr converts i64 to ptr, got i32 to ptr
+  @f inst4 `trap`: terminator in the middle of a block

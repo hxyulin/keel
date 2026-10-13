@@ -175,10 +175,12 @@ impl Function {
             InstData::Select { args } => vec![self.value_type(args[1])],
             InstData::Icmp { .. } => vec![Type::I8],
             InstData::Call { func, .. } => self.callees[*func].sig.returns.clone(),
+            InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
-            | InstData::Return { .. } => vec![],
+            | InstData::Return { .. }
+            | InstData::Trap => vec![],
         };
         self.append_inst_with_results(block, data, &result_tys)
     }
@@ -338,6 +340,12 @@ impl Function {
                 write_list(f, args.iter().map(|&a| v(a)))?;
                 f.write_str(")")
             }
+            InstData::Intrinsic { id, args } => {
+                write!(f, "intrinsic {id}(")?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                f.write_str(")")
+            }
+            InstData::Trap => f.write_str("trap"),
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
             InstData::Select { args } => {

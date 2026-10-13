@@ -1,0 +1,9 @@
+func @f(ptr, i32, i64) {
+block0(v0: ptr, v1: i32, v2: i64):
+    intrinsic memcpy(v0, v0, v1)
+    intrinsic memset(v0, v1, v2)
+    v3 = ptrtoint.i32 v0
+    v4 = inttoptr.ptr v1
+    trap
+    return
+}

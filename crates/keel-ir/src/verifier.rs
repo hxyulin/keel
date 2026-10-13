@@ -250,19 +250,36 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::Convert {
+                op: op @ (ConvertOp::PtrToInt | ConvertOp::IntToPtr),
+                ty: to,
+                arg,
+            } => {
+                let from = ty(*arg);
+                let (want_from, want_to) = match op {
+                    ConvertOp::PtrToInt => (Type::Ptr, Type::I64),
+                    _ => (Type::I64, Type::Ptr),
+                };
+                if (from, *to) != (want_from, want_to) {
+                    self.inst_error(
+                        inst,
+                        format!("{op} converts {want_from} to {want_to}, got {from} to {to}"),
+                    );
+                }
+            }
             InstData::Convert { op, ty: to, arg } => {
                 let from = ty(*arg);
                 let ok = match (from.bytes(), to.bytes()) {
                     (Some(f), Some(t)) if from.is_int() && to.is_int() => match op {
                         ConvertOp::Sext | ConvertOp::Uext => t > f,
-                        ConvertOp::Trunc => t < f,
+                        _ => t < f,
                     },
                     _ => false,
                 };
                 if !ok {
                     let rule = match op {
                         ConvertOp::Sext | ConvertOp::Uext => "a wider",
-                        ConvertOp::Trunc => "a narrower",
+                        _ => "a narrower",
                     };
                     self.inst_error(
                         inst,
@@ -311,6 +328,21 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::Intrinsic { id, args } => {
+                let info = id.info();
+                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
+                if got != info.params {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "intrinsic {id} takes ({}), got ({})",
+                            type_list(info.params),
+                            type_list(&got)
+                        ),
+                    );
+                }
+            }
+            InstData::Trap => {}
             InstData::StackAddr { slot } => {
                 if slot.index() >= func.num_stack_slots() {
                     self.inst_error(inst, format!("{slot} is not declared"));

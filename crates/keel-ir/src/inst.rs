@@ -5,7 +5,7 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, FuncRef, StackSlot, Type, Value};
+use crate::{Block, FuncRef, Intrinsic, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -51,6 +51,11 @@ pub enum InstData {
         func: FuncRef,
         args: Vec<Value>,
     },
+    /// A call-like operation with known meaning; see [`Intrinsic`].
+    Intrinsic {
+        id: Intrinsic,
+        args: Vec<Value>,
+    },
     /// Address of a stack slot.
     StackAddr {
         slot: StackSlot,
@@ -66,6 +71,8 @@ pub enum InstData {
     Return {
         args: Vec<Value>,
     },
+    /// Stops the program. A terminator, since nothing after it runs.
+    Trap,
 }
 
 /// A branch target together with the arguments for its block parameters.
@@ -118,6 +125,10 @@ pub enum ConvertOp {
     Sext,
     Uext,
     Trunc,
+    /// `ptr` to `i64`: the address as a number.
+    PtrToInt,
+    /// `i64` to `ptr`.
+    IntToPtr,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -150,6 +161,7 @@ impl InstData {
     pub fn is_pinned(&self) -> bool {
         match self {
             InstData::Binary { op, .. } => op.can_trap(),
+            InstData::Intrinsic { id, .. } => !id.info().pure,
             InstData::Iconst { .. }
             | InstData::Unary { .. }
             | InstData::Select { .. }
@@ -159,6 +171,7 @@ impl InstData {
             InstData::Load { .. }
             | InstData::Store { .. }
             | InstData::Call { .. }
+            | InstData::Trap
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Return { .. } => true,
@@ -168,7 +181,10 @@ impl InstData {
     pub fn is_terminator(&self) -> bool {
         matches!(
             self,
-            InstData::Jump { .. } | InstData::Brif { .. } | InstData::Return { .. }
+            InstData::Jump { .. }
+                | InstData::Brif { .. }
+                | InstData::Return { .. }
+                | InstData::Trap
         )
     }
 
@@ -183,7 +199,7 @@ impl InstData {
     /// Visits every value operand, including block-call arguments.
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {
-            InstData::Iconst { .. } | InstData::StackAddr { .. } => {}
+            InstData::Iconst { .. } | InstData::StackAddr { .. } | InstData::Trap => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter().copied().for_each(f)
             }
@@ -200,15 +216,15 @@ impl InstData {
                 f(*cond);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
-            InstData::Return { args } | InstData::Call { args, .. } => {
-                args.iter().copied().for_each(f)
-            }
+            InstData::Return { args }
+            | InstData::Call { args, .. }
+            | InstData::Intrinsic { args, .. } => args.iter().copied().for_each(f),
         }
     }
 
     pub fn for_each_operand_mut(&mut self, mut f: impl FnMut(&mut Value)) {
         match self {
-            InstData::Iconst { .. } | InstData::StackAddr { .. } => {}
+            InstData::Iconst { .. } | InstData::StackAddr { .. } | InstData::Trap => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter_mut().for_each(f)
             }
@@ -225,7 +241,9 @@ impl InstData {
                 f(cond);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
-            InstData::Return { args } | InstData::Call { args, .. } => args.iter_mut().for_each(f),
+            InstData::Return { args }
+            | InstData::Call { args, .. }
+            | InstData::Intrinsic { args, .. } => args.iter_mut().for_each(f),
         }
     }
 }
@@ -274,6 +292,8 @@ impl fmt::Display for ConvertOp {
             ConvertOp::Sext => "sext",
             ConvertOp::Uext => "uext",
             ConvertOp::Trunc => "trunc",
+            ConvertOp::PtrToInt => "ptrtoint",
+            ConvertOp::IntToPtr => "inttoptr",
         })
     }
 }

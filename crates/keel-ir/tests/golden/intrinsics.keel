@@ -1,0 +1,16 @@
+func @f(ptr, ptr, i64, i8) -> i64 {
+block0(v0: ptr, v1: ptr, v2: i64, v3: i8):
+    intrinsic memset(v0, v3, v2)
+    intrinsic memcpy(v1, v0, v2)
+    intrinsic memmove(v0, v1, v2)
+    intrinsic debugtrap()
+    v4 = ptrtoint.i64 v0
+    v5 = iadd v4, v2
+    v6 = inttoptr.ptr v5
+    v7 = icmp.eq v6, v1
+    brif v7, block1, block2
+block1:
+    trap
+block2:
+    return v4
+}

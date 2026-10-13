@@ -16,7 +16,7 @@
 
 use crate::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, FuncDecl, FuncRef, Function,
-    InstData, IntCC, Module, Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
+    InstData, IntCC, Intrinsic, Module, Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -593,18 +593,24 @@ impl Parser {
                         }
                     };
                     let func = names.callee(&name, loc);
-                    self.expect(Tok::Punct('('))?;
-                    let mut args = Vec::new();
-                    if !self.eat(&Tok::Punct(')')) {
-                        loop {
-                            args.push(self.value(names)?);
-                            if self.eat(&Tok::Punct(')')) {
-                                break;
-                            }
-                            self.expect(Tok::Punct(','))?;
-                        }
+                    InstData::Call {
+                        func,
+                        args: self.arg_list(names)?,
                     }
-                    InstData::Call { func, args }
+                }
+                "intrinsic" => {
+                    no_suffix()?;
+                    let (name, loc) = self.ident("an intrinsic name like `memcpy`")?;
+                    let id = Intrinsic::from_name(&name)
+                        .ok_or_else(|| error(loc, format!("unknown intrinsic `{name}`")))?;
+                    InstData::Intrinsic {
+                        id,
+                        args: self.arg_list(names)?,
+                    }
+                }
+                "trap" => {
+                    no_suffix()?;
+                    InstData::Trap
                 }
                 "stack_addr" => {
                     no_suffix()?;
@@ -685,16 +691,23 @@ impl Parser {
 
         // A call's result count depends on the callee's signature, which is
         // checked when building; every other instruction has 0 or 1 results.
-        let expected = match data {
+        let expected = match &data {
             InstData::Call { .. } => None,
+            InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
-            | InstData::Return { .. } => Some(0),
+            | InstData::Return { .. }
+            | InstData::Trap => Some(0),
             _ => Some(1),
         };
+        // Name intrinsics by themselves, not by the `intrinsic` keyword.
+        let what = match &data {
+            InstData::Intrinsic { id, .. } => id.to_string(),
+            _ => base.to_string(),
+        };
         match (expected, results.len()) {
-            (Some(0), n) if n > 0 => return Err(error(op_loc, format!("`{base}` has no result"))),
+            (Some(0), n) if n > 0 => return Err(error(op_loc, format!("`{what}` has no result"))),
             (Some(1), 0) => {
                 return Err(error(
                     op_loc,
@@ -713,6 +726,22 @@ impl Parser {
             data,
             loc: op_loc,
         })
+    }
+
+    /// `(v0, v1, ...)`
+    fn arg_list(&mut self, names: &mut Names) -> Result<Vec<Value>, ParseError> {
+        self.expect(Tok::Punct('('))?;
+        let mut args = Vec::new();
+        if !self.eat(&Tok::Punct(')')) {
+            loop {
+                args.push(self.value(names)?);
+                if self.eat(&Tok::Punct(')')) {
+                    break;
+                }
+                self.expect(Tok::Punct(','))?;
+            }
+        }
+        Ok(args)
     }
 
     fn value(&mut self, names: &mut Names) -> Result<Value, ParseError> {
@@ -786,6 +815,11 @@ fn build(
         callee_sigs.push((callee, (*sig).clone()));
     }
     for inst in blocks.iter().flat_map(|b| &b.insts) {
+        if let InstData::Intrinsic { id, .. } = &inst.data {
+            for (&v, &ty) in inst.results.iter().zip(id.info().returns) {
+                types[v.index()] = Some(ty);
+            }
+        }
         if let InstData::Call { func, .. } = &inst.data {
             let (callee, sig) = &callee_sigs[func.index()];
             if sig.returns.len() != inst.results.len() {
@@ -941,6 +975,8 @@ fn parse_convert_op(s: &str) -> Option<ConvertOp> {
         "sext" => ConvertOp::Sext,
         "uext" => ConvertOp::Uext,
         "trunc" => ConvertOp::Trunc,
+        "ptrtoint" => ConvertOp::PtrToInt,
+        "inttoptr" => ConvertOp::IntToPtr,
         _ => return None,
     })
 }

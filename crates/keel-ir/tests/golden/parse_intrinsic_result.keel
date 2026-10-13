@@ -1,0 +1,5 @@
+func @f(ptr, i8, i64) {
+block0(v0: ptr, v1: i8, v2: i64):
+    v3 = intrinsic memset(v0, v1, v2)
+    return
+}
