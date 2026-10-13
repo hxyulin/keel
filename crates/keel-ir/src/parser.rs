@@ -1,8 +1,9 @@
 //! Parser for the text format produced by `Module`'s `Display` impl.
 //!
-//! A file is one module: `decl` lines for external functions and `func`
-//! definitions, in any order. A call may name a function defined later, so
-//! functions are parsed first and built once every signature is known.
+//! A file is one module: `decl` lines for external functions and data,
+//! `data` definitions and `func` definitions, in any order. A call or a
+//! `symbol_addr` may name something defined later, so functions are parsed
+//! first and built once every name is known.
 //!
 //! The grammar is line-based: a block header or an instruction per line.
 //! `;` starts a comment. Values may be used before the line that defines them
@@ -15,10 +16,11 @@
 //!    parameters and results, in text order), infer result types, and build.
 
 use crate::{
-    BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, FuncDecl, FuncRef, Function,
-    InstData, IntCC, Intrinsic, Module, Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
+    BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, DataRef,
+    EntityRef, FuncDecl, FuncRef, Function, InstData, IntCC, Intrinsic, Module, SigRef, Signature,
+    StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,17 +36,24 @@ impl fmt::Display for ParseError {
     }
 }
 
-/// Parses a module: declarations and functions.
+/// Parses a module: declarations, data and functions.
 pub fn parse(src: &str) -> Result<Module, ParseError> {
     let tokens = lex(src)?;
     let mut parser = Parser { tokens, pos: 0 };
     let mut decls = Vec::new();
+    let mut data = Vec::new();
     let mut parsed = Vec::new();
     parser.skip_newlines();
     while !parser.at(&Tok::Eof) {
-        let (kw, loc) = parser.ident("`func` or `decl`")?;
+        let (kw, loc) = parser.ident("`func`, `data` or `decl`")?;
         match kw.as_str() {
             "func" => parsed.push(parser.function()?),
+            "data" => data.push(parser.data_definition()?),
+            "decl" if parser.eat(&Tok::Ident("data".into())) => {
+                let name = parser.global("a data name like `@environ`")?;
+                parser.expect(Tok::Newline)?;
+                data.push(DataObject { name, init: None });
+            }
             "decl" => {
                 let name = parser.global("a function name like `@putchar`")?;
                 let sig = parser.signature()?;
@@ -54,7 +63,7 @@ pub fn parse(src: &str) -> Result<Module, ParseError> {
             _ => {
                 return Err(error(
                     loc,
-                    format!("expected `func` or `decl`, found `{kw}`"),
+                    format!("expected `func`, `data` or `decl`, found `{kw}`"),
                 ));
             }
         }
@@ -69,11 +78,16 @@ pub fn parse(src: &str) -> Result<Module, ParseError> {
     for func in &parsed {
         sigs.entry(&func.name).or_insert(&func.sig);
     }
+    let data_names: HashSet<&str> = data.iter().map(|d| d.name.as_str()).collect();
     let functions = parsed
         .iter()
-        .map(|func| build(func, &sigs))
+        .map(|func| build(func, &sigs, &data_names))
         .collect::<Result<_, _>>()?;
-    Ok(Module { decls, functions })
+    Ok(Module {
+        decls,
+        data,
+        functions,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -81,6 +95,8 @@ enum Tok {
     Ident(String),
     Global(String),
     Int(i64),
+    /// `b"..."`, with escapes already decoded.
+    Bytes(Vec<u8>),
     Punct(char),
     Arrow,
     Newline,
@@ -93,6 +109,7 @@ impl fmt::Display for Tok {
             Tok::Ident(s) => write!(f, "`{s}`"),
             Tok::Global(s) => write!(f, "`@{s}`"),
             Tok::Int(n) => write!(f, "`{n}`"),
+            Tok::Bytes(_) => f.write_str("a byte string"),
             Tok::Punct(c) => write!(f, "`{c}`"),
             Tok::Arrow => f.write_str("`->`"),
             Tok::Newline => f.write_str("end of line"),
@@ -111,8 +128,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
     let mut tokens = Vec::new();
     for (line_idx, line) in src.lines().enumerate() {
         let line_no = line_idx as u32 + 1;
-        let code = line.split(';').next().unwrap_or("");
-        let chars: Vec<char> = code.chars().collect();
+        let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
         while i < chars.len() {
             let c = chars[i];
@@ -121,8 +137,15 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 col: i as u32 + 1,
             };
             let ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.';
-            if c.is_whitespace() {
+            if c == ';' {
+                // A comment runs to the end of the line.
+                break;
+            } else if c.is_whitespace() {
                 i += 1;
+            } else if c == 'b' && chars.get(i + 1) == Some(&'"') {
+                let (bytes, end) = lex_bytes(&chars, i + 2, line_no)?;
+                tokens.push((Tok::Bytes(bytes), loc));
+                i = end;
             } else if c == '-' && chars.get(i + 1) == Some(&'>') {
                 tokens.push((Tok::Arrow, loc));
                 i += 2;
@@ -154,7 +177,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                     },
                     loc,
                 ));
-            } else if "(),:={}".contains(c) {
+            } else if "(),:={}+".contains(c) {
                 tokens.push((Tok::Punct(c), loc));
                 i += 1;
             } else {
@@ -169,7 +192,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
             Tok::Newline,
             Loc {
                 line: line_no,
-                col: chars.len() as u32 + 1,
+                col: i as u32 + 1,
             },
         ));
     }
@@ -182,6 +205,58 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
         },
     ));
     Ok(tokens)
+}
+
+/// Decodes the body of a `b"..."` string starting at `chars[start]`, up to
+/// the closing quote. Returns the bytes and the index after the quote.
+fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize), ParseError> {
+    let err = |i: usize, message: String| ParseError {
+        line,
+        col: i as u32 + 1,
+        message,
+    };
+    let mut bytes = Vec::new();
+    let mut i = start;
+    loop {
+        let Some(&c) = chars.get(i) else {
+            return Err(err(start - 2, "unterminated byte string".into()));
+        };
+        i += 1;
+        match c {
+            '"' => return Ok((bytes, i)),
+            '\\' => {
+                let escape = chars.get(i).copied();
+                i += 1;
+                bytes.push(match escape {
+                    Some('n') => b'\n',
+                    Some('t') => b'\t',
+                    Some('r') => b'\r',
+                    Some('0') => 0,
+                    Some('\\') => b'\\',
+                    Some('"') => b'"',
+                    Some('x') => {
+                        let hex: String = chars.get(i..i + 2).unwrap_or(&[]).iter().collect();
+                        i += 2;
+                        u8::from_str_radix(&hex, 16).map_err(|_| {
+                            err(i - 4, "`\\x` needs two hex digits, like `\\x0a`".into())
+                        })?
+                    }
+                    other => {
+                        let shown = other.map_or(String::new(), String::from);
+                        return Err(err(i - 2, format!("unknown escape `\\{shown}`")));
+                    }
+                });
+            }
+            c if c.is_ascii() => bytes.push(c as u8),
+            // Non-ASCII text would need an encoding; spell it with `\x`.
+            c => {
+                return Err(err(
+                    i - 1,
+                    format!("non-ASCII character `{c}`; use `\\x` escapes"),
+                ));
+            }
+        }
+    }
 }
 
 struct Parser {
@@ -229,6 +304,13 @@ struct Names {
     /// Called functions, by name; resolved against the module when building.
     callees: HashMap<String, FuncRef>,
     callee_first_use: Vec<(String, Loc)>,
+    /// Names used by `symbol_addr`, which may be functions or data; the
+    /// module decides when building.
+    symbols: HashMap<String, usize>,
+    symbol_first_use: Vec<(String, Loc)>,
+    /// Indirect-call signatures without duplicates; the index is the
+    /// final `SigRef`.
+    signatures: Vec<Signature>,
 }
 
 impl Names {
@@ -260,6 +342,28 @@ impl Names {
         self.callees.insert(name.to_string(), f);
         self.callee_first_use.push((name.to_string(), loc));
         f
+    }
+
+    /// A temporary handle for a `symbol_addr` operand, stored as a `DataRef`
+    /// until the module says what the name is.
+    fn symbol(&mut self, name: &str, loc: Loc) -> Symbol {
+        let n = self.symbols.len();
+        let n = *self.symbols.entry(name.to_string()).or_insert_with(|| {
+            self.symbol_first_use.push((name.to_string(), loc));
+            n
+        });
+        Symbol::Data(DataRef::new(n))
+    }
+
+    fn signature(&mut self, sig: Signature) -> SigRef {
+        let n = match self.signatures.iter().position(|s| *s == sig) {
+            Some(n) => n,
+            None => {
+                self.signatures.push(sig);
+                self.signatures.len() - 1
+            }
+        };
+        SigRef::new(n)
     }
 
     fn block(&mut self, name: &str, loc: Loc) -> Block {
@@ -459,6 +563,75 @@ impl Parser {
         Ok(StackSlotData { size, align })
     }
 
+    /// Everything after `data`:
+    /// `@name = [const] align <n> { item, ... }`, where an item is
+    /// `b"..."`, `<int type> <n>`, `zero <n>` or `ptr @sym [+ <n>]`. Items
+    /// may continue over several lines.
+    fn data_definition(&mut self) -> Result<DataObject, ParseError> {
+        let name = self.global("a data name like `@msg`")?;
+        self.expect(Tok::Punct('='))?;
+        let constant = self.eat(&Tok::Ident("const".into()));
+        let (kw, kw_loc) = self.ident("`align`")?;
+        if kw != "align" {
+            return Err(error(kw_loc, format!("expected `align`, found `{kw}`")));
+        }
+        let align = self.u32("an alignment")?;
+        self.expect(Tok::Punct('{'))?;
+        let mut items = Vec::new();
+        self.skip_newlines();
+        if !self.eat(&Tok::Punct('}')) {
+            loop {
+                items.push(self.data_item()?);
+                self.skip_newlines();
+                if self.eat(&Tok::Punct('}')) {
+                    break;
+                }
+                self.expect(Tok::Punct(','))?;
+                self.skip_newlines();
+            }
+        }
+        self.expect(Tok::Newline)?;
+        Ok(DataObject {
+            name,
+            init: Some(DataInit {
+                constant,
+                align,
+                items,
+            }),
+        })
+    }
+
+    fn data_item(&mut self) -> Result<DataItem, ParseError> {
+        if let (Tok::Bytes(bytes), _) = self.next() {
+            return Ok(DataItem::Bytes(bytes));
+        }
+        self.pos -= 1;
+        let (kw, loc) = self.ident("a data item like `i32 7`, `b\"..\"`, `zero 8` or `ptr @f`")?;
+        match kw.as_str() {
+            "zero" => Ok(DataItem::Zero(self.u32("a byte count")?)),
+            "ptr" => {
+                let symbol = self.global("a symbol like `@main`")?;
+                let addend = if self.eat(&Tok::Punct('+')) {
+                    self.u32("an offset in bytes")?
+                } else {
+                    0
+                };
+                Ok(DataItem::Ptr { symbol, addend })
+            }
+            _ => {
+                let ty = parse_type(&kw)
+                    .ok_or_else(|| error(loc, format!("expected a data item, found `{kw}`")))?;
+                match self.next() {
+                    (Tok::Int(value), _) => Ok(DataItem::Int { ty, value }),
+                    _ => {
+                        self.pos -= 1;
+                        Err(self.unexpected("an integer"))
+                    }
+                }
+            }
+        }
+    }
+
     fn u32(&mut self, wanted: &str) -> Result<u32, ParseError> {
         match self.next() {
             (Tok::Int(n), loc) => {
@@ -598,6 +771,38 @@ impl Parser {
                         args: self.arg_list(names)?,
                     }
                 }
+                "call_indirect" => {
+                    no_suffix()?;
+                    let callee = self.value(names)?;
+                    let args = self.arg_list(names)?;
+                    self.expect(Tok::Punct(':'))?;
+                    let sig = self.signature()?;
+                    if sig.returns.len() != results.len() {
+                        return Err(error(
+                            op_loc,
+                            format!(
+                                "the signature returns {} value(s), but {} result(s) are named",
+                                sig.returns.len(),
+                                results.len()
+                            ),
+                        ));
+                    }
+                    InstData::CallIndirect {
+                        sig: names.signature(sig),
+                        callee,
+                        args,
+                    }
+                }
+                "symbol_addr" => {
+                    no_suffix()?;
+                    let (Tok::Global(name), loc) = self.next() else {
+                        self.pos -= 1;
+                        return Err(self.unexpected("a symbol like `@msg`"));
+                    };
+                    InstData::SymbolAddr {
+                        symbol: names.symbol(&name, loc),
+                    }
+                }
                 "intrinsic" => {
                     no_suffix()?;
                     let (name, loc) = self.ident("an intrinsic name like `memcpy`")?;
@@ -692,7 +897,7 @@ impl Parser {
         // A call's result count depends on the callee's signature, which is
         // checked when building; every other instruction has 0 or 1 results.
         let expected = match &data {
-            InstData::Call { .. } => None,
+            InstData::Call { .. } | InstData::CallIndirect { .. } => None,
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Store { .. }
             | InstData::Jump { .. }
@@ -770,6 +975,7 @@ impl Parser {
 fn build(
     parsed: &ParsedFunction,
     sigs: &HashMap<&str, &Signature>,
+    data_names: &HashSet<&str>,
 ) -> Result<Function, ParseError> {
     let ParsedFunction {
         name,
@@ -814,7 +1020,23 @@ fn build(
             .ok_or_else(|| error(*loc, format!("function `@{callee}` is not declared")))?;
         callee_sigs.push((callee, (*sig).clone()));
     }
+    // `symbol_addr` names, in order of first use: functions (by signature)
+    // or data.
+    let mut symbols = Vec::new();
+    for (symbol, loc) in &names.symbol_first_use {
+        let sig = sigs.get(symbol.as_str());
+        if sig.is_none() && !data_names.contains(symbol.as_str()) {
+            return Err(error(*loc, format!("symbol `@{symbol}` is not declared")));
+        }
+        symbols.push((symbol, sig.map(|s| (*s).clone())));
+    }
     for inst in blocks.iter().flat_map(|b| &b.insts) {
+        if let InstData::CallIndirect { sig, .. } = &inst.data {
+            let returns = &names.signatures[sig.index()].returns;
+            for (&v, &ty) in inst.results.iter().zip(returns) {
+                types[v.index()] = Some(ty);
+            }
+        }
         if let InstData::Intrinsic { id, .. } = &inst.data {
             for (&v, &ty) in inst.results.iter().zip(id.info().returns) {
                 types[v.index()] = Some(ty);
@@ -849,7 +1071,7 @@ fn build(
                 InstData::Iconst { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. } => Some(*ty),
-                InstData::StackAddr { .. } => Some(Type::Ptr),
+                InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } => Some(Type::I8),
                 InstData::Unary { arg, .. } => types[arg.index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
@@ -875,6 +1097,18 @@ fn build(
     for (callee, sig) in callee_sigs {
         func.import_function(callee, sig);
     }
+    // After the callees, so a function named by both a call and a
+    // `symbol_addr` reuses the call's `FuncRef`.
+    let symbols: Vec<Symbol> = symbols
+        .into_iter()
+        .map(|(name, sig)| match sig {
+            Some(sig) => Symbol::Func(func.import_function(name, sig)),
+            None => Symbol::Data(func.import_data(name)),
+        })
+        .collect();
+    for sig in &names.signatures {
+        func.import_signature(sig.clone());
+    }
     for _ in blocks {
         func.create_block();
     }
@@ -889,6 +1123,12 @@ fn build(
             data.for_each_operand_mut(|v| *v = value_map[v.index()]);
             match &mut data {
                 InstData::Jump { dest } => dest.block = block_map[dest.block.index()],
+                InstData::SymbolAddr { symbol } => {
+                    let Symbol::Data(temp) = *symbol else {
+                        unreachable!("the parser stores symbols as temporary DataRefs")
+                    };
+                    *symbol = symbols[temp.index()];
+                }
                 InstData::Brif { dests, .. } => {
                     for dest in dests {
                         dest.block = block_map[dest.block.index()];

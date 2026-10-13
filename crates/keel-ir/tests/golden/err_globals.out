@@ -1,0 +1,13 @@
+verifier errors:
+  @f: is declared or defined more than once
+  @bad_align: alignment must be a power of two up to 4096, got 3
+  @empty: data object is empty
+  @too_big: 256 does not fit in i8
+  @too_big: -32769 does not fit in i16
+  @wide: data integers must be i8 to i64, got i128
+  @dangling: points to @nowhere, which is not declared
+  @misaligned: ptr @f is at offset 4, which is not a multiple of 8
+  @under_aligned: holds pointers, so it needs align 8 or more, got 4
+  @past_end: @bad_align + 2 is past the end of @bad_align (1 bytes)
+  @f inst1 `v2 = call_indirect v1(v0) : (ptr) -> i64 cc(c)`: call_indirect callee must be ptr, got i64
+  @f inst2 `v3 = call_indirect v0(v1) : (ptr) -> i64 cc(c)`: the signature takes (ptr), got (i64)

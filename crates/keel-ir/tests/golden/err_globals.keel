@@ -1,0 +1,18 @@
+; Verifier errors in data objects and indirect calls.
+data @bad_align = align 3 { i8 0 }
+data @empty = align 1 { }
+data @too_big = align 1 { i8 256, i16 -32769, i8 -128, i8 255 }
+data @wide = align 16 { i128 1 }
+data @dangling = align 8 { ptr @nowhere }
+data @misaligned = align 8 { i32 0, ptr @f }
+data @under_aligned = align 4 { ptr @f }
+data @past_end = const align 8 { ptr @bad_align + 2 }
+data @f = align 1 { i8 0 }
+
+func @f(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = iconst.i64 1
+    v2 = call_indirect v1(v0) : (ptr) -> i64
+    v3 = call_indirect v0(v1) : (ptr) -> i64
+    return v3
+}

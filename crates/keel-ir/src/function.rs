@@ -3,8 +3,8 @@
 //! All mutation goes through methods so invariants (result values, aliases)
 //! stay in one place.
 
-use crate::inst::{BlockCall, InstData};
-use crate::{Arena, Block, FuncRef, Inst, StackSlot, Type, Value};
+use crate::inst::{BlockCall, InstData, Symbol};
+use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -97,6 +97,11 @@ pub struct Function {
     /// function self-contained: result types and verification of calls need
     /// no module.
     callees: Arena<FuncRef, FuncDecl>,
+    /// Data objects whose address this function takes, by name. Their
+    /// contents belong to the module.
+    data_symbols: Arena<DataRef, String>,
+    /// Signatures of indirect calls, without duplicates.
+    signatures: Arena<SigRef, Signature>,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
 }
@@ -111,6 +116,8 @@ impl Function {
             values: Arena::new(),
             stack_slots: Arena::new(),
             callees: Arena::new(),
+            data_symbols: Arena::new(),
+            signatures: Arena::new(),
             layout: Vec::new(),
         }
     }
@@ -146,6 +153,43 @@ impl Function {
         self.callees.iter()
     }
 
+    /// Returns a reference to data object `name`, reusing an existing one.
+    pub fn import_data(&mut self, name: &str) -> DataRef {
+        if let Some((data_ref, _)) = self.data_symbols.iter().find(|(_, n)| *n == name) {
+            return data_ref;
+        }
+        self.data_symbols.push(name.to_string())
+    }
+
+    pub fn data_symbols(&self) -> impl Iterator<Item = (DataRef, &str)> {
+        self.data_symbols.iter().map(|(r, name)| (r, name.as_str()))
+    }
+
+    /// Returns a reference to `sig` for indirect calls, reusing an existing
+    /// one.
+    pub fn import_signature(&mut self, sig: Signature) -> SigRef {
+        if let Some((sig_ref, _)) = self.signatures.iter().find(|(_, s)| **s == sig) {
+            return sig_ref;
+        }
+        self.signatures.push(sig)
+    }
+
+    pub fn signature(&self, sig_ref: SigRef) -> &Signature {
+        &self.signatures[sig_ref]
+    }
+
+    pub fn signatures(&self) -> impl Iterator<Item = (SigRef, &Signature)> {
+        self.signatures.iter()
+    }
+
+    /// The linker name of `symbol`.
+    pub fn symbol_name(&self, symbol: Symbol) -> &str {
+        match symbol {
+            Symbol::Func(func_ref) => &self.callees[func_ref].name,
+            Symbol::Data(data_ref) => &self.data_symbols[data_ref],
+        }
+    }
+
     /// Creates a block at the end of the layout.
     pub fn create_block(&mut self) -> Block {
         let block = self.blocks.push(BlockData::default());
@@ -169,12 +213,13 @@ impl Function {
             InstData::Iconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. } => vec![*ty],
-            InstData::StackAddr { .. } => vec![Type::Ptr],
+            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => vec![Type::Ptr],
             InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
             InstData::Select { args } => vec![self.value_type(args[1])],
             InstData::Icmp { .. } => vec![Type::I8],
             InstData::Call { func, .. } => self.callees[*func].sig.returns.clone(),
+            InstData::CallIndirect { sig, .. } => self.signatures[*sig].returns.clone(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
             InstData::Store { .. }
             | InstData::Jump { .. }
@@ -339,6 +384,14 @@ impl Function {
                 write!(f, "call @{}(", self.callees[*func].name)?;
                 write_list(f, args.iter().map(|&a| v(a)))?;
                 f.write_str(")")
+            }
+            InstData::SymbolAddr { symbol } => {
+                write!(f, "symbol_addr @{}", self.symbol_name(*symbol))
+            }
+            InstData::CallIndirect { sig, callee, args } => {
+                write!(f, "call_indirect {}(", v(*callee))?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                write!(f, ") : {}", self.signatures[*sig])
             }
             InstData::Intrinsic { id, args } => {
                 write!(f, "intrinsic {id}(")?;

@@ -5,7 +5,7 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, FuncRef, Intrinsic, StackSlot, Type, Value};
+use crate::{Block, DataRef, FuncRef, Intrinsic, SigRef, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -51,6 +51,13 @@ pub enum InstData {
         func: FuncRef,
         args: Vec<Value>,
     },
+    /// Calls the function at address `callee`, which must have signature
+    /// `sig`.
+    CallIndirect {
+        sig: SigRef,
+        callee: Value,
+        args: Vec<Value>,
+    },
     /// A call-like operation with known meaning; see [`Intrinsic`].
     Intrinsic {
         id: Intrinsic,
@@ -59,6 +66,10 @@ pub enum InstData {
     /// Address of a stack slot.
     StackAddr {
         slot: StackSlot,
+    },
+    /// Address of a function or data object.
+    SymbolAddr {
+        symbol: Symbol,
     },
     Jump {
         dest: BlockCall,
@@ -73,6 +84,14 @@ pub enum InstData {
     },
     /// Stops the program. A terminator, since nothing after it runs.
     Trap,
+}
+
+/// A linker symbol an instruction refers to, through one of the function's
+/// tables.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Symbol {
+    Func(FuncRef),
+    Data(DataRef),
 }
 
 /// A branch target together with the arguments for its block parameters.
@@ -167,10 +186,12 @@ impl InstData {
             | InstData::Select { .. }
             | InstData::Convert { .. }
             | InstData::Icmp { .. }
-            | InstData::StackAddr { .. } => false,
+            | InstData::StackAddr { .. }
+            | InstData::SymbolAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
             | InstData::Call { .. }
+            | InstData::CallIndirect { .. }
             | InstData::Trap
             | InstData::Jump { .. }
             | InstData::Brif { .. }
@@ -199,9 +220,16 @@ impl InstData {
     /// Visits every value operand, including block-call arguments.
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {
-            InstData::Iconst { .. } | InstData::StackAddr { .. } | InstData::Trap => {}
+            InstData::Iconst { .. }
+            | InstData::StackAddr { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::Trap => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter().copied().for_each(f)
+            }
+            InstData::CallIndirect { callee, args, .. } => {
+                f(*callee);
+                args.iter().copied().for_each(f);
             }
             InstData::Select { args } => args.iter().copied().for_each(f),
             InstData::Unary { arg, .. } => f(*arg),
@@ -224,9 +252,16 @@ impl InstData {
 
     pub fn for_each_operand_mut(&mut self, mut f: impl FnMut(&mut Value)) {
         match self {
-            InstData::Iconst { .. } | InstData::StackAddr { .. } | InstData::Trap => {}
+            InstData::Iconst { .. }
+            | InstData::StackAddr { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::Trap => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter_mut().for_each(f)
+            }
+            InstData::CallIndirect { callee, args, .. } => {
+                f(callee);
+                args.iter_mut().for_each(f);
             }
             InstData::Select { args } => args.iter_mut().for_each(f),
             InstData::Unary { arg, .. } => f(arg),

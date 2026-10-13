@@ -1,6 +1,7 @@
 //! Keel IR: a CFG of blocks with block arguments, pinned side-effecting
 //! instructions and floating pure ones. See `docs/design.md`.
 
+pub mod data;
 pub mod dominators;
 pub mod entity;
 pub mod function;
@@ -11,9 +12,10 @@ pub mod parser;
 pub mod types;
 pub mod verifier;
 
+pub use data::{DataInit, DataItem, DataObject};
 pub use entity::{Arena, EntityRef};
 pub use function::{CallConv, FuncDecl, Function, Signature, StackSlotData, ValueData, ValueDef};
-pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, UnaryOp};
+pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, Symbol, UnaryOp};
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use module::Module;
 pub use parser::{ParseError, parse};
@@ -44,4 +46,14 @@ entity!(
     /// A fixed-size region of the function's stack frame.
     StackSlot,
     "ss"
+);
+entity!(
+    /// A data object this function takes the address of, by name.
+    DataRef,
+    "data"
+);
+entity!(
+    /// A signature used by an indirect call.
+    SigRef,
+    "sig"
 );

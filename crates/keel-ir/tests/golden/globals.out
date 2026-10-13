@@ -1,0 +1,28 @@
+decl @puts(ptr) -> i32 cc(c)
+decl data @environ
+data @msg = const align 1 { b"Hi; \"keel\"\n\0", b"\t\\\x7f\xff" }
+data @counter = align 8 { i64 -1 }
+data @mixed = const align 4 { i8 255, i8 -1, i16 772, i32 7, zero 4 }
+data @table = const align 8 { ptr @add, ptr @msg + 4, ptr @puts, ptr @environ }
+
+func @main() -> i32 cc(c) {
+block0:
+    v0 = symbol_addr @table
+    v1 = load.ptr v0
+    v2 = iconst.i64 2
+    v3 = call_indirect v1(v2, v2) : (i64, i64) -> i64 cc(c)
+    v4 = symbol_addr @msg
+    v5 = call @puts(v4)
+    v6 = symbol_addr @puts
+    v7 = call_indirect v6(v4) : (ptr) -> i32 cc(c)
+    v8 = symbol_addr @add
+    v9 = call_indirect v8(v3, v3) : (i64, i64) -> i64 cc(c)
+    call_indirect v8(v3, v3) : (i64, i64) cc(c)
+    return v7
+}
+
+func @add(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}

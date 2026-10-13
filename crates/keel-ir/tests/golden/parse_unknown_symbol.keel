@@ -1,0 +1,5 @@
+func @main() -> ptr {
+block0:
+    v0 = symbol_addr @nowhere
+    return v0
+}
