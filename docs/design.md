@@ -187,14 +187,19 @@ Apple arm64's C convention, as implemented:
   time. A signature marks this with `...`: `decl @printf(ptr, ...) -> i32`.
   Calls pass the named parameters and then any number of `i32`, `i64`,
   `ptr` or `f64`, the types C's default argument promotions leave.
+- `i8`/`i16` parameters and results may be marked `sext` or `uext`
+  (`decl @f(i8 sext) -> i16 uext`): C widens `char` and `short` to 32 bits
+  by their signedness, the caller for arguments and the callee for results.
+  Keel code never relies on it (narrow values have unspecified upper bits),
+  but C does, so external functions and indirect calls need the attribute on
+  narrow parameters, and every defined function on a narrow result, since it
+  is exported. On the stack, narrow arguments take their own size and need
+  no extension.
 - Calls store stack arguments at `sp`, in an outgoing-argument area at the
   bottom of the frame sized for the largest call, so `sp` never moves after
   the prologue. A function reads its own stack parameters at `x29 + 16`.
 
-Limits: at most one return value; no `i8`/`i16` return values, nor such
-arguments to external functions or through `call_indirect` (Apple's ABI has
-the caller extend them by C signedness, which the IR does not record);
-variadic functions can be called but not defined (no `va_start` yet); no
+Limits: at most one return value; variadic functions can be called but not defined (no `va_start` yet); no
 by-value structs; at most 4080 bytes of stack arguments per call.
 
 ## Target

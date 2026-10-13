@@ -16,9 +16,9 @@
 //!    parameters and results, in text order), infer result types, and build.
 
 use crate::{
-    BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, DataRef,
-    EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC, Intrinsic, Module, SigRef,
-    Signature, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
+    DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
+    Intrinsic, Module, SigRef, Signature, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -514,21 +514,6 @@ impl Parser {
         parse_type(&name).ok_or_else(|| error(loc, format!("unknown type `{name}`")))
     }
 
-    fn type_list(&mut self) -> Result<Vec<Type>, ParseError> {
-        self.expect(Tok::Punct('('))?;
-        let mut tys = Vec::new();
-        if !self.eat(&Tok::Punct(')')) {
-            loop {
-                tys.push(self.ty()?);
-                if self.eat(&Tok::Punct(')')) {
-                    break;
-                }
-                self.expect(Tok::Punct(','))?;
-            }
-        }
-        Ok(tys)
-    }
-
     fn global(&mut self, wanted: &str) -> Result<String, ParseError> {
         match self.next() {
             (Tok::Global(name), _) => Ok(name),
@@ -552,22 +537,27 @@ impl Parser {
                     self.expect(Tok::Punct(')'))?;
                     break;
                 }
-                params.push(self.ty()?);
+                params.push(self.abi_param()?);
                 if self.eat(&Tok::Punct(')')) {
                     break;
                 }
                 self.expect(Tok::Punct(','))?;
             }
         }
-        let returns = if self.eat(&Tok::Arrow) {
-            if self.at(&Tok::Punct('(')) {
-                self.type_list()?
+        let mut returns = Vec::new();
+        if self.eat(&Tok::Arrow) {
+            if self.eat(&Tok::Punct('(')) {
+                loop {
+                    returns.push(self.abi_param()?);
+                    if self.eat(&Tok::Punct(')')) {
+                        break;
+                    }
+                    self.expect(Tok::Punct(','))?;
+                }
             } else {
-                vec![self.ty()?]
+                returns.push(self.abi_param()?);
             }
-        } else {
-            Vec::new()
-        };
+        }
         let mut cc = CallConv::C;
         if self.at(&Tok::Ident("cc".into())) {
             self.pos += 1;
@@ -585,6 +575,17 @@ impl Parser {
             cc,
             variadic,
         })
+    }
+
+    /// A type with optional ABI attributes: `i8 sext`.
+    fn abi_param(&mut self) -> Result<AbiParam, ParseError> {
+        let mut param = AbiParam::new(self.ty()?);
+        if self.eat(&Tok::Ident("sext".into())) {
+            param.ext = ArgExt::Sext;
+        } else if self.eat(&Tok::Ident("uext".into())) {
+            param.ext = ArgExt::Uext;
+        }
+        Ok(param)
     }
 
     /// Everything after `func`.
@@ -1162,8 +1163,8 @@ fn build(
     }
     for inst in blocks.iter().flat_map(|b| &b.insts) {
         if let InstData::CallIndirect { sig, .. } = &inst.data {
-            let returns = &names.signatures[sig.index()].returns;
-            for (&v, &ty) in inst.results.iter().zip(returns) {
+            let returns = names.signatures[sig.index()].return_types();
+            for (&v, &ty) in inst.results.iter().zip(&returns) {
                 types[v.index()] = Some(ty);
             }
         }
@@ -1184,7 +1185,7 @@ fn build(
                     ),
                 ));
             }
-            for (&v, &ty) in inst.results.iter().zip(&sig.returns) {
+            for (&v, &ty) in inst.results.iter().zip(&sig.return_types()) {
                 types[v.index()] = Some(ty);
             }
         }

@@ -1,0 +1,10 @@
+decl @putc_signed(i8 sext, i16 uext) -> i8 sext cc(c)
+
+func @f(i8 uext) -> i16 sext cc(c) {
+block0(v0: i8):
+    v1 = iconst.i16 -1
+    v2 = call @putc_signed(v0, v1)
+    v3 = symbol_addr @putc_signed
+    v4 = call_indirect v3(v0, v1) : (i8 sext, i16 uext) -> i8 sext cc(c)
+    return v1
+}

@@ -1,0 +1,61 @@
+; expect: exit 0
+; i8/i16 across calls to and from C, checked in abi_ext.c. Apple's ABI has
+; the caller extend narrow arguments to 32 bits and the callee extend narrow
+; results; `sext`/`uext` say which way. The C side declares the same
+; functions with `int` so it sees all 32 bits.
+decl @c_raw(i8 sext, i16 sext, i8 uext, i16 uext) -> i32
+decl @c_stack(i64, i64, i64, i64, i64, i64, i64, i64, i8 sext, i16 sext, i8 uext, i32) -> i32
+decl @c_ret_s8() -> i8 sext
+
+; Passes the low bits of x as each narrow argument, upper bits and all.
+func @k_pass(i64) -> i32 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = trunc.i16 v0
+    v3 = call @c_raw(v1, v2, v1, v2)
+    return v3
+}
+
+; The same past x7, where they are packed on the stack instead.
+func @k_pass_stack(i64) -> i32 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = trunc.i16 v0
+    v3 = trunc.i32 v0
+    v4 = call @c_stack(v0, v0, v0, v0, v0, v0, v0, v0, v1, v2, v1, v3)
+    return v4
+}
+
+func @k_ret_s8(i64) -> i8 sext {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    return v1
+}
+
+func @k_ret_u8(i64) -> i8 uext {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    return v1
+}
+
+func @k_ret_s16(i64) -> i16 sext {
+block0(v0: i64):
+    v1 = trunc.i16 v0
+    return v1
+}
+
+func @k_ret_u16(i64) -> i16 uext {
+block0(v0: i64):
+    v1 = trunc.i16 v0
+    return v1
+}
+
+; Uses a narrow C result: c_ret_s8() + 1 as i32.
+func @k_use_ret() -> i32 {
+block0:
+    v0 = call @c_ret_s8()
+    v1 = sext.i32 v0
+    v2 = iconst.i32 1
+    v3 = iadd v1, v2
+    return v3
+}

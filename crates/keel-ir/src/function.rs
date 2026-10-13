@@ -20,10 +20,50 @@ pub enum CallConv {
     C,
 }
 
+/// How a narrow integer is widened when it crosses a call. C passes and
+/// returns `char` and `short` extended to 32 bits by their signedness on
+/// Apple arm64, which the type alone does not say.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum ArgExt {
+    None,
+    Sext,
+    Uext,
+}
+
+/// A parameter or return value of a signature: its type and how the ABI
+/// treats it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AbiParam {
+    pub ty: Type,
+    /// Only for `i8` and `i16`.
+    pub ext: ArgExt,
+}
+
+impl AbiParam {
+    pub fn new(ty: Type) -> Self {
+        Self {
+            ty,
+            ext: ArgExt::None,
+        }
+    }
+}
+
+impl fmt::Display for AbiParam {
+    /// `i8 sext`
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.ty)?;
+        match self.ext {
+            ArgExt::None => Ok(()),
+            ArgExt::Sext => f.write_str(" sext"),
+            ArgExt::Uext => f.write_str(" uext"),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Signature {
-    pub params: Vec<Type>,
-    pub returns: Vec<Type>,
+    pub params: Vec<AbiParam>,
+    pub returns: Vec<AbiParam>,
     pub cc: CallConv,
     /// Takes more arguments after `params`, like C's `...`. A call passes
     /// `params` and then any number of `i32`, `i64`, `ptr` or `f64`: the
@@ -56,6 +96,26 @@ impl fmt::Display for Signature {
         match self.cc {
             CallConv::C => f.write_str(" cc(c)"),
         }
+    }
+}
+
+impl Signature {
+    /// A C-convention signature with plain parameters and returns.
+    pub fn new(params: &[Type], returns: &[Type]) -> Self {
+        Self {
+            params: params.iter().map(|&ty| AbiParam::new(ty)).collect(),
+            returns: returns.iter().map(|&ty| AbiParam::new(ty)).collect(),
+            cc: CallConv::C,
+            variadic: false,
+        }
+    }
+
+    pub fn param_types(&self) -> Vec<Type> {
+        self.params.iter().map(|p| p.ty).collect()
+    }
+
+    pub fn return_types(&self) -> Vec<Type> {
+        self.returns.iter().map(|p| p.ty).collect()
     }
 }
 
@@ -253,8 +313,8 @@ impl Function {
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
             InstData::Select { args } => vec![self.value_type(args[1])],
             InstData::Icmp { .. } | InstData::Fcmp { .. } => vec![Type::I8],
-            InstData::Call { func, .. } => self.callees[*func].sig.returns.clone(),
-            InstData::CallIndirect { sig, .. } => self.signatures[*sig].returns.clone(),
+            InstData::Call { func, .. } => self.callees[*func].sig.return_types(),
+            InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
             InstData::Store { .. }
             | InstData::Jump { .. }
@@ -619,12 +679,7 @@ mod tests {
 
     /// `fn sum(p: *const i32, n: i64) -> i64`: sums `n` sign-extended i32s.
     fn build_sum() -> Function {
-        let sig = Signature {
-            params: vec![Type::Ptr, Type::I64],
-            returns: vec![Type::I64],
-            cc: CallConv::C,
-            variadic: false,
-        };
+        let sig = Signature::new(&[Type::Ptr, Type::I64], &[Type::I64]);
         let mut func = Function::new("sum", sig);
         let entry = func.create_block();
         let header = func.create_block();

@@ -1,0 +1,4 @@
+verifier errors:
+  @g: `i32 sext`: only i8 and i16 are extended, since C passes them as 32 bits
+  @g: `i64 uext`: only i8 and i16 are extended, since C passes them as 32 bits
+  @f signature: `f32 sext`: only i8 and i16 are extended, since C passes them as 32 bits

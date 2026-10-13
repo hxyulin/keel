@@ -1,0 +1,6 @@
+decl @g(i32 sext) -> i64 uext
+
+func @f(f32 sext) {
+block0(v0: f32):
+    return
+}

@@ -71,8 +71,9 @@ use crate::CodegenError;
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
-    BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, EntityRef,
-    FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Module, Signature, Type, UnaryOp, Value,
+    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
+    DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Module, Signature,
+    Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -183,7 +184,8 @@ impl<'a> FunctionCompiler<'a> {
                     .into(),
             ));
         }
-        let (_, incoming) = arg_locs(&func.sig.params, func.sig.params.len());
+        let param_tys = func.sig.param_types();
+        let (_, incoming) = arg_locs(&param_tys, param_tys.len());
         if incoming > MAX_STACK_ARGS {
             return Err(err(format!(
                 "{incoming} bytes of stack parameters is more than the {MAX_STACK_ARGS} supported"
@@ -191,12 +193,17 @@ impl<'a> FunctionCompiler<'a> {
         }
         match func.sig.returns.as_slice() {
             [] => {}
-            [Type::I8 | Type::I16] => {
-                // The Apple ABI has the callee extend these to 32 bits, as
-                // signed or unsigned depending on the C type, which the IR
-                // does not record.
+            // The Apple ABI has the callee extend these to 32 bits, and every
+            // function is exported, so C may be relying on it.
+            [
+                AbiParam {
+                    ty: Type::I8 | Type::I16,
+                    ext: ArgExt::None,
+                },
+            ] => {
                 return Err(err(
-                    "i8/i16 return values need signedness the IR does not have yet".into(),
+                    "an i8/i16 return value needs `sext` or `uext`: C callers expect 32 bits"
+                        .into(),
                 ));
             }
             [_] => {}
@@ -314,10 +321,10 @@ impl<'a> FunctionCompiler<'a> {
         // Stack arguments are in the caller's frame, just above ours.
         if let Some(entry) = func.entry_block() {
             let params = func.block_params(entry).to_vec();
-            let tys = &func.sig.params;
-            let (locs, _) = arg_locs(tys, tys.len());
+            let tys = func.sig.param_types();
+            let (locs, _) = arg_locs(&tys, tys.len());
             let mut moves = Vec::new();
-            for ((param, loc), &ty) in params.into_iter().zip(locs).zip(tys) {
+            for ((param, loc), &ty) in params.into_iter().zip(locs).zip(&tys) {
                 let Some(dst) = self.alloc.loc(param) else {
                     continue;
                 };
@@ -386,12 +393,12 @@ impl<'a> FunctionCompiler<'a> {
                 self.def_done(result, d);
             }
             InstData::Call { func: callee, args } => {
-                let named = func.callee(callee).sig.params.len();
-                self.call(&args, named, &format!("_{}", func.callee(callee).name));
+                let decl = func.callee(callee);
+                self.call(&args, &decl.sig.params, &format!("_{}", decl.name));
                 self.call_result(result);
             }
             InstData::CallIndirect { sig, callee, args } => {
-                self.move_args(&args, func.signature(sig).params.len());
+                self.move_args(&args, &func.signature(sig).params);
                 // The callee is in an allocated register, which the argument
                 // moves leave alone (they write x0–x7, x16 and x17), or in a
                 // spill slot, reloaded after the moves so x16 is free.
@@ -606,7 +613,13 @@ impl<'a> FunctionCompiler<'a> {
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
                 Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
-                    self.call(&args, args.len(), &format!("_{id}"));
+                    let params: Vec<AbiParam> = id
+                        .info()
+                        .params
+                        .iter()
+                        .map(|&ty| AbiParam::new(ty))
+                        .collect();
+                    self.call(&args, &params, &format!("_{id}"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
@@ -617,6 +630,8 @@ impl<'a> FunctionCompiler<'a> {
                 if let Some(&value) = args.first() {
                     let src = self.loc(value);
                     self.emit_move(return_loc(self.ty(value)), src);
+                    let ret = &func.sig.returns[0];
+                    self.extend_in_place(0, ret.ty, ret.ext);
                 }
                 self.epilogue();
                 self.emit("ret");
@@ -628,7 +643,7 @@ impl<'a> FunctionCompiler<'a> {
     /// are named, the rest variadic. Values live across the call are in
     /// callee-saved registers or spill slots (the allocator sees to that),
     /// so nothing needs saving here.
-    fn call(&mut self, args: &[Value], named: usize, symbol: &str) {
+    fn call(&mut self, args: &[Value], named: &[AbiParam], symbol: &str) {
         self.move_args(args, named);
         self.emit(format!("bl\t{symbol}"));
     }
@@ -636,17 +651,41 @@ impl<'a> FunctionCompiler<'a> {
     /// Moves call arguments into x0–x7, v0–v7 and the outgoing argument
     /// area at `sp`. The two do not interfere: arguments are never
     /// allocated to x0–x7 or v0–v7, nor to the outgoing area.
-    fn move_args(&mut self, args: &[Value], named: usize) {
+    ///
+    /// Narrow arguments marked `sext`/`uext` are then extended to 32 bits
+    /// in their argument register, as Apple's ABI has the caller do. On the
+    /// stack they take their own size, so there is nothing to extend.
+    fn move_args(&mut self, args: &[Value], named: &[AbiParam]) {
         let tys: Vec<Type> = args.iter().map(|&a| self.ty(a)).collect();
-        let (locs, _) = arg_locs(&tys, named);
+        let (locs, _) = arg_locs(&tys, named.len());
         let mut moves = Vec::new();
-        for ((&arg, loc), &ty) in args.iter().zip(locs).zip(&tys) {
+        let mut extend = Vec::new();
+        for (i, ((&arg, loc), &ty)) in args.iter().zip(locs).zip(&tys).enumerate() {
             match loc {
-                ArgLoc::Reg(dst) => moves.push((dst, self.loc(arg))),
+                ArgLoc::Reg(dst) => {
+                    moves.push((dst, self.loc(arg)));
+                    if let (Some(param), Loc::Reg(r)) = (named.get(i), dst) {
+                        extend.push((r, param.ty, param.ext));
+                    }
+                }
                 ArgLoc::Stack(offset) => self.store_stack_arg(arg, ty, offset),
             }
         }
         self.parallel_copy(&moves);
+        for (r, ty, ext) in extend {
+            self.extend_in_place(r, ty, ext);
+        }
+    }
+
+    /// Extends the narrow value in `w<r>` to 32 bits, if `ext` asks.
+    fn extend_in_place(&mut self, r: u8, ty: Type, ext: ArgExt) {
+        let signed = match ext {
+            ArgExt::None => return,
+            ArgExt::Sext => true,
+            ArgExt::Uext => false,
+        };
+        let extended = self.extend(r, r, ty, signed);
+        debug_assert_eq!(extended, r);
     }
 
     /// Stores `arg` at `[sp, #offset]` with its own width.
@@ -1149,16 +1188,16 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
         ));
     }
     // The Apple ABI has the caller extend narrow arguments to 32 bits by C
-    // signedness, which the IR does not record. Keel functions do not rely
-    // on it, but external ones may.
+    // signedness. Keel functions do not rely on it, but external ones may,
+    // so their signatures must say which.
     if external
         && sig
             .params
             .iter()
-            .any(|ty| matches!(ty, Type::I8 | Type::I16))
+            .any(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None)
     {
         return Err(format!(
-            "{what}: i8/i16 arguments to external code need signedness the IR does not have yet"
+            "{what}: i8/i16 arguments to external code need `sext` or `uext`"
         ));
     }
     Ok(())

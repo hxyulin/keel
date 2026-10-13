@@ -8,8 +8,8 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Signature, Type, UnaryOp,
-    Value, ValueDef,
+    ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Signature, Type,
+    UnaryOp, Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -44,6 +44,14 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             errors.push(VerifierError {
                 location: format!("@{name}"),
                 message: "is declared or defined more than once".into(),
+            });
+        }
+    }
+    for decl in &module.decls {
+        for message in check_signature(&decl.sig) {
+            errors.push(VerifierError {
+                location: format!("@{}", decl.name),
+                message,
             });
         }
     }
@@ -201,13 +209,13 @@ impl Verifier<'_> {
             .iter()
             .map(|&p| func.value_type(p))
             .collect();
-        if param_tys != func.sig.params {
+        if param_tys != func.sig.param_types() {
             self.error(
                 entry.to_string(),
                 format!(
                     "entry block parameters ({}) do not match the signature ({})",
                     type_list(&param_tys),
-                    type_list(&func.sig.params)
+                    type_list(&func.sig.param_types())
                 ),
             );
         }
@@ -223,6 +231,14 @@ impl Verifier<'_> {
             }
             if data.size == 0 {
                 self.error(ss.to_string(), "stack slot size must be non-zero".into());
+            }
+        }
+        for message in check_signature(&func.sig) {
+            self.error("signature".into(), message);
+        }
+        for (sig_ref, sig) in func.signatures() {
+            for message in check_signature(sig) {
+                self.error(sig_ref.to_string(), message);
             }
         }
         if !self.cfg.preds(entry).is_empty() {
@@ -467,13 +483,13 @@ impl Verifier<'_> {
             }
             InstData::Return { args } => {
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if got != func.sig.returns {
+                if got != func.sig.return_types() {
                     self.inst_error(
                         inst,
                         format!(
                             "returns ({}) but the signature returns ({})",
                             type_list(&got),
-                            type_list(&func.sig.returns)
+                            type_list(&func.sig.return_types())
                         ),
                     );
                 }
@@ -592,17 +608,31 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
     })
 }
 
+/// Checks the ABI attributes of a signature's parameters and returns.
+fn check_signature(sig: &Signature) -> Vec<String> {
+    let mut errors = Vec::new();
+    for param in sig.params.iter().chain(&sig.returns) {
+        if param.ext != ArgExt::None && !matches!(param.ty, Type::I8 | Type::I16) {
+            errors.push(format!(
+                "`{param}`: only i8 and i16 are extended, since C passes them as 32 bits"
+            ));
+        }
+    }
+    errors
+}
+
 /// Whether arguments of types `got` fit `sig`: exactly its parameters, or
 /// for a variadic signature its parameters followed by any number of the
 /// types C's default argument promotions produce. (An `i8` or `f32` would
 /// be read back by the callee as an `int` or `double` it is not.)
 fn args_match(sig: &Signature, got: &[Type]) -> bool {
-    let n = sig.params.len();
+    let params = sig.param_types();
+    let n = params.len();
     if !sig.variadic {
-        return got == sig.params;
+        return got == params;
     }
     got.len() >= n
-        && got[..n] == sig.params[..]
+        && got[..n] == params[..]
         && got[n..]
             .iter()
             .all(|ty| matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
@@ -610,7 +640,7 @@ fn args_match(sig: &Signature, got: &[Type]) -> bool {
 
 /// A signature's parameters for messages, with `...` if variadic.
 fn param_list(sig: &Signature) -> String {
-    let mut list = type_list(&sig.params);
+    let mut list = type_list(&sig.param_types());
     if sig.variadic {
         list.push_str(if list.is_empty() { "..." } else { ", ..." });
     }

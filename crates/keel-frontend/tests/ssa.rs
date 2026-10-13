@@ -2,15 +2,10 @@
 //! with mutable variables, and check the IR that comes out.
 
 use keel_frontend::FunctionBuilder;
-use keel_ir::{CallConv, Function, IntCC, Signature, Type, verify};
+use keel_ir::{Function, IntCC, Signature, Type, verify};
 
 fn sig(params: &[Type], returns: &[Type]) -> Signature {
-    Signature {
-        params: params.to_vec(),
-        returns: returns.to_vec(),
-        cc: CallConv::C,
-        variadic: false,
-    }
+    Signature::new(params, returns)
 }
 
 /// ```c

@@ -18,7 +18,8 @@ pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
 pub use entity::{Arena, EntityRef};
 pub use function::{
-    CallConv, FuncDecl, Function, InsertPoint, Signature, StackSlotData, ValueData, ValueDef,
+    AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Signature, StackSlotData,
+    ValueData, ValueDef,
 };
 pub use inst::{BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, Symbol, UnaryOp};
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
