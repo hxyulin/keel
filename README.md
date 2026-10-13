@@ -10,6 +10,10 @@ See [docs/design.md](docs/design.md) for the design decisions.
 ```sh
 cargo run -p keel -- compile crates/keel-codegen/tests/programs/return42.keel -o return42.s
 clang -o return42 return42.s && ./return42; echo $?   # 42
+
+cargo run -p keel -- compile -O input.keel -o out.s   # optimize first
+cargo run -p keel -- opt -p gvn,dce input.keel        # run passes, print the IR
+cargo run -p keel -- passes                           # list the passes
 ```
 
 ## Development
@@ -20,6 +24,9 @@ clang -o return42 return42.s && ./return42; echo $?   # 42
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
   file has an `; expect: exit N` or `; expect: trap` line and may have a
   same-named `.c` driver that it is linked with. Each program is compiled
-  twice: with the full register set and with a tiny one that forces spills.
+  three times: with the full register set, with a tiny one that forces
+  spills, and after the default optimization pipeline.
+- Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
+  `; passes: a, b` line.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.

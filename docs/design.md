@@ -27,6 +27,11 @@ and why they were made.
   resolve. Dead code removal is mark-and-sweep from pinned instructions. Use
   counts are computed by a pass when it needs them. All mutation goes through
   methods, so use-lists can be added later without touching passes.
+- **Editing.** Instructions are inserted at an `InsertPoint` (end of a block
+  or before an instruction), moved and removed; blocks and block parameters
+  can be removed. Removed entities keep their handles and nothing is
+  renumbered; the verifier reports any use of a value whose definition was
+  removed. `func.ins(at).iadd(a, b)` builds typed instructions.
 
 ## Types
 
@@ -229,3 +234,54 @@ Known gaps: no interval splitting (a value spilled anywhere is spilled
 everywhere), no hints to place values in x0–x7 or to coalesce copies,
 blocks are laid out in reverse postorder only, and constants are
 re-materialized into registers rather than folded into immediates.
+
+## Optimizer
+
+`keel-opt` runs passes, each `fn(&mut Function) -> bool`, one function at a
+time, and **verifies after every pass**: the IR is valid between passes,
+always, so a broken pass is caught where it broke things. Passes compute the
+analyses they need; there is no analysis cache yet.
+
+| Pass | What it does |
+|---|---|
+| `simplify-cfg` | constant `brif` → `jump`, skip forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
+| `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width); trapping divisions are left to trap |
+| `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
+| `dce` | mark from pinned instructions; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
+| `gcm` | Click's global code motion, the scheduler for floating instructions |
+
+The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
+dce, gcm`.
+
+**GCM** places each pure instruction between its *early* block (the deepest
+block defining an operand) and its *late* block (the common dominator of its
+uses), choosing the block in the fewest loops and, among those, the latest.
+That hoists invariants out of loops and sinks code into the branch that needs
+it. Two choices made after measuring the end-to-end programs:
+
+- An instruction that stays in its block keeps its place. Moving everything to
+  just before its first use made one program's spills go from 11 to 75: a
+  chain of `select`s sank to the end of `main`, keeping every condition alive
+  across a dozen calls.
+- Instructions without operands (constants, addresses) are rematerialized:
+  each block using one gets its own copy. GVN merges every `iconst 1` in a
+  function into one value, which otherwise lives from the top of the function
+  to its last use (33 → 47 spills in the register-pressure test). A register
+  allocator that rematerializes when it runs out of registers would do this
+  better.
+
+With both, `-O` output is never larger than the unoptimized output on the
+test programs, and programs whose checks are all constants fold away
+entirely, which checks constant folding against results from the hardware.
+
+## Frontend
+
+`keel-frontend`'s `FunctionBuilder` builds SSA from mutable variables
+(`declare_var`, `def_var`, `use_var`) with the algorithm of Braun et al.
+(2013): reading a variable looks for its definition in the block, then in
+the predecessors, adding a block parameter where several meet. Blocks are
+*sealed* once all their predecessors exist; reads in unsealed blocks add
+incomplete parameters that sealing fills in. Parameters whose arguments are
+all one value are removed, and `finalize` repeats that until nothing changes,
+since removing one can make another trivial.
+
