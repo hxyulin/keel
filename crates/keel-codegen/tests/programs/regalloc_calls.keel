@@ -1,0 +1,91 @@
+; expect: exit 0
+; Values live across calls must be in callee-saved registers or spilled,
+; never in caller-saved registers the callee may clobber. Checked against C
+; in regalloc_calls.c, whose helpers clobber every caller-saved register.
+decl @clobber()
+decl @twice(i64) -> i64
+
+; Five values computed before a call and used after it.
+func @across(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 3
+    v2 = imul v0, v1                   ; 3x
+    v3 = iconst.i64 5
+    v4 = iadd v0, v3                   ; x + 5
+    v5 = xor v2, v4
+    v6 = trunc.i32 v0
+    v7 = iconst.i32 7
+    v8 = iadd v6, v7                   ; (i32)x + 7
+    call @clobber()
+    v9 = sext.i64 v8
+    v10 = iadd v2, v4
+    v11 = iadd v10, v5
+    v12 = iadd v11, v9
+    v13 = iadd v12, v0
+    return v13
+}
+
+; Keel calling keel: @across keeps its values in callee-saved registers,
+; and so does this function across its calls to @across. If @across did not
+; restore them, these would be wrong afterwards.
+func @nested(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 1
+    v2 = iadd v0, v1
+    v3 = iconst.i64 2
+    v4 = imul v0, v3
+    v5 = call @across(v0)
+    v6 = call @across(v2)
+    v7 = iadd v5, v6
+    v8 = iadd v7, v2
+    v9 = iadd v8, v4
+    v10 = iadd v9, v0
+    return v10
+}
+
+; A call inside a loop: the counter, the bound, the sum and a loop
+; invariant are all live across it. Sums twice(i) + 10k for i < n.
+func @call_loop(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):              ; n, k
+    v2 = iconst.i64 0
+    v3 = iconst.i64 10
+    v4 = imul v1, v3                   ; 10k, used after the call
+    jump block1(v2, v2)
+block1(v5: i64, v6: i64):              ; i, acc
+    v7 = icmp.ult v5, v0
+    brif v7, block2, block3
+block2:
+    v8 = call @twice(v5)
+    v9 = iadd v6, v8
+    v10 = iadd v9, v4
+    v11 = iconst.i64 1
+    v12 = iadd v5, v11
+    jump block1(v12, v10)
+block3:
+    return v6
+}
+
+; memset is a libc call, so a loop around it must keep its values out of
+; caller-saved registers too. Sums the 8 bytes of memset(buf, i, 8) read
+; back as one i64, for i < n.
+func @memset_loop(i64) -> i64 {
+    ss0 = stack_slot 8, align 8
+block0(v0: i64):
+    v1 = stack_addr ss0
+    v2 = iconst.i64 8
+    v3 = iconst.i64 0
+    jump block1(v3, v3)
+block1(v4: i64, v5: i64):              ; i, acc
+    v6 = icmp.ult v4, v0
+    brif v6, block2, block3
+block2:
+    v7 = trunc.i8 v4
+    intrinsic memset(v1, v7, v2)
+    v8 = load.i64 v1
+    v9 = iadd v5, v8
+    v10 = iconst.i64 1
+    v11 = iadd v4, v10
+    jump block1(v11, v9)
+block3:
+    return v5
+}

@@ -1,0 +1,159 @@
+; expect: exit 0
+; Loops for the register allocator: block arguments that rotate (cycles in
+; the parallel copy on the back edge) and values live across the back edge.
+; Checked against C in regalloc_loops.c.
+
+; Rotates (a, b, c) -> (b, c, a) n times, a 3-cycle in the copy. The back
+; edge is the else-edge of a brif, so the copy runs on a landing pad.
+func @rotate3(i64, i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64):
+    jump block1(v0, v1, v2, v3)
+block1(v4: i64, v5: i64, v6: i64, v7: i64):  ; a, b, c, n
+    v8 = iconst.i64 0
+    v9 = icmp.eq v7, v8
+    v10 = iconst.i64 1
+    v11 = isub v7, v10
+    brif v9, block2, block1(v5, v6, v4, v11)
+block2:
+    v12 = iconst.i64 100
+    v13 = imul v4, v12
+    v14 = iconst.i64 10
+    v15 = imul v5, v14
+    v16 = iadd v13, v15
+    v17 = iadd v16, v6
+    return v17
+}
+
+; Twenty loop-carried values p0..p19 starting at x + i, rotated by one
+; place n times: a 20-cycle, plus the counter. With more parameters than
+; registers, some live in spill slots, so the cycle mixes registers and
+; stack slots. Returns the fold h = h * 31 + p_i over i = 0..19.
+func @rotate_many(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):              ; x, n
+    v2 = iconst.i64 0
+    v3 = iadd v0, v2
+    v4 = iconst.i64 1
+    v5 = iadd v0, v4
+    v6 = iconst.i64 2
+    v7 = iadd v0, v6
+    v8 = iconst.i64 3
+    v9 = iadd v0, v8
+    v10 = iconst.i64 4
+    v11 = iadd v0, v10
+    v12 = iconst.i64 5
+    v13 = iadd v0, v12
+    v14 = iconst.i64 6
+    v15 = iadd v0, v14
+    v16 = iconst.i64 7
+    v17 = iadd v0, v16
+    v18 = iconst.i64 8
+    v19 = iadd v0, v18
+    v20 = iconst.i64 9
+    v21 = iadd v0, v20
+    v22 = iconst.i64 10
+    v23 = iadd v0, v22
+    v24 = iconst.i64 11
+    v25 = iadd v0, v24
+    v26 = iconst.i64 12
+    v27 = iadd v0, v26
+    v28 = iconst.i64 13
+    v29 = iadd v0, v28
+    v30 = iconst.i64 14
+    v31 = iadd v0, v30
+    v32 = iconst.i64 15
+    v33 = iadd v0, v32
+    v34 = iconst.i64 16
+    v35 = iadd v0, v34
+    v36 = iconst.i64 17
+    v37 = iadd v0, v36
+    v38 = iconst.i64 18
+    v39 = iadd v0, v38
+    v40 = iconst.i64 19
+    v41 = iadd v0, v40
+    jump block1(v3, v5, v7, v9, v11, v13, v15, v17, v19, v21, v23, v25, v27, v29, v31, v33, v35, v37, v39, v41, v1)
+block1(v50: i64, v51: i64, v52: i64, v53: i64, v54: i64, v55: i64, v56: i64, v57: i64, v58: i64, v59: i64, v60: i64, v61: i64, v62: i64, v63: i64, v64: i64, v65: i64, v66: i64, v67: i64, v68: i64, v69: i64, v70: i64):
+    v71 = iconst.i64 0
+    v72 = icmp.eq v70, v71
+    v73 = iconst.i64 1
+    v74 = isub v70, v73
+    brif v72, block2, block1(v51, v52, v53, v54, v55, v56, v57, v58, v59, v60, v61, v62, v63, v64, v65, v66, v67, v68, v69, v50, v74)
+block2:
+    v80 = iconst.i64 31
+    v81 = iconst.i64 0
+    v82 = imul v81, v80
+    v83 = iadd v82, v50
+    v84 = imul v83, v80
+    v85 = iadd v84, v51
+    v86 = imul v85, v80
+    v87 = iadd v86, v52
+    v88 = imul v87, v80
+    v89 = iadd v88, v53
+    v90 = imul v89, v80
+    v91 = iadd v90, v54
+    v92 = imul v91, v80
+    v93 = iadd v92, v55
+    v94 = imul v93, v80
+    v95 = iadd v94, v56
+    v96 = imul v95, v80
+    v97 = iadd v96, v57
+    v98 = imul v97, v80
+    v99 = iadd v98, v58
+    v100 = imul v99, v80
+    v101 = iadd v100, v59
+    v102 = imul v101, v80
+    v103 = iadd v102, v60
+    v104 = imul v103, v80
+    v105 = iadd v104, v61
+    v106 = imul v105, v80
+    v107 = iadd v106, v62
+    v108 = imul v107, v80
+    v109 = iadd v108, v63
+    v110 = imul v109, v80
+    v111 = iadd v110, v64
+    v112 = imul v111, v80
+    v113 = iadd v112, v65
+    v114 = imul v113, v80
+    v115 = iadd v114, v66
+    v116 = imul v115, v80
+    v117 = iadd v116, v67
+    v118 = imul v117, v80
+    v119 = iadd v118, v68
+    v120 = imul v119, v80
+    v121 = iadd v120, v69
+    return v121
+}
+
+; Loop invariants k1 = 3x and k2 = x + 7, defined before the loop and last
+; used near the top of its body. They are needed again on the next trip, so
+; their intervals must cover the whole loop; otherwise the temporaries
+; computed later in the body would take their registers. Counts n down to
+; 0 so that termination does not depend on them.
+func @invariant(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):              ; x, n
+    v2 = iconst.i64 3
+    v3 = imul v0, v2                   ; k1
+    v4 = iconst.i64 7
+    v5 = iadd v0, v4                   ; k2
+    v6 = iconst.i64 0
+    jump block1(v1, v6)
+block1(v7: i64, v8: i64):              ; n, acc
+    v9 = iconst.i64 0
+    v10 = icmp.eq v7, v9
+    brif v10, block3, block2
+block2:
+    v11 = iadd v8, v3                  ; acc + k1
+    v12 = xor v11, v5                  ; ^ k2
+    v13 = iconst.i64 1
+    v14 = isub v7, v13
+    v15 = iconst.i64 5
+    v16 = imul v14, v15
+    v17 = iconst.i64 11
+    v18 = iadd v16, v17
+    v19 = iconst.i64 13
+    v20 = xor v18, v19
+    v21 = imul v20, v18
+    v22 = iadd v12, v21
+    jump block1(v14, v22)
+block3:
+    return v8
+}
