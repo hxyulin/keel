@@ -9,7 +9,7 @@ use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
     ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
-    Signature, Type, UnaryOp, Value, ValueDef,
+    Purpose, Signature, Type, UnaryOp, Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -654,6 +654,28 @@ fn check_signature(sig: &Signature) -> Vec<String> {
         if param.ext != ArgExt::None && !matches!(param.ty, Type::I8 | Type::I16) {
             errors.push(format!(
                 "`{param}`: only i8 and i16 are extended, since C passes them as 32 bits"
+            ));
+        }
+        if let Some(layout) = param.layout() {
+            if param.ty != Type::Ptr {
+                errors.push(format!("`{param}`: a struct is passed as a ptr to it"));
+            }
+            if layout.size() == 0 {
+                errors.push(format!("`{param}`: the struct is empty"));
+            }
+        }
+    }
+    for (i, param) in sig.params.iter().enumerate() {
+        if matches!(param.purpose, Purpose::Sret(_)) && (i > 0 || !sig.returns.is_empty()) {
+            errors.push(format!(
+                "`{param}` must be the first parameter of a function that returns nothing"
+            ));
+        }
+    }
+    for ret in &sig.returns {
+        if ret.purpose != Purpose::Normal {
+            errors.push(format!(
+                "`{ret}` cannot be a return value; return structs through an sret parameter"
             ));
         }
     }

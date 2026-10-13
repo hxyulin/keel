@@ -1,0 +1,19 @@
+; Structs cross calls as pointers to their memory, with the layout on the
+; signature: `byval` gives the callee its own copy, `sret` is where the
+; callee writes a struct result.
+decl @c_point(ptr byval {i32, i32}) -> i64
+decl @c_make(ptr sret {i64, [3 x f64], {i8, ptr}}, i32)
+
+func @f(ptr byval {f32, f32, f32}, ptr) {
+    ss0 = stack_slot 8, align 4
+    ss1 = stack_slot 48, align 8
+block0(v0: ptr, v1: ptr):
+    v2 = stack_addr ss0
+    v3 = call @c_point(v2)
+    v4 = stack_addr ss1
+    v5 = iconst.i32 7
+    call @c_make(v4, v5)
+    v6 = symbol_addr @c_make
+    call_indirect v6(v4, v5) : (ptr sret {i64, [3 x f64], {i8, ptr}}, i32)
+    return
+}

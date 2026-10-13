@@ -11,6 +11,7 @@
 //! methods hide the representation if it needs to change.
 
 use crate::inst::{BlockCall, InstData, Symbol};
+use crate::layout::Layout;
 use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, StackSlot, Type, Value};
 use std::fmt;
 
@@ -30,6 +31,22 @@ pub enum ArgExt {
     Uext,
 }
 
+/// What a `ptr` parameter stands for, when it is a C struct passed or
+/// returned by value. The IR only ever handles the struct's address; the
+/// calling convention copies the bytes.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Purpose {
+    /// An ordinary value.
+    Normal,
+    /// The caller passes the address of a struct; the callee receives the
+    /// address of its own copy, which it may change.
+    ByVal(Layout),
+    /// The caller passes the address of memory for the struct result, which
+    /// the callee fills in. Only as the first parameter of a function that
+    /// returns nothing.
+    Sret(Layout),
+}
+
 /// A parameter or return value of a signature: its type and how the ABI
 /// treats it.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -37,6 +54,7 @@ pub struct AbiParam {
     pub ty: Type,
     /// Only for `i8` and `i16`.
     pub ext: ArgExt,
+    pub purpose: Purpose,
 }
 
 impl AbiParam {
@@ -44,18 +62,32 @@ impl AbiParam {
         Self {
             ty,
             ext: ArgExt::None,
+            purpose: Purpose::Normal,
+        }
+    }
+
+    /// The layout of the struct a `byval` or `sret` parameter points to.
+    pub fn layout(&self) -> Option<&Layout> {
+        match &self.purpose {
+            Purpose::Normal => None,
+            Purpose::ByVal(layout) | Purpose::Sret(layout) => Some(layout),
         }
     }
 }
 
 impl fmt::Display for AbiParam {
-    /// `i8 sext`
+    /// `i8 sext`, `ptr byval {i32, f64}`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.ty)?;
         match self.ext {
-            ArgExt::None => Ok(()),
-            ArgExt::Sext => f.write_str(" sext"),
-            ArgExt::Uext => f.write_str(" uext"),
+            ArgExt::None => {}
+            ArgExt::Sext => f.write_str(" sext")?,
+            ArgExt::Uext => f.write_str(" uext")?,
+        }
+        match &self.purpose {
+            Purpose::Normal => Ok(()),
+            Purpose::ByVal(layout) => write!(f, " byval {layout}"),
+            Purpose::Sret(layout) => write!(f, " sret {layout}"),
         }
     }
 }

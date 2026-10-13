@@ -1,0 +1,5 @@
+verifier errors:
+  @a: `i64 byval {i32}`: a struct is passed as a ptr to it
+  @b: `ptr sret {i64}` must be the first parameter of a function that returns nothing
+  @c: `ptr sret {i64}` must be the first parameter of a function that returns nothing
+  @d: `ptr byval {}`: the struct is empty

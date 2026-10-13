@@ -18,7 +18,8 @@
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
-    Intrinsic, Module, SigRef, Signature, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    Intrinsic, Layout, Module, Purpose, SigRef, Signature, StackSlot, StackSlotData, Symbol, Type,
+    UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -577,15 +578,50 @@ impl Parser {
         })
     }
 
-    /// A type with optional ABI attributes: `i8 sext`.
+    /// A type with optional ABI attributes: `i8 sext`, `ptr byval {i32}`.
     fn abi_param(&mut self) -> Result<AbiParam, ParseError> {
         let mut param = AbiParam::new(self.ty()?);
         if self.eat(&Tok::Ident("sext".into())) {
             param.ext = ArgExt::Sext;
         } else if self.eat(&Tok::Ident("uext".into())) {
             param.ext = ArgExt::Uext;
+        } else if self.eat(&Tok::Ident("byval".into())) {
+            param.purpose = Purpose::ByVal(self.layout()?);
+        } else if self.eat(&Tok::Ident("sret".into())) {
+            param.purpose = Purpose::Sret(self.layout()?);
         }
         Ok(param)
+    }
+
+    /// `{layout, ...}`, `[n x layout]` or a type.
+    fn layout(&mut self) -> Result<Layout, ParseError> {
+        if self.eat(&Tok::Punct('{')) {
+            let mut fields = Vec::new();
+            if !self.eat(&Tok::Punct('}')) {
+                loop {
+                    fields.push(self.layout()?);
+                    if self.eat(&Tok::Punct('}')) {
+                        break;
+                    }
+                    self.expect(Tok::Punct(','))?;
+                }
+            }
+            return Ok(Layout::Struct(fields));
+        }
+        if self.eat(&Tok::Punct('[')) {
+            let n = self.u32("an element count")?;
+            let (x, loc) = self.ident("`x`")?;
+            if x != "x" {
+                return Err(error(
+                    loc,
+                    format!("expected `x` as in `[4 x f32]`, found `{x}`"),
+                ));
+            }
+            let elem = self.layout()?;
+            self.expect(Tok::Punct(']'))?;
+            return Ok(Layout::Array(Box::new(elem), n));
+        }
+        Ok(Layout::Scalar(self.ty()?))
     }
 
     /// Everything after `func`.

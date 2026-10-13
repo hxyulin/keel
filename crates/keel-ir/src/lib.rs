@@ -8,6 +8,7 @@ pub mod entity;
 pub mod function;
 pub mod inst;
 pub mod intrinsic;
+pub mod layout;
 pub mod loops;
 pub mod module;
 pub mod parser;
@@ -18,11 +19,12 @@ pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
 pub use entity::{Arena, EntityRef};
 pub use function::{
-    AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Signature, StackSlotData,
+    AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Purpose, Signature, StackSlotData,
     ValueData, ValueDef,
 };
 pub use inst::{BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, Symbol, UnaryOp};
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
+pub use layout::Layout;
 pub use module::Module;
 pub use parser::{ParseError, parse};
 pub use types::Type;

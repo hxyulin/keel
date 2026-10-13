@@ -46,6 +46,9 @@
 //!
 //! ```text
 //! sp + 0              outgoing stack arguments, for the call that needs most
+//! ...                 copies of big structs that calls pass by value
+//! ...                 a slot keeping a call's sret address across the call
+//! ...                 struct parameters and an sret result held in registers
 //! ...                 spill slots, 8 bytes each
 //! ...                 IR stack slots, each at its alignment
 //! ...                 padding to 16 bytes
@@ -68,12 +71,13 @@
 //! of pointers the loader fills in: `adrp` + `ldr` reads the GOT entry.
 
 use crate::CodegenError;
+use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
-    DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Module, Signature,
-    Type, UnaryOp, Value,
+    DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module,
+    Purpose, Signature, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -159,7 +163,16 @@ struct FunctionCompiler<'a> {
     alloc: Allocation,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
-    /// Offset from `sp` of spill slot 0, above the outgoing arguments.
+    /// Offset from `sp` of the area where calls put copies of big structs
+    /// passed by value.
+    copy_base: usize,
+    /// Offset from `sp` of an 8-byte slot keeping a call's `sret` address
+    /// across the call, for results that come back in registers.
+    sret_save: Option<usize>,
+    /// Offset from `sp` of the memory behind each `byval` parameter that
+    /// arrived in registers, and behind an `sret` result returned in them.
+    param_areas: Vec<Option<usize>>,
+    /// Offset from `sp` of spill slot 0, above the areas for calls.
     spill_base: usize,
     /// Offset from x29 of the first variadic argument: the next 8-byte slot
     /// after the named stack parameters.
@@ -181,8 +194,8 @@ impl<'a> FunctionCompiler<'a> {
             message,
         };
         let CallConv::C = func.sig.cc;
-        let param_tys = func.sig.param_types();
-        let (_, incoming) = arg_locs(&param_tys, param_tys.len());
+        let param_kinds = param_kinds(&func.sig.params);
+        let (param_locs, incoming) = abi::arg_locs(&param_kinds, param_kinds.len());
         if incoming > MAX_STACK_ARGS {
             return Err(err(format!(
                 "{incoming} bytes of stack parameters is more than the {MAX_STACK_ARGS} supported"
@@ -196,6 +209,7 @@ impl<'a> FunctionCompiler<'a> {
                 AbiParam {
                     ty: Type::I8 | Type::I16,
                     ext: ArgExt::None,
+                    ..
                 },
             ] => {
                 return Err(err(
@@ -228,31 +242,56 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
 
-        // The outgoing argument area at the bottom of the frame must hold
-        // the stack arguments of every call this function makes.
-        let mut outgoing = 0;
+        // The bottom of the frame holds what calls need: their stack
+        // arguments, copies of big structs passed by value, and a slot for
+        // an `sret` address.
+        let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
         for (_, inst) in func.layout_insts() {
-            let (args, named) = match func.inst_data(inst) {
-                InstData::Call { func: callee, args } => {
-                    (args, func.callee(*callee).sig.params.len())
-                }
-                InstData::CallIndirect { sig, args, .. } => {
-                    (args, func.signature(*sig).params.len())
-                }
+            let (args, params) = match func.inst_data(inst) {
+                InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
+                InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
                 _ => continue,
             };
-            let tys: Vec<Type> = args
-                .iter()
-                .map(|&a| func.value_type(func.resolve(a)))
-                .collect();
-            outgoing = outgoing.max(arg_locs(&tys, named).1);
+            let kinds = arg_kinds(func, params, args);
+            let (locs, stack) = abi::arg_locs(&kinds, params.len());
+            outgoing = outgoing.max(stack);
+            let mut bytes: u64 = 0;
+            for (loc, kind) in locs.iter().zip(&kinds) {
+                match (loc, kind) {
+                    (ArgLoc::Copy(_), ArgKind::ByVal(layout)) => {
+                        bytes = bytes.next_multiple_of(16) + layout.size();
+                    }
+                    (ArgLoc::SretRegs(_), _) => needs_sret_save = true,
+                    _ => {}
+                }
+            }
+            copies = copies.max(bytes);
         }
         if outgoing > MAX_STACK_ARGS {
             return Err(err(format!(
                 "a call passes {outgoing} bytes of stack arguments, more than the {MAX_STACK_ARGS} supported"
             )));
         }
-        let spill_base = (outgoing as usize).next_multiple_of(8);
+        let copy_base = (outgoing as usize).next_multiple_of(16);
+        let mut offset = copy_base + copies as usize;
+        let sret_save = needs_sret_save.then(|| {
+            offset = offset.next_multiple_of(8) + 8;
+            offset - 8
+        });
+        let mut param_areas = Vec::new();
+        for (loc, param) in param_locs.iter().zip(&func.sig.params) {
+            param_areas.push(match loc {
+                ArgLoc::InRegs(_) | ArgLoc::SretRegs(_) => {
+                    let layout = param.layout().expect("a struct");
+                    offset = offset.next_multiple_of(layout.align().max(8) as usize);
+                    let area = offset;
+                    offset += layout.size().next_multiple_of(8) as usize;
+                    Some(area)
+                }
+                _ => None,
+            });
+        }
+        let spill_base = offset.next_multiple_of(8);
 
         let alloc = regalloc::allocate(func, pools, is_call);
         let mut offset = spill_base + 8 * alloc.spill_slots as usize;
@@ -278,6 +317,9 @@ impl<'a> FunctionCompiler<'a> {
             module,
             alloc,
             stack_slot_offsets,
+            copy_base,
+            sret_save,
+            param_areas,
             spill_base,
             variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
@@ -316,22 +358,46 @@ impl<'a> FunctionCompiler<'a> {
         }
         // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
         // so this copy has no cycles; it may still store to spill slots.
-        // Stack arguments are in the caller's frame, just above ours.
+        // Stack arguments are in the caller's frame, just above ours. An
+        // `sret` address arrives in x8, which is also a scratch register,
+        // so nothing may use scratch registers before it is copied: only
+        // `load_stack_param` does, and it uses x16.
         if let Some(entry) = func.entry_block() {
             let params = func.block_params(entry).to_vec();
-            let tys = func.sig.param_types();
-            let (locs, _) = arg_locs(&tys, tys.len());
+            let kinds = param_kinds(&func.sig.params);
+            let (locs, _) = abi::arg_locs(&kinds, kinds.len());
             let mut moves = Vec::new();
-            for ((param, loc), &ty) in params.into_iter().zip(locs).zip(&tys) {
+            let mut addresses = Vec::new();
+            for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
                 let Some(dst) = self.alloc.loc(param) else {
                     continue;
                 };
+                let abi_param = &func.sig.params[i];
                 match loc {
-                    ArgLoc::Reg(src) => moves.push((dst, src)),
-                    ArgLoc::Stack(offset) => self.load_stack_param(dst, ty, 16 + offset),
+                    ArgLoc::Value(Slot::Reg(src)) | ArgLoc::Copy(Slot::Reg(src)) => {
+                        moves.push((dst, src))
+                    }
+                    ArgLoc::Value(Slot::Stack(offset)) | ArgLoc::Copy(Slot::Stack(offset)) => {
+                        self.load_stack_param(dst, abi_param.ty, 16 + offset)
+                    }
+                    ArgLoc::SretMemory => moves.push((dst, Loc::Reg(8))),
+                    // The struct's address is where its bytes are now.
+                    ArgLoc::InRegs(regs) => {
+                        let area = self.param_areas[i].expect("planned");
+                        let layout = abi_param.layout().expect("a struct");
+                        self.store_struct_regs(&regs, layout, area);
+                        addresses.push((dst, "sp", area));
+                    }
+                    ArgLoc::OnStack(offset) => addresses.push((dst, "x29", 16 + offset as usize)),
+                    ArgLoc::SretRegs(_) => {
+                        addresses.push((dst, "sp", self.param_areas[i].expect("planned")))
+                    }
                 }
             }
             self.parallel_copy(&moves);
+            for (dst, base, offset) in addresses {
+                self.address(dst, base, offset);
+            }
         }
 
         // Only reachable blocks, in the order the allocator numbered them.
@@ -392,17 +458,18 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(callee);
-                self.call(&args, &decl.sig.params, &format!("_{}", decl.name));
-                self.call_result(result);
+                let sret = self.move_args(&args, &decl.sig.params);
+                self.emit(format!("bl\t_{}", decl.name));
+                self.call_result(result, sret);
             }
             InstData::CallIndirect { sig, callee, args } => {
-                self.move_args(&args, &func.signature(sig).params);
+                let sret = self.move_args(&args, &func.signature(sig).params);
                 // The callee is in an allocated register, which the argument
-                // moves leave alone (they write x0–x7, x16 and x17), or in a
+                // moves leave alone (they write x0–x8, x16 and x17), or in a
                 // spill slot, reloaded after the moves so x16 is free.
                 let target = self.use_reg(callee, S0);
                 self.emit(format!("blr\tx{target}"));
-                self.call_result(result);
+                self.call_result(result, sret);
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
@@ -635,7 +702,8 @@ impl<'a> FunctionCompiler<'a> {
                         .iter()
                         .map(|&ty| AbiParam::new(ty))
                         .collect();
-                    self.call(&args, &params, &format!("_{id}"));
+                    self.move_args(&args, &params);
+                    self.emit(format!("bl\t_{id}"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
@@ -649,6 +717,13 @@ impl<'a> FunctionCompiler<'a> {
             },
             InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
+                // A struct result in registers is loaded from where the
+                // function wrote it.
+                if let Some(Purpose::Sret(layout)) = func.sig.params.first().map(|p| &p.purpose)
+                    && let Some(area) = self.param_areas[0]
+                {
+                    self.load_struct_regs(layout, area);
+                }
                 if let Some(&value) = args.first() {
                     let src = self.loc(value);
                     self.emit_move(return_loc(self.ty(value)), src);
@@ -661,42 +736,105 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Moves the arguments into place and calls `symbol`; the first `named`
-    /// are named, the rest variadic. Values live across the call are in
-    /// callee-saved registers or spill slots (the allocator sees to that),
-    /// so nothing needs saving here.
-    fn call(&mut self, args: &[Value], named: &[AbiParam], symbol: &str) {
-        self.move_args(args, named);
-        self.emit(format!("bl\t{symbol}"));
-    }
-
-    /// Moves call arguments into x0–x7, v0–v7 and the outgoing argument
-    /// area at `sp`. The two do not interfere: arguments are never
-    /// allocated to x0–x7 or v0–v7, nor to the outgoing area.
+    /// Moves call arguments into x0–x8, v0–v7 and the bottom of the frame,
+    /// for parameters `params` (any further arguments are variadic). Values
+    /// live across the call are in callee-saved registers or spill slots
+    /// (the allocator sees to that), so nothing needs saving here.
     ///
-    /// Narrow arguments marked `sext`/`uext` are then extended to 32 bits
-    /// in their argument register, as Apple's ABI has the caller do. On the
-    /// stack they take their own size, so there is nothing to extend.
-    fn move_args(&mut self, args: &[Value], named: &[AbiParam]) {
-        let tys: Vec<Type> = args.iter().map(|&a| self.ty(a)).collect();
-        let (locs, _) = arg_locs(&tys, named.len());
+    /// Stack arguments and struct copies come first, then the register
+    /// moves, then the registers filled from memory: struct bytes, struct
+    /// addresses and x8. None of them overwrites another's source, since
+    /// arguments are never allocated to x0–x8, v0–v7 or the bottom of the
+    /// frame.
+    ///
+    /// Narrow arguments marked `sext`/`uext` are extended to 32 bits in
+    /// their register, as Apple's ABI has the caller do. On the stack they
+    /// take their own size, so there is nothing to extend.
+    ///
+    /// Returns the registers and layout of an `sret` result that comes back
+    /// in registers, for [`Self::call_result`] to store.
+    fn move_args<'s>(
+        &mut self,
+        args: &[Value],
+        params: &'s [AbiParam],
+    ) -> Option<(Vec<Loc>, &'s Layout)> {
+        let kinds = arg_kinds(self.func, params, args);
+        let (locs, _) = abi::arg_locs(&kinds, params.len());
         let mut moves = Vec::new();
         let mut extend = Vec::new();
-        for (i, ((&arg, loc), &ty)) in args.iter().zip(locs).zip(&tys).enumerate() {
+        // Registers filled after the moves.
+        enum Late<'l> {
+            Address(Loc, usize),
+            Sret(Value),
+            Struct(Vec<Loc>, &'l Layout, Value),
+        }
+        let mut late = Vec::new();
+        let mut copied: u64 = 0;
+        let mut sret = None;
+        for (i, ((&arg, loc), kind)) in args.iter().zip(locs).zip(&kinds).enumerate() {
+            let layout = match kind {
+                ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(*layout),
+                ArgKind::Value(_) => None,
+            };
             match loc {
-                ArgLoc::Reg(dst) => {
+                ArgLoc::Value(Slot::Reg(dst)) => {
                     moves.push((dst, self.loc(arg)));
-                    if let (Some(param), Loc::Reg(r)) = (named.get(i), dst) {
+                    if let (Some(param), Loc::Reg(r)) = (params.get(i), dst) {
                         extend.push((r, param.ty, param.ext));
                     }
                 }
-                ArgLoc::Stack(offset) => self.store_stack_arg(arg, ty, offset),
+                ArgLoc::Value(Slot::Stack(offset)) => {
+                    self.store_stack_arg(arg, self.ty(arg), offset)
+                }
+                ArgLoc::OnStack(offset) => {
+                    let src = self.use_reg(arg, S0);
+                    self.copy_bytes(offset as usize, src, layout.expect("a struct").size());
+                }
+                ArgLoc::Copy(slot) => {
+                    let size = layout.expect("a struct").size();
+                    copied = copied.next_multiple_of(16);
+                    let at = self.copy_base + copied as usize;
+                    copied += size;
+                    let src = self.use_reg(arg, S0);
+                    self.copy_bytes(at, src, size);
+                    match slot {
+                        Slot::Reg(dst) => late.push(Late::Address(dst, at)),
+                        Slot::Stack(offset) => {
+                            self.address(Loc::Reg(S0), "sp", at);
+                            self.emit(format!("str\tx{S0}, [sp, #{offset}]"));
+                        }
+                    }
+                }
+                ArgLoc::InRegs(regs) => {
+                    late.push(Late::Struct(regs, layout.expect("a struct"), arg))
+                }
+                ArgLoc::SretMemory => late.push(Late::Sret(arg)),
+                ArgLoc::SretRegs(regs) => {
+                    let p = self.use_reg(arg, S0);
+                    let save = self.sret_save.expect("planned");
+                    self.emit(format!("str\tx{p}, [sp, #{save}]"));
+                    sret = Some((regs, layout.expect("a struct")));
+                }
             }
         }
         self.parallel_copy(&moves);
         for (r, ty, ext) in extend {
             self.extend_in_place(r, ty, ext);
         }
+        for step in late {
+            match step {
+                Late::Address(dst, at) => self.address(dst, "sp", at),
+                Late::Sret(arg) => {
+                    let p = self.use_reg(arg, S0);
+                    self.emit(format!("mov\tx8, x{p}"));
+                }
+                Late::Struct(regs, layout, arg) => {
+                    let p = self.use_reg(arg, S0);
+                    self.load_struct_exact(&regs, layout, p);
+                }
+            }
+        }
+        sret
     }
 
     /// Extends the narrow value in `w<r>` to 32 bits, if `ext` asks.
@@ -749,12 +887,145 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Moves a call's result, if it has one, from x0 or v0 to its place.
-    fn call_result(&mut self, result: Option<Value>) {
+    /// Moves a call's result, if it has one, from x0 or v0 to its place,
+    /// and stores a struct result that came back in registers to its
+    /// `sret` address.
+    fn call_result(&mut self, result: Option<Value>, sret: Option<(Vec<Loc>, &Layout)>) {
         if let Some(value) = result
             && let Some(loc) = self.alloc.loc(value)
         {
             self.emit_move(loc, return_loc(self.func.value_type(value)));
+        }
+        if let Some((regs, layout)) = sret {
+            let save = self.sret_save.expect("planned");
+            self.emit(format!("ldr\tx{S0}, [sp, #{save}]"));
+            match abi::classify(layout) {
+                StructClass::Hfa { ty, .. } => {
+                    for (&(offset, _), &r) in layout.leaves().iter().zip(&regs) {
+                        self.emit(format!("str\t{}, [x{S0}, #{offset}]", freg(loc_reg(r), ty)));
+                    }
+                }
+                _ => {
+                    for (k, &r) in regs.iter().enumerate() {
+                        let offset = 8 * k as u64;
+                        let n = (layout.size() - offset).min(8);
+                        self.store_chunk(loc_reg(r), S0, offset, n);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Stores struct registers `regs` (as passed or returned) into the
+    /// frame at `sp + area`, which is rounded up to 8 bytes, so whole
+    /// registers fit.
+    fn store_struct_regs(&mut self, regs: &[Loc], layout: &Layout, area: usize) {
+        match abi::classify(layout) {
+            StructClass::Hfa { ty, .. } => {
+                for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
+                    let fr = freg(loc_reg(r), ty);
+                    self.emit(format!("str\t{fr}, [sp, #{}]", area + offset as usize));
+                }
+            }
+            _ => {
+                for (k, &r) in regs.iter().enumerate() {
+                    let r = loc_reg(r);
+                    self.emit(format!("str\tx{r}, [sp, #{}]", area + 8 * k));
+                }
+            }
+        }
+    }
+
+    /// Loads the registers a struct of `layout` is returned in from the
+    /// frame at `sp + area`.
+    fn load_struct_regs(&mut self, layout: &Layout, area: usize) {
+        match abi::classify(layout) {
+            StructClass::Hfa { ty, .. } => {
+                for (i, &(offset, _)) in layout.leaves().iter().enumerate() {
+                    let fr = freg(i as u8, ty);
+                    self.emit(format!("ldr\t{fr}, [sp, #{}]", area + offset as usize));
+                }
+            }
+            StructClass::Gprs { count } => {
+                for k in 0..count as usize {
+                    self.emit(format!("ldr\tx{k}, [sp, #{}]", area + 8 * k));
+                }
+            }
+            StructClass::Indirect => unreachable!("returned through memory"),
+        }
+    }
+
+    /// Loads a struct at `[x<p>]` into argument registers `regs`, reading
+    /// exactly its bytes (reading past its end could fault).
+    fn load_struct_exact(&mut self, regs: &[Loc], layout: &Layout, p: u8) {
+        match abi::classify(layout) {
+            StructClass::Hfa { ty, .. } => {
+                for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
+                    self.emit(format!("ldr\t{}, [x{p}, #{offset}]", freg(loc_reg(r), ty)));
+                }
+            }
+            _ => {
+                for (k, &r) in regs.iter().enumerate() {
+                    let offset = 8 * k as u64;
+                    let n = (layout.size() - offset).min(8);
+                    self.load_chunk(loc_reg(r), p, offset, n);
+                }
+            }
+        }
+    }
+
+    /// Loads `n` (1 to 8) bytes at `[x<p>, #offset]` into `x<r>`, zero
+    /// above them, piece by piece through x17. `r` and `p` are not x17.
+    fn load_chunk(&mut self, r: u8, p: u8, offset: u64, n: u64) {
+        for (i, (at, size)) in pieces(n).into_iter().enumerate() {
+            let (op, _) = piece_ops(size);
+            let target = if i == 0 { r } else { S1 };
+            let wide = if size == 8 { 'x' } else { 'w' };
+            self.emit(format!("{op}\t{wide}{target}, [x{p}, #{}]", offset + at));
+            if i > 0 {
+                self.emit(format!("orr\tx{r}, x{r}, x{S1}, lsl #{}", 8 * at));
+            }
+        }
+    }
+
+    /// Stores the low `n` (1 to 8) bytes of `x<r>` at `[x<p>, #offset]`.
+    fn store_chunk(&mut self, r: u8, p: u8, offset: u64, n: u64) {
+        for (at, size) in pieces(n) {
+            let (_, op) = piece_ops(size);
+            let wide = if size == 8 { 'x' } else { 'w' };
+            let src = if at == 0 {
+                r
+            } else {
+                self.emit(format!("lsr\tx{S1}, x{r}, #{}", 8 * at));
+                S1
+            };
+            self.emit(format!("{op}\t{wide}{src}, [x{p}, #{}]", offset + at));
+        }
+    }
+
+    /// Copies `size` bytes from `[x<src>]` to `[sp, #to]` through x17.
+    fn copy_bytes(&mut self, to: usize, src: u8, size: u64) {
+        for (at, n) in pieces(size) {
+            let (load, store) = piece_ops(n);
+            let wide = if n == 8 { 'x' } else { 'w' };
+            self.emit(format!("{load}\t{wide}{S1}, [x{src}, #{at}]"));
+            self.emit(format!("{store}\t{wide}{S1}, [sp, #{}]", to + at as usize));
+        }
+    }
+
+    /// Puts the address `base + offset` in `dst`.
+    fn address(&mut self, dst: Loc, base: &str, offset: usize) {
+        let r = match dst {
+            Loc::Reg(r) => r,
+            _ => S0,
+        };
+        // `add` takes a 12-bit immediate, optionally shifted by 12.
+        self.emit(format!("add\tx{r}, {base}, #{}", offset & 0xfff));
+        if offset >> 12 != 0 {
+            self.emit(format!("add\tx{r}, x{r}, #{}, lsl #12", offset >> 12));
+        }
+        if let Loc::Stack(s) = dst {
+            self.emit(format!("str\tx{r}, {}", self.slot(s)));
         }
     }
 
@@ -1377,54 +1648,59 @@ fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
     }
 }
 
-/// Where the C convention puts one argument.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum ArgLoc {
-    /// x0–x7 or v0–v7.
-    Reg(Loc),
-    /// At this offset from the caller's `sp` at the call.
-    Stack(u32),
+/// The convention's view of a function's own parameters.
+fn param_kinds(params: &[AbiParam]) -> Vec<ArgKind<'_>> {
+    params
+        .iter()
+        .map(|p| ArgKind::of(p.ty, &p.purpose))
+        .collect()
 }
 
-/// Places arguments of types `tys`, the first `named` of them named and the
-/// rest variadic, by Apple's arm64 C convention. Returns each argument's
-/// location and the bytes of stack they take.
-///
-/// - Named integers and pointers go in x0–x7, floats in v0–v7, each class
-///   counted on its own: `f(i64, f64, i64)` uses x0, d0 and x1.
-/// - Once a class runs out, its arguments go on the stack in order, each
-///   at its natural size and alignment: Apple packs them, where standard
-///   AAPCS64 gives each its own 8-byte slot.
-/// - Variadic arguments always go on the stack, each in its own 8-byte
-///   slot (Apple's `va_list` is a pointer stepping 8 bytes at a time).
-fn arg_locs(tys: &[Type], named: usize) -> (Vec<ArgLoc>, u32) {
-    let (mut ints, mut floats, mut stack) = (0u8, 0u8, 0u32);
-    let mut on_stack = |size: u32, align: u32| {
-        let offset = stack.next_multiple_of(align);
-        stack = offset + size;
-        ArgLoc::Stack(offset)
-    };
-    let locs = tys
-        .iter()
+/// The convention's view of a call's arguments: the parameters `params`,
+/// then any variadic arguments by their types.
+fn arg_kinds<'s>(func: &Function, params: &'s [AbiParam], args: &[Value]) -> Vec<ArgKind<'s>> {
+    args.iter()
         .enumerate()
-        .map(|(i, ty)| {
-            if i >= named {
-                return on_stack(8, 8);
-            }
-            let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() {
-                (&mut floats, Loc::FReg)
-            } else {
-                (&mut ints, Loc::Reg)
-            };
-            if *next < 8 {
-                *next += 1;
-                return ArgLoc::Reg(class(*next - 1));
-            }
-            let size = ty.bytes().unwrap_or(8);
-            on_stack(size, size)
+        .map(|(i, &arg)| match params.get(i) {
+            Some(p) => ArgKind::of(p.ty, &p.purpose),
+            None => ArgKind::Value(func.value_type(func.resolve(arg))),
         })
-        .collect();
-    (locs, stack)
+        .collect()
+}
+
+/// The register number of an argument register.
+fn loc_reg(loc: Loc) -> u8 {
+    match loc {
+        Loc::Reg(r) | Loc::FReg(r) => r,
+        Loc::Stack(_) => unreachable!("not a register"),
+    }
+}
+
+/// Splits `n` bytes into naturally aligned loads: 8-byte pieces, then at
+/// most one each of 4, 2 and 1. Returns (offset, size) pairs.
+fn pieces(n: u64) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while n - at >= 8 {
+        out.push((at, 8));
+        at += 8;
+    }
+    for size in [4, 2, 1] {
+        if n - at >= size {
+            out.push((at, size));
+            at += size;
+        }
+    }
+    out
+}
+
+/// Load and store mnemonics for a piece of `size` bytes.
+fn piece_ops(size: u64) -> (&'static str, &'static str) {
+    match size {
+        1 => ("ldrb", "strb"),
+        2 => ("ldrh", "strh"),
+        _ => ("ldr", "str"),
+    }
 }
 
 /// Where a single return value of type `ty` goes: x0 or v0.

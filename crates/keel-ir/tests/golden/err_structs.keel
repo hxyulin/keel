@@ -1,0 +1,4 @@
+decl @a(i64 byval {i32})
+decl @b(i32, ptr sret {i64})
+decl @c(ptr sret {i64}) -> i32
+decl @d(ptr byval {})

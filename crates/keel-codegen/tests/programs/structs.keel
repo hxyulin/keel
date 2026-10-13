@@ -1,0 +1,372 @@
+; expect: exit 0
+; Structs by value and struct results, both ways between keel and C,
+; checked in structs.c. keel hands the struct memory to C helpers (h_* hash
+; it, fill_* write it), so what is tested is exactly what the calling
+; convention moved: registers for small structs and float aggregates,
+; copies for big ones, the stack when registers run out, and results in
+; registers or through x8.
+
+decl @c_s8(ptr byval {i32, i32}) -> i64
+decl @h_s8(ptr) -> i64
+decl @c_s16(ptr byval {i64, i64}) -> i64
+decl @h_s16(ptr) -> i64
+decl @c_s24(ptr byval {i64, i64, i64}) -> i64
+decl @h_s24(ptr) -> i64
+decl @c_d2(ptr byval {f64, f64}) -> i64
+decl @h_d2(ptr) -> i64
+decl @c_f3(ptr byval {f32, f32, f32}) -> i64
+decl @h_f3(ptr) -> i64
+decl @c_f4(ptr byval {[4 x f32]}) -> i64
+decl @h_f4(ptr) -> i64
+decl @c_dl(ptr byval {f64, i64}) -> i64
+decl @h_dl(ptr) -> i64
+decl @c_c3(ptr byval {i8, i8, i8}) -> i64
+decl @h_c3(ptr) -> i64
+decl @c_n8(ptr byval {i8, {i16, [3 x i8]}}) -> i64
+decl @h_n8(ptr) -> i64
+decl @c_big(ptr byval {[5 x i64]}) -> i64
+decl @h_big(ptr) -> i64
+decl @c_after7(i64, i64, i64, i64, i64, i64, i64, ptr byval {i64, i64}, i64) -> i64
+decl @c_fafter(f64, f64, f64, f64, f64, f64, f64, ptr byval {f64, f64}, f32) -> i64
+decl @c_after8(i64, i64, i64, i64, i64, i64, i64, i64, ptr byval {i8, i8, i8}, ptr byval {f32, f32, f32}, ptr byval {[5 x i64]}, i32) -> i64
+decl @h_after7(i64, i64, i64, i64, i64, i64, i64, ptr, i64) -> i64
+decl @h_fafter(f64, f64, f64, f64, f64, f64, f64, ptr, f32) -> i64
+decl @h_after8(i64, i64, i64, i64, i64, i64, i64, i64, ptr, ptr, ptr, i32) -> i64
+decl @c_fstack(f64, f64, f64, f64, f64, f64, f64, f64, ptr byval {f32, f32, f32}, f32, ptr byval {f32, f32, f32}) -> i64
+decl @h_fstack(f64, f64, f64, f64, f64, f64, f64, f64, ptr, f32, ptr) -> i64
+decl @scribble(ptr, i64)
+decl @fill_s16(ptr, i64)
+decl @fill_s24(ptr, i64)
+decl @fill_d2(ptr, i64)
+decl @fill_f3(ptr, i64)
+decl @fill_c3(ptr, i64)
+decl @fill_big(ptr, i64)
+decl @c_make_s16(ptr sret {i64, i64}, i64)
+decl @c_make_s24(ptr sret {i64, i64, i64}, i64)
+decl @c_make_d2(ptr sret {f64, f64}, i64)
+decl @c_make_f3(ptr sret {f32, f32, f32}, i64)
+decl @c_make_c3(ptr sret {i8, i8, i8}, i64)
+
+; keel passes a struct it was given a pointer to on to C, by value.
+func @k_pass_s8(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_s8(v0)
+    return v1
+}
+
+func @k_pass_s16(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_s16(v0)
+    return v1
+}
+
+func @k_pass_s24(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_s24(v0)
+    return v1
+}
+
+func @k_pass_d2(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_d2(v0)
+    return v1
+}
+
+func @k_pass_f3(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_f3(v0)
+    return v1
+}
+
+func @k_pass_f4(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_f4(v0)
+    return v1
+}
+
+func @k_pass_dl(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_dl(v0)
+    return v1
+}
+
+func @k_pass_c3(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_c3(v0)
+    return v1
+}
+
+func @k_pass_n8(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_n8(v0)
+    return v1
+}
+
+func @k_pass_big(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @c_big(v0)
+    return v1
+}
+
+; keel receives structs by value from C.
+func @k_s8(ptr byval {i32, i32}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_s8(v0)
+    return v1
+}
+
+func @k_s16(ptr byval {i64, i64}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_s16(v0)
+    return v1
+}
+
+func @k_s24(ptr byval {i64, i64, i64}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_s24(v0)
+    return v1
+}
+
+func @k_d2(ptr byval {f64, f64}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_d2(v0)
+    return v1
+}
+
+func @k_f3(ptr byval {f32, f32, f32}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_f3(v0)
+    return v1
+}
+
+func @k_f4(ptr byval {[4 x f32]}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_f4(v0)
+    return v1
+}
+
+func @k_dl(ptr byval {f64, i64}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_dl(v0)
+    return v1
+}
+
+func @k_c3(ptr byval {i8, i8, i8}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_c3(v0)
+    return v1
+}
+
+func @k_n8(ptr byval {i8, {i16, [3 x i8]}}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_n8(v0)
+    return v1
+}
+
+func @k_big(ptr byval {[5 x i64]}) -> i64 {
+block0(v0: ptr):
+    v1 = call @h_big(v0)
+    return v1
+}
+
+; Registers run out: the struct and everything after it are on the stack.
+func @k_after7(i64, i64, i64, i64, i64, i64, i64, ptr byval {i64, i64}, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: ptr, v8: i64):
+    v9 = call @h_after7(v0, v1, v2, v3, v4, v5, v6, v7, v8)
+    return v9
+}
+
+func @k_fafter(f64, f64, f64, f64, f64, f64, f64, ptr byval {f64, f64}, f32) -> i64 {
+block0(v0: f64, v1: f64, v2: f64, v3: f64, v4: f64, v5: f64, v6: f64, v7: ptr, v8: f32):
+    v9 = call @h_fafter(v0, v1, v2, v3, v4, v5, v6, v7, v8)
+    return v9
+}
+
+; A small struct, a float aggregate (in s0-s2) and a big struct (its
+; address on the stack), after the general registers are used up.
+func @k_after8(i64, i64, i64, i64, i64, i64, i64, i64, ptr byval {i8, i8, i8}, ptr byval {f32, f32, f32}, ptr byval {[5 x i64]}, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: ptr, v9: ptr, v10: ptr, v11: i32):
+    v12 = call @h_after8(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11)
+    return v12
+}
+
+func @k_pass_after7(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = iconst.i64 1
+    v2 = iconst.i64 2
+    v3 = iconst.i64 3
+    v4 = iconst.i64 4
+    v5 = iconst.i64 5
+    v6 = iconst.i64 6
+    v7 = iconst.i64 7
+    v8 = iconst.i64 8
+    v9 = call @c_after7(v1, v2, v3, v4, v5, v6, v7, v0, v8)
+    return v9
+}
+
+func @k_pass_fafter(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = fconst.f64 1.0
+    v2 = fconst.f64 2.0
+    v3 = fconst.f64 3.0
+    v4 = fconst.f64 4.0
+    v5 = fconst.f64 5.0
+    v6 = fconst.f64 6.0
+    v7 = fconst.f64 7.0
+    v8 = fconst.f32 0.5
+    v9 = call @c_fafter(v1, v2, v3, v4, v5, v6, v7, v0, v8)
+    return v9
+}
+
+func @k_pass_after8(ptr, ptr, ptr) -> i64 {
+block0(v0: ptr, v1: ptr, v2: ptr):
+    v3 = iconst.i64 1
+    v4 = iconst.i64 2
+    v5 = iconst.i64 3
+    v6 = iconst.i64 4
+    v7 = iconst.i64 5
+    v8 = iconst.i64 6
+    v9 = iconst.i64 7
+    v10 = iconst.i64 8
+    v11 = iconst.i32 -9
+    v12 = call @c_after8(v3, v4, v5, v6, v7, v8, v9, v10, v0, v1, v2, v11)
+    return v12
+}
+
+; Float aggregates past v7 go on the stack at their own alignment: the
+; first at 0, the f32 at 12, the second at 16.
+func @k_fstack(f64, f64, f64, f64, f64, f64, f64, f64, ptr byval {f32, f32, f32}, f32, ptr byval {f32, f32, f32}) -> i64 {
+block0(v0: f64, v1: f64, v2: f64, v3: f64, v4: f64, v5: f64, v6: f64, v7: f64, v8: ptr, v9: f32, v10: ptr):
+    v11 = call @h_fstack(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10)
+    return v11
+}
+
+func @k_pass_fstack(ptr, ptr) -> i64 {
+block0(v0: ptr, v1: ptr):
+    v2 = fconst.f64 1.0
+    v3 = fconst.f64 2.0
+    v4 = fconst.f64 3.0
+    v5 = fconst.f64 4.0
+    v6 = fconst.f64 5.0
+    v7 = fconst.f64 6.0
+    v8 = fconst.f64 7.0
+    v9 = fconst.f64 8.0
+    v10 = fconst.f32 0.75
+    v11 = call @c_fstack(v2, v3, v4, v5, v6, v7, v8, v9, v0, v10, v1)
+    return v11
+}
+
+; The callee's copy is its own to change.
+func @k_scribble_big(ptr byval {[5 x i64]}) -> i64 {
+block0(v0: ptr):
+    v1 = iconst.i64 40
+    call @scribble(v0, v1)
+    v2 = call @h_big(v0)
+    return v2
+}
+
+func @k_scribble_s16(ptr byval {i64, i64}) -> i64 {
+block0(v0: ptr):
+    v1 = iconst.i64 16
+    call @scribble(v0, v1)
+    v2 = call @h_s16(v0)
+    return v2
+}
+
+; keel to keel.
+func @k_k_s16(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @k_s16(v0)
+    return v1
+}
+
+; The callee scribbles over its copy; ours must be intact afterwards.
+func @k_k_big(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @k_scribble_big(v0)
+    v2 = call @h_big(v0)
+    return v2
+}
+
+; keel returns structs, which C fills in.
+func @k_make_s16(ptr sret {i64, i64}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_s16(v0, v1)
+    return
+}
+
+func @k_make_s24(ptr sret {i64, i64, i64}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_s24(v0, v1)
+    return
+}
+
+func @k_make_d2(ptr sret {f64, f64}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_d2(v0, v1)
+    return
+}
+
+func @k_make_f3(ptr sret {f32, f32, f32}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_f3(v0, v1)
+    return
+}
+
+func @k_make_c3(ptr sret {i8, i8, i8}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_c3(v0, v1)
+    return
+}
+
+func @k_make_big(ptr sret {[5 x i64]}, i64) {
+block0(v0: ptr, v1: i64):
+    call @fill_big(v0, v1)
+    return
+}
+
+; keel receives struct results from C.
+func @k_get_s16(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    call @c_make_s16(v0, v1)
+    return
+}
+
+func @k_get_s24(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    call @c_make_s24(v0, v1)
+    return
+}
+
+func @k_get_d2(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    call @c_make_d2(v0, v1)
+    return
+}
+
+func @k_get_f3(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    call @c_make_f3(v0, v1)
+    return
+}
+
+func @k_get_c3(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    call @c_make_c3(v0, v1)
+    return
+}
+
+; keel makes structs with its own functions and passes them on.
+func @k_roundtrip(i64) -> i64 {
+    ss0 = stack_slot 16, align 8
+    ss1 = stack_slot 40, align 8
+block0(v0: i64):
+    v1 = stack_addr ss0
+    call @k_make_s16(v1, v0)
+    v2 = stack_addr ss1
+    call @k_make_big(v2, v0)
+    v3 = call @k_s16(v1)
+    v4 = call @k_big(v2)
+    v5 = iadd v3, v4
+    return v5
+}

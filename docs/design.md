@@ -44,10 +44,12 @@ and why they were made.
 - Signedness is on operations, not types. Comparisons return `i8` 0/1.
 - `ptr` is opaque. Memory is untyped bytes. `ptrtoint.i64` and
   `inttoptr.ptr` convert between a pointer and its address.
-- **Layouts** are named declarations (`layout %Point = c { x: i32, y: i32 }`).
-  `field.addr` and `elem.addr` are checked by the verifier and lowered to
-  `ptradd` with a constant offset, so optimizations only see `ptradd`.
-  Bitfields belong to layouts, not to the instruction set.
+- There are no aggregate values: a struct lives in memory and is handled
+  through a `ptr`. **Layouts** (`{i32, [4 x f32], {i8, ptr}}`, with C's
+  rules for alignment and padding) only appear on signatures, where the
+  calling convention needs a struct's shape (`ptr byval {..}`,
+  `ptr sret {..}`; see ABI). Named layouts with checked `field.addr` /
+  `elem.addr`, lowered to `ptradd`, may come later for frontends.
 
 ## Integer operations
 
@@ -200,6 +202,25 @@ Apple arm64's C convention, as implemented:
   narrow parameters, and every defined function on a narrow result, since it
   is exported. On the stack, narrow arguments take their own size and need
   no extension.
+- **Structs by value.** A parameter `ptr byval {i32, f64}` passes the struct
+  at that address by value: the callee receives the address of its own
+  copy. `ptr sret {..}` as the first parameter (of a function returning
+  nothing) is where the callee writes a struct result. Classification
+  (`keel-codegen/src/abi.rs`), as checked against clang:
+  - one to four floats of one type, however nested (a homogeneous float
+    aggregate), go one per v register; on the stack they keep their natural
+    size and alignment;
+  - other structs up to 16 bytes go in one or two x registers, or on the
+    stack in 8-byte-aligned slots rounded up to 8;
+  - a struct that does not fit in the registers left goes whole to the stack
+    and closes that register class to later arguments;
+  - bigger structs are copied by the caller, which passes the copy's
+    address;
+  - results come back the same way, with bigger ones written to memory whose
+    address the caller passes in x8.
+
+  Struct bytes are moved with exact-size loads and stores, so nothing reads
+  or writes past a struct's end.
 - Calls store stack arguments at `sp`, in an outgoing-argument area at the
   bottom of the frame sized for the largest call, so `sp` never moves after
   the prologue. A function reads its own stack parameters at `x29 + 16`.
@@ -210,8 +231,8 @@ Apple arm64's C convention, as implemented:
   bytes on Apple arm64 (a pointer to the next 8-byte slot), so a frontend
   can pass one to `vprintf` by loading it as a `ptr`.
 
-Limits: at most one return value; no by-value structs; at most 4080 bytes of
-stack arguments per call.
+Limits: at most one return value (return structs through `sret`); at most
+4080 bytes of stack arguments per call.
 
 ## Target
 
@@ -286,6 +307,10 @@ values have unspecified upper bits anyway.
 
 ```text
 sp + 0              outgoing stack arguments (for the call that needs most)
+...                 copies of big structs passed by value
+...                 a slot keeping a call's sret address across it
+...                 incoming structs that arrived in registers, and a struct
+                    result returned in registers
 ...                 spill slots, 8 bytes each (only as many as needed)
 ...                 IR stack slots, each at its alignment
 ...                 padding to 16 bytes
