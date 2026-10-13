@@ -22,18 +22,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
 
     let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
-    let funcs = keel_ir::parse(&src).map_err(|e| format!("{input}:{e}"))?;
-    for func in &funcs {
-        if let Err(errors) = keel_ir::verify(func) {
-            let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
-            return Err(format!(
-                "{input}: verifier errors in @{}:\n{}",
-                func.name,
-                lines.join("\n")
-            ));
-        }
+    let module = keel_ir::parse(&src).map_err(|e| format!("{input}:{e}"))?;
+    if let Err(errors) = keel_ir::verify_module(&module) {
+        let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+        return Err(format!("{input}: verifier errors:\n{}", lines.join("\n")));
     }
-    let asm = keel_codegen::aarch64::compile(&funcs).map_err(|e| format!("{input}: {e}"))?;
+    let asm = keel_codegen::aarch64::compile(&module).map_err(|e| format!("{input}: {e}"))?;
     match output {
         Some(path) => std::fs::write(path, asm).map_err(|e| format!("{path}: {e}")),
         None => {
