@@ -11,7 +11,7 @@ pub mod verifier;
 
 pub use entity::{Arena, EntityRef};
 pub use function::{CallConv, Function, Signature, ValueData, ValueDef};
-pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC};
+pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, UnaryOp};
 pub use parser::{ParseError, parse};
 pub use types::Type;
 pub use verifier::{VerifierError, verify};

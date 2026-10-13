@@ -5,7 +5,9 @@
 //! that every use is dominated by its definition. All errors are collected.
 
 use crate::dominators::{ControlFlowGraph, DominatorTree};
-use crate::{BinaryOp, BlockCall, ConvertOp, Function, Inst, InstData, Type, Value, ValueDef};
+use crate::{
+    BinaryOp, BlockCall, ConvertOp, Function, Inst, InstData, Type, UnaryOp, Value, ValueDef,
+};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -139,7 +141,11 @@ impl Verifier<'_> {
                             );
                         }
                     }
-                    BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+                    BinaryOp::Shl
+                    | BinaryOp::Ushr
+                    | BinaryOp::Sshr
+                    | BinaryOp::Rotl
+                    | BinaryOp::Rotr => {
                         if !a.is_int() || !b.is_int() {
                             self.inst_error(inst, format!("{op} takes integers, got ({a}, {b})"));
                         }
@@ -152,6 +158,29 @@ impl Verifier<'_> {
                             );
                         }
                     }
+                }
+            }
+            InstData::Unary { op, arg } => {
+                let a = ty(*arg);
+                if !a.is_int() {
+                    self.inst_error(inst, format!("{op} takes an integer, got {a}"));
+                } else if *op == UnaryOp::Bswap && a == Type::I8 {
+                    self.inst_error(inst, "bswap needs at least i16".into());
+                }
+            }
+            InstData::Select { args } => {
+                let (c, a, b) = (ty(args[0]), ty(args[1]), ty(args[2]));
+                if !c.is_int() {
+                    self.inst_error(
+                        inst,
+                        format!("select condition must be an integer, got {c}"),
+                    );
+                }
+                if a != b {
+                    self.inst_error(
+                        inst,
+                        format!("select arms must have the same type, got ({a}, {b})"),
+                    );
                 }
             }
             InstData::Convert { op, ty: to, arg } => {

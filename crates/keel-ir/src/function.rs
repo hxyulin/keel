@@ -95,7 +95,9 @@ impl Function {
             InstData::Iconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. } => Some(*ty),
+            InstData::Unary { arg, .. } => Some(self.value_type(*arg)),
             InstData::Binary { args, .. } => Some(self.value_type(args[0])),
+            InstData::Select { args } => Some(self.value_type(args[1])),
             InstData::Icmp { .. } => Some(Type::I8),
             InstData::Store { .. }
             | InstData::Jump { .. }
@@ -261,7 +263,11 @@ impl Function {
         let v = |value: Value| self.resolve(value);
         match self.inst_data(inst) {
             InstData::Iconst { ty, imm } => write!(f, "iconst.{ty} {imm}"),
+            InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
+            InstData::Select { args } => {
+                write!(f, "select {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            }
             InstData::Convert { op, ty, arg } => write!(f, "{op}.{ty} {}", v(*arg)),
             InstData::Icmp { cond, args } => {
                 write!(f, "icmp.{cond} {}, {}", v(args[0]), v(args[1]))

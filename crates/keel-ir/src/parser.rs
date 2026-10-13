@@ -12,7 +12,7 @@
 
 use crate::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, InstData, IntCC,
-    Signature, Type, Value,
+    Signature, Type, UnaryOp, Value,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -432,7 +432,13 @@ impl Parser {
             }
         };
 
-        let data = if let Some(op) = parse_binary_op(base) {
+        let data = if let Some(op) = parse_unary_op(base) {
+            no_suffix()?;
+            InstData::Unary {
+                op,
+                arg: self.value(names)?,
+            }
+        } else if let Some(op) = parse_binary_op(base) {
             no_suffix()?;
             let a = self.value(names)?;
             self.expect(Tok::Punct(','))?;
@@ -458,6 +464,16 @@ impl Parser {
                         }
                     };
                     InstData::Iconst { ty, imm }
+                }
+                "select" => {
+                    no_suffix()?;
+                    let cond = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let if_true = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::Select {
+                        args: [cond, if_true, self.value(names)?],
+                    }
                 }
                 "icmp" => {
                     let s = suffix.ok_or_else(|| {
@@ -607,7 +623,9 @@ fn build(
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. } => Some(*ty),
                 InstData::Icmp { .. } => Some(Type::I8),
+                InstData::Unary { arg, .. } => types[arg.index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
+                InstData::Select { args } => types[args[1].index()],
                 _ => None,
             };
             if ty.is_some() {
@@ -691,7 +709,23 @@ fn parse_binary_op(s: &str) -> Option<BinaryOp> {
         "shl" => BinaryOp::Shl,
         "ushr" => BinaryOp::Ushr,
         "sshr" => BinaryOp::Sshr,
+        "rotl" => BinaryOp::Rotl,
+        "rotr" => BinaryOp::Rotr,
+        "umulhi" => BinaryOp::Umulhi,
+        "smulhi" => BinaryOp::Smulhi,
         "ptradd" => BinaryOp::Ptradd,
+        _ => return None,
+    })
+}
+
+fn parse_unary_op(s: &str) -> Option<UnaryOp> {
+    Some(match s {
+        "ineg" => UnaryOp::Ineg,
+        "bnot" => UnaryOp::Bnot,
+        "clz" => UnaryOp::Clz,
+        "ctz" => UnaryOp::Ctz,
+        "popcnt" => UnaryOp::Popcnt,
+        "bswap" => UnaryOp::Bswap,
         _ => return None,
     })
 }

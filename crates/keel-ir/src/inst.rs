@@ -15,9 +15,17 @@ pub enum InstData {
         ty: Type,
         imm: i64,
     },
+    Unary {
+        op: UnaryOp,
+        arg: Value,
+    },
     Binary {
         op: BinaryOp,
         args: [Value; 2],
+    },
+    /// `args[1]` if `args[0]` is non-zero, else `args[2]`. Does not branch.
+    Select {
+        args: [Value; 3],
     },
     /// Width change between integer types.
     Convert {
@@ -73,8 +81,27 @@ pub enum BinaryOp {
     Shl,
     Ushr,
     Sshr,
+    /// Rotates; the amount is taken modulo the bit width, like shifts.
+    Rotl,
+    Rotr,
+    /// High half of the double-width product.
+    Umulhi,
+    Smulhi,
     /// `ptr + i64` byte offset.
     Ptradd,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum UnaryOp {
+    Ineg,
+    Bnot,
+    /// Leading zeros; the bit width for 0.
+    Clz,
+    /// Trailing zeros; the bit width for 0.
+    Ctz,
+    Popcnt,
+    /// Byte swap. Needs at least `i16`.
+    Bswap,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -114,7 +141,11 @@ impl InstData {
     pub fn is_pinned(&self) -> bool {
         match self {
             InstData::Binary { op, .. } => op.can_trap(),
-            InstData::Iconst { .. } | InstData::Convert { .. } | InstData::Icmp { .. } => false,
+            InstData::Iconst { .. }
+            | InstData::Unary { .. }
+            | InstData::Select { .. }
+            | InstData::Convert { .. }
+            | InstData::Icmp { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
             | InstData::Jump { .. }
@@ -145,6 +176,8 @@ impl InstData {
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter().copied().for_each(f)
             }
+            InstData::Select { args } => args.iter().copied().for_each(f),
+            InstData::Unary { arg, .. } => f(*arg),
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
             InstData::Store { value, addr } => {
@@ -166,6 +199,8 @@ impl InstData {
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter_mut().for_each(f)
             }
+            InstData::Select { args } => args.iter_mut().for_each(f),
+            InstData::Unary { arg, .. } => f(arg),
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
             InstData::Store { value, addr } => {
@@ -198,7 +233,24 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Shl => "shl",
             BinaryOp::Ushr => "ushr",
             BinaryOp::Sshr => "sshr",
+            BinaryOp::Rotl => "rotl",
+            BinaryOp::Rotr => "rotr",
+            BinaryOp::Umulhi => "umulhi",
+            BinaryOp::Smulhi => "smulhi",
             BinaryOp::Ptradd => "ptradd",
+        })
+    }
+}
+
+impl fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            UnaryOp::Ineg => "ineg",
+            UnaryOp::Bnot => "bnot",
+            UnaryOp::Clz => "clz",
+            UnaryOp::Ctz => "ctz",
+            UnaryOp::Popcnt => "popcnt",
+            UnaryOp::Bswap => "bswap",
         })
     }
 }

@@ -1,0 +1,7 @@
+verifier errors in @f:
+  inst0 `v4 = bswap v0`: bswap needs at least i16
+  inst1 `v5 = clz v3`: clz takes an integer, got ptr
+  inst2 `v6 = select v1, v1, v2`: select arms must have the same type, got (i32, i64)
+  inst3 `v7 = select v3, v1, v1`: select condition must be an integer, got ptr
+  inst4 `v8 = umulhi v1, v2`: umulhi takes two integers of the same type, got (i32, i64)
+  inst5 `v9 = rotl v3, v1`: rotl takes integers, got (ptr, i32)

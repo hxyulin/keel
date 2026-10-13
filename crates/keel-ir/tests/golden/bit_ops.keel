@@ -1,0 +1,15 @@
+func @bits(i32, i64, i8) -> i64 {
+block0(v0: i32, v1: i64, v2: i8):
+    v3 = ineg v0
+    v4 = bnot v3
+    v5 = clz v4
+    v6 = ctz v1
+    v7 = popcnt v2
+    v8 = bswap v1
+    v9 = rotl v8, v2
+    v10 = rotr v9, v1
+    v11 = umulhi v10, v6
+    v12 = smulhi v11, v1
+    v13 = select v7, v12, v1
+    return v13
+}
