@@ -4,7 +4,7 @@
 //! stay in one place.
 
 use crate::inst::{BlockCall, InstData};
-use crate::{Arena, Block, Inst, Type, Value};
+use crate::{Arena, Block, Inst, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -36,6 +36,13 @@ pub struct ValueData {
     pub def: ValueDef,
 }
 
+/// A stack slot: `size` bytes aligned to `align` (a power of two, at most 16).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct StackSlotData {
+    pub size: u32,
+    pub align: u32,
+}
+
 #[derive(Clone, Debug, Default)]
 struct BlockData {
     params: Vec<Value>,
@@ -56,6 +63,7 @@ pub struct Function {
     blocks: Arena<Block, BlockData>,
     insts: Arena<Inst, InstNode>,
     values: Arena<Value, ValueData>,
+    stack_slots: Arena<StackSlot, StackSlotData>,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
 }
@@ -68,8 +76,21 @@ impl Function {
             blocks: Arena::new(),
             insts: Arena::new(),
             values: Arena::new(),
+            stack_slots: Arena::new(),
             layout: Vec::new(),
         }
+    }
+
+    pub fn create_stack_slot(&mut self, size: u32, align: u32) -> StackSlot {
+        self.stack_slots.push(StackSlotData { size, align })
+    }
+
+    pub fn stack_slots(&self) -> impl Iterator<Item = (StackSlot, StackSlotData)> + '_ {
+        self.stack_slots.iter().map(|(ss, data)| (ss, *data))
+    }
+
+    pub fn num_stack_slots(&self) -> usize {
+        self.stack_slots.len()
     }
 
     /// Creates a block at the end of the layout.
@@ -95,6 +116,7 @@ impl Function {
             InstData::Iconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. } => Some(*ty),
+            InstData::StackAddr { .. } => Some(Type::Ptr),
             InstData::Unary { arg, .. } => Some(self.value_type(*arg)),
             InstData::Binary { args, .. } => Some(self.value_type(args[0])),
             InstData::Select { args } => Some(self.value_type(args[1])),
@@ -216,6 +238,13 @@ impl fmt::Display for Function {
         match self.sig.cc {
             CallConv::C => f.write_str(" cc(c) {\n")?,
         }
+        for (ss, data) in self.stack_slots() {
+            writeln!(
+                f,
+                "    {ss} = stack_slot {}, align {}",
+                data.size, data.align
+            )?;
+        }
 
         for block in self.blocks() {
             write!(f, "{block}")?;
@@ -263,6 +292,7 @@ impl Function {
         let v = |value: Value| self.resolve(value);
         match self.inst_data(inst) {
             InstData::Iconst { ty, imm } => write!(f, "iconst.{ty} {imm}"),
+            InstData::StackAddr { slot } => write!(f, "stack_addr {slot}"),
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
             InstData::Select { args } => {

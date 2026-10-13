@@ -6,7 +6,8 @@
 
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    BinaryOp, BlockCall, ConvertOp, Function, Inst, InstData, Type, UnaryOp, Value, ValueDef,
+    BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Type, UnaryOp, Value,
+    ValueDef,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -70,6 +71,20 @@ impl Verifier<'_> {
                     type_list(&func.sig.params)
                 ),
             );
+        }
+        for (ss, data) in func.stack_slots() {
+            if !data.align.is_power_of_two() || data.align > 16 {
+                self.error(
+                    ss.to_string(),
+                    format!(
+                        "alignment must be a power of two up to 16, got {}",
+                        data.align
+                    ),
+                );
+            }
+            if data.size == 0 {
+                self.error(ss.to_string(), "stack slot size must be non-zero".into());
+            }
         }
         if !self.cfg.preds(entry).is_empty() {
             self.error(
@@ -227,6 +242,11 @@ impl Verifier<'_> {
                         inst,
                         format!("store address must be ptr, got {}", ty(*addr)),
                     );
+                }
+            }
+            InstData::StackAddr { slot } => {
+                if slot.index() >= func.num_stack_slots() {
+                    self.inst_error(inst, format!("{slot} is not declared"));
                 }
             }
             InstData::Jump { .. } => {}

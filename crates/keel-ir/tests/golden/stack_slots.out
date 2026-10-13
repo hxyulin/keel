@@ -1,0 +1,11 @@
+func @f() -> i64 cc(c) {
+    ss0 = stack_slot 8, align 8
+    ss1 = stack_slot 3, align 1
+block0:
+    v0 = stack_addr ss0
+    v1 = iconst.i64 5
+    store v1, v0
+    v2 = stack_addr ss1
+    v3 = load.i64 v0
+    return v3
+}

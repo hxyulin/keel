@@ -1,0 +1,6 @@
+func @f() {
+    ss0 = stack_slot 8, align 8
+block0:
+    v0 = stack_addr ss1
+    return
+}

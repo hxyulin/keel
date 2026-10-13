@@ -15,6 +15,7 @@
 //! ```text
 //! sp + 0              value slots, 8 bytes each, indexed by value number
 //! sp + 8 * values     scratch slots for block-argument copies
+//! ...                 IR stack slots, each at its alignment
 //! ...                 padding to 16 bytes
 //! x29                 saved x29 (frame pointer), saved x30 (return address)
 //! ```
@@ -37,12 +38,18 @@ pub fn compile(funcs: &[Function]) -> Result<String, CodegenError> {
 }
 
 /// The largest offset `ldr x, [sp, #imm]` can encode (12 bits, scaled by 8).
+/// Value and scratch slots are addressed this way, so they must fit below it.
 const MAX_SLOT_OFFSET: usize = 4095 * 8;
+
+/// The largest frame `sub sp` can allocate in two instructions (24 bits).
+const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
 struct FunctionCompiler<'a> {
     func: &'a Function,
     /// Offset of the first scratch slot.
     scratch_base: usize,
+    /// Offset from `sp` of each IR stack slot.
+    stack_slot_offsets: Vec<usize>,
     frame_size: usize,
     out: String,
     uses_trap: bool,
@@ -94,15 +101,28 @@ impl<'a> FunctionCompiler<'a> {
             .max()
             .unwrap_or(0);
         let scratch_base = 8 * func.num_values();
-        let frame_size = (scratch_base + 8 * max_args).next_multiple_of(16);
-        if frame_size > MAX_SLOT_OFFSET {
+        let mut offset = scratch_base + 8 * max_args;
+        if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
-                "frame of {frame_size} bytes is too large for this allocator"
+                "{offset} bytes of value slots is too many for this allocator"
             )));
+        }
+        // `sp` is 16-byte aligned and slot alignment is at most 16, so an
+        // aligned offset gives an aligned address.
+        let mut stack_slot_offsets = Vec::new();
+        for (_, slot) in func.stack_slots() {
+            offset = offset.next_multiple_of(slot.align as usize);
+            stack_slot_offsets.push(offset);
+            offset += slot.size as usize;
+        }
+        let frame_size = offset.next_multiple_of(16);
+        if frame_size > MAX_FRAME_SIZE {
+            return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         Ok(Self {
             func,
             scratch_base,
+            stack_slot_offsets,
             frame_size,
             out: String::new(),
             uses_trap: false,
@@ -145,6 +165,15 @@ impl<'a> FunctionCompiler<'a> {
         match func.inst_data(inst).clone() {
             InstData::Iconst { imm, .. } => {
                 self.materialize(9, imm as u64, true);
+                self.store_result(result, 9);
+            }
+            InstData::StackAddr { slot } => {
+                let offset = self.stack_slot_offsets[slot.index()];
+                // `add` takes a 12-bit immediate, optionally shifted by 12.
+                self.emit(format!("add\tx9, sp, #{}", offset & 0xfff));
+                if offset >> 12 != 0 {
+                    self.emit(format!("add\tx9, x9, #{}, lsl #12", offset >> 12));
+                }
                 self.store_result(result, 9);
             }
             InstData::Unary { op, arg } => {

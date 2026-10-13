@@ -1,0 +1,123 @@
+; expect: exit 0
+; Returns 0, or the number of the last failing check.
+func @main() -> i32 {
+    ss0 = stack_slot 5000, align 16    ; pushes the other slots past 4 KiB
+    ss1 = stack_slot 40, align 4       ; int32_t a[10]
+    ss2 = stack_slot 1, align 1
+    ss3 = stack_slot 8, align 8
+    ss4 = stack_slot 16, align 16
+block0:
+    v0 = stack_addr ss1
+    v1 = iconst.i64 0
+    jump block1(v1)
+block1(v2: i64):                       ; for i in 0..10: a[i] = 3 * i
+    v3 = iconst.i64 10
+    v4 = icmp.ult v2, v3
+    brif v4, block2, block3(v1, v1)
+block2:
+    v5 = iconst.i64 4
+    v6 = imul v2, v5
+    v7 = ptradd v0, v6
+    v8 = iconst.i64 3
+    v9 = imul v2, v8
+    v10 = trunc.i32 v9
+    store v10, v7
+    v11 = iconst.i64 1
+    v12 = iadd v2, v11
+    jump block1(v12)
+block3(v13: i64, v14: i64):            ; for i in 0..10: sum += a[i]
+    v15 = iconst.i64 10
+    v16 = icmp.ult v13, v15
+    brif v16, block4, block5
+block4:
+    v17 = iconst.i64 4
+    v18 = imul v13, v17
+    v19 = ptradd v0, v18
+    v20 = load.i32 v19
+    v21 = sext.i64 v20
+    v22 = iadd v14, v21
+    v23 = iconst.i64 1
+    v24 = iadd v13, v23
+    jump block3(v24, v22)
+block5:
+    v30 = iconst.i32 0
+    ; check 1: the sum is 3 * (0 + 1 + ... + 9) = 135
+    v31 = iconst.i64 135
+    v32 = icmp.ne v14, v31
+    v33 = iconst.i32 1
+    v34 = select v32, v33, v30
+    ; checks 2-3: ss3 is 8-byte aligned, ss4 16-byte aligned. There is no
+    ; ptr-to-int op, but memory is untyped: store the address, load an i64.
+    v40 = stack_addr ss3
+    v44 = stack_addr ss4
+    v53 = stack_addr ss0
+    v45 = iconst.i64 0
+    store v40, v53
+    v48 = load.i64 v53
+    v41 = iconst.i64 7
+    v49 = and v48, v41
+    v50 = icmp.ne v49, v45
+    v46 = iconst.i32 2
+    v51 = select v50, v46, v34
+    store v44, v53
+    v54 = load.i64 v53
+    v55 = iconst.i64 15
+    v56 = and v54, v55
+    v57 = icmp.ne v56, v45
+    v58 = iconst.i32 3
+    v59 = select v57, v58, v51
+    ; check 4 and 5: little-endian byte view of an i32 stored in ss3
+    v60 = iconst.i32 287454020         ; 0x11223344
+    store v60, v40
+    v61 = load.i8 v40
+    v62 = iconst.i8 68                 ; 0x44
+    v63 = icmp.ne v61, v62
+    v64 = iconst.i32 4
+    v65 = select v63, v64, v59
+    v66 = iconst.i64 2
+    v67 = ptradd v40, v66
+    v68 = load.i16 v67
+    v69 = iconst.i16 4386              ; 0x1122
+    v70 = icmp.ne v68, v69
+    v71 = iconst.i32 5
+    v72 = select v70, v71, v65
+    ; check 6: slots do not overlap. Write ss2, then fill its neighbours.
+    v80 = iconst.i8 127
+    v81 = stack_addr ss2
+    store v80, v81
+    v82 = iconst.i64 -1
+    store v82, v40
+    v83 = stack_addr ss4
+    store v82, v83
+    v84 = iconst.i64 8
+    v85 = ptradd v83, v84
+    store v82, v85
+    v86 = load.i8 v81
+    v87 = icmp.ne v86, v80
+    v88 = iconst.i32 6
+    v89 = select v87, v88, v72
+    ; check 7: the far end of the 5000-byte slot is addressable
+    v90 = stack_addr ss0
+    v91 = iconst.i64 4992
+    v92 = ptradd v90, v91
+    v93 = iconst.i64 123456789
+    store v93, v92
+    v94 = load.i64 v92
+    v95 = icmp.ne v94, v93
+    v96 = iconst.i32 7
+    v97 = select v95, v96, v89
+    ; check 8: ss1 starts after all 5000 bytes of ss0
+    v100 = stack_addr ss0
+    v101 = stack_addr ss1
+    v102 = stack_addr ss4
+    store v100, v102
+    v103 = load.i64 v102
+    store v101, v102
+    v104 = load.i64 v102
+    v105 = isub v104, v103
+    v106 = iconst.i64 5000
+    v107 = icmp.ult v105, v106
+    v108 = iconst.i32 8
+    v109 = select v107, v108, v97
+    return v109
+}

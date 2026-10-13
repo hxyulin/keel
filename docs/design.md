@@ -73,6 +73,10 @@ trapping) are for call-like or target-specific operations: `memcpy`,
 
 ## Memory
 
+- Stack memory is declared per function, not allocated by an instruction:
+  `ss0 = stack_slot 16, align 4` (alignment a power of two up to 16), and
+  `stack_addr ss0` gives its address. Sizes are fixed, so the frame layout is
+  known before codegen; a separate `dynamic_alloca` can come later for VLAs.
 - Memory operations are ordered by CFG order.
 - Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
   promise disjointness between classes.

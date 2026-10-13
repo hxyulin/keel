@@ -10,7 +10,7 @@ pub mod types;
 pub mod verifier;
 
 pub use entity::{Arena, EntityRef};
-pub use function::{CallConv, Function, Signature, ValueData, ValueDef};
+pub use function::{CallConv, Function, Signature, StackSlotData, ValueData, ValueDef};
 pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, UnaryOp};
 pub use parser::{ParseError, parse};
 pub use types::Type;
@@ -30,4 +30,9 @@ entity!(
     /// A basic block.
     Block,
     "block"
+);
+entity!(
+    /// A fixed-size region of the function's stack frame.
+    StackSlot,
+    "ss"
 );

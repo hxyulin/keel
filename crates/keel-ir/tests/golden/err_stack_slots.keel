@@ -1,0 +1,7 @@
+func @f() {
+    ss0 = stack_slot 8, align 3
+    ss1 = stack_slot 8, align 32
+    ss2 = stack_slot 0, align 1
+block0:
+    return
+}

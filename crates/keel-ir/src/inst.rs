@@ -5,7 +5,7 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, Type, Value};
+use crate::{Block, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -45,6 +45,10 @@ pub enum InstData {
     Store {
         value: Value,
         addr: Value,
+    },
+    /// Address of a stack slot.
+    StackAddr {
+        slot: StackSlot,
     },
     Jump {
         dest: BlockCall,
@@ -145,7 +149,8 @@ impl InstData {
             | InstData::Unary { .. }
             | InstData::Select { .. }
             | InstData::Convert { .. }
-            | InstData::Icmp { .. } => false,
+            | InstData::Icmp { .. }
+            | InstData::StackAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
             | InstData::Jump { .. }
@@ -172,7 +177,7 @@ impl InstData {
     /// Visits every value operand, including block-call arguments.
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {
-            InstData::Iconst { .. } => {}
+            InstData::Iconst { .. } | InstData::StackAddr { .. } => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter().copied().for_each(f)
             }
@@ -195,7 +200,7 @@ impl InstData {
 
     pub fn for_each_operand_mut(&mut self, mut f: impl FnMut(&mut Value)) {
         match self {
-            InstData::Iconst { .. } => {}
+            InstData::Iconst { .. } | InstData::StackAddr { .. } => {}
             InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
                 args.iter_mut().for_each(f)
             }

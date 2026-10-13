@@ -12,7 +12,7 @@
 
 use crate::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, InstData, IntCC,
-    Signature, Type, UnaryOp, Value,
+    Signature, StackSlot, StackSlotData, Type, UnaryOp, Value,
 };
 use std::collections::HashMap;
 use std::fmt;
@@ -181,6 +181,8 @@ struct Names {
     blocks: HashMap<String, Block>,
     block_first_use: Vec<(String, Loc)>,
     block_defined: Vec<bool>,
+    /// Stack slots, declared before the first block.
+    slots: HashMap<String, StackSlot>,
 }
 
 impl Names {
@@ -340,8 +342,14 @@ impl Parser {
         self.expect(Tok::Newline)?;
 
         let mut names = Names::default();
-        let mut blocks = Vec::new();
+        let mut slots = Vec::new();
         self.skip_newlines();
+        while matches!(self.peek(), Tok::Ident(_)) && self.tokens[self.pos + 1].0 == Tok::Punct('=')
+        {
+            slots.push(self.stack_slot(&mut names)?);
+            self.skip_newlines();
+        }
+        let mut blocks = Vec::new();
         while !self.eat(&Tok::Punct('}')) {
             if self.at(&Tok::Eof) {
                 return Err(self.unexpected("`}`"));
@@ -356,9 +364,48 @@ impl Parser {
                 returns,
                 cc,
             },
+            slots,
             blocks,
             names,
         )
+    }
+
+    /// `ss0 = stack_slot <size>, align <align>`
+    fn stack_slot(&mut self, names: &mut Names) -> Result<StackSlotData, ParseError> {
+        let (name, loc) = self.ident("a stack slot name")?;
+        self.expect(Tok::Punct('='))?;
+        let (kw, kw_loc) = self.ident("`stack_slot`")?;
+        if kw != "stack_slot" {
+            return Err(error(
+                kw_loc,
+                format!("expected `stack_slot`, found `{kw}`"),
+            ));
+        }
+        let size = self.u32("a size in bytes")?;
+        self.expect(Tok::Punct(','))?;
+        let (kw, kw_loc) = self.ident("`align`")?;
+        if kw != "align" {
+            return Err(error(kw_loc, format!("expected `align`, found `{kw}`")));
+        }
+        let align = self.u32("an alignment")?;
+        self.expect(Tok::Newline)?;
+        let slot = StackSlot::new(names.slots.len());
+        if names.slots.insert(name.clone(), slot).is_some() {
+            return Err(error(loc, format!("stack slot `{name}` is defined twice")));
+        }
+        Ok(StackSlotData { size, align })
+    }
+
+    fn u32(&mut self, wanted: &str) -> Result<u32, ParseError> {
+        match self.next() {
+            (Tok::Int(n), loc) => {
+                u32::try_from(n).map_err(|_| error(loc, format!("{n} is out of range")))
+            }
+            _ => {
+                self.pos -= 1;
+                Err(self.unexpected(wanted))
+            }
+        }
     }
 
     fn block(&mut self, names: &mut Names) -> Result<ParsedBlock, ParseError> {
@@ -464,6 +511,14 @@ impl Parser {
                         }
                     };
                     InstData::Iconst { ty, imm }
+                }
+                "stack_addr" => {
+                    no_suffix()?;
+                    let (name, loc) = self.ident("a stack slot")?;
+                    let slot = *names.slots.get(&name).ok_or_else(|| {
+                        error(loc, format!("stack slot `{name}` is not declared"))
+                    })?;
+                    InstData::StackAddr { slot }
                 }
                 "select" => {
                     no_suffix()?;
@@ -581,6 +636,7 @@ impl Parser {
 fn build(
     name: String,
     sig: Signature,
+    slots: Vec<StackSlotData>,
     blocks: Vec<ParsedBlock>,
     names: Names,
 ) -> Result<Function, ParseError> {
@@ -622,6 +678,7 @@ fn build(
                 InstData::Iconst { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. } => Some(*ty),
+                InstData::StackAddr { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } => Some(Type::I8),
                 InstData::Unary { arg, .. } => types[arg.index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
@@ -639,6 +696,10 @@ fn build(
     }
 
     let mut func = Function::new(name, sig);
+    // Slots were numbered in declaration order, which is creation order.
+    for slot in slots {
+        func.create_stack_slot(slot.size, slot.align);
+    }
     for _ in &blocks {
         func.create_block();
     }
