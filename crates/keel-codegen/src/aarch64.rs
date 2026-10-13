@@ -1,45 +1,112 @@
-//! IR → Apple arm64 assembly text, with a spill-everything register
-//! allocator.
+//! IR → Apple arm64 assembly text, with values in registers chosen by the
+//! linear-scan allocator in [`crate::regalloc`].
 //!
-//! Every SSA value lives in its own 8-byte stack slot. Each instruction loads
-//! its operands into scratch registers (x9–x12), computes, and stores the
-//! result back. The output is slow but obviously correct, which makes it a
-//! baseline to test a real register allocator against.
-//!
-//! Values narrower than 64 bits are stored with unspecified upper bits.
-//! Operations whose result depends on those bits (comparisons, division,
-//! right shifts, extensions) extend their operands first.
-//!
-//! Frame layout, from the stack pointer up:
+//! # Registers
 //!
 //! ```text
-//! sp + 0              value slots, 8 bytes each, indexed by value number
-//! sp + 8 * values     scratch slots for block-argument copies
+//! x0–x7    arguments and results of calls; never allocated
+//! x8       scratch (keel does not return structs through it yet)
+//! x9–x15   allocatable, caller-saved: for values not live across a call
+//! x16–x17  scratch (IP0/IP1, which the ABI already lets veneers clobber)
+//! x18      reserved by Apple; never touched
+//! x19–x28  allocatable, callee-saved: saved in the prologue if used
+//! x29–x30  frame pointer and return address
+//! ```
+//!
+//! Keeping x0–x7 out of the pool means setting up a call never has to move
+//! a live value out of the way, and a spilled operand can always be
+//! reloaded into a scratch register. Each instruction is lowered with its
+//! operands in their allocated registers (or reloaded into x16, x17, x8 if
+//! spilled) and computes straight into its result's register (or into x16
+//! and stores it, if the result is spilled).
+//!
+//! A result may share a register with an operand that dies at the same
+//! instruction (see the regalloc docs on program points), so **a lowering
+//! must read every operand before it writes the destination**. Lowerings
+//! that need several steps build intermediate values in scratch registers
+//! and write the destination last.
+//!
+//! Values narrower than 64 bits have unspecified upper bits. Operations
+//! whose result depends on those bits (comparisons, division, right shifts,
+//! extensions) extend their operands first, into a scratch register.
+//!
+//! # Frame
+//!
+//! From the stack pointer up:
+//!
+//! ```text
+//! sp + 0              spill slots, 8 bytes each
 //! ...                 IR stack slots, each at its alignment
 //! ...                 padding to 16 bytes
+//! x29 - 16 * pairs    callee-saved registers this function uses, in pairs
 //! x29                 saved x29 (frame pointer), saved x30 (return address)
 //! ```
 
 use crate::CodegenError;
+use crate::parallel_copy::sequentialize;
+use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, Inst, InstData, IntCC,
     Intrinsic, Module, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
+/// The registers values are allocated to.
+pub const REGISTERS: Pools = Pools {
+    caller_saved: &[9, 10, 11, 12, 13, 14, 15],
+    callee_saved: &[19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+};
+
+/// Scratch registers, never allocated. Spilled operands are reloaded into
+/// them in this order, a spilled result is computed in `S0`, and lowerings
+/// use them for intermediate values.
+const S0: u8 = 16;
+const S1: u8 = 17;
+const S2: u8 = 8;
+
 /// Compiles a module into one assembly file for `clang`/`as`. Declared
 /// functions are left as undefined symbols for the linker to resolve.
 pub fn compile(module: &Module) -> Result<String, CodegenError> {
+    compile_with(module, &REGISTERS)
+}
+
+/// Like [`compile`], allocating only from `pools`, which must be drawn from
+/// [`REGISTERS`]. Tests use a tiny set to force spills.
+pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
+    assert!(
+        pools
+            .caller_saved
+            .iter()
+            .all(|r| REGISTERS.caller_saved.contains(r))
+            && pools
+                .callee_saved
+                .iter()
+                .all(|r| REGISTERS.callee_saved.contains(r)),
+        "register pools must be subsets of REGISTERS"
+    );
     let mut out = String::from("\t.section\t__TEXT,__text,regular,pure_instructions\n");
     for func in &module.functions {
-        FunctionCompiler::new(func, module)?.compile(&mut out);
+        FunctionCompiler::new(func, module, pools)?.compile(&mut out);
     }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
 }
 
+/// Instructions that clobber the caller-saved registers: calls, and the
+/// memory intrinsics, which are calls to libc.
+fn is_call(data: &InstData) -> bool {
+    match data {
+        InstData::Call { .. } => true,
+        InstData::Intrinsic { id, .. } => match id {
+            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
+            Intrinsic::Debugtrap => false,
+        },
+        _ => false,
+    }
+}
+
 /// The largest offset `ldr x, [sp, #imm]` can encode (12 bits, scaled by 8).
-/// Value and scratch slots are addressed this way, so they must fit below it.
+/// Spill slots are addressed this way, so they must fit below it.
 const MAX_SLOT_OFFSET: usize = 4095 * 8;
 
 /// The largest frame `sub sp` can allocate in two instructions (24 bits).
@@ -47,17 +114,20 @@ const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
 struct FunctionCompiler<'a> {
     func: &'a Function,
-    /// Offset of the first scratch slot.
-    scratch_base: usize,
+    alloc: Allocation,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
+    /// Spill slots and IR stack slots; the callee-saved area is separate.
     frame_size: usize,
+    /// The block emitted after the current one, which a branch can fall
+    /// through to.
+    next_block: Option<Block>,
     out: String,
     uses_trap: bool,
 }
 
 impl<'a> FunctionCompiler<'a> {
-    fn new(func: &'a Function, module: &Module) -> Result<Self, CodegenError> {
+    fn new(func: &'a Function, module: &Module, pools: &Pools) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -124,18 +194,11 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
 
-        let max_args = func
-            .blocks()
-            .flat_map(|b| func.block_insts(b))
-            .flat_map(|&inst| func.inst_data(inst).branch_dests())
-            .map(|dest| dest.args.len())
-            .max()
-            .unwrap_or(0);
-        let scratch_base = 8 * func.num_values();
-        let mut offset = scratch_base + 8 * max_args;
+        let alloc = regalloc::allocate(func, pools, is_call);
+        let mut offset = 8 * alloc.spill_slots as usize;
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
-                "{offset} bytes of value slots is too many for this allocator"
+                "{offset} bytes of spill slots is too many for this allocator"
             )));
         }
         // `sp` is 16-byte aligned and slot alignment is at most 16, so an
@@ -152,9 +215,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         Ok(Self {
             func,
-            scratch_base,
+            alloc,
             stack_slot_offsets,
             frame_size,
+            next_block: None,
             out: String::new(),
             uses_trap: false,
         })
@@ -164,19 +228,38 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let name = &func.name;
         writeln!(out, "\t.globl\t_{name}\n\t.p2align\t2\n_{name}:").unwrap();
+        self.allocation_comment();
 
         self.emit("stp\tx29, x30, [sp, #-16]!");
         self.emit("mov\tx29, sp");
+        // Push the callee-saved registers in pairs, keeping `sp` 16-byte
+        // aligned; an odd one out still takes 16 bytes.
+        for pair in self.alloc.callee_saved_used.clone().chunks(2) {
+            match pair {
+                [a, b] => self.emit(format!("stp\tx{a}, x{b}, [sp, #-16]!")),
+                [a] => self.emit(format!("str\tx{a}, [sp, #-16]!")),
+                _ => unreachable!(),
+            }
+        }
         if self.frame_size > 0 {
             self.sub_sp(self.frame_size);
         }
+        // Arguments arrive in x0–x7, which are never allocated, so this
+        // copy has no cycles; it may still store to spill slots.
         if let Some(entry) = func.entry_block() {
-            for (i, &param) in func.block_params(entry).iter().enumerate() {
-                self.emit(format!("str\tx{i}, {}", self.slot(param)));
-            }
+            let moves: Vec<(Loc, Loc)> = func
+                .block_params(entry)
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &param)| Some((self.alloc.loc(param)?, Loc::Reg(i as u8))))
+                .collect();
+            self.parallel_copy(&moves);
         }
 
-        for block in func.blocks() {
+        // Only reachable blocks, in the order the allocator numbered them.
+        let order = self.alloc.order.clone();
+        for (i, &block) in order.iter().enumerate() {
+            self.next_block = order.get(i + 1).copied();
             writeln!(self.out, "{}:", self.label(block)).unwrap();
             for &inst in func.block_insts(block) {
                 writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
@@ -190,130 +273,150 @@ impl<'a> FunctionCompiler<'a> {
         out.push_str(&self.out);
     }
 
+    /// A comment listing where each value lives, to make the output
+    /// readable.
+    fn allocation_comment(&mut self) {
+        let mut line = String::from("\t; regalloc:");
+        for value in (0..self.func.num_values()).map(Value::new) {
+            if let Some(loc) = self.alloc.loc(value) {
+                write!(line, " {value}={}", loc_name(loc)).unwrap();
+            }
+        }
+        writeln!(self.out, "{line}").unwrap();
+    }
+
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         match func.inst_data(inst).clone() {
             InstData::Iconst { imm, .. } => {
-                self.materialize(9, imm as u64, true);
-                self.store_result(result, 9);
+                let d = self.def_reg(result);
+                self.materialize(d, imm as u64, true);
+                self.def_done(result, d);
             }
             InstData::Call { func: callee, args } => {
-                // Spill-everything keeps no values in registers, so nothing
-                // needs saving around the call; x30 is saved in the prologue.
-                for (i, &arg) in args.iter().enumerate() {
-                    self.load(i as u8, arg);
-                }
-                self.emit(format!("bl\t_{}", func.callee(callee).name));
-                if let Some(result) = result {
-                    self.store_result(Some(result), 0);
+                self.call(&args, &format!("_{}", func.callee(callee).name));
+                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+                    self.emit_move(loc, Loc::Reg(0));
                 }
             }
             InstData::StackAddr { slot } => {
+                let d = self.def_reg(result);
                 let offset = self.stack_slot_offsets[slot.index()];
                 // `add` takes a 12-bit immediate, optionally shifted by 12.
-                self.emit(format!("add\tx9, sp, #{}", offset & 0xfff));
+                self.emit(format!("add\tx{d}, sp, #{}", offset & 0xfff));
                 if offset >> 12 != 0 {
-                    self.emit(format!("add\tx9, x9, #{}, lsl #12", offset >> 12));
+                    self.emit(format!("add\tx{d}, x{d}, #{}, lsl #12", offset >> 12));
                 }
-                self.store_result(result, 9);
+                self.def_done(result, d);
             }
             InstData::Unary { op, arg } => {
-                self.unary(op, arg);
-                self.store_result(result, 9);
+                let d = self.def_reg(result);
+                self.unary(op, arg, d);
+                self.def_done(result, d);
             }
             InstData::Binary { op, args } => {
-                self.binary(op, args);
-                self.store_result(result, 9);
+                let d = self.def_reg(result);
+                self.binary(op, args, d);
+                self.def_done(result, d);
             }
             InstData::Select { args } => {
+                let d = self.def_reg(result);
                 let ty = self.ty(args[1]);
-                self.load(9, args[0]);
-                self.test_nonzero(9, self.ty(args[0]));
-                self.load(10, args[1]);
-                self.load(11, args[2]);
-                let (a, b, dst) = (reg(10, ty), reg(11, ty), reg(9, ty));
-                self.emit(format!("csel\t{dst}, {a}, {b}, ne"));
-                self.store_result(result, 9);
+                let c = self.use_reg(args[0], S0);
+                self.test_nonzero(c, self.ty(args[0]));
+                let a = self.use_reg(args[1], S1);
+                let b = self.use_reg(args[2], S2);
+                let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
+                self.emit(format!("csel\t{rd}, {a}, {b}, ne"));
+                self.def_done(result, d);
             }
             InstData::Convert { op, ty, arg } => {
-                self.load(9, arg);
+                let d = self.def_reg(result);
+                let a = self.use_reg(arg, S0);
                 let from = self.ty(arg);
                 match op {
                     ConvertOp::Sext => match from {
-                        Type::I8 => self.emit(format!("sxtb\t{}, w9", reg(9, ty))),
-                        Type::I16 => self.emit(format!("sxth\t{}, w9", reg(9, ty))),
-                        _ => self.emit("sxtw\tx9, w9"),
+                        Type::I8 => self.emit(format!("sxtb\t{}, w{a}", reg(d, ty))),
+                        Type::I16 => self.emit(format!("sxth\t{}, w{a}", reg(d, ty))),
+                        _ => self.emit(format!("sxtw\tx{d}, w{a}")),
                     },
                     // Writing a w register clears the upper 32 bits.
                     ConvertOp::Uext => match from {
-                        Type::I8 => self.emit("uxtb\tw9, w9"),
-                        Type::I16 => self.emit("uxth\tw9, w9"),
-                        _ => self.emit("mov\tw9, w9"),
+                        Type::I8 => self.emit(format!("uxtb\tw{d}, w{a}")),
+                        Type::I16 => self.emit(format!("uxth\tw{d}, w{a}")),
+                        _ => self.emit(format!("mov\tw{d}, w{a}")),
                     },
-                    // The low bits are already right; upper bits are unspecified.
-                    ConvertOp::Trunc => {}
-                    // A pointer is a 64-bit address in a register already.
-                    ConvertOp::PtrToInt | ConvertOp::IntToPtr => {}
+                    // The low bits are already right; upper bits are
+                    // unspecified. A pointer is a 64-bit address already.
+                    // Either way the bits just move.
+                    ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
+                        if a != d {
+                            self.emit(format!("mov\tx{d}, x{a}"));
+                        }
+                    }
                 }
-                self.store_result(result, 9);
+                self.def_done(result, d);
             }
             InstData::Icmp { cond, args } => {
+                let d = self.def_reg(result);
                 let ty = self.ty(args[0]);
-                self.load(9, args[0]);
-                self.load(10, args[1]);
                 let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
-                self.extend(9, ty, signed);
-                self.extend(10, ty, signed);
-                self.emit(format!("cmp\t{}, {}", reg(9, ty), reg(10, ty)));
-                self.emit(format!("cset\tw9, {}", cond_code(cond)));
-                self.store_result(result, 9);
+                let a = self.use_reg(args[0], S0);
+                let a = self.extend(S0, a, ty, signed);
+                let b = self.use_reg(args[1], S1);
+                let b = self.extend(S1, b, ty, signed);
+                self.emit(format!("cmp\t{}, {}", reg(a, ty), reg(b, ty)));
+                self.emit(format!("cset\tw{d}, {}", cond_code(cond)));
+                self.def_done(result, d);
             }
             InstData::Load { ty, addr } => {
-                self.load(9, addr);
+                let d = self.def_reg(result);
+                let a = self.use_reg(addr, S0);
                 let op = match ty {
                     Type::I8 => "ldrb",
                     Type::I16 => "ldrh",
                     _ => "ldr",
                 };
-                self.emit(format!("{op}\t{}, [x9]", reg(9, ty)));
-                self.store_result(result, 9);
+                self.emit(format!("{op}\t{}, [x{a}]", reg(d, ty)));
+                self.def_done(result, d);
             }
             InstData::Store { value, addr } => {
                 let ty = self.ty(value);
-                self.load(9, value);
-                self.load(10, addr);
+                let v = self.use_reg(value, S0);
+                let a = self.use_reg(addr, S1);
                 let op = match ty {
                     Type::I8 => "strb",
                     Type::I16 => "strh",
                     _ => "str",
                 };
-                self.emit(format!("{op}\t{}, [x10]", reg(9, ty)));
+                self.emit(format!("{op}\t{}, [x{a}]", reg(v, ty)));
             }
             InstData::Jump { dest } => {
                 self.block_args(&dest);
-                self.emit(format!("b\t{}", self.label(dest.block)));
+                self.branch_unless_next(dest.block);
             }
             InstData::Brif {
                 cond,
                 dests: [then_dest, else_dest],
             } => {
-                self.load(9, cond);
-                self.test_nonzero(9, self.ty(cond));
+                let c = self.use_reg(cond, S0);
+                self.test_nonzero(c, self.ty(cond));
                 // Block arguments are copied on the edge, so a branch with
-                // else-arguments needs its own landing pad.
-                let else_edge = if else_dest.args.is_empty() {
-                    self.label(else_dest.block)
+                // else-arguments needs its own landing pad. The copies only
+                // move data, so the flags survive them.
+                if else_dest.args.is_empty() {
+                    self.emit(format!("b.eq\t{}", self.label(else_dest.block)));
+                    self.block_args(&then_dest);
+                    self.branch_unless_next(then_dest.block);
                 } else {
-                    format!("L{}_{inst}_else", func.name)
-                };
-                self.emit(format!("b.eq\t{else_edge}"));
-                self.block_args(&then_dest);
-                self.emit(format!("b\t{}", self.label(then_dest.block)));
-                if !else_dest.args.is_empty() {
-                    writeln!(self.out, "{else_edge}:").unwrap();
+                    let pad = format!("L{}_{inst}_else", func.name);
+                    self.emit(format!("b.eq\t{pad}"));
+                    self.block_args(&then_dest);
+                    self.emit(format!("b\t{}", self.label(then_dest.block)));
+                    writeln!(self.out, "{pad}:").unwrap();
                     self.block_args(&else_dest);
-                    self.emit(format!("b\t{}", self.label(else_dest.block)));
+                    self.branch_unless_next(else_dest.block);
                 }
             }
             InstData::Intrinsic { id, args } => match id {
@@ -321,10 +424,7 @@ impl<'a> FunctionCompiler<'a> {
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
                 Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
-                    for (i, &arg) in args.iter().enumerate() {
-                        self.load(i as u8, arg);
-                    }
-                    self.emit(format!("bl\t_{id}"));
+                    self.call(&args, &format!("_{id}"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
@@ -333,21 +433,55 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
                 if let Some(&value) = args.first() {
-                    self.load(0, value);
+                    let src = self.loc(value);
+                    self.emit_move(Loc::Reg(0), src);
                 }
-                self.emit("mov\tsp, x29");
-                self.emit("ldp\tx29, x30, [sp], #16");
+                self.epilogue();
                 self.emit("ret");
             }
         }
     }
 
-    /// Computes `args[0] op args[1]` into x9.
-    fn binary(&mut self, op: BinaryOp, args: [Value; 2]) {
+    /// Moves the arguments into x0–x7 and calls `symbol`. Values live across
+    /// the call are in callee-saved registers or spill slots (the allocator
+    /// sees to that), so nothing needs saving here.
+    fn call(&mut self, args: &[Value], symbol: &str) {
+        let moves: Vec<(Loc, Loc)> = args
+            .iter()
+            .enumerate()
+            .map(|(i, &arg)| (Loc::Reg(i as u8), self.loc(arg)))
+            .collect();
+        self.parallel_copy(&moves);
+        self.emit(format!("bl\t{symbol}"));
+    }
+
+    /// Restores the callee-saved registers, `sp` and the frame pointer.
+    fn epilogue(&mut self) {
+        let saved = self.alloc.callee_saved_used.clone();
+        let pairs = saved.len().div_ceil(2);
+        // Point `sp` at the last pair pushed and pop in reverse. Measuring
+        // from x29 makes the size of the rest of the frame irrelevant.
+        if pairs == 0 {
+            self.emit("mov\tsp, x29");
+        } else {
+            self.emit(format!("sub\tsp, x29, #{}", 16 * pairs));
+        }
+        for pair in saved.chunks(2).rev() {
+            match pair {
+                [a, b] => self.emit(format!("ldp\tx{a}, x{b}, [sp], #16")),
+                [a] => self.emit(format!("ldr\tx{a}, [sp], #16")),
+                _ => unreachable!(),
+            }
+        }
+        self.emit("ldp\tx29, x30, [sp], #16");
+    }
+
+    /// Computes `args[0] op args[1]` into `d`.
+    fn binary(&mut self, op: BinaryOp, args: [Value; 2], d: u8) {
         let ty = self.ty(args[0]);
-        let (a, b) = (reg(9, ty), reg(10, ty));
-        self.load(9, args[0]);
-        self.load(10, args[1]);
+        let a = self.use_reg(args[0], S0);
+        let b = self.use_reg(args[1], S1);
+        let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
         let simple = match op {
             BinaryOp::Iadd | BinaryOp::Ptradd => Some("add"),
             BinaryOp::Isub => Some("sub"),
@@ -358,7 +492,7 @@ impl<'a> FunctionCompiler<'a> {
             _ => None,
         };
         if let Some(mnemonic) = simple {
-            self.emit(format!("{mnemonic}\t{a}, {a}, {b}"));
+            self.emit(format!("{mnemonic}\t{rd}, {ra}, {rb}"));
             return;
         }
         match op {
@@ -367,25 +501,29 @@ impl<'a> FunctionCompiler<'a> {
                 // n is rotating right by -n.
                 None => {
                     if op == BinaryOp::Rotl {
-                        self.emit(format!("neg\t{b}, {b}"));
+                        let neg = reg(S1, ty);
+                        self.emit(format!("neg\t{neg}, {rb}"));
+                        self.emit(format!("ror\t{rd}, {ra}, {neg}"));
+                    } else {
+                        self.emit(format!("ror\t{rd}, {ra}, {rb}"));
                     }
-                    self.emit(format!("ror\t{a}, {a}, {b}"));
                 }
                 // No narrow rotate instruction: (x << n) | (x >> (bits - n))
                 // on the zero-extended value. n = 0 shifts right by `bits`,
                 // which gives 0 in a 32-bit register, as needed.
                 Some(bits) => {
-                    self.extend(9, ty, false);
-                    self.emit(format!("and\tw10, w10, #{}", bits - 1));
-                    self.emit(format!("mov\tw12, #{bits}"));
-                    self.emit("sub\tw12, w12, w10");
+                    let x = self.extend(S0, a, ty, false);
+                    // w17 = n, w8 = bits - n
+                    self.emit(format!("and\tw{S1}, w{b}, #{}", bits - 1));
+                    self.emit(format!("mov\tw{S2}, #{bits}"));
+                    self.emit(format!("sub\tw{S2}, w{S2}, w{S1}"));
                     let (first, second) = match op {
                         BinaryOp::Rotl => ("lsl", "lsr"),
                         _ => ("lsr", "lsl"),
                     };
-                    self.emit(format!("{first}\tw11, w9, w10"));
-                    self.emit(format!("{second}\tw12, w9, w12"));
-                    self.emit("orr\tw9, w11, w12");
+                    self.emit(format!("{first}\tw{S1}, w{x}, w{S1}"));
+                    self.emit(format!("{second}\tw{S2}, w{x}, w{S2}"));
+                    self.emit(format!("orr\tw{d}, w{S1}, w{S2}"));
                 }
             },
             BinaryOp::Umulhi | BinaryOp::Smulhi => {
@@ -393,7 +531,7 @@ impl<'a> FunctionCompiler<'a> {
                 match ty {
                     Type::I64 => {
                         let mnemonic = if signed { "smulh" } else { "umulh" };
-                        self.emit(format!("{mnemonic}\tx9, x9, x10"));
+                        self.emit(format!("{mnemonic}\tx{d}, x{a}, x{b}"));
                     }
                     // Widening 32x32 -> 64 multiply, then take the top half.
                     Type::I32 => {
@@ -402,112 +540,115 @@ impl<'a> FunctionCompiler<'a> {
                         } else {
                             ("umull", "lsr")
                         };
-                        self.emit(format!("{mul}\tx9, w9, w10"));
-                        self.emit(format!("{shr}\tx9, x9, #32"));
+                        self.emit(format!("{mul}\tx{d}, w{a}, w{b}"));
+                        self.emit(format!("{shr}\tx{d}, x{d}, #32"));
                     }
                     // The full product of two extended i8/i16 fits in 32 bits.
                     _ => {
                         let bits = narrow_bits(ty).expect("i8 or i16");
-                        self.extend(9, ty, signed);
-                        self.extend(10, ty, signed);
-                        self.emit("mul\tw9, w9, w10");
+                        let a = self.extend(S0, a, ty, signed);
+                        let b = self.extend(S1, b, ty, signed);
+                        self.emit(format!("mul\tw{d}, w{a}, w{b}"));
                         let shr = if signed { "asr" } else { "lsr" };
-                        self.emit(format!("{shr}\tw9, w9, #{bits}"));
+                        self.emit(format!("{shr}\tw{d}, w{d}, #{bits}"));
                     }
                 }
             }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                 // Shift amounts are taken modulo the bit width. The hardware
                 // does that for 32 and 64 bits; narrower types need a mask.
-                if let Some(bits) = narrow_bits(ty) {
-                    self.emit(format!("and\tw10, w10, #{}", bits - 1));
-                }
-                let mnemonic = match op {
-                    BinaryOp::Shl => "lsl",
-                    BinaryOp::Ushr => {
-                        self.extend(9, ty, false);
-                        "lsr"
+                let b = match narrow_bits(ty) {
+                    Some(bits) => {
+                        self.emit(format!("and\tw{S1}, w{b}, #{}", bits - 1));
+                        S1
                     }
-                    _ => {
-                        self.extend(9, ty, true);
-                        "asr"
-                    }
+                    None => b,
                 };
-                self.emit(format!("{mnemonic}\t{a}, {a}, {b}"));
+                let (mnemonic, a) = match op {
+                    BinaryOp::Shl => ("lsl", a),
+                    BinaryOp::Ushr => ("lsr", self.extend(S0, a, ty, false)),
+                    _ => ("asr", self.extend(S0, a, ty, true)),
+                };
+                self.emit(format!("{mnemonic}\t{rd}, {}, {}", reg(a, ty), reg(b, ty)));
             }
             BinaryOp::Udiv | BinaryOp::Urem | BinaryOp::Sdiv | BinaryOp::Srem => {
                 let signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
-                self.extend(9, ty, signed);
-                self.extend(10, ty, signed);
+                let a = reg(self.extend(S0, a, ty, signed), ty);
+                let b = reg(self.extend(S1, b, ty, signed), ty);
                 let trap = self.trap_label();
                 // Hardware division returns 0 for a zero divisor; the IR traps.
                 self.emit(format!("cbz\t{b}, {trap}"));
                 if op == BinaryOp::Sdiv {
                     // MIN / -1 overflows. Hardware wraps; the IR traps.
-                    let min = reg(12, ty);
-                    self.materialize(12, min_value(ty), ty == Type::I64);
+                    let min = reg(S2, ty);
+                    self.materialize(S2, min_value(ty), ty == Type::I64);
                     self.emit(format!("cmn\t{b}, #1"));
                     self.emit(format!("ccmp\t{a}, {min}, #0, eq"));
                     self.emit(format!("b.eq\t{trap}"));
                 }
-                let q = reg(11, ty);
                 let div = if signed { "sdiv" } else { "udiv" };
-                self.emit(format!("{div}\t{q}, {a}, {b}"));
                 match op {
-                    // remainder = a - (a / b) * b
+                    // remainder = a - (a / b) * b, with the quotient in a
+                    // scratch register since `a` and `b` are read again.
                     BinaryOp::Urem | BinaryOp::Srem => {
-                        self.emit(format!("msub\t{a}, {q}, {b}, {a}"))
+                        let q = reg(S2, ty);
+                        self.emit(format!("{div}\t{q}, {a}, {b}"));
+                        self.emit(format!("msub\t{rd}, {q}, {b}, {a}"));
                     }
-                    _ => self.emit(format!("mov\t{a}, {q}")),
+                    _ => self.emit(format!("{div}\t{rd}, {a}, {b}")),
                 }
             }
             _ => unreachable!("handled above"),
         }
     }
 
-    /// Computes `op arg` into x9.
-    fn unary(&mut self, op: UnaryOp, arg: Value) {
+    /// Computes `op arg` into `d`.
+    fn unary(&mut self, op: UnaryOp, arg: Value, d: u8) {
         let ty = self.ty(arg);
-        let a = reg(9, ty);
-        self.load(9, arg);
+        let a = self.use_reg(arg, S0);
+        let (ra, rd) = (reg(a, ty), reg(d, ty));
         match op {
-            UnaryOp::Ineg => self.emit(format!("neg\t{a}, {a}")),
-            UnaryOp::Bnot => self.emit(format!("mvn\t{a}, {a}")),
+            UnaryOp::Ineg => self.emit(format!("neg\t{rd}, {ra}")),
+            UnaryOp::Bnot => self.emit(format!("mvn\t{rd}, {ra}")),
             UnaryOp::Clz => {
                 // Count in 32 bits, then drop the zeros above the narrow width.
-                self.extend(9, ty, false);
-                self.emit(format!("clz\t{a}, {a}"));
+                let x = reg(self.extend(S0, a, ty, false), ty);
+                self.emit(format!("clz\t{rd}, {x}"));
                 if let Some(bits) = narrow_bits(ty) {
-                    self.emit(format!("sub\tw9, w9, #{}", 32 - bits));
+                    self.emit(format!("sub\tw{d}, w{d}, #{}", 32 - bits));
                 }
             }
             UnaryOp::Ctz => {
                 // ctz = clz of the bit-reversed value. For narrow types, a
                 // set bit just above the width caps the count at the width
                 // and hides the unspecified upper bits.
-                if let Some(bits) = narrow_bits(ty) {
-                    self.emit(format!("orr\tw9, w9, #{:#x}", 1u32 << bits));
+                let x = reg(S0, ty);
+                match narrow_bits(ty) {
+                    Some(bits) => {
+                        self.emit(format!("orr\t{x}, {ra}, #{:#x}", 1u32 << bits));
+                        self.emit(format!("rbit\t{x}, {x}"));
+                    }
+                    None => self.emit(format!("rbit\t{x}, {ra}")),
                 }
-                self.emit(format!("rbit\t{a}, {a}"));
-                self.emit(format!("clz\t{a}, {a}"));
+                self.emit(format!("clz\t{rd}, {x}"));
             }
             UnaryOp::Popcnt => {
                 // No scalar popcount: count bits per byte in a SIMD register
                 // (`cnt`), then add the byte counts (`addv`).
-                self.extend(9, ty, false);
+                let x = self.extend(S0, a, ty, false);
                 if ty == Type::I64 {
-                    self.emit("fmov\td0, x9");
+                    self.emit(format!("fmov\td0, x{x}"));
                 } else {
-                    self.emit("fmov\ts0, w9");
+                    self.emit(format!("fmov\ts0, w{x}"));
                 }
                 self.emit("cnt\tv0.8b, v0.8b");
                 self.emit("addv\tb0, v0.8b");
-                self.emit("fmov\tw9, s0");
+                self.emit(format!("fmov\tw{d}, s0"));
             }
             UnaryOp::Bswap => match ty {
                 // Swaps the bytes within each halfword; the low one is ours.
-                Type::I16 => self.emit("rev16\tw9, w9"),
-                _ => self.emit(format!("rev\t{a}, {a}")),
+                Type::I16 => self.emit(format!("rev16\tw{d}, w{a}")),
+                _ => self.emit(format!("rev\t{rd}, {ra}")),
             },
         }
     }
@@ -523,40 +664,62 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Copies block-call arguments into the target's parameter slots. All
-    /// copies happen at once: `jump block1(v4, v3)` may swap two parameters,
-    /// so with more than one argument everything goes through scratch slots.
+    /// Copies block-call arguments into the target's parameters. All copies
+    /// happen at once (`jump block1(v4, v3)` may swap two parameters), so
+    /// they go through the parallel-copy sequentializer.
     fn block_args(&mut self, call: &BlockCall) {
-        let params = self.func.block_params(call.block).to_vec();
-        match call.args.as_slice() {
-            [] => {}
-            [arg] => {
-                self.load(9, *arg);
-                self.emit(format!("str\tx9, {}", self.slot(params[0])));
-            }
-            args => {
-                for (i, &arg) in args.iter().enumerate() {
-                    self.load(9, arg);
-                    self.emit(format!("str\tx9, [sp, #{}]", self.scratch_base + 8 * i));
-                }
-                for (i, &param) in params.iter().enumerate() {
-                    self.emit(format!("ldr\tx9, [sp, #{}]", self.scratch_base + 8 * i));
-                    self.emit(format!("str\tx9, {}", self.slot(param)));
-                }
+        let params = self.func.block_params(call.block);
+        let moves: Vec<(Loc, Loc)> = params
+            .iter()
+            .zip(&call.args)
+            // A parameter with no location is an alias, never read.
+            .filter_map(|(&param, &arg)| Some((self.alloc.loc(param)?, self.loc(arg))))
+            .collect();
+        self.parallel_copy(&moves);
+    }
+
+    /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
+    /// x16 breaks cycles; `emit_move` uses x17 for slot-to-slot moves.
+    fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
+        for (dst, src) in sequentialize(moves, Loc::Reg(S0)) {
+            self.emit_move(dst, src);
+        }
+    }
+
+    /// One 64-bit move between any two locations. Narrow values have
+    /// unspecified upper bits, so copying all 64 is always fine.
+    fn emit_move(&mut self, dst: Loc, src: Loc) {
+        match (dst, src) {
+            _ if dst == src => {}
+            (Loc::Reg(d), Loc::Reg(s)) => self.emit(format!("mov\tx{d}, x{s}")),
+            (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("ldr\tx{d}, {}", slot(s))),
+            (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("str\tx{s}, {}", slot(d))),
+            (Loc::Stack(d), Loc::Stack(s)) => {
+                self.emit(format!("ldr\tx{S1}, {}", slot(s)));
+                self.emit(format!("str\tx{S1}, {}", slot(d)));
             }
         }
     }
 
-    /// Sign- or zero-extends a narrow value in `w<reg>` to 32 bits.
-    fn extend(&mut self, reg: u8, ty: Type, signed: bool) {
+    fn branch_unless_next(&mut self, target: Block) {
+        if self.next_block != Some(target) {
+            self.emit(format!("b\t{}", self.label(target)));
+        }
+    }
+
+    /// Sign- or zero-extends a narrow value in `w<src>` into `w<scratch>`
+    /// and returns `scratch`; returns `src` unchanged for 32- and 64-bit
+    /// types. Extending in place would clobber the operand's register.
+    fn extend(&mut self, scratch: u8, src: u8, ty: Type, signed: bool) -> u8 {
         let op = match (ty, signed) {
             (Type::I8, true) => "sxtb",
             (Type::I8, false) => "uxtb",
             (Type::I16, true) => "sxth",
             (Type::I16, false) => "uxth",
-            _ => return,
+            _ => return src,
         };
-        self.emit(format!("{op}\tw{reg}, w{reg}"));
+        self.emit(format!("{op}\tw{scratch}, w{src}"));
+        scratch
     }
 
     /// Loads a constant with `movz` and up to three `movk`s.
@@ -590,19 +753,40 @@ impl<'a> FunctionCompiler<'a> {
         format!("L{}_trap", self.func.name)
     }
 
-    fn load(&mut self, reg: u8, value: Value) {
-        let slot = self.slot(value);
-        self.emit(format!("ldr\tx{reg}, {slot}"));
+    /// The location of an operand.
+    fn loc(&self, value: Value) -> Loc {
+        self.alloc
+            .loc(self.func.resolve(value))
+            .expect("operand in reachable code is allocated")
     }
 
-    fn store_result(&mut self, result: Option<Value>, reg: u8) {
+    /// The register holding operand `value`: its own, or `scratch` after
+    /// reloading it from its spill slot.
+    fn use_reg(&mut self, value: Value, scratch: u8) -> u8 {
+        match self.loc(value) {
+            Loc::Reg(r) => r,
+            Loc::Stack(s) => {
+                self.emit(format!("ldr\tx{scratch}, {}", slot(s)));
+                scratch
+            }
+        }
+    }
+
+    /// The register to compute `result` into: its own, or x16 if it is
+    /// spilled (or an alias, whose value is never read).
+    fn def_reg(&self, result: Option<Value>) -> u8 {
         let value = result.expect("instruction has a result");
-        let slot = self.slot(value);
-        self.emit(format!("str\tx{reg}, {slot}"));
+        match self.alloc.loc(value) {
+            Some(Loc::Reg(r)) => r,
+            _ => S0,
+        }
     }
 
-    fn slot(&self, value: Value) -> String {
-        format!("[sp, #{}]", 8 * self.func.resolve(value).index())
+    /// Stores a spilled result computed into `reg` by [`Self::def_reg`].
+    fn def_done(&mut self, result: Option<Value>, reg: u8) {
+        if let Some(Loc::Stack(s)) = result.and_then(|v| self.alloc.loc(v)) {
+            self.emit(format!("str\tx{reg}, {}", slot(s)));
+        }
     }
 
     fn ty(&self, value: Value) -> Type {
@@ -615,6 +799,19 @@ impl<'a> FunctionCompiler<'a> {
 
     fn emit(&mut self, line: impl AsRef<str>) {
         writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    }
+}
+
+/// The address of spill slot `index`. Spill slots are at the bottom of the
+/// frame, so the offset is small enough for a scaled immediate.
+fn slot(index: u32) -> String {
+    format!("[sp, #{}]", 8 * index)
+}
+
+fn loc_name(loc: Loc) -> String {
+    match loc {
+        Loc::Reg(r) => format!("x{r}"),
+        Loc::Stack(s) => slot(s),
     }
 }
 

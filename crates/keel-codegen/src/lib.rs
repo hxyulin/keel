@@ -1,6 +1,10 @@
 //! Machine code generation. Only aarch64 (Apple) for now.
 
 pub mod aarch64;
+mod parallel_copy;
+mod regalloc;
+
+pub use regalloc::Pools;
 
 use std::fmt;
 
