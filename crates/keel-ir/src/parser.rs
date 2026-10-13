@@ -979,6 +979,10 @@ impl Parser {
                         args: [a, self.value(names)?],
                     }
                 }
+                "va_arg" => InstData::VaArg {
+                    ty: suffix_type("type")?,
+                    list: self.value(names)?,
+                },
                 "load" => InstData::Load {
                     ty: suffix_type("type")?,
                     addr: self.value(names)?,
@@ -1224,7 +1228,8 @@ fn build(
                 InstData::Iconst { ty, .. }
                 | InstData::Fconst { ty, .. }
                 | InstData::Convert { ty, .. }
-                | InstData::Load { ty, .. } => Some(*ty),
+                | InstData::Load { ty, .. }
+                | InstData::VaArg { ty, .. } => Some(*ty),
                 InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
                 InstData::Unary { arg, .. } => types[arg.index()],

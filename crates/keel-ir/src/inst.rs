@@ -58,6 +58,12 @@ pub enum InstData {
         value: Value,
         addr: Value,
     },
+    /// Reads the next variadic argument, of type `ty` (`i32`, `i64`, `ptr`
+    /// or `f64`), from the `va_list` at `list`, and advances it.
+    VaArg {
+        ty: Type,
+        list: Value,
+    },
     /// Calls a function; results follow its signature.
     Call {
         func: FuncRef,
@@ -312,6 +318,7 @@ impl InstData {
             | InstData::SymbolAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
+            | InstData::VaArg { .. }
             | InstData::Call { .. }
             | InstData::CallIndirect { .. }
             | InstData::Trap
@@ -370,6 +377,7 @@ impl InstData {
             InstData::Unary { arg, .. } => f(*arg),
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
+            InstData::VaArg { list, .. } => f(*list),
             InstData::Store { value, addr } => {
                 f(*value);
                 f(*addr);
@@ -407,6 +415,7 @@ impl InstData {
             InstData::Unary { arg, .. } => f(arg),
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
+            InstData::VaArg { list, .. } => f(list),
             InstData::Store { value, addr } => {
                 f(value);
                 f(addr);

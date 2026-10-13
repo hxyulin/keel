@@ -1,0 +1,13 @@
+func @not_variadic(ptr) {
+block0(v0: ptr):
+    intrinsic va_start(v0)
+    v1 = va_arg.i64 v0
+    return
+}
+
+func @bad_types(i64, ...) {
+block0(v0: i64):
+    v1 = va_arg.f32 v0
+    v2 = va_arg.i8 v0
+    return
+}

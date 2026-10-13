@@ -307,7 +307,8 @@ impl Function {
             InstData::Iconst { ty, .. }
             | InstData::Fconst { ty, .. }
             | InstData::Convert { ty, .. }
-            | InstData::Load { ty, .. } => vec![*ty],
+            | InstData::Load { ty, .. }
+            | InstData::VaArg { ty, .. } => vec![*ty],
             InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => vec![Type::Ptr],
             InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
@@ -626,6 +627,7 @@ impl Function {
                 write!(f, "fcmp.{cond} {}, {}", v(args[0]), v(args[1]))
             }
             InstData::Load { ty, addr } => write!(f, "load.{ty} {}", v(*addr)),
+            InstData::VaArg { ty, list } => write!(f, "va_arg.{ty} {}", v(*list)),
             InstData::Store { value, addr } => write!(f, "store {}, {}", v(*value), v(*addr)),
             InstData::Jump { dest } => {
                 f.write_str("jump ")?;

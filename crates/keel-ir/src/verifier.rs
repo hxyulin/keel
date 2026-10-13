@@ -8,8 +8,8 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Signature, Type,
-    UnaryOp, Value, ValueDef,
+    ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
+    Signature, Type, UnaryOp, Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -408,6 +408,20 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("load address must be ptr, got {}", ty(*addr)));
                 }
             }
+            InstData::VaArg { ty: t, list } => {
+                if !matches!(t, Type::I32 | Type::I64 | Type::Ptr | Type::F64) {
+                    self.inst_error(
+                        inst,
+                        format!("va_arg reads i32, i64, ptr or f64 (C's promoted types), got {t}"),
+                    );
+                }
+                if ty(*list) != Type::Ptr {
+                    self.inst_error(inst, format!("va_arg list must be ptr, got {}", ty(*list)));
+                }
+                if !func.sig.variadic {
+                    self.inst_error(inst, "va_arg in a function that is not variadic".into());
+                }
+            }
             InstData::Store { addr, .. } => {
                 if ty(*addr) != Type::Ptr {
                     self.inst_error(
@@ -453,6 +467,9 @@ impl Verifier<'_> {
             }
             InstData::SymbolAddr { .. } => {}
             InstData::Intrinsic { id, args } => {
+                if *id == Intrinsic::VaStart && !func.sig.variadic {
+                    self.inst_error(inst, "va_start in a function that is not variadic".into());
+                }
                 let info = id.info();
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
                 if got != info.params {

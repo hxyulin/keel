@@ -204,8 +204,14 @@ Apple arm64's C convention, as implemented:
   bottom of the frame sized for the largest call, so `sp` never moves after
   the prologue. A function reads its own stack parameters at `x29 + 16`.
 
-Limits: at most one return value; variadic functions can be called but not defined (no `va_start` yet); no
-by-value structs; at most 4080 bytes of stack arguments per call.
+- **Defining** a variadic function: `intrinsic va_start(v0)` initializes
+  a `va_list` at `v0`, and `v1 = va_arg.i64 v0` reads the next argument and
+  advances it (types as for calls). A `va_list` is target-defined memory, 8
+  bytes on Apple arm64 (a pointer to the next 8-byte slot), so a frontend
+  can pass one to `vprintf` by loading it as a `ptr`.
+
+Limits: at most one return value; no by-value structs; at most 4080 bytes of
+stack arguments per call.
 
 ## Target
 

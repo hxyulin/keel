@@ -21,6 +21,11 @@ pub enum Intrinsic {
     /// Stops in the debugger, which can resume past it. Without a debugger
     /// the process gets SIGTRAP.
     Debugtrap,
+    /// `va_start(list)`: initializes the `va_list` at `list` to the first
+    /// variadic argument of the current (variadic) function. A `va_list` is
+    /// target-defined memory: 8 bytes, align 8, on Apple arm64. Read it with
+    /// `va_arg`; copying its bytes copies the position.
+    VaStart,
 }
 
 pub struct IntrinsicInfo {
@@ -32,11 +37,12 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 4] = [
+    pub const ALL: [Intrinsic; 5] = [
         Intrinsic::Memcpy,
         Intrinsic::Memmove,
         Intrinsic::Memset,
         Intrinsic::Debugtrap,
+        Intrinsic::VaStart,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -46,6 +52,7 @@ impl Intrinsic {
             Intrinsic::Memmove => ("memmove", MEM, &[], false),
             Intrinsic::Memset => ("memset", &[Type::Ptr, Type::I8, Type::I64], &[], false),
             Intrinsic::Debugtrap => ("debugtrap", &[], &[], false),
+            Intrinsic::VaStart => ("va_start", &[Type::Ptr], &[], false),
         };
         IntrinsicInfo {
             name,

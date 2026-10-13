@@ -130,6 +130,10 @@ impl InstBuilder<'_> {
         self.value(InstData::Load { ty, addr })
     }
 
+    pub fn va_arg(self, ty: Type, list: Value) -> Value {
+        self.value(InstData::VaArg { ty, list })
+    }
+
     pub fn store(self, value: Value, addr: Value) -> Inst {
         self.build(InstData::Store { value, addr })
     }

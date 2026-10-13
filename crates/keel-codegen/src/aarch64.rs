@@ -134,7 +134,7 @@ fn is_call(data: &InstData) -> bool {
         InstData::Call { .. } | InstData::CallIndirect { .. } => true,
         InstData::Intrinsic { id, .. } => match id {
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
-            Intrinsic::Debugtrap => false,
+            Intrinsic::Debugtrap | Intrinsic::VaStart => false,
         },
         _ => false,
     }
@@ -161,6 +161,9 @@ struct FunctionCompiler<'a> {
     stack_slot_offsets: Vec<usize>,
     /// Offset from `sp` of spill slot 0, above the outgoing arguments.
     spill_base: usize,
+    /// Offset from x29 of the first variadic argument: the next 8-byte slot
+    /// after the named stack parameters.
+    variadic_offset: u32,
     /// Outgoing arguments, spill slots and IR stack slots; the
     /// callee-saved area is separate.
     frame_size: usize,
@@ -178,12 +181,6 @@ impl<'a> FunctionCompiler<'a> {
             message,
         };
         let CallConv::C = func.sig.cc;
-        if func.sig.variadic {
-            return Err(err(
-                "variadic functions can be called but not defined yet (there is no va_start)"
-                    .into(),
-            ));
-        }
         let param_tys = func.sig.param_types();
         let (_, incoming) = arg_locs(&param_tys, param_tys.len());
         if incoming > MAX_STACK_ARGS {
@@ -282,6 +279,7 @@ impl<'a> FunctionCompiler<'a> {
             alloc,
             stack_slot_offsets,
             spill_base,
+            variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
             next_block: None,
             out: String::new(),
@@ -547,6 +545,23 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("cset\tw{d}, {}", float_cond_code(cond)));
                 self.def_done(result, d);
             }
+            // Load the pointer, store it advanced by a slot, then read the
+            // argument: the result may share the list's register.
+            InstData::VaArg { ty, list } => {
+                let a = self.use_reg(list, S2);
+                self.emit(format!("ldr\tx{S0}, [x{a}]"));
+                self.emit(format!("add\tx{S1}, x{S0}, #8"));
+                self.emit(format!("str\tx{S1}, [x{a}]"));
+                if ty.is_float() {
+                    let d = self.def_freg(result);
+                    self.emit(format!("ldr\t{}, [x{S0}]", freg(d, ty)));
+                    self.def_done(result, d);
+                } else {
+                    let d = self.def_reg(result);
+                    self.emit(format!("ldr\t{}, [x{S0}]", reg(d, ty)));
+                    self.def_done(result, d);
+                }
+            }
             InstData::Load { ty, addr } if ty.is_float() => {
                 let d = self.def_freg(result);
                 let a = self.use_reg(addr, S0);
@@ -625,6 +640,12 @@ impl<'a> FunctionCompiler<'a> {
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
                 Intrinsic::Debugtrap => self.emit("brk\t#0xf000"),
+                // Apple's va_list is a pointer to the next argument slot.
+                Intrinsic::VaStart => {
+                    let list = self.use_reg(args[0], S1);
+                    self.emit(format!("add\tx{S0}, x29, #{}", self.variadic_offset));
+                    self.emit(format!("str\tx{S0}, [x{list}]"));
+                }
             },
             InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
