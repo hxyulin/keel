@@ -84,6 +84,15 @@ impl<K: EntityRef, V> Arena<K, V> {
     }
 }
 
+impl<K, V: Clone> Clone for Arena<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            _key: PhantomData,
+        }
+    }
+}
+
 impl<K: EntityRef, V> Default for Arena<K, V> {
     fn default() -> Self {
         Self::new()
