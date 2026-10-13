@@ -1,0 +1,201 @@
+; expect: exit 0
+; stdout: Hi from data!
+; stdout: from data!
+; stdout: Hi from data!
+; Data in every section, symbol addresses (local and through the GOT) and
+; indirect calls in both directions between keel and C.
+; Returns 0, or the number of the last failing check.
+decl @puts(ptr) -> i32
+decl @c_read_counter() -> i64
+decl @c_read_c_counter() -> i64
+decl @c_double(i64) -> i64
+decl @c_apply(ptr, i64, i64) -> i64
+decl @c_get_mul() -> ptr
+decl @c_check_mixed() -> i32
+decl data @c_counter
+
+data @greeting = const align 1 { b"Hi from data!\0" }
+data @tail = const align 8 { ptr @greeting + 3 }
+data @counter = align 8 { i64 40 }
+data @ops = const align 8 { ptr @add, ptr @sub }
+data @scratch = align 8 { zero 64 }
+data @mixed = const align 4 { i8 1, i8 -1, i16 772, i32 -2, zero 4 }
+data @fp = align 8 { ptr @sub }
+
+func @main() -> i32 {
+block0:
+    ok = iconst.i32 0
+    ; checks 1-2: puts a constant string, then a pointer to its middle
+    greeting = symbol_addr @greeting
+    p1 = call @puts(greeting)
+    tail = symbol_addr @tail
+    tail_ptr = load.ptr tail
+    p2 = call @puts(tail_ptr)
+    ; libc is a dylib, so its functions' addresses only exist in the GOT
+    puts = symbol_addr @puts
+    p3 = call_indirect puts(greeting) : (ptr) -> i32
+    ; check 3: keel writes @counter, C reads 42
+    counter = symbol_addr @counter
+    c0 = load.i64 counter
+    two = iconst.i64 2
+    c1 = iadd c0, two
+    store c1, counter
+    c2 = call @c_read_counter()
+    n42 = iconst.i64 42
+    f3 = icmp.ne c2, n42
+    k3 = iconst.i32 3
+    r3 = select f3, k3, ok
+    ; checks 4-5: a constant table of function pointers
+    ops = symbol_addr @ops
+    eight = iconst.i64 8
+    ops1 = ptradd ops, eight
+    sub = load.ptr ops1
+    ten = iconst.i64 10
+    three = iconst.i64 3
+    d = call_indirect sub(ten, three) : (i64, i64) -> i64
+    seven = iconst.i64 7
+    f4 = icmp.ne d, seven
+    k4 = iconst.i32 4
+    r4 = select f4, k4, r3
+    add = load.ptr ops
+    s = call_indirect add(ten, three) : (i64, i64) -> i64
+    n13 = iconst.i64 13
+    f5 = icmp.ne s, n13
+    k5 = iconst.i32 5
+    r5 = select f5, k5, r4
+    ; checks 6-7: C's data through the GOT, read and written
+    cc = symbol_addr @c_counter
+    cc0 = load.i64 cc
+    f6 = icmp.ne cc0, seven
+    k6 = iconst.i32 6
+    r6 = select f6, k6, r5
+    store eight, cc
+    cc1 = call @c_read_c_counter()
+    f7 = icmp.ne cc1, eight
+    k7 = iconst.i32 7
+    r7 = select f7, k7, r6
+    ; check 8: a C function's address through the GOT
+    dbl = symbol_addr @c_double
+    n21 = iconst.i64 21
+    x8 = call_indirect dbl(n21) : (i64) -> i64
+    f8 = icmp.ne x8, n42
+    k8 = iconst.i32 8
+    r8 = select f8, k8, r7
+    ; check 9: C calls a keel function through a pointer
+    add_fn = symbol_addr @add
+    n40 = iconst.i64 40
+    x9 = call @c_apply(add_fn, n40, two)
+    f9 = icmp.ne x9, n42
+    k9 = iconst.i32 9
+    r9 = select f9, k9, r8
+    ; check 10: keel calls a static C function C handed out
+    mul = call @c_get_mul()
+    six = iconst.i64 6
+    x10 = call_indirect mul(six, seven) : (i64, i64) -> i64
+    f10 = icmp.ne x10, n42
+    k10 = iconst.i32 10
+    r10 = select f10, k10, r9
+    ; check 11: zero-filled data starts at 0 and is writable
+    scratch = symbol_addr @scratch
+    n56 = iconst.i64 56
+    last = ptradd scratch, n56
+    z = load.i64 last
+    n99 = iconst.i64 99
+    store n99, last
+    z2 = load.i64 last
+    z_sum = iadd z, z2
+    f11 = icmp.ne z_sum, n99
+    k11 = iconst.i32 11
+    r11 = select f11, k11, r10
+    ; checks 12-14: mixed integers have the right bytes
+    m_ok = call @c_check_mixed()
+    one32 = iconst.i32 1
+    f12 = icmp.ne m_ok, one32
+    k12 = iconst.i32 12
+    r12 = select f12, k12, r11
+    mixed = symbol_addr @mixed
+    m2 = ptradd mixed, two
+    h = load.i16 m2
+    h64 = sext.i64 h
+    n772 = iconst.i64 772
+    f13 = icmp.ne h64, n772
+    k13 = iconst.i32 13
+    r13 = select f13, k13, r12
+    four = iconst.i64 4
+    m4 = ptradd mixed, four
+    w = load.i32 m4
+    w64 = sext.i64 w
+    neg2 = iconst.i64 -2
+    f14 = icmp.ne w64, neg2
+    k14 = iconst.i32 14
+    r14 = select f14, k14, r13
+    ; checks 15-16: a mutable function pointer, called, replaced, called
+    fp = symbol_addr @fp
+    fp0 = load.ptr fp
+    n50 = iconst.i64 50
+    x15 = call_indirect fp0(n50, eight) : (i64, i64) -> i64
+    f15 = icmp.ne x15, n42
+    k15 = iconst.i32 15
+    r15 = select f15, k15, r14
+    store add_fn, fp
+    fp1 = load.ptr fp
+    x16 = call_indirect fp1(n40, two) : (i64, i64) -> i64
+    f16 = icmp.ne x16, n42
+    k16 = iconst.i32 16
+    r16 = select f16, k16, r15
+    ; check 17: an indirect call with no result bumps @counter to 43
+    bump = symbol_addr @bump
+    call_indirect bump() : ()
+    c3 = call @c_read_counter()
+    n43 = iconst.i64 43
+    f17 = icmp.ne c3, n43
+    k17 = iconst.i32 17
+    r17 = select f17, k17, r16
+    ; check 18: three function pointers live across calls, so with few
+    ; registers one is spilled and reloaded just before its `blr`
+    x18 = call @chain(ops)
+    n18 = iconst.i64 18
+    f18 = icmp.ne x18, n18
+    k18 = iconst.i32 18
+    r18 = select f18, k18, r17
+    return r18
+}
+
+; ((1 + 10) - 3) + 10 = 18, calling through pointers loaded up front.
+func @chain(ptr) -> i64 {
+block0(ops: ptr):
+    eight = iconst.i64 8
+    ops1 = ptradd ops, eight
+    add1 = load.ptr ops
+    sub = load.ptr ops1
+    add2 = load.ptr ops
+    one = iconst.i64 1
+    ten = iconst.i64 10
+    three = iconst.i64 3
+    a = call_indirect add1(one, ten) : (i64, i64) -> i64
+    b = call_indirect sub(a, three) : (i64, i64) -> i64
+    c = call_indirect add2(b, ten) : (i64, i64) -> i64
+    return c
+}
+
+func @add(i64, i64) -> i64 {
+block0(a: i64, b: i64):
+    r = iadd a, b
+    return r
+}
+
+func @sub(i64, i64) -> i64 {
+block0(a: i64, b: i64):
+    r = isub a, b
+    return r
+}
+
+func @bump() {
+block0:
+    p = symbol_addr @counter
+    x = load.i64 p
+    one = iconst.i64 1
+    y = iadd x, one
+    store y, p
+    return
+}

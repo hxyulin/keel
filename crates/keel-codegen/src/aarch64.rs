@@ -41,13 +41,22 @@
 //! x29 - 16 * pairs    callee-saved registers this function uses, in pairs
 //! x29                 saved x29 (frame pointer), saved x30 (return address)
 //! ```
+//!
+//! # Symbols
+//!
+//! Code may not contain absolute addresses: the executable is loaded at a
+//! random address. A symbol's address is computed relative to the program
+//! counter: `adrp` gives its 4 KiB page, `add` the offset within the page.
+//! Symbols defined in another image (libc, a dylib) are only known at load
+//! time, so their addresses come from the global offset table (GOT), a table
+//! of pointers the loader fills in: `adrp` + `ldr` reads the GOT entry.
 
 use crate::CodegenError;
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
-    BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, Inst, InstData, IntCC,
-    Intrinsic, Module, Type, UnaryOp, Value,
+    BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, EntityRef,
+    Function, Inst, InstData, IntCC, Intrinsic, Module, Signature, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -88,6 +97,11 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     for func in &module.functions {
         FunctionCompiler::new(func, module, pools)?.compile(&mut out);
     }
+    for data in &module.data {
+        if let Some(init) = &data.init {
+            emit_data(&mut out, data, init);
+        }
+    }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
 }
@@ -96,7 +110,7 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
 /// memory intrinsics, which are calls to libc.
 fn is_call(data: &InstData) -> bool {
     match data {
-        InstData::Call { .. } => true,
+        InstData::Call { .. } | InstData::CallIndirect { .. } => true,
         InstData::Intrinsic { id, .. } => match id {
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
             Intrinsic::Debugtrap => false,
@@ -114,6 +128,7 @@ const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
 struct FunctionCompiler<'a> {
     func: &'a Function,
+    module: &'a Module,
     alloc: Allocation,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
@@ -127,7 +142,7 @@ struct FunctionCompiler<'a> {
 }
 
 impl<'a> FunctionCompiler<'a> {
-    fn new(func: &'a Function, module: &Module, pools: &Pools) -> Result<Self, CodegenError> {
+    fn new(func: &'a Function, module: &'a Module, pools: &Pools) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -156,34 +171,13 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         for (_, callee) in func.callees() {
-            let sig = &callee.sig;
-            let CallConv::C = sig.cc;
-            if sig.params.len() > 8 {
-                return Err(err(format!(
-                    "call to @{}: more than 8 arguments (stack arguments) are not supported yet",
-                    callee.name
-                )));
-            }
-            if sig.returns.len() > 1 {
-                return Err(err(format!(
-                    "call to @{}: multiple return values are not supported by the C convention",
-                    callee.name
-                )));
-            }
-            // The Apple ABI has the caller extend narrow arguments to 32 bits
-            // by C signedness, which the IR does not record. Keel functions
-            // do not rely on it, but external ones may.
-            if module.is_external(&callee.name)
-                && sig
-                    .params
-                    .iter()
-                    .any(|ty| matches!(ty, Type::I8 | Type::I16))
-            {
-                return Err(err(format!(
-                    "call to external @{}: i8/i16 arguments need signedness the IR does not have yet",
-                    callee.name
-                )));
-            }
+            let what = format!("call to @{}", callee.name);
+            check_call_signature(&what, &callee.sig, module.is_external(&callee.name))
+                .map_err(err)?;
+        }
+        // The target of an indirect call may be an external function.
+        for (_, sig) in func.signatures() {
+            check_call_signature(&format!("indirect call {sig}"), sig, true).map_err(err)?;
         }
         for value in (0..func.num_values()).map(Value::new) {
             let ty = func.value_type(value);
@@ -215,6 +209,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         Ok(Self {
             func,
+            module,
             alloc,
             stack_slot_offsets,
             frame_size,
@@ -299,6 +294,29 @@ impl<'a> FunctionCompiler<'a> {
                 if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
                     self.emit_move(loc, Loc::Reg(0));
                 }
+            }
+            InstData::CallIndirect { callee, args, .. } => {
+                self.move_args(&args);
+                // The callee is in an allocated register, which the argument
+                // moves leave alone (they write x0–x7, x16 and x17), or in a
+                // spill slot, reloaded after the moves so x16 is free.
+                let target = self.use_reg(callee, S0);
+                self.emit(format!("blr\tx{target}"));
+                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+                    self.emit_move(loc, Loc::Reg(0));
+                }
+            }
+            InstData::SymbolAddr { symbol } => {
+                let d = self.def_reg(result);
+                let name = func.symbol_name(symbol);
+                if self.module.defines(name) {
+                    self.emit(format!("adrp\tx{d}, _{name}@PAGE"));
+                    self.emit(format!("add\tx{d}, x{d}, _{name}@PAGEOFF"));
+                } else {
+                    self.emit(format!("adrp\tx{d}, _{name}@GOTPAGE"));
+                    self.emit(format!("ldr\tx{d}, [x{d}, _{name}@GOTPAGEOFF]"));
+                }
+                self.def_done(result, d);
             }
             InstData::StackAddr { slot } => {
                 let d = self.def_reg(result);
@@ -446,13 +464,18 @@ impl<'a> FunctionCompiler<'a> {
     /// the call are in callee-saved registers or spill slots (the allocator
     /// sees to that), so nothing needs saving here.
     fn call(&mut self, args: &[Value], symbol: &str) {
+        self.move_args(args);
+        self.emit(format!("bl\t{symbol}"));
+    }
+
+    /// Moves call arguments into x0–x7.
+    fn move_args(&mut self, args: &[Value]) {
         let moves: Vec<(Loc, Loc)> = args
             .iter()
             .enumerate()
             .map(|(i, &arg)| (Loc::Reg(i as u8), self.loc(arg)))
             .collect();
         self.parallel_copy(&moves);
-        self.emit(format!("bl\t{symbol}"));
     }
 
     /// Restores the callee-saved registers, `sp` and the frame pointer.
@@ -799,6 +822,98 @@ impl<'a> FunctionCompiler<'a> {
 
     fn emit(&mut self, line: impl AsRef<str>) {
         writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    }
+}
+
+/// Rejects calls the C convention support cannot make yet. `external`
+/// callees may be C code relying on the full ABI.
+fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(), String> {
+    let CallConv::C = sig.cc;
+    if sig.params.len() > 8 {
+        return Err(format!(
+            "{what}: more than 8 arguments (stack arguments) are not supported yet"
+        ));
+    }
+    if sig.returns.len() > 1 {
+        return Err(format!(
+            "{what}: multiple return values are not supported by the C convention"
+        ));
+    }
+    // The Apple ABI has the caller extend narrow arguments to 32 bits by C
+    // signedness, which the IR does not record. Keel functions do not rely
+    // on it, but external ones may.
+    if external
+        && sig
+            .params
+            .iter()
+            .any(|ty| matches!(ty, Type::I8 | Type::I16))
+    {
+        return Err(format!(
+            "{what}: i8/i16 arguments to external code need signedness the IR does not have yet"
+        ));
+    }
+    Ok(())
+}
+
+/// Emits a data object into the section its contents call for:
+///
+/// - mutable and all zero: zero-fill (`__bss`), which takes no file space;
+/// - mutable: `__DATA,__data`;
+/// - constant with pointers: `__DATA,__const`, since the loader writes the
+///   pointers at startup and then makes the pages read-only;
+/// - constant without pointers: `__TEXT,__const`, read-only from the start.
+///
+/// Every object is exported (`.globl`), like functions.
+fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
+    let name = &data.name;
+    let log2_align = init.align.trailing_zeros();
+    writeln!(out, "\t.globl\t_{name}").unwrap();
+    if !init.constant && init.is_zero() {
+        writeln!(
+            out,
+            "\t.zerofill\t__DATA,__bss,_{name},{},{log2_align}",
+            init.size()
+        )
+        .unwrap();
+        return;
+    }
+    let section = match (init.constant, init.has_relocations()) {
+        (false, _) => "__DATA,__data",
+        (true, true) => "__DATA,__const",
+        (true, false) => "__TEXT,__const",
+    };
+    writeln!(
+        out,
+        "\t.section\t{section}\n\t.p2align\t{log2_align}\n_{name}:"
+    )
+    .unwrap();
+    for item in &init.items {
+        match item {
+            DataItem::Bytes(bytes) if bytes.is_empty() => {}
+            DataItem::Bytes(bytes) => {
+                let list: Vec<String> = bytes.iter().map(|b| b.to_string()).collect();
+                writeln!(out, "\t.byte\t{}", list.join(", ")).unwrap();
+            }
+            // The directives truncate to their width, and the verifier has
+            // checked the value fits, so the bits are right either way.
+            DataItem::Int { ty, value } => {
+                let directive = match ty {
+                    Type::I8 => ".byte",
+                    Type::I16 => ".short",
+                    Type::I32 => ".long",
+                    _ => ".quad",
+                };
+                let bits = 8 * ty.bytes().unwrap_or(8);
+                let unsigned = (*value as u64) & (u64::MAX >> (64 - bits));
+                writeln!(out, "\t{directive}\t{unsigned}").unwrap();
+            }
+            DataItem::Zero(0) => {}
+            DataItem::Zero(n) => writeln!(out, "\t.space\t{n}").unwrap(),
+            DataItem::Ptr { symbol, addend: 0 } => writeln!(out, "\t.quad\t_{symbol}").unwrap(),
+            DataItem::Ptr { symbol, addend } => {
+                writeln!(out, "\t.quad\t_{symbol}+{addend}").unwrap()
+            }
+        }
     }
 }
 
