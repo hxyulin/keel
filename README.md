@@ -25,7 +25,8 @@ cargo run -p keel -- passes                           # list the passes
   file has an `; expect: exit N` or `; expect: trap` line and may have a
   same-named `.c` driver that it is linked with. Each program is compiled
   three times: with the full register set, with a tiny one that forces
-  spills, and after the default optimization pipeline.
+  spills, and after the default optimization pipeline. A program that runs
+  for more than 10 seconds fails.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),

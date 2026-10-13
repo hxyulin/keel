@@ -1,0 +1,8 @@
+func @f(i8, f32) {
+block0(v0: i8, v1: f32):
+    switch v0, block1, [1: block1, 257: block1, -1: block1, 255: block1, 3: block2]
+block1:
+    switch v1, block1, []
+block2(v2: i8):
+    return
+}

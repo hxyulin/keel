@@ -91,6 +91,14 @@ pub enum InstData {
         cond: Value,
         dests: [BlockCall; 2],
     },
+    /// Branch to `dests[i + 1]` if `arg` equals `cases[i]`, else to
+    /// `dests[0]`. Case values are bit patterns of `arg`'s type, written
+    /// signed or unsigned, and distinct.
+    Switch {
+        arg: Value,
+        dests: Vec<BlockCall>,
+        cases: Vec<i64>,
+    },
     Return {
         args: Vec<Value>,
     },
@@ -309,6 +317,7 @@ impl InstData {
             | InstData::Trap
             | InstData::Jump { .. }
             | InstData::Brif { .. }
+            | InstData::Switch { .. }
             | InstData::Return { .. } => true,
         }
     }
@@ -318,6 +327,7 @@ impl InstData {
             self,
             InstData::Jump { .. }
                 | InstData::Brif { .. }
+                | InstData::Switch { .. }
                 | InstData::Return { .. }
                 | InstData::Trap
         )
@@ -327,6 +337,7 @@ impl InstData {
         match self {
             InstData::Jump { dest } => std::slice::from_ref(dest),
             InstData::Brif { dests, .. } => dests,
+            InstData::Switch { dests, .. } => dests,
             _ => &[],
         }
     }
@@ -335,6 +346,7 @@ impl InstData {
         match self {
             InstData::Jump { dest } => std::slice::from_mut(dest),
             InstData::Brif { dests, .. } => dests,
+            InstData::Switch { dests, .. } => dests,
             _ => &mut [],
         }
     }
@@ -365,6 +377,10 @@ impl InstData {
             InstData::Jump { dest } => dest.args.iter().copied().for_each(f),
             InstData::Brif { cond, dests } => {
                 f(*cond);
+                dests.iter().flat_map(|d| &d.args).copied().for_each(f);
+            }
+            InstData::Switch { arg, dests, .. } => {
+                f(*arg);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
             InstData::Return { args }
@@ -398,6 +414,10 @@ impl InstData {
             InstData::Jump { dest } => dest.args.iter_mut().for_each(f),
             InstData::Brif { cond, dests } => {
                 f(cond);
+                dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
+            }
+            InstData::Switch { arg, dests, .. } => {
+                f(arg);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
             InstData::Return { args }

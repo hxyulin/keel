@@ -608,6 +608,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.branch_unless_next(else_dest.block);
                 }
             }
+            InstData::Switch { arg, dests, cases } => self.switch(inst, arg, &dests, &cases),
             InstData::Intrinsic { id, args } => match id {
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
@@ -977,6 +978,96 @@ impl<'a> FunctionCompiler<'a> {
                 _ => self.emit(format!("rev\t{rd}, {ra}")),
             },
             _ => unreachable!("float operations are lowered in `inst`"),
+        }
+    }
+
+    /// Lowers `switch`: a jump table if the cases are dense, else a chain of
+    /// compares. Like `brif`, a target with block arguments gets a landing
+    /// pad that copies them.
+    fn switch(&mut self, inst: Inst, arg: Value, dests: &[BlockCall], cases: &[i64]) {
+        let ty = self.ty(arg);
+        let is64 = ty == Type::I64;
+        // Compare the zero-extended bits with the cases as unsigned bits.
+        let mask = u64::MAX >> (64 - 8 * ty.bytes().expect("integer"));
+        let x = self.use_reg(arg, S0);
+        let x = self.extend(S0, x, ty, false);
+        let values: Vec<u64> = cases.iter().map(|&c| c as u64 & mask).collect();
+        let targets: Vec<String> = dests
+            .iter()
+            .enumerate()
+            .map(|(i, d)| match d.args.is_empty() {
+                true => self.label(d.block),
+                false => format!("L{}_{inst}_edge{i}", self.func.name),
+            })
+            .collect();
+
+        let (min, max) = match (values.iter().min(), values.iter().max()) {
+            (Some(&min), Some(&max)) => (min, max),
+            _ => (0, 0),
+        };
+        let span = max - min;
+        if values.len() >= 4 && span < 3 * values.len() as u64 && span < 4096 {
+            // idx = x - min, unsigned; anything above the span is default.
+            let idx = if min == 0 {
+                x
+            } else {
+                let sub = self.operand(S1, min, is64);
+                self.emit(format!("sub\t{}, {}, {sub}", reg(S0, ty), reg(x, ty)));
+                S0
+            };
+            self.emit(format!("cmp\t{}, #{span}", reg(idx, ty)));
+            self.emit(format!("b.hi\t{}", targets[0]));
+            let table = format!("L{}_{inst}_table", self.func.name);
+            let index = if is64 {
+                format!("x{idx}, lsl #2")
+            } else {
+                format!("w{idx}, uxtw #2")
+            };
+            self.emit(format!("adr\tx{S1}, {table}"));
+            self.emit(format!("ldrsw\tx{S0}, [x{S1}, {index}]"));
+            self.emit(format!("add\tx{S1}, x{S1}, x{S0}"));
+            self.emit(format!("br\tx{S1}"));
+            // Offsets from the table to each target, never executed.
+            writeln!(self.out, "{table}:").unwrap();
+            for k in 0..=span {
+                let i = values
+                    .iter()
+                    .position(|&v| v == min + k)
+                    .map_or(0, |i| i + 1);
+                self.emit(format!(".long\t{} - {table}", targets[i]));
+            }
+        } else {
+            for (i, &value) in values.iter().enumerate() {
+                let operand = self.operand(S1, value, is64);
+                self.emit(format!("cmp\t{}, {operand}", reg(x, ty)));
+                self.emit(format!("b.eq\t{}", targets[i + 1]));
+            }
+            if dests[0].args.is_empty() {
+                self.branch_unless_next(dests[0].block);
+            } else {
+                self.emit(format!("b\t{}", targets[0]));
+            }
+        }
+        for (dest, target) in dests.iter().zip(&targets) {
+            if !dest.args.is_empty() {
+                writeln!(self.out, "{target}:").unwrap();
+                self.block_args(dest);
+                self.emit(format!("b\t{}", self.label(dest.block)));
+            }
+        }
+    }
+
+    /// `value` as the second operand of `cmp`/`sub`: an immediate if it fits
+    /// in 12 bits, else materialized in `scratch`.
+    fn operand(&mut self, scratch: u8, value: u64, is64: bool) -> String {
+        if value < 4096 {
+            return format!("#{value}");
+        }
+        self.materialize(scratch, value, is64);
+        if is64 {
+            format!("x{scratch}")
+        } else {
+            format!("w{scratch}")
         }
     }
 

@@ -1,0 +1,5 @@
+verifier errors:
+  @f inst0 `switch v0, block1, [1: block1, 257: block1, -1: block1, 255: block1, 3: block2]`: case 257 does not fit in i8
+  @f inst0 `switch v0, block1, [1: block1, 257: block1, -1: block1, 255: block1, 3: block2]`: case 255 is the same i8 as an earlier case
+  @f inst0 `switch v0, block1, [1: block1, 257: block1, -1: block1, 255: block1, 3: block2]`: block2 takes 1 argument(s), got 0
+  @f inst1 `switch v1, block1, []`: switch takes i8 to i64, got f32

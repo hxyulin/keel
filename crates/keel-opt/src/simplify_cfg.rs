@@ -1,6 +1,7 @@
 //! CFG cleanup, repeated until nothing changes:
 //!
-//! 1. A `brif` on a constant, or with two identical targets, becomes a `jump`.
+//! 1. A `brif` or `switch` on a constant, or whose targets are all the
+//!    same, becomes a `jump`.
 //! 2. A branch to a block that only jumps on (no parameters, one `jump`)
 //!    goes straight to that jump's target. The jump's arguments are defined
 //!    in blocks dominating the skipped block, so they dominate every
@@ -32,15 +33,25 @@ fn fold_branches(func: &mut Function) -> bool {
         let Some(&term) = func.block_insts(block).last() else {
             continue;
         };
-        let InstData::Brif { cond, dests } = func.inst_data(term) else {
-            continue;
+        let taken = match func.inst_data(term) {
+            InstData::Brif { cond, dests } => match constant(func, *cond) {
+                Some(c) if c.is_zero() => Some(&dests[1]),
+                Some(_) => Some(&dests[0]),
+                None => None,
+            },
+            InstData::Switch { arg, dests, cases } => constant(func, *arg).map(|c| {
+                let hit = cases.iter().position(|&case| c.same_bits(case));
+                &dests[hit.map_or(0, |i| i + 1)]
+            }),
+            _ => continue,
         };
-        let taken = match constant(func, *cond) {
-            Some(c) if c.is_zero() => Some(&dests[1]),
-            Some(_) => Some(&dests[0]),
-            None if same_call(func, &dests[0], &dests[1]) => Some(&dests[0]),
-            None => None,
-        };
+        let dests = func.inst_data(term).branch_dests();
+        let taken = taken.or_else(|| {
+            dests[1..]
+                .iter()
+                .all(|d| same_call(func, &dests[0], d))
+                .then_some(&dests[0])
+        });
         if let Some(dest) = taken {
             let dest = dest.clone();
             *func.inst_data_mut(term) = InstData::Jump { dest };

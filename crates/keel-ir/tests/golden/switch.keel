@@ -1,0 +1,13 @@
+; `switch` picks a target by value; the default comes first. Targets may
+; take arguments, and several cases may share one.
+func @f(i32, i64) -> i64 {
+block0(v0: i32, v1: i64):
+    switch v0, block3(v1), [0: block1, 1: block2(v1), -7: block1, 0xff: block3(v1)]
+block1:
+    v2 = iconst.i64 10
+    return v2
+block2(v3: i64):
+    return v3
+block3(v4: i64):
+    switch v4, block1, []
+}

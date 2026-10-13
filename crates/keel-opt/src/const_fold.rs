@@ -118,6 +118,11 @@ impl Const {
         self.bits == 0
     }
 
+    /// Whether `value`, taken as bits of this constant's type, equals it.
+    pub(crate) fn same_bits(self, value: i64) -> bool {
+        self.bits == value as u64 & mask(self.ty)
+    }
+
     fn width(self) -> u32 {
         width(self.ty)
     }

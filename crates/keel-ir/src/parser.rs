@@ -180,7 +180,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                     },
                     loc,
                 ));
-            } else if "(),:={}+".contains(c) {
+            } else if "(),:={}+[]".contains(c) {
                 tokens.push((Tok::Punct(c), loc));
                 i += 1;
             } else {
@@ -1009,6 +1009,27 @@ impl Parser {
                         dests: [then_dest, self.block_call(names)?],
                     }
                 }
+                "switch" => {
+                    no_suffix()?;
+                    let arg = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let mut dests = vec![self.block_call(names)?];
+                    let mut cases = Vec::new();
+                    self.expect(Tok::Punct(','))?;
+                    self.expect(Tok::Punct('['))?;
+                    if !self.eat(&Tok::Punct(']')) {
+                        loop {
+                            cases.push(self.int("a case value")?);
+                            self.expect(Tok::Punct(':'))?;
+                            dests.push(self.block_call(names)?);
+                            if self.eat(&Tok::Punct(']')) {
+                                break;
+                            }
+                            self.expect(Tok::Punct(','))?;
+                        }
+                    }
+                    InstData::Switch { arg, dests, cases }
+                }
                 "return" => {
                     no_suffix()?;
                     let mut args = Vec::new();
@@ -1033,6 +1054,7 @@ impl Parser {
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
+            | InstData::Switch { .. }
             | InstData::Return { .. }
             | InstData::Trap => Some(0),
             _ => Some(1),
@@ -1253,20 +1275,14 @@ fn build(
         for inst in &parsed.insts {
             let mut data = inst.data.clone();
             data.for_each_operand_mut(|v| *v = value_map[v.index()]);
-            match &mut data {
-                InstData::Jump { dest } => dest.block = block_map[dest.block.index()],
-                InstData::SymbolAddr { symbol } => {
-                    let Symbol::Data(temp) = *symbol else {
-                        unreachable!("the parser stores symbols as temporary DataRefs")
-                    };
-                    *symbol = symbols[temp.index()];
-                }
-                InstData::Brif { dests, .. } => {
-                    for dest in dests {
-                        dest.block = block_map[dest.block.index()];
-                    }
-                }
-                _ => {}
+            for dest in data.branch_dests_mut() {
+                dest.block = block_map[dest.block.index()];
+            }
+            if let InstData::SymbolAddr { symbol } = &mut data {
+                let Symbol::Data(temp) = *symbol else {
+                    unreachable!("the parser stores symbols as temporary DataRefs")
+                };
+                *symbol = symbols[temp.index()];
             }
             let result_tys = inst
                 .results

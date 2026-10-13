@@ -14,7 +14,8 @@ use keel_codegen::Pools;
 use keel_codegen::aarch64::REGISTERS;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 /// SIGTRAP, raised by `brk`.
 const SIGTRAP: i32 = 5;
@@ -77,7 +78,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
         ));
     }
 
-    let out = Command::new(&exe_path).output().unwrap();
+    let out = run_with_timeout(&exe_path)?;
     let got = match (out.status.code(), out.status.signal()) {
         (Some(code), _) => format!("exit {code}"),
         (None, Some(SIGTRAP)) => "trap".to_string(),
@@ -99,6 +100,29 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
         ));
     }
     Ok(())
+}
+
+/// How long a program may run before it counts as hung, so a miscompiled
+/// loop fails the test instead of stalling it.
+const TIMEOUT: Duration = Duration::from_secs(10);
+
+fn run_with_timeout(exe: &Path) -> Result<Output, String> {
+    let mut child = Command::new(exe)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("running {}: {e}", exe.display()))?;
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > TIMEOUT {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            return Err(format!("still running after {TIMEOUT:?}; killed"));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The programs print little, so the pipes cannot fill up and block them.
+    Ok(child.wait_with_output().unwrap())
 }
 
 #[test]

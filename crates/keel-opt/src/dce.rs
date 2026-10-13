@@ -93,6 +93,7 @@ fn uses_except_branch_args(func: &Function, inst: Inst, out: &mut Vec<Value>) {
     match func.inst_data(inst) {
         InstData::Jump { .. } => {}
         InstData::Brif { cond, .. } => out.push(*cond),
+        InstData::Switch { arg, .. } => out.push(*arg),
         data => data.for_each_operand(|v| out.push(v)),
     }
 }

@@ -319,6 +319,7 @@ impl Function {
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
+            | InstData::Switch { .. }
             | InstData::Return { .. }
             | InstData::Trap => vec![],
         };
@@ -635,6 +636,19 @@ impl Function {
                 self.write_block_call(f, &dests[0])?;
                 f.write_str(", ")?;
                 self.write_block_call(f, &dests[1])
+            }
+            InstData::Switch { arg, dests, cases } => {
+                write!(f, "switch {}, ", v(*arg))?;
+                self.write_block_call(f, &dests[0])?;
+                f.write_str(", [")?;
+                for (i, (case, dest)) in cases.iter().zip(&dests[1..]).enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{case}: ")?;
+                    self.write_block_call(f, dest)?;
+                }
+                f.write_str("]")
             }
             InstData::Return { args } => {
                 f.write_str("return")?;

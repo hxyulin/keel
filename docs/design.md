@@ -12,6 +12,11 @@ and why they were made.
   into the same block can carry different values.
 - Values defined in a dominating block may be used directly; only merges go
   through block parameters.
+- Terminators: `jump`, `brif`, `return`, `trap`, and `switch v0, block9,
+  [0: block1, 7: block2(v3)]`, which compares an integer with distinct case
+  values (bit patterns of its type) and otherwise goes to the default, listed
+  first. On aarch64 dense cases (at least 4, spanning less than 3× their
+  count) become a jump table, the rest a chain of compares.
 - **Pinned vs floating instructions.** Anything with side effects or that can
   trap (`load`, `store`, `call`, `udiv`, `.trap` variants, `assume`,
   terminators) keeps its position. Pure instructions (`iadd`, `icmp`,

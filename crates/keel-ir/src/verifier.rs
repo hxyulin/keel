@@ -473,6 +473,28 @@ impl Verifier<'_> {
                 }
             }
             InstData::Jump { .. } => {}
+            InstData::Switch { arg, cases, .. } => {
+                let t = ty(*arg);
+                if !t.is_int() || t == Type::I128 {
+                    self.inst_error(inst, format!("switch takes i8 to i64, got {t}"));
+                    return;
+                }
+                let bits = 8 * t.bytes().unwrap();
+                let mask = u64::MAX >> (64 - bits);
+                let mut seen = HashSet::new();
+                for &case in cases {
+                    let fits =
+                        bits == 64 || (-(1i64 << (bits - 1))..(1i64 << bits)).contains(&case);
+                    if !fits {
+                        self.inst_error(inst, format!("case {case} does not fit in {t}"));
+                    } else if !seen.insert(case as u64 & mask) {
+                        self.inst_error(
+                            inst,
+                            format!("case {case} is the same {t} as an earlier case"),
+                        );
+                    }
+                }
+            }
             InstData::Brif { cond, .. } => {
                 if !ty(*cond).is_int() {
                     self.inst_error(

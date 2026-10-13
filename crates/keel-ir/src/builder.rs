@@ -196,6 +196,14 @@ impl InstBuilder<'_> {
         })
     }
 
+    /// `switch arg, default, [case: dest, ...]`.
+    pub fn switch(self, arg: Value, default: BlockCall, cases: Vec<(i64, BlockCall)>) -> Inst {
+        let (cases, rest): (Vec<i64>, Vec<BlockCall>) = cases.into_iter().unzip();
+        let mut dests = vec![default];
+        dests.extend(rest);
+        self.build(InstData::Switch { arg, dests, cases })
+    }
+
     pub fn return_(self, args: &[Value]) -> Inst {
         self.build(InstData::Return {
             args: args.to_vec(),
