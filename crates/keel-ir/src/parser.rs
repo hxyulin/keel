@@ -17,8 +17,8 @@
 
 use crate::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, DataRef,
-    EntityRef, FuncDecl, FuncRef, Function, InstData, IntCC, Intrinsic, Module, SigRef, Signature,
-    StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC, Intrinsic, Module, SigRef,
+    Signature, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -95,6 +95,10 @@ enum Tok {
     Ident(String),
     Global(String),
     Int(i64),
+    /// `0x...`: raw bits.
+    Hex(u64),
+    /// A decimal float, as written, so it can be parsed at the right width.
+    Float(String),
     /// `b"..."`, with escapes already decoded.
     Bytes(Vec<u8>),
     Punct(char),
@@ -109,6 +113,8 @@ impl fmt::Display for Tok {
             Tok::Ident(s) => write!(f, "`{s}`"),
             Tok::Global(s) => write!(f, "`@{s}`"),
             Tok::Int(n) => write!(f, "`{n}`"),
+            Tok::Hex(n) => write!(f, "`{n:#x}`"),
+            Tok::Float(s) => write!(f, "`{s}`"),
             Tok::Bytes(_) => f.write_str("a byte string"),
             Tok::Punct(c) => write!(f, "`{c}`"),
             Tok::Arrow => f.write_str("`->`"),
@@ -150,18 +156,9 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 tokens.push((Tok::Arrow, loc));
                 i += 2;
             } else if c == '-' || c.is_ascii_digit() {
-                let start = i;
-                i += 1;
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-                let text: String = chars[start..i].iter().collect();
-                let n = text.parse().map_err(|_| ParseError {
-                    line: loc.line,
-                    col: loc.col,
-                    message: format!("invalid integer `{text}`"),
-                })?;
-                tokens.push((Tok::Int(n), loc));
+                let (tok, end) = lex_number(&chars, i, line_no)?;
+                tokens.push((tok, loc));
+                i = end;
             } else if c == '@' || c.is_ascii_alphabetic() || c == '_' {
                 let start = if c == '@' { i + 1 } else { i };
                 i = start;
@@ -205,6 +202,67 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
         },
     ));
     Ok(tokens)
+}
+
+/// Lexes a number starting at `chars[start]`: a decimal integer, `0x` hex
+/// bits, or a float (`1.5`, `-2e-3`, `-inf`; `inf` and `nan` alone are
+/// identifiers). Returns the token and the index after it.
+fn lex_number(chars: &[char], start: usize, line: u32) -> Result<(Tok, usize), ParseError> {
+    let err = |message: String| ParseError {
+        line,
+        col: start as u32 + 1,
+        message,
+    };
+    let text = |end: usize| chars[start..end].iter().collect::<String>();
+    let digits = |mut i: usize, radix: u32| {
+        while i < chars.len() && chars[i].is_digit(radix) {
+            i += 1;
+        }
+        i
+    };
+    let negative = chars[start] == '-';
+    let mut i = start + usize::from(negative);
+    if negative && chars[i..].starts_with(&['i', 'n', 'f']) {
+        return Ok((Tok::Float("-inf".into()), i + 3));
+    }
+    if chars[i..].starts_with(&['0', 'x']) {
+        let end = digits(i + 2, 16);
+        let hex: String = chars[i + 2..end].iter().collect();
+        if negative {
+            return Err(err("hex literals are bits and cannot be negative".into()));
+        }
+        let bits = u64::from_str_radix(&hex, 16)
+            .map_err(|_| err(format!("invalid hex literal `{}`", text(end))))?;
+        return Ok((Tok::Hex(bits), end));
+    }
+    let int_end = digits(i, 10);
+    if int_end == i {
+        return Err(err(format!("invalid number `{}`", text(int_end))));
+    }
+    i = int_end;
+    let mut is_float = false;
+    if chars.get(i) == Some(&'.') && chars.get(i + 1).is_some_and(char::is_ascii_digit) {
+        i = digits(i + 1, 10);
+        is_float = true;
+    }
+    if matches!(chars.get(i), Some('e' | 'E')) {
+        let mut j = i + 1;
+        if matches!(chars.get(j), Some('+' | '-')) {
+            j += 1;
+        }
+        if chars.get(j).is_some_and(char::is_ascii_digit) {
+            i = digits(j, 10);
+            is_float = true;
+        }
+    }
+    let text = text(i);
+    if is_float {
+        return Ok((Tok::Float(text), i));
+    }
+    let n = text
+        .parse()
+        .map_err(|_| err(format!("invalid integer `{text}`")))?;
+    Ok((Tok::Int(n), i))
 }
 
 /// Decodes the body of a `b"..."` string starting at `chars[start]`, up to
@@ -621,26 +679,54 @@ impl Parser {
             _ => {
                 let ty = parse_type(&kw)
                     .ok_or_else(|| error(loc, format!("expected a data item, found `{kw}`")))?;
-                match self.next() {
-                    (Tok::Int(value), _) => Ok(DataItem::Int { ty, value }),
-                    _ => {
-                        self.pos -= 1;
-                        Err(self.unexpected("an integer"))
-                    }
-                }
+                let value = self.int("an integer")?;
+                Ok(DataItem::Int { ty, value })
             }
         }
     }
 
     fn u32(&mut self, wanted: &str) -> Result<u32, ParseError> {
+        let loc = self.loc();
+        let n = self.int(wanted)?;
+        u32::try_from(n).map_err(|_| error(loc, format!("{n} is out of range")))
+    }
+
+    /// A decimal integer, or hex bits taken as a 64-bit two's complement
+    /// number.
+    fn int(&mut self, wanted: &str) -> Result<i64, ParseError> {
         match self.next() {
-            (Tok::Int(n), loc) => {
-                u32::try_from(n).map_err(|_| error(loc, format!("{n} is out of range")))
-            }
+            (Tok::Int(n), _) => Ok(n),
+            (Tok::Hex(bits), _) => Ok(bits as i64),
             _ => {
                 self.pos -= 1;
                 Err(self.unexpected(wanted))
             }
+        }
+    }
+
+    /// The bits of a float literal of type `ty`: a decimal, `inf`, `nan`,
+    /// or hex bits.
+    fn float_bits(&mut self, ty: Type) -> Result<u64, ParseError> {
+        let (tok, loc) = self.next();
+        let text = match tok {
+            Tok::Hex(bits) if ty == Type::F32 && bits > u64::from(u32::MAX) => {
+                return Err(error(loc, format!("{bits:#x} is too wide for f32 bits")));
+            }
+            Tok::Hex(bits) => return Ok(bits),
+            Tok::Float(s) => s,
+            Tok::Int(n) => n.to_string(),
+            Tok::Ident(s) if s == "inf" || s == "nan" => s,
+            _ => {
+                self.pos -= 1;
+                return Err(
+                    self.unexpected("a float like `1.5`, `inf`, `nan` or `0x3ff0000000000000`")
+                );
+            }
+        };
+        let bad = || error(loc, format!("invalid {ty} `{text}`"));
+        match ty {
+            Type::F32 => Ok(u64::from(text.parse::<f32>().map_err(|_| bad())?.to_bits())),
+            _ => Ok(text.parse::<f64>().map_err(|_| bad())?.to_bits()),
         }
     }
 
@@ -747,14 +833,21 @@ impl Parser {
             match base {
                 "iconst" => {
                     let ty = suffix_type("type")?;
-                    let imm = match self.next() {
-                        (Tok::Int(n), _) => n,
-                        _ => {
-                            self.pos -= 1;
-                            return Err(self.unexpected("an integer"));
-                        }
-                    };
+                    let imm = self.int("an integer")?;
                     InstData::Iconst { ty, imm }
+                }
+                "fconst" => {
+                    let ty = suffix_type("type")?;
+                    if !ty.is_float() {
+                        return Err(error(
+                            op_loc,
+                            format!("`fconst` makes f32 or f64, not {ty}"),
+                        ));
+                    }
+                    InstData::Fconst {
+                        ty,
+                        bits: self.float_bits(ty)?,
+                    }
                 }
                 "call" => {
                     no_suffix()?;
@@ -844,6 +937,19 @@ impl Parser {
                     let a = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
                     InstData::Icmp {
+                        cond,
+                        args: [a, self.value(names)?],
+                    }
+                }
+                "fcmp" => {
+                    let s = suffix.ok_or_else(|| {
+                        error(op_loc, "`fcmp` needs a condition like `fcmp.lt`".into())
+                    })?;
+                    let cond = parse_float_cond(s)
+                        .ok_or_else(|| error(op_loc, format!("unknown condition `{s}`")))?;
+                    let a = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::Fcmp {
                         cond,
                         args: [a, self.value(names)?],
                     }
@@ -1069,10 +1175,11 @@ fn build(
             }
             let ty = match &inst.data {
                 InstData::Iconst { ty, .. }
+                | InstData::Fconst { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. } => Some(*ty),
                 InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
-                InstData::Icmp { .. } => Some(Type::I8),
+                InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
                 InstData::Unary { arg, .. } => types[arg.index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
                 InstData::Select { args } => types[args[1].index()],
@@ -1194,6 +1301,12 @@ fn parse_binary_op(s: &str) -> Option<BinaryOp> {
         "umulhi" => BinaryOp::Umulhi,
         "smulhi" => BinaryOp::Smulhi,
         "ptradd" => BinaryOp::Ptradd,
+        "fadd" => BinaryOp::Fadd,
+        "fsub" => BinaryOp::Fsub,
+        "fmul" => BinaryOp::Fmul,
+        "fdiv" => BinaryOp::Fdiv,
+        "fmin" => BinaryOp::Fmin,
+        "fmax" => BinaryOp::Fmax,
         _ => return None,
     })
 }
@@ -1206,6 +1319,13 @@ fn parse_unary_op(s: &str) -> Option<UnaryOp> {
         "ctz" => UnaryOp::Ctz,
         "popcnt" => UnaryOp::Popcnt,
         "bswap" => UnaryOp::Bswap,
+        "fneg" => UnaryOp::Fneg,
+        "fabs" => UnaryOp::Fabs,
+        "fsqrt" => UnaryOp::Fsqrt,
+        "fceil" => UnaryOp::Fceil,
+        "ffloor" => UnaryOp::Ffloor,
+        "ftrunc" => UnaryOp::Ftrunc,
+        "fnearest" => UnaryOp::Fnearest,
         _ => return None,
     })
 }
@@ -1217,6 +1337,13 @@ fn parse_convert_op(s: &str) -> Option<ConvertOp> {
         "trunc" => ConvertOp::Trunc,
         "ptrtoint" => ConvertOp::PtrToInt,
         "inttoptr" => ConvertOp::IntToPtr,
+        "fpext" => ConvertOp::Fpext,
+        "fptrunc" => ConvertOp::Fptrunc,
+        "fptosi" => ConvertOp::Fptosi,
+        "fptoui" => ConvertOp::Fptoui,
+        "sitofp" => ConvertOp::Sitofp,
+        "uitofp" => ConvertOp::Uitofp,
+        "bitcast" => ConvertOp::Bitcast,
         _ => return None,
     })
 }
@@ -1233,6 +1360,20 @@ fn parse_cond(s: &str) -> Option<IntCC> {
         "ule" => IntCC::Ule,
         "ugt" => IntCC::Ugt,
         "uge" => IntCC::Uge,
+        _ => return None,
+    })
+}
+
+fn parse_float_cond(s: &str) -> Option<FloatCC> {
+    Some(match s {
+        "eq" => FloatCC::Eq,
+        "ne" => FloatCC::Ne,
+        "lt" => FloatCC::Lt,
+        "le" => FloatCC::Le,
+        "gt" => FloatCC::Gt,
+        "ge" => FloatCC::Ge,
+        "ord" => FloatCC::Ord,
+        "uno" => FloatCC::Uno,
         _ => return None,
     })
 }

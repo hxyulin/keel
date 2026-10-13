@@ -15,6 +15,12 @@ pub enum InstData {
         ty: Type,
         imm: i64,
     },
+    /// Float constant, as the bits of `ty` (`f32` uses the low 32), so the
+    /// instruction stays hashable and NaN payloads survive.
+    Fconst {
+        ty: Type,
+        bits: u64,
+    },
     Unary {
         op: UnaryOp,
         arg: Value,
@@ -27,7 +33,8 @@ pub enum InstData {
     Select {
         args: [Value; 3],
     },
-    /// Width change between integer types.
+    /// Conversion between types: integer widths, pointers and integers,
+    /// floats and integers.
     Convert {
         op: ConvertOp,
         ty: Type,
@@ -36,6 +43,11 @@ pub enum InstData {
     /// Produces `i8` 0 or 1.
     Icmp {
         cond: IntCC,
+        args: [Value; 2],
+    },
+    /// Produces `i8` 0 or 1.
+    Fcmp {
+        cond: FloatCC,
         args: [Value; 2],
     },
     Load {
@@ -86,6 +98,31 @@ pub enum InstData {
     Trap,
 }
 
+/// Formats an `fconst` operand: the shortest decimal that reads back as the
+/// same value, or the raw bits in hex for NaN, whose payload decimal cannot
+/// show.
+pub(crate) fn float_text(ty: Type, bits: u64) -> String {
+    match ty {
+        Type::F32 => {
+            let x = f32::from_bits(bits as u32);
+            // Bits above 32 are invalid; show them rather than drop them.
+            if x.is_nan() || bits > u64::from(u32::MAX) {
+                format!("{bits:#010x}")
+            } else {
+                format!("{x:?}")
+            }
+        }
+        _ => {
+            let x = f64::from_bits(bits);
+            if x.is_nan() {
+                format!("{bits:#018x}")
+            } else {
+                format!("{x:?}")
+            }
+        }
+    }
+}
+
 /// A linker symbol an instruction refers to, through one of the function's
 /// tables.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -124,6 +161,15 @@ pub enum BinaryOp {
     Smulhi,
     /// `ptr + i64` byte offset.
     Ptradd,
+    /// Float arithmetic, IEEE 754 with round-to-nearest-even.
+    Fadd,
+    Fsub,
+    Fmul,
+    Fdiv,
+    /// IEEE 754-2019 `minimum`/`maximum`: a NaN operand gives NaN, and
+    /// -0 is less than +0.
+    Fmin,
+    Fmax,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -137,6 +183,15 @@ pub enum UnaryOp {
     Popcnt,
     /// Byte swap. Needs at least `i16`.
     Bswap,
+    Fneg,
+    Fabs,
+    Fsqrt,
+    /// Rounding to an integral float: up, down, toward zero, and to the
+    /// nearest with ties to even.
+    Fceil,
+    Ffloor,
+    Ftrunc,
+    Fnearest,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -148,6 +203,20 @@ pub enum ConvertOp {
     PtrToInt,
     /// `i64` to `ptr`.
     IntToPtr,
+    /// `f32` to `f64`, exactly.
+    Fpext,
+    /// `f64` to `f32`, rounding to nearest.
+    Fptrunc,
+    /// Float to `i32`/`i64`, rounding toward zero. Out-of-range values
+    /// saturate and NaN gives 0, as on aarch64 (and Rust's `as`).
+    Fptosi,
+    Fptoui,
+    /// Integer to float, rounding to nearest.
+    Sitofp,
+    Uitofp,
+    /// Reinterprets the bits between an integer and a float of the same
+    /// size.
+    Bitcast,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -164,12 +233,55 @@ pub enum IntCC {
     Uge,
 }
 
+/// Float comparisons. All but `ne` and `uno` are false if either operand is
+/// NaN; `ne` is true then, like C's `!=`.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum FloatCC {
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// Neither operand is NaN.
+    Ord,
+    /// At least one operand is NaN.
+    Uno,
+}
+
 impl BinaryOp {
+    pub fn is_float(self) -> bool {
+        matches!(
+            self,
+            BinaryOp::Fadd
+                | BinaryOp::Fsub
+                | BinaryOp::Fmul
+                | BinaryOp::Fdiv
+                | BinaryOp::Fmin
+                | BinaryOp::Fmax
+        )
+    }
+
     /// Division and remainder trap on a zero divisor (and `sdiv` on overflow).
     pub fn can_trap(self) -> bool {
         matches!(
             self,
             BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem
+        )
+    }
+}
+
+impl UnaryOp {
+    pub fn is_float(self) -> bool {
+        matches!(
+            self,
+            UnaryOp::Fneg
+                | UnaryOp::Fabs
+                | UnaryOp::Fsqrt
+                | UnaryOp::Fceil
+                | UnaryOp::Ffloor
+                | UnaryOp::Ftrunc
+                | UnaryOp::Fnearest
         )
     }
 }
@@ -182,10 +294,12 @@ impl InstData {
             InstData::Binary { op, .. } => op.can_trap(),
             InstData::Intrinsic { id, .. } => !id.info().pure,
             InstData::Iconst { .. }
+            | InstData::Fconst { .. }
             | InstData::Unary { .. }
             | InstData::Select { .. }
             | InstData::Convert { .. }
             | InstData::Icmp { .. }
+            | InstData::Fcmp { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. } => false,
             InstData::Load { .. }
@@ -229,12 +343,13 @@ impl InstData {
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {
             InstData::Iconst { .. }
+            | InstData::Fconst { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Trap => {}
-            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
-                args.iter().copied().for_each(f)
-            }
+            InstData::Binary { args, .. }
+            | InstData::Icmp { args, .. }
+            | InstData::Fcmp { args, .. } => args.iter().copied().for_each(f),
             InstData::CallIndirect { callee, args, .. } => {
                 f(*callee);
                 args.iter().copied().for_each(f);
@@ -261,12 +376,13 @@ impl InstData {
     pub fn for_each_operand_mut(&mut self, mut f: impl FnMut(&mut Value)) {
         match self {
             InstData::Iconst { .. }
+            | InstData::Fconst { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Trap => {}
-            InstData::Binary { args, .. } | InstData::Icmp { args, .. } => {
-                args.iter_mut().for_each(f)
-            }
+            InstData::Binary { args, .. }
+            | InstData::Icmp { args, .. }
+            | InstData::Fcmp { args, .. } => args.iter_mut().for_each(f),
             InstData::CallIndirect { callee, args, .. } => {
                 f(callee);
                 args.iter_mut().for_each(f);
@@ -312,6 +428,12 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Umulhi => "umulhi",
             BinaryOp::Smulhi => "smulhi",
             BinaryOp::Ptradd => "ptradd",
+            BinaryOp::Fadd => "fadd",
+            BinaryOp::Fsub => "fsub",
+            BinaryOp::Fmul => "fmul",
+            BinaryOp::Fdiv => "fdiv",
+            BinaryOp::Fmin => "fmin",
+            BinaryOp::Fmax => "fmax",
         })
     }
 }
@@ -325,6 +447,13 @@ impl fmt::Display for UnaryOp {
             UnaryOp::Ctz => "ctz",
             UnaryOp::Popcnt => "popcnt",
             UnaryOp::Bswap => "bswap",
+            UnaryOp::Fneg => "fneg",
+            UnaryOp::Fabs => "fabs",
+            UnaryOp::Fsqrt => "fsqrt",
+            UnaryOp::Fceil => "fceil",
+            UnaryOp::Ffloor => "ffloor",
+            UnaryOp::Ftrunc => "ftrunc",
+            UnaryOp::Fnearest => "fnearest",
         })
     }
 }
@@ -337,6 +466,13 @@ impl fmt::Display for ConvertOp {
             ConvertOp::Trunc => "trunc",
             ConvertOp::PtrToInt => "ptrtoint",
             ConvertOp::IntToPtr => "inttoptr",
+            ConvertOp::Fpext => "fpext",
+            ConvertOp::Fptrunc => "fptrunc",
+            ConvertOp::Fptosi => "fptosi",
+            ConvertOp::Fptoui => "fptoui",
+            ConvertOp::Sitofp => "sitofp",
+            ConvertOp::Uitofp => "uitofp",
+            ConvertOp::Bitcast => "bitcast",
         })
     }
 }
@@ -354,6 +490,21 @@ impl fmt::Display for IntCC {
             IntCC::Ule => "ule",
             IntCC::Ugt => "ugt",
             IntCC::Uge => "uge",
+        })
+    }
+}
+
+impl fmt::Display for FloatCC {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            FloatCC::Eq => "eq",
+            FloatCC::Ne => "ne",
+            FloatCC::Lt => "lt",
+            FloatCC::Le => "le",
+            FloatCC::Gt => "gt",
+            FloatCC::Ge => "ge",
+            FloatCC::Ord => "ord",
+            FloatCC::Uno => "uno",
         })
     }
 }

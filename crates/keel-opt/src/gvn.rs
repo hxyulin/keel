@@ -90,5 +90,9 @@ fn is_commutative(op: BinaryOp) -> bool {
             | BinaryOp::Xor
             | BinaryOp::Umulhi
             | BinaryOp::Smulhi
+            // Only the payload of a NaN result could depend on operand
+            // order, and the IR leaves that unspecified.
+            | BinaryOp::Fadd
+            | BinaryOp::Fmul
     )
 }

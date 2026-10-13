@@ -7,8 +7,8 @@
 
 use crate::function::InsertPoint;
 use crate::{
-    BinaryOp, Block, BlockCall, ConvertOp, FuncRef, Function, Inst, InstData, IntCC, Intrinsic,
-    SigRef, StackSlot, Symbol, Type, UnaryOp, Value,
+    BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, Inst, InstData, IntCC,
+    Intrinsic, SigRef, StackSlot, Symbol, Type, UnaryOp, Value,
 };
 
 pub struct InstBuilder<'f> {
@@ -73,10 +73,31 @@ impl InstBuilder<'_> {
         and => And, or => Or, xor => Xor,
         shl => Shl, ushr => Ushr, sshr => Sshr, rotl => Rotl, rotr => Rotr,
         umulhi => Umulhi, smulhi => Smulhi, ptradd => Ptradd,
+        fadd => Fadd, fsub => Fsub, fmul => Fmul, fdiv => Fdiv, fmin => Fmin, fmax => Fmax,
     }
 
     unary! {
         ineg => Ineg, bnot => Bnot, clz => Clz, ctz => Ctz, popcnt => Popcnt, bswap => Bswap,
+        fneg => Fneg, fabs => Fabs, fsqrt => Fsqrt,
+        fceil => Fceil, ffloor => Ffloor, ftrunc => Ftrunc, fnearest => Fnearest,
+    }
+
+    pub fn f32const(self, x: f32) -> Value {
+        self.value(InstData::Fconst {
+            ty: Type::F32,
+            bits: u64::from(x.to_bits()),
+        })
+    }
+
+    pub fn f64const(self, x: f64) -> Value {
+        self.value(InstData::Fconst {
+            ty: Type::F64,
+            bits: x.to_bits(),
+        })
+    }
+
+    pub fn fcmp(self, cond: FloatCC, a: Value, b: Value) -> Value {
+        self.value(InstData::Fcmp { cond, args: [a, b] })
     }
 
     pub fn icmp(self, cond: IntCC, a: Value, b: Value) -> Value {

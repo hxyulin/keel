@@ -289,6 +289,13 @@ impl Verifier<'_> {
                     self.inst_error(inst, format!("iconst type must be an integer, got {ty}"));
                 }
             }
+            InstData::Fconst { ty, bits } => {
+                if !ty.is_float() {
+                    self.inst_error(inst, format!("fconst type must be f32 or f64, got {ty}"));
+                } else if *ty == Type::F32 && *bits > u64::from(u32::MAX) {
+                    self.inst_error(inst, format!("{bits:#x} is too wide for f32 bits"));
+                }
+            }
             InstData::Binary { op, args } => {
                 let (a, b) = (ty(args[0]), ty(args[1]));
                 match op {
@@ -309,6 +316,14 @@ impl Verifier<'_> {
                             self.inst_error(inst, format!("{op} takes integers, got ({a}, {b})"));
                         }
                     }
+                    _ if op.is_float() => {
+                        if !a.is_float() || a != b {
+                            self.inst_error(
+                                inst,
+                                format!("{op} takes two floats of the same type, got ({a}, {b})"),
+                            );
+                        }
+                    }
                     _ => {
                         if !a.is_int() || a != b {
                             self.inst_error(
@@ -321,7 +336,11 @@ impl Verifier<'_> {
             }
             InstData::Unary { op, arg } => {
                 let a = ty(*arg);
-                if !a.is_int() {
+                if op.is_float() {
+                    if !a.is_float() {
+                        self.inst_error(inst, format!("{op} takes a float, got {a}"));
+                    }
+                } else if !a.is_int() {
                     self.inst_error(inst, format!("{op} takes an integer, got {a}"));
                 } else if *op == UnaryOp::Bswap && a == Type::I8 {
                     self.inst_error(inst, "bswap needs at least i16".into());
@@ -342,43 +361,10 @@ impl Verifier<'_> {
                     );
                 }
             }
-            InstData::Convert {
-                op: op @ (ConvertOp::PtrToInt | ConvertOp::IntToPtr),
-                ty: to,
-                arg,
-            } => {
-                let from = ty(*arg);
-                let (want_from, want_to) = match op {
-                    ConvertOp::PtrToInt => (Type::Ptr, Type::I64),
-                    _ => (Type::I64, Type::Ptr),
-                };
-                if (from, *to) != (want_from, want_to) {
-                    self.inst_error(
-                        inst,
-                        format!("{op} converts {want_from} to {want_to}, got {from} to {to}"),
-                    );
-                }
-            }
             InstData::Convert { op, ty: to, arg } => {
-                let from = ty(*arg);
-                let ok = match (from.bytes(), to.bytes()) {
-                    (Some(f), Some(t)) if from.is_int() && to.is_int() => match op {
-                        ConvertOp::Sext | ConvertOp::Uext => t > f,
-                        _ => t < f,
-                    },
-                    _ => false,
-                };
-                if !ok {
-                    let rule = match op {
-                        ConvertOp::Sext | ConvertOp::Uext => "a wider",
-                        _ => "a narrower",
-                    };
-                    self.inst_error(
-                        inst,
-                        format!(
-                            "{op} must convert an integer to {rule} integer, got {from} to {to}"
-                        ),
-                    );
+                if let Err(rule) = check_convert(*op, ty(*arg), *to) {
+                    let from = ty(*arg);
+                    self.inst_error(inst, format!("{op} {rule}, got {from} to {to}"));
                 }
             }
             InstData::Icmp { args, .. } => {
@@ -389,6 +375,15 @@ impl Verifier<'_> {
                         format!(
                             "icmp takes two integers or pointers of the same type, got ({a}, {b})"
                         ),
+                    );
+                }
+            }
+            InstData::Fcmp { args, .. } => {
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if a != b || !a.is_float() {
+                    self.inst_error(
+                        inst,
+                        format!("fcmp takes two floats of the same type, got ({a}, {b})"),
                     );
                 }
             }
@@ -551,6 +546,50 @@ impl Verifier<'_> {
     fn error(&mut self, location: String, message: String) {
         self.errors.push(VerifierError { location, message });
     }
+}
+
+/// Checks a conversion other than `ptrtoint`/`inttoptr`; the error is the
+/// rule it breaks.
+fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str> {
+    // Integers that float conversions take: no i128, which no target
+    // converts in one instruction.
+    let small_int = |t: Type| t.is_int() && t != Type::I128;
+    let ok = match op {
+        ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc => match (from.bytes(), to.bytes()) {
+            (Some(f), Some(t)) if from.is_int() && to.is_int() => match op {
+                ConvertOp::Trunc => t < f,
+                _ => t > f,
+            },
+            _ => false,
+        },
+        ConvertOp::Fpext => (from, to) == (Type::F32, Type::F64),
+        ConvertOp::Fptrunc => (from, to) == (Type::F64, Type::F32),
+        ConvertOp::Fptosi | ConvertOp::Fptoui => {
+            from.is_float() && matches!(to, Type::I32 | Type::I64)
+        }
+        ConvertOp::Sitofp | ConvertOp::Uitofp => small_int(from) && to.is_float(),
+        ConvertOp::Bitcast => {
+            from.is_float() != to.is_float()
+                && (from.is_int() || to.is_int())
+                && from.bytes() == to.bytes()
+        }
+        ConvertOp::PtrToInt => (from, to) == (Type::Ptr, Type::I64),
+        ConvertOp::IntToPtr => (from, to) == (Type::I64, Type::Ptr),
+    };
+    if ok {
+        return Ok(());
+    }
+    Err(match op {
+        ConvertOp::Sext | ConvertOp::Uext => "must convert an integer to a wider integer",
+        ConvertOp::Trunc => "must convert an integer to a narrower integer",
+        ConvertOp::Fpext => "converts f32 to f64",
+        ConvertOp::Fptrunc => "converts f64 to f32",
+        ConvertOp::Fptosi | ConvertOp::Fptoui => "converts a float to i32 or i64",
+        ConvertOp::Sitofp | ConvertOp::Uitofp => "converts an integer up to i64 to a float",
+        ConvertOp::Bitcast => "converts between an integer and a float of the same size",
+        ConvertOp::PtrToInt => "converts ptr to i64",
+        ConvertOp::IntToPtr => "converts i64 to ptr",
+    })
 }
 
 fn type_list(tys: &[Type]) -> String {

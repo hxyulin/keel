@@ -1,0 +1,431 @@
+; expect: exit 0
+; Floats, checked against C in floats.c: arithmetic in both widths, the
+; calling convention both ways (floats in v0-v7, counted apart from the
+; integer registers), comparisons with NaN, rounding, saturating
+; conversions, bit casts, float loop variables and floats live across calls.
+decl @c_mix(i64, f64, f32, i32) -> f64
+decl @fclobber()
+
+; 3x^2 - 2x + 0.5
+func @poly(f64) -> f64 {
+block0(v0: f64):
+    v1 = fconst.f64 3.0
+    v2 = fmul v0, v0
+    v3 = fmul v1, v2
+    v4 = fconst.f64 2.0
+    v5 = fmul v4, v0
+    v6 = fsub v3, v5
+    v7 = fconst.f64 0.5
+    v8 = fadd v6, v7
+    return v8
+}
+
+func @poly32(f32) -> f32 {
+block0(v0: f32):
+    v1 = fconst.f32 3.0
+    v2 = fmul v0, v0
+    v3 = fmul v1, v2
+    v4 = fconst.f32 2.0
+    v5 = fmul v4, v0
+    v6 = fsub v3, v5
+    v7 = fconst.f32 0.5
+    v8 = fadd v6, v7
+    return v8
+}
+
+; Interleaved classes: a in x0, b in d0, c in w1, d in s1, p in x2.
+; a + b * 2 + c * 3 + d * 4 + *p
+func @mixed(i64, f64, i32, f32, ptr) -> f64 {
+block0(v0: i64, v1: f64, v2: i32, v3: f32, v4: ptr):
+    v5 = sitofp.f64 v0
+    v6 = fconst.f64 2.0
+    v7 = fmul v1, v6
+    v8 = fadd v5, v7
+    v9 = sitofp.f64 v2
+    v10 = fconst.f64 3.0
+    v11 = fmul v9, v10
+    v12 = fadd v8, v11
+    v13 = fpext.f64 v3
+    v14 = fconst.f64 4.0
+    v15 = fmul v13, v14
+    v16 = fadd v12, v15
+    v17 = load.f64 v4
+    v18 = fadd v16, v17
+    return v18
+}
+
+; Calls C with mixed arguments, keeping floats live across calls that
+; clobber every caller-saved FP register.
+; x + c_mix(7, x, 1.5, -2) + x * 10, with x and x * 10 kept across calls
+func @call_c(f64) -> f64 {
+block0(v0: f64):
+    v1 = fconst.f64 10.0
+    v2 = fmul v0, v1
+    call @fclobber()
+    v3 = iconst.i64 7
+    v4 = fconst.f32 1.5
+    v5 = iconst.i32 -2
+    v6 = call @c_mix(v3, v0, v4, v5)
+    call @fclobber()
+    v7 = fadd v0, v6
+    v8 = fadd v7, v2
+    return v8
+}
+
+; out[0..7] = sqrt, ceil, floor, trunc, nearest, neg, abs of x
+func @unary(f64, ptr) {
+block0(v0: f64, v1: ptr):
+    v2 = iconst.i64 8
+    v3 = fsqrt v0
+    store v3, v1
+    v4 = ptradd v1, v2
+    v5 = fceil v0
+    store v5, v4
+    v6 = ptradd v4, v2
+    v7 = ffloor v0
+    store v7, v6
+    v8 = ptradd v6, v2
+    v9 = ftrunc v0
+    store v9, v8
+    v10 = ptradd v8, v2
+    v11 = fnearest v0
+    store v11, v10
+    v12 = ptradd v10, v2
+    v13 = fneg v0
+    store v13, v12
+    v14 = ptradd v12, v2
+    v15 = fabs v0
+    store v15, v14
+    return
+}
+
+; The same in f32: out[0..3] = sqrt, nearest, neg, a / b
+func @unary32(f32, f32, ptr) {
+block0(v0: f32, v1: f32, v2: ptr):
+    v3 = iconst.i64 4
+    v4 = fsqrt v0
+    store v4, v2
+    v5 = ptradd v2, v3
+    v6 = fnearest v0
+    store v6, v5
+    v7 = ptradd v5, v3
+    v8 = fneg v0
+    store v8, v7
+    v9 = ptradd v7, v3
+    v10 = fdiv v0, v1
+    store v10, v9
+    return
+}
+
+; out[0] = fmin, out[1] = fmax
+func @minmax(f64, f64, ptr) {
+block0(v0: f64, v1: f64, v2: ptr):
+    v3 = fmin v0, v1
+    store v3, v2
+    v4 = iconst.i64 8
+    v5 = ptradd v2, v4
+    v6 = fmax v0, v1
+    store v6, v5
+    return
+}
+
+; Bit i is the result of condition i: eq ne lt le gt ge ord uno.
+func @compare(f64, f64) -> i32 {
+block0(v0: f64, v1: f64):
+    v2 = fcmp.eq v0, v1
+    v3 = fcmp.ne v0, v1
+    v4 = fcmp.lt v0, v1
+    v5 = fcmp.le v0, v1
+    v6 = fcmp.gt v0, v1
+    v7 = fcmp.ge v0, v1
+    v8 = fcmp.ord v0, v1
+    v9 = fcmp.uno v0, v1
+    v10 = uext.i32 v2
+    v11 = uext.i32 v3
+    v12 = uext.i32 v4
+    v13 = uext.i32 v5
+    v14 = uext.i32 v6
+    v15 = uext.i32 v7
+    v16 = uext.i32 v8
+    v17 = uext.i32 v9
+    v20 = iconst.i32 1
+    v21 = iconst.i32 2
+    v22 = iconst.i32 3
+    v23 = iconst.i32 4
+    v24 = iconst.i32 5
+    v25 = iconst.i32 6
+    v26 = iconst.i32 7
+    v31 = shl v11, v20
+    v32 = shl v12, v21
+    v33 = shl v13, v22
+    v34 = shl v14, v23
+    v35 = shl v15, v24
+    v36 = shl v16, v25
+    v37 = shl v17, v26
+    v40 = or v10, v31
+    v41 = or v40, v32
+    v42 = or v41, v33
+    v43 = or v42, v34
+    v44 = or v43, v35
+    v45 = or v44, v36
+    v46 = or v45, v37
+    return v46
+}
+
+; The same comparisons in f32, for one condition picked by a select chain
+; so the f32 compare instruction is exercised: lt and uno.
+func @compare32(f32, f32) -> i32 {
+block0(v0: f32, v1: f32):
+    v2 = fcmp.lt v0, v1
+    v3 = fcmp.uno v0, v1
+    v4 = uext.i32 v2
+    v5 = uext.i32 v3
+    v6 = iconst.i32 1
+    v7 = shl v5, v6
+    v8 = or v4, v7
+    return v8
+}
+
+; out[0..3] = fptosi.i32, fptosi.i64, fptoui.i32, fptoui.i64 of x, each
+; widened to 64 bits (signed results sign-extended, unsigned zero-extended)
+func @to_int(f64, ptr) {
+block0(v0: f64, v1: ptr):
+    v2 = iconst.i64 8
+    v3 = fptosi.i32 v0
+    v4 = sext.i64 v3
+    store v4, v1
+    v5 = ptradd v1, v2
+    v6 = fptosi.i64 v0
+    store v6, v5
+    v7 = ptradd v5, v2
+    v8 = fptoui.i32 v0
+    v9 = uext.i64 v8
+    store v9, v7
+    v10 = ptradd v7, v2
+    v11 = fptoui.i64 v0
+    store v11, v10
+    return
+}
+
+; From f32: fptosi.i32 only.
+func @to_int32(f32) -> i32 {
+block0(v0: f32):
+    v1 = fptosi.i32 v0
+    return v1
+}
+
+; out[0..4] = sitofp.f64(b), uitofp.f64(b), sitofp.f64(w), uitofp.f64(w),
+; uitofp.f32(w) widened, with b: i8 and w: i64
+func @from_int(i8, i64, ptr) {
+block0(v0: i8, v1: i64, v2: ptr):
+    v3 = iconst.i64 8
+    v4 = sitofp.f64 v0
+    store v4, v2
+    v5 = ptradd v2, v3
+    v6 = uitofp.f64 v0
+    store v6, v5
+    v7 = ptradd v5, v3
+    v8 = sitofp.f64 v1
+    store v8, v7
+    v9 = ptradd v7, v3
+    v10 = uitofp.f64 v1
+    store v10, v9
+    v11 = ptradd v9, v3
+    v12 = uitofp.f32 v1
+    v13 = fpext.f64 v12
+    store v13, v11
+    return
+}
+
+func @bits(f64) -> i64 {
+block0(v0: f64):
+    v1 = bitcast.i64 v0
+    return v1
+}
+
+func @from_bits32(i32) -> f32 {
+block0(v0: i32):
+    v1 = bitcast.f32 v0
+    return v1
+}
+
+func @narrow(f64) -> f32 {
+block0(v0: f64):
+    v1 = fptrunc.f32 v0
+    return v1
+}
+
+; Constants whose bits matter: -0.0, a signalling NaN, the smallest
+; subnormal, and an f32 that is not exact in decimal.
+func @neg_zero() -> f64 {
+block0:
+    v0 = fconst.f64 -0.0
+    return v0
+}
+
+func @snan() -> f64 {
+block0:
+    v0 = fconst.f64 0x7ff0000000000001
+    return v0
+}
+
+func @tiny() -> f64 {
+block0:
+    v0 = fconst.f64 5e-324
+    return v0
+}
+
+func @tenth32() -> f32 {
+block0:
+    v0 = fconst.f32 0.1
+    return v0
+}
+
+func @select_f(i32, f64, f64) -> f64 {
+block0(v0: i32, v1: f64, v2: f64):
+    v3 = select v0, v1, v2
+    return v3
+}
+
+; sum of 1/i for i in 1..=n, with the sum as a float block parameter.
+func @harmonic(i64) -> f64 {
+block0(v0: i64):
+    v1 = fconst.f64 0.0
+    v2 = iconst.i64 1
+    jump block1(v2, v1)
+block1(v3: i64, v4: f64):
+    v5 = icmp.sle v3, v0
+    brif v5, block2, block3
+block2:
+    v6 = sitofp.f64 v3
+    v7 = fconst.f64 1.0
+    v8 = fdiv v7, v6
+    v9 = fadd v4, v8
+    v10 = iadd v3, v2
+    jump block1(v10, v9)
+block3:
+    return v4
+}
+
+; Swaps two floats n times through block parameters (a cycle in the FP
+; registers), then returns a * 10 + b.
+func @swaps(f64, f64, i64) -> f64 {
+block0(v0: f64, v1: f64, v2: i64):
+    v3 = iconst.i64 0
+    jump block1(v0, v1, v3)
+block1(v4: f64, v5: f64, v6: i64):
+    v7 = icmp.ult v6, v2
+    brif v7, block2, block3
+block2:
+    v8 = iconst.i64 1
+    v9 = iadd v6, v8
+    jump block1(v5, v4, v9)
+block3:
+    v10 = fconst.f64 10.0
+    v11 = fmul v4, v10
+    v12 = fadd v11, v5
+    return v12
+}
+
+; Twenty floats live at once across a call: more than the eight
+; callee-saved FP registers, so some are spilled.
+func @pressure(f64) -> f64 {
+block0(v0: f64):
+    v1 = fconst.f64 1.0
+    v2 = fadd v0, v1
+    v3 = fadd v2, v1
+    v4 = fadd v3, v1
+    v5 = fadd v4, v1
+    v6 = fadd v5, v1
+    v7 = fadd v6, v1
+    v8 = fadd v7, v1
+    v9 = fadd v8, v1
+    v10 = fadd v9, v1
+    v11 = fadd v10, v1
+    v12 = fadd v11, v1
+    v13 = fadd v12, v1
+    v14 = fadd v13, v1
+    v15 = fadd v14, v1
+    v16 = fadd v15, v1
+    v17 = fadd v16, v1
+    v18 = fadd v17, v1
+    v19 = fadd v18, v1
+    v20 = fadd v19, v1
+    call @fclobber()
+    v21 = fmul v2, v3
+    v22 = fadd v21, v4
+    v23 = fmul v22, v5
+    v24 = fadd v23, v6
+    v25 = fsub v24, v7
+    v26 = fadd v25, v8
+    v27 = fsub v26, v9
+    v28 = fadd v27, v10
+    v29 = fmul v28, v11
+    v30 = fadd v29, v12
+    v31 = fsub v30, v13
+    v32 = fadd v31, v14
+    v33 = fadd v32, v15
+    v34 = fsub v33, v16
+    v35 = fadd v34, v17
+    v36 = fadd v35, v18
+    v37 = fsub v36, v19
+    v38 = fadd v37, v20
+    v39 = fadd v38, v0
+    return v39
+}
+
+; Constant expressions, which the optimizer folds on the host: out[0..9].
+; floats.c computes the same on the target at run time.
+func @consts(ptr) {
+block0(v0: ptr):
+    v1 = iconst.i64 8
+    v2 = fconst.f64 0.1
+    v3 = fconst.f64 0.2
+    v4 = fadd v2, v3                    ; 0.30000000000000004
+    store v4, v0
+    v5 = ptradd v0, v1
+    v6 = fconst.f64 1.0
+    v7 = fconst.f64 3.0
+    v8 = fdiv v6, v7
+    store v8, v5
+    v9 = ptradd v5, v1
+    v10 = fconst.f64 2.0
+    v11 = fsqrt v10
+    store v11, v9
+    v12 = ptradd v9, v1
+    v13 = fconst.f64 -2.5
+    v14 = fnearest v13                  ; -2, ties to even
+    store v14, v12
+    v15 = ptradd v12, v1
+    v16 = fconst.f64 0.0
+    v17 = fconst.f64 -0.0
+    v18 = fmin v16, v17                 ; -0
+    store v18, v15
+    v19 = ptradd v15, v1
+    v20 = fconst.f64 1e300
+    v21 = fmul v20, v20                 ; inf
+    store v21, v19
+    v22 = ptradd v19, v1
+    v23 = fptosi.i64 v21                ; saturates to i64::MAX
+    store v23, v22
+    v24 = ptradd v22, v1
+    v25 = fconst.f32 16777216.0
+    v26 = fconst.f32 1.0
+    v27 = fadd v25, v26                 ; rounds to 2^24 in f32
+    v28 = fpext.f64 v27
+    store v28, v24
+    v29 = ptradd v24, v1
+    v30 = iconst.i64 -1
+    v31 = uitofp.f64 v30                ; 2^64
+    store v31, v29
+    v32 = ptradd v29, v1
+    v33 = fcmp.lt v16, v17              ; 0 < -0 is false
+    v34 = fcmp.ne v21, v21              ; inf != inf is false
+    v35 = uext.i64 v33
+    v36 = uext.i64 v34
+    v37 = iconst.i64 2
+    v38 = imul v36, v37
+    v39 = iadd v35, v38
+    store v39, v32
+    return
+}

@@ -71,6 +71,33 @@ and as an ordinary instruction every block using it would need a dummy
 terminator (LLVM's `call @llvm.trap()` + `unreachable`). `debugtrap` can be
 resumed by a debugger, so it is an intrinsic.
 
+## Float operations
+
+- `f32` and `f64` follow IEEE 754 with round-to-nearest-even. Constants are
+  `fconst.f64 1.5` (also `inf`, `-inf`, `nan`, or the raw bits in hex,
+  `fconst.f64 0x7ff0000000000001`). The instruction stores bits, so it is
+  hashable and keeps NaN payloads; the printer writes the shortest decimal
+  that reads back exactly, and hex for NaNs.
+- Arithmetic: `fadd fsub fmul fdiv fneg fabs fsqrt`, and `fmin fmax` with
+  IEEE 754-2019 `minimum`/`maximum` semantics (NaN in, NaN out; -0 < +0),
+  which is what aarch64's `fmin`/`fmax` do.
+- Rounding to an integral float: `fceil ffloor ftrunc fnearest` (ties to
+  even).
+- `fcmp.<cond>` gives `i8` 0/1 for `eq ne lt le gt ge ord uno`. Every
+  condition except `ne` and `uno` is false when an operand is NaN; `ne` is
+  C's `!=`.
+- Conversions: `fpext`/`fptrunc` between f32 and f64, `sitofp`/`uitofp`
+  from `i8`–`i64`, `bitcast` between an integer and a float of the same
+  size, and `fptosi`/`fptoui` to `i32`/`i64`, which **saturate** (NaN gives
+  0), as the hardware and Rust's `as` do. That keeps them pure, with no UB
+  and no trap. Narrower results are a `trunc` away, with whatever
+  semantics the frontend wants.
+- **Which NaN** an arithmetic operation returns is unspecified (as in
+  WebAssembly). This lets the optimizer fold float operations on the host
+  and treat `fadd`/`fmul` as commutative: only a NaN's payload could tell.
+  Folding produces the canonical quiet NaN, so output does not depend on
+  the host. `fneg` and `fabs` are exact: they only change the sign bit.
+
 ## Undefined behaviour
 
 - Integer arithmetic wraps by default.
@@ -148,7 +175,9 @@ decl data @environ
   resolved against the target. A single `abi-lower` pass turns calls into explicit register
   and stack moves, using layouts to classify by-value structs.
 
-Current limits of the aarch64 C convention support: at most 8 arguments (no
+Integers and pointers are passed in x0–x7 and floats in v0–v7, each class
+counted separately (`f(i64, f64, i64)` uses x0, d0, x1). Current limits of
+the aarch64 C convention support: at most 8 arguments of each class (no
 stack arguments), at most one return value, no `i8`/`i16` return values or
 arguments to external functions or through `call_indirect` (Apple's ABI extends those by C signedness,
 which the IR does not record), and no variadic calls (Apple passes variadic
@@ -182,7 +211,9 @@ stack; it was replaced once it had served as the baseline.
    used at the top of a loop body is live out of the latch, so its interval
    covers the whole loop. Single intervals without holes are conservative
    but always safe.
-4. **Scan.** Intervals in start order. When no register is free, spill
+4. **Scan.** Intervals in start order. Integers and floats are separate
+   register classes (general-purpose and SIMD/FP registers) that never
+   interfere: each interval only competes for registers of its own class. When no register is free, spill
    whichever active interval ends last (or the new one, if it ends last). A
    spilled value lives in a stack slot for its whole life: no splitting.
    Spill slots are shared by non-overlapping intervals with the same scan.
@@ -197,6 +228,10 @@ stack; it was replaced once it had served as the baseline.
 | x18 | reserved by Apple; never touched |
 | x19–x28 | allocatable, callee-saved |
 | x29, x30 | frame pointer, return address |
+| v0–v7 | float arguments and results; never allocated |
+| v8–v15 | allocatable, callee-saved (the ABI preserves only the low 64 bits, which is all a scalar uses) |
+| v16–v18 | scratch |
+| v19–v31 | allocatable, caller-saved |
 
 Keeping x0–x7 out of the pool means a call's arguments can be moved into
 place without moving live values out of the way first.
@@ -212,8 +247,9 @@ function actually uses, with `stp`/`ldp` pairs.
 so do call arguments into x0–x7 and incoming arguments into their allocated
 locations. `parallel_copy.rs` turns such a copy into ordinary moves: emit
 any move whose destination nobody still needs to read; when only cycles are
-left, save one destination in x16 and redirect its readers there. A
-slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
+left, save one destination in x16 and redirect its readers there (`fmov`
+moves a float's bits into x16 and back, so one temporary serves both
+classes). A slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
 values have unspecified upper bits anyway.
 
 **Frame layout,** from `sp` up:
@@ -222,7 +258,8 @@ values have unspecified upper bits anyway.
 sp + 0              spill slots, 8 bytes each (only as many as needed)
 ...                 IR stack slots, each at its alignment
 ...                 padding to 16 bytes
-x29 - 16 * pairs    callee-saved registers used, in pairs
+...                 callee-saved FP registers used (d8–d15), in pairs
+x29 - 16 * pairs    callee-saved general registers used, in pairs
 x29                 saved x29, x30
 ```
 
@@ -245,7 +282,7 @@ analyses they need; there is no analysis cache yet.
 | Pass | What it does |
 |---|---|
 | `simplify-cfg` | constant `brif` → `jump`, skip forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
-| `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width); trapping divisions are left to trap |
+| `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
 | `dce` | mark from pinned instructions; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |

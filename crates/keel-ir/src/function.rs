@@ -234,13 +234,14 @@ impl Function {
     pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
         let result_tys = match &data {
             InstData::Iconst { ty, .. }
+            | InstData::Fconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. } => vec![*ty],
             InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => vec![Type::Ptr],
             InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
             InstData::Select { args } => vec![self.value_type(args[1])],
-            InstData::Icmp { .. } => vec![Type::I8],
+            InstData::Icmp { .. } | InstData::Fcmp { .. } => vec![Type::I8],
             InstData::Call { func, .. } => self.callees[*func].sig.returns.clone(),
             InstData::CallIndirect { sig, .. } => self.signatures[*sig].returns.clone(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
@@ -517,6 +518,9 @@ impl Function {
         let v = |value: Value| self.resolve(value);
         match self.inst_data(inst) {
             InstData::Iconst { ty, imm } => write!(f, "iconst.{ty} {imm}"),
+            InstData::Fconst { ty, bits } => {
+                write!(f, "fconst.{ty} {}", crate::inst::float_text(*ty, *bits))
+            }
             InstData::StackAddr { slot } => write!(f, "stack_addr {slot}"),
             InstData::Call { func, args } => {
                 write!(f, "call @{}(", self.callees[*func].name)?;
@@ -545,6 +549,9 @@ impl Function {
             InstData::Convert { op, ty, arg } => write!(f, "{op}.{ty} {}", v(*arg)),
             InstData::Icmp { cond, args } => {
                 write!(f, "icmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            }
+            InstData::Fcmp { cond, args } => {
+                write!(f, "fcmp.{cond} {}, {}", v(args[0]), v(args[1]))
             }
             InstData::Load { ty, addr } => write!(f, "load.{ty} {}", v(*addr)),
             InstData::Store { value, addr } => write!(f, "store {}, {}", v(*value), v(*addr)),

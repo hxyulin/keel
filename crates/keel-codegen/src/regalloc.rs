@@ -28,6 +28,10 @@
 //! is no interval splitting. Spill slots are shared by values whose
 //! intervals do not overlap, with the same scan.
 //!
+//! Integers and pointers go in general-purpose registers, floats in the
+//! SIMD/FP registers: two register classes that never interfere. One scan
+//! handles both; each interval only competes for registers of its class.
+//!
 //! # Program points
 //!
 //! Every instruction gets two points: it reads its operands at the even
@@ -59,6 +63,8 @@ use std::collections::BTreeSet;
 pub enum Loc {
     /// A general-purpose register, by number (`x9` is `Reg(9)`).
     Reg(u8),
+    /// A SIMD/FP register, by number (`d19` is `FReg(19)`).
+    FReg(u8),
     /// A spill slot, by index; the code generator decides the offset.
     Stack(u32),
 }
@@ -72,6 +78,9 @@ pub struct Pools {
     /// Preserved by calls, but a function that writes one must save and
     /// restore it.
     pub callee_saved: &'static [u8],
+    /// The same for floats, in the SIMD/FP registers.
+    pub float_caller_saved: &'static [u8],
+    pub float_callee_saved: &'static [u8],
 }
 
 pub struct Allocation {
@@ -86,6 +95,7 @@ pub struct Allocation {
     /// The callee-saved registers handed out, sorted, which the prologue
     /// must save.
     pub callee_saved_used: Vec<u8>,
+    pub float_callee_saved_used: Vec<u8>,
 }
 
 impl Allocation {
@@ -107,21 +117,37 @@ pub fn allocate(func: &Function, pools: &Pools, is_call: impl Fn(&InstData) -> b
     let mut spilled = linear_scan(&intervals, pools, &mut locs);
     let spill_slots = assign_spill_slots(&mut spilled, &mut locs);
 
-    let mut callee_saved_used: Vec<u8> = locs
-        .iter()
-        .filter_map(|&loc| match loc {
-            Some(Loc::Reg(r)) if pools.callee_saved.contains(&r) => Some(r),
+    let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
+        let mut regs: Vec<u8> = locs
+            .iter()
+            .filter_map(|&loc| want(loc?))
+            .filter(|r| pool.contains(r))
+            .collect();
+        regs.sort_unstable();
+        regs.dedup();
+        regs
+    };
+    let callee_saved_used = used(
+        |loc| match loc {
+            Loc::Reg(r) => Some(r),
             _ => None,
-        })
-        .collect();
-    callee_saved_used.sort_unstable();
-    callee_saved_used.dedup();
+        },
+        pools.callee_saved,
+    );
+    let float_callee_saved_used = used(
+        |loc| match loc {
+            Loc::FReg(r) => Some(r),
+            _ => None,
+        },
+        pools.float_callee_saved,
+    );
 
     Allocation {
         order,
         locs,
         spill_slots,
         callee_saved_used,
+        float_callee_saved_used,
     }
 }
 
@@ -131,6 +157,8 @@ struct Interval {
     start: u32,
     end: u32,
     crosses_call: bool,
+    /// Whether it needs an FP register rather than a general-purpose one.
+    float: bool,
 }
 
 /// Live-in and live-out sets, indexed by block.
@@ -268,11 +296,13 @@ fn build_intervals(
             // point: the first call after `start` comes before `end`.
             let next_call = calls.partition_point(|&c| c <= start);
             let crosses_call = calls.get(next_call).is_some_and(|&c| c < end);
+            let value = Value::new(i);
             Some(Interval {
-                value: Value::new(i),
+                value,
                 start,
                 end,
                 crosses_call,
+                float: func.value_type(value).is_float(),
             })
         })
         .collect()
@@ -285,7 +315,7 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
     sorted.sort_by_key(|iv| (iv.start, iv.value));
 
     // Intervals holding a register, with that register.
-    let mut active: Vec<(&Interval, u8)> = Vec::new();
+    let mut active: Vec<(&Interval, Loc)> = Vec::new();
     let mut spilled = Vec::new();
     for cur in sorted {
         // Free the registers of intervals that ended before this one starts.
@@ -293,17 +323,30 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
 
         // Live across a call: only a callee-saved register survives it.
         // Otherwise prefer caller-saved ones, which need no save/restore.
-        let allowed: Vec<u8> = if cur.crosses_call {
-            pools.callee_saved.to_vec()
+        let (caller_saved, callee_saved, class): (_, _, fn(u8) -> Loc) = if cur.float {
+            (
+                pools.float_caller_saved,
+                pools.float_callee_saved,
+                Loc::FReg,
+            )
         } else {
-            [pools.caller_saved, pools.callee_saved].concat()
+            (pools.caller_saved, pools.callee_saved, Loc::Reg)
+        };
+        let allowed: Vec<Loc> = if cur.crosses_call {
+            callee_saved.iter().map(|&r| class(r)).collect()
+        } else {
+            caller_saved
+                .iter()
+                .chain(callee_saved)
+                .map(|&r| class(r))
+                .collect()
         };
         let free = allowed
             .iter()
             .copied()
             .find(|&r| active.iter().all(|&(_, used)| used != r));
         if let Some(reg) = free {
-            locs[cur.value.index()] = Some(Loc::Reg(reg));
+            locs[cur.value.index()] = Some(reg);
             active.push((cur, reg));
             continue;
         }
@@ -322,7 +365,7 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.value.index()] = None;
                 spilled.push(evicted.clone());
-                locs[cur.value.index()] = Some(Loc::Reg(reg));
+                locs[cur.value.index()] = Some(reg);
                 active.push((cur, reg));
             }
             _ => spilled.push(cur.clone()),
@@ -443,9 +486,15 @@ mod tests {
         let pools = Pools {
             caller_saved: &[9, 10],
             callee_saved: &[19, 20],
+            float_caller_saved: &[19, 20],
+            float_callee_saved: &[8, 9],
         };
-        let is_call =
-            |d: &InstData| matches!(d, InstData::Call { .. } | InstData::Intrinsic { .. });
+        let is_call = |d: &InstData| {
+            matches!(
+                d,
+                InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Intrinsic { .. }
+            )
+        };
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
         let mut checked = 0;
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -460,9 +509,20 @@ mod tests {
                 let ivs = build_intervals(func, &cfg, &alloc.order, &is_call);
                 for (i, a) in ivs.iter().enumerate() {
                     let loc = alloc.loc(a.value).expect("every interval is allocated");
+                    assert!(
+                        match loc {
+                            Loc::Reg(_) => !a.float,
+                            Loc::FReg(_) => a.float,
+                            Loc::Stack(_) => true,
+                        },
+                        "{}: {} is in the wrong register class: {loc:?}",
+                        func.name,
+                        a.value
+                    );
                     if a.crosses_call {
                         assert!(
-                            !matches!(loc, Loc::Reg(r) if pools.caller_saved.contains(&r)),
+                            !matches!(loc, Loc::Reg(r) if pools.caller_saved.contains(&r))
+                                && !matches!(loc, Loc::FReg(r) if pools.float_caller_saved.contains(&r)),
                             "{}: {} crosses a call in {loc:?}",
                             func.name,
                             a.value

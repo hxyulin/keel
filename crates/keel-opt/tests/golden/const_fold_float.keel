@@ -1,0 +1,24 @@
+; passes: const-fold
+; Floats fold at their own width: f32 rounds at every step. NaNs print as
+; hex bits; conversions saturate.
+func @f() -> f64 {
+block0:
+    v0 = fconst.f32 16777216.0
+    v1 = fconst.f32 1.0
+    v2 = fadd v0, v1
+    v3 = fpext.f64 v2
+    v4 = fconst.f64 0.0
+    v5 = fdiv v4, v4
+    v6 = fcmp.uno v5, v5
+    v7 = fptosi.i32 v5
+    v8 = fconst.f64 -1e300
+    v9 = fptosi.i32 v8
+    v10 = iconst.i32 -5
+    v11 = uitofp.f64 v10
+    v12 = select v6, v3, v11
+    v13 = sitofp.f64 v9
+    v14 = fadd v12, v13
+    v15 = sitofp.f64 v7
+    v16 = fadd v14, v15
+    return v16
+}

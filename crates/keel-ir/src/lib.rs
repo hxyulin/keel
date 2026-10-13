@@ -20,7 +20,7 @@ pub use entity::{Arena, EntityRef};
 pub use function::{
     CallConv, FuncDecl, Function, InsertPoint, Signature, StackSlotData, ValueData, ValueDef,
 };
-pub use inst::{BinaryOp, BlockCall, ConvertOp, InstData, IntCC, Symbol, UnaryOp};
+pub use inst::{BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, Symbol, UnaryOp};
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use module::Module;
 pub use parser::{ParseError, parse};

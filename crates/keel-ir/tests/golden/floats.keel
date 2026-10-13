@@ -1,0 +1,48 @@
+; Float constants print as the shortest decimal that reads back exactly;
+; NaNs print as hex bits so their payload survives. Hex bits are accepted
+; for any constant.
+func @consts() -> f64 {
+block0:
+    v0 = fconst.f64 1.5
+    v1 = fconst.f64 -0.0
+    v2 = fconst.f64 1e100
+    v3 = fconst.f64 -inf
+    v4 = fconst.f64 nan
+    v5 = fconst.f64 0x7ff0000000000001  ; signalling NaN
+    v6 = fconst.f64 0x3ff0000000000000  ; 1.0
+    v7 = fconst.f32 0.1                 ; rounded once, to f32
+    v8 = fconst.f32 16777217            ; 2^24 + 1 rounds to 2^24
+    v9 = fconst.f32 inf
+    v10 = iconst.i64 0xffffffffffffffff ; -1
+    return v0
+}
+
+func @ops(f64, f64, f32) -> i8 {
+block0(v0: f64, v1: f64, v2: f32):
+    v3 = fadd v0, v1
+    v4 = fsub v3, v1
+    v5 = fmul v4, v4
+    v6 = fdiv v5, v1
+    v7 = fmin v6, v0
+    v8 = fmax v7, v1
+    v9 = fneg v8
+    v10 = fabs v9
+    v11 = fsqrt v10
+    v12 = fceil v11
+    v13 = ffloor v12
+    v14 = ftrunc v13
+    v15 = fnearest v14
+    v16 = fpext.f64 v2
+    v17 = fptrunc.f32 v15
+    v18 = fptosi.i32 v16
+    v19 = fptoui.i64 v17
+    v20 = sitofp.f32 v18
+    v21 = uitofp.f64 v19
+    v22 = bitcast.i64 v21
+    v23 = bitcast.f64 v22
+    v24 = select v18, v23, v0
+    v25 = fcmp.lt v24, v1
+    v26 = fcmp.uno v20, v17
+    v27 = and v25, v26
+    return v27
+}

@@ -1,0 +1,5 @@
+func @f() -> i32 {
+block0:
+    v0 = fconst.i32 1.5
+    return v0
+}

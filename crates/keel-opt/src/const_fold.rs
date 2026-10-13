@@ -10,9 +10,16 @@
 //! uses, so a chain `v1 = iadd v0, v0; v2 = imul v1, v1` folds in one pass.
 //! A `select` with a constant condition is replaced by the chosen arm,
 //! constant or not.
+//!
+//! Floats fold with the host's IEEE 754 arithmetic, which rounds like the
+//! target's. Which NaN an operation produces is unspecified in the IR, so
+//! a folded NaN may differ in payload from the one the machine would make.
 
+use fp::Float;
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{BinaryOp, ConvertOp, Function, InstData, IntCC, Type, UnaryOp, Value, ValueDef};
+
+mod fp;
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -20,43 +27,76 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for &block in domtree.rpo() {
         for inst in func.block_insts(block).to_vec() {
-            let konst = |v: Value| constant(func, v);
-            let folded = match func.inst_data(inst) {
-                InstData::Binary { op, args } => match (konst(args[0]), konst(args[1])) {
-                    (Some(a), Some(b)) => binary(*op, a, b),
-                    _ => None,
-                },
-                InstData::Unary { op, arg } => konst(*arg).and_then(|a| unary(*op, a)),
-                InstData::Convert { op, ty, arg } => konst(*arg).and_then(|a| convert(*op, *ty, a)),
-                InstData::Icmp { cond, args } => match (konst(args[0]), konst(args[1])) {
-                    (Some(a), Some(b)) => Some(Const {
-                        ty: Type::I8,
-                        bits: icmp(*cond, a, b) as u64,
-                    }),
-                    _ => None,
-                },
-                InstData::Select { args } => {
-                    if let Some(c) = konst(args[0]) {
-                        let chosen = if c.is_zero() { args[2] } else { args[1] };
-                        let result = func.first_result(inst);
-                        func.replace_all_uses(result, chosen);
-                        func.remove_inst(inst);
-                        changed = true;
-                    }
-                    continue;
+            if let InstData::Select { args } = *func.inst_data(inst) {
+                if let Some(c) = constant(func, args[0]) {
+                    let chosen = if c.is_zero() { args[2] } else { args[1] };
+                    let result = func.first_result(inst);
+                    func.replace_all_uses(result, chosen);
+                    func.remove_inst(inst);
+                    changed = true;
                 }
-                _ => None,
-            };
-            if let Some(c) = folded {
-                *func.inst_data_mut(inst) = InstData::Iconst {
-                    ty: c.ty,
-                    imm: c.signed(),
-                };
+                continue;
+            }
+            if let Some(folded) = fold(func, func.inst_data(inst)) {
+                *func.inst_data_mut(inst) = folded;
                 changed = true;
             }
         }
     }
     changed
+}
+
+/// The constant instruction `data` computes, if its operands are constants.
+fn fold(func: &Function, data: &InstData) -> Option<InstData> {
+    let int = |v: Value| constant(func, v);
+    let float = |v: Value| fp::constant(func, v);
+    let folded = match *data {
+        InstData::Binary { op, args } if op.is_float() => {
+            Folded::Float(fp::binary(op, float(args[0])?, float(args[1])?))
+        }
+        InstData::Binary { op, args } => Folded::Int(binary(op, int(args[0])?, int(args[1])?)?),
+        InstData::Unary { op, arg } if op.is_float() => Folded::Float(fp::unary(op, float(arg)?)),
+        InstData::Unary { op, arg } => Folded::Int(unary(op, int(arg)?)?),
+        InstData::Convert { op, ty, arg } => match op {
+            ConvertOp::Fpext | ConvertOp::Fptrunc => Folded::Float(fp::convert(ty, float(arg)?)),
+            ConvertOp::Fptosi | ConvertOp::Fptoui => {
+                let n = fp::to_int(float(arg)?, op == ConvertOp::Fptosi, ty);
+                Folded::Int(Const::new(ty, n))
+            }
+            ConvertOp::Sitofp => Folded::Float(fp::from_int(int(arg)?.signed().into(), ty)),
+            ConvertOp::Uitofp => Folded::Float(fp::from_int(int(arg)?.bits.into(), ty)),
+            ConvertOp::Bitcast if ty.is_float() => Folded::Float(Float {
+                ty,
+                bits: int(arg)?.bits,
+            }),
+            ConvertOp::Bitcast => Folded::Int(Const::new(ty, float(arg)?.bits)),
+            _ => Folded::Int(convert(op, ty, int(arg)?)?),
+        },
+        InstData::Icmp { cond, args } => Folded::Int(Const {
+            ty: Type::I8,
+            bits: icmp(cond, int(args[0])?, int(args[1])?) as u64,
+        }),
+        InstData::Fcmp { cond, args } => Folded::Int(Const {
+            ty: Type::I8,
+            bits: fp::compare(cond, float(args[0])?, float(args[1])?) as u64,
+        }),
+        _ => return None,
+    };
+    Some(match folded {
+        Folded::Int(c) => InstData::Iconst {
+            ty: c.ty,
+            imm: c.signed(),
+        },
+        Folded::Float(x) => InstData::Fconst {
+            ty: x.ty,
+            bits: x.bits,
+        },
+    })
+}
+
+enum Folded {
+    Int(Const),
+    Float(Float),
 }
 
 /// An integer constant: its type and its bits, zero-extended from the width.
@@ -142,6 +182,7 @@ fn binary(op: BinaryOp, a: Const, b: Const) -> Option<Const> {
         BinaryOp::Umulhi => ((u128::from(x) * u128::from(y)) >> w) as u64,
         BinaryOp::Smulhi => ((i128::from(sx) * i128::from(sy)) >> w) as u64,
         BinaryOp::Ptradd => return None,
+        _ => unreachable!("float operations fold in fp"),
     };
     Some(Const::new(ty, bits))
 }
@@ -164,6 +205,7 @@ fn unary(op: UnaryOp, a: Const) -> Option<Const> {
         UnaryOp::Ctz => u64::from(x.trailing_zeros().min(w)),
         UnaryOp::Popcnt => u64::from(x.count_ones()),
         UnaryOp::Bswap => x.swap_bytes() >> (64 - w),
+        _ => unreachable!("float operations fold in fp"),
     };
     Some(Const::new(a.ty, bits))
 }
@@ -172,7 +214,7 @@ fn convert(op: ConvertOp, to: Type, a: Const) -> Option<Const> {
     let bits = match op {
         ConvertOp::Sext => a.signed() as u64,
         ConvertOp::Uext | ConvertOp::Trunc => a.bits,
-        ConvertOp::PtrToInt | ConvertOp::IntToPtr => return None,
+        _ => return None,
     };
     to.is_int().then(|| Const::new(to, bits))
 }

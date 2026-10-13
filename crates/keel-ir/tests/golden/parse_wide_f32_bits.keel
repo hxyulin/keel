@@ -1,0 +1,5 @@
+func @f() -> f32 {
+block0:
+    v0 = fconst.f32 0x100000000
+    return v0
+}

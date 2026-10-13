@@ -11,7 +11,17 @@
 //! x18      reserved by Apple; never touched
 //! x19–x28  allocatable, callee-saved: saved in the prologue if used
 //! x29–x30  frame pointer and return address
+//!
+//! v0–v7    float arguments and results; never allocated
+//! v8–v15   allocatable, callee-saved (only the low 64 bits, d8–d15,
+//!          which is all a scalar float uses)
+//! v16–v18  scratch
+//! v19–v31  allocatable, caller-saved
 //! ```
+//!
+//! Floats live in the SIMD/FP registers, named `s<n>` as f32 and `d<n>` as
+//! f64; the same rules apply as for integers, with v16–v18 as the scratch
+//! registers.
 //!
 //! Keeping x0–x7 out of the pool means setting up a call never has to move
 //! a live value out of the way, and a spilled operand can always be
@@ -38,7 +48,8 @@
 //! sp + 0              spill slots, 8 bytes each
 //! ...                 IR stack slots, each at its alignment
 //! ...                 padding to 16 bytes
-//! x29 - 16 * pairs    callee-saved registers this function uses, in pairs
+//! ...                 callee-saved FP registers this function uses, in pairs
+//! x29 - 16 * pairs    callee-saved general registers it uses, in pairs
 //! x29                 saved x29 (frame pointer), saved x30 (return address)
 //! ```
 //!
@@ -56,7 +67,7 @@ use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem, DataObject, EntityRef,
-    Function, Inst, InstData, IntCC, Intrinsic, Module, Signature, Type, UnaryOp, Value,
+    FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Module, Signature, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -64,6 +75,8 @@ use std::fmt::Write;
 pub const REGISTERS: Pools = Pools {
     caller_saved: &[9, 10, 11, 12, 13, 14, 15],
     callee_saved: &[19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+    float_caller_saved: &[19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31],
+    float_callee_saved: &[8, 9, 10, 11, 12, 13, 14, 15],
 };
 
 /// Scratch registers, never allocated. Spilled operands are reloaded into
@@ -72,6 +85,11 @@ pub const REGISTERS: Pools = Pools {
 const S0: u8 = 16;
 const S1: u8 = 17;
 const S2: u8 = 8;
+
+/// FP scratch registers, used like `S0`–`S2` for floats.
+const FS0: u8 = 16;
+const FS1: u8 = 17;
+const FS2: u8 = 18;
 
 /// Compiles a module into one assembly file for `clang`/`as`. Declared
 /// functions are left as undefined symbols for the linker to resolve.
@@ -82,15 +100,12 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
+    let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
-        pools
-            .caller_saved
-            .iter()
-            .all(|r| REGISTERS.caller_saved.contains(r))
-            && pools
-                .callee_saved
-                .iter()
-                .all(|r| REGISTERS.callee_saved.contains(r)),
+        subset(pools.caller_saved, REGISTERS.caller_saved)
+            && subset(pools.callee_saved, REGISTERS.callee_saved)
+            && subset(pools.float_caller_saved, REGISTERS.float_caller_saved)
+            && subset(pools.float_callee_saved, REGISTERS.float_callee_saved),
         "register pools must be subsets of REGISTERS"
     );
     let mut out = String::from("\t.section\t__TEXT,__text,regular,pure_instructions\n");
@@ -148,9 +163,10 @@ impl<'a> FunctionCompiler<'a> {
             message,
         };
         let CallConv::C = func.sig.cc;
-        if func.sig.params.len() > 8 {
+        if arg_locs(&func.sig.params).contains(&None) {
             return Err(err(
-                "more than 8 parameters (stack arguments) are not supported yet".into(),
+                "more than 8 integer or 8 float parameters (stack arguments) are not supported yet"
+                    .into(),
             ));
         }
         match func.sig.returns.as_slice() {
@@ -181,7 +197,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         for value in (0..func.num_values()).map(Value::new) {
             let ty = func.value_type(value);
-            if matches!(ty, Type::I128 | Type::F32 | Type::F64) {
+            if ty == Type::I128 {
                 return Err(err(format!(
                     "{value}: type {ty} is not supported by aarch64 codegen yet"
                 )));
@@ -236,17 +252,24 @@ impl<'a> FunctionCompiler<'a> {
                 _ => unreachable!(),
             }
         }
+        for pair in self.alloc.float_callee_saved_used.clone().chunks(2) {
+            match pair {
+                [a, b] => self.emit(format!("stp\td{a}, d{b}, [sp, #-16]!")),
+                [a] => self.emit(format!("str\td{a}, [sp, #-16]!")),
+                _ => unreachable!(),
+            }
+        }
         if self.frame_size > 0 {
             self.sub_sp(self.frame_size);
         }
-        // Arguments arrive in x0–x7, which are never allocated, so this
-        // copy has no cycles; it may still store to spill slots.
+        // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
+        // so this copy has no cycles; it may still store to spill slots.
         if let Some(entry) = func.entry_block() {
-            let moves: Vec<(Loc, Loc)> = func
-                .block_params(entry)
+            let params = func.block_params(entry);
+            let moves: Vec<(Loc, Loc)> = params
                 .iter()
-                .enumerate()
-                .filter_map(|(i, &param)| Some((self.alloc.loc(param)?, Loc::Reg(i as u8))))
+                .zip(arg_locs(&func.sig.params))
+                .filter_map(|(&param, src)| Some((self.alloc.loc(param)?, src.expect("checked"))))
                 .collect();
             self.parallel_copy(&moves);
         }
@@ -289,11 +312,27 @@ impl<'a> FunctionCompiler<'a> {
                 self.materialize(d, imm as u64, true);
                 self.def_done(result, d);
             }
+            InstData::Fconst { ty, bits } => {
+                let d = self.def_freg(result);
+                let fd = freg(d, ty);
+                if bits == 0 {
+                    let zero = if ty == Type::F32 { "wzr" } else { "xzr" };
+                    self.emit(format!("fmov\t{fd}, {zero}"));
+                } else {
+                    let is64 = ty == Type::F64;
+                    self.materialize(S0, bits, is64);
+                    let src = if is64 {
+                        format!("x{S0}")
+                    } else {
+                        format!("w{S0}")
+                    };
+                    self.emit(format!("fmov\t{fd}, {src}"));
+                }
+                self.def_done(result, d);
+            }
             InstData::Call { func: callee, args } => {
                 self.call(&args, &format!("_{}", func.callee(callee).name));
-                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
-                    self.emit_move(loc, Loc::Reg(0));
-                }
+                self.call_result(result);
             }
             InstData::CallIndirect { callee, args, .. } => {
                 self.move_args(&args);
@@ -302,9 +341,7 @@ impl<'a> FunctionCompiler<'a> {
                 // spill slot, reloaded after the moves so x16 is free.
                 let target = self.use_reg(callee, S0);
                 self.emit(format!("blr\tx{target}"));
-                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
-                    self.emit_move(loc, Loc::Reg(0));
-                }
+                self.call_result(result);
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
@@ -328,14 +365,60 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
+            InstData::Unary { op, arg } if op.is_float() => {
+                let ty = self.ty(arg);
+                let d = self.def_freg(result);
+                let a = self.use_freg(arg, FS0);
+                let mnemonic = match op {
+                    UnaryOp::Fneg => "fneg",
+                    UnaryOp::Fabs => "fabs",
+                    UnaryOp::Fsqrt => "fsqrt",
+                    UnaryOp::Fceil => "frintp",
+                    UnaryOp::Ffloor => "frintm",
+                    UnaryOp::Ftrunc => "frintz",
+                    UnaryOp::Fnearest => "frintn",
+                    _ => unreachable!("integer operation"),
+                };
+                self.emit(format!("{mnemonic}\t{}, {}", freg(d, ty), freg(a, ty)));
+                self.def_done(result, d);
+            }
             InstData::Unary { op, arg } => {
                 let d = self.def_reg(result);
                 self.unary(op, arg, d);
                 self.def_done(result, d);
             }
+            InstData::Binary { op, args } if op.is_float() => {
+                let ty = self.ty(args[0]);
+                let d = self.def_freg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                let mnemonic = match op {
+                    BinaryOp::Fadd => "fadd",
+                    BinaryOp::Fsub => "fsub",
+                    BinaryOp::Fmul => "fmul",
+                    BinaryOp::Fdiv => "fdiv",
+                    BinaryOp::Fmin => "fmin",
+                    BinaryOp::Fmax => "fmax",
+                    _ => unreachable!("integer operation"),
+                };
+                let (fa, fb, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
+                self.emit(format!("{mnemonic}\t{fd}, {fa}, {fb}"));
+                self.def_done(result, d);
+            }
             InstData::Binary { op, args } => {
                 let d = self.def_reg(result);
                 self.binary(op, args, d);
+                self.def_done(result, d);
+            }
+            InstData::Select { args } if self.ty(args[1]).is_float() => {
+                let ty = self.ty(args[1]);
+                let d = self.def_freg(result);
+                let c = self.use_reg(args[0], S0);
+                self.test_nonzero(c, self.ty(args[0]));
+                let a = self.use_freg(args[1], FS1);
+                let b = self.use_freg(args[2], FS2);
+                let (a, b, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
+                self.emit(format!("fcsel\t{fd}, {a}, {b}, ne"));
                 self.def_done(result, d);
             }
             InstData::Select { args } => {
@@ -348,6 +431,9 @@ impl<'a> FunctionCompiler<'a> {
                 let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
                 self.emit(format!("csel\t{rd}, {a}, {b}, ne"));
                 self.def_done(result, d);
+            }
+            InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
+                self.float_convert(op, ty, arg, result);
             }
             InstData::Convert { op, ty, arg } => {
                 let d = self.def_reg(result);
@@ -373,6 +459,7 @@ impl<'a> FunctionCompiler<'a> {
                             self.emit(format!("mov\tx{d}, x{a}"));
                         }
                     }
+                    _ => unreachable!("float conversions are lowered by float_convert"),
                 }
                 self.def_done(result, d);
             }
@@ -388,6 +475,21 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("cset\tw{d}, {}", cond_code(cond)));
                 self.def_done(result, d);
             }
+            InstData::Fcmp { cond, args } => {
+                let ty = self.ty(args[0]);
+                let d = self.def_reg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                self.emit(format!("fcmp\t{}, {}", freg(a, ty), freg(b, ty)));
+                self.emit(format!("cset\tw{d}, {}", float_cond_code(cond)));
+                self.def_done(result, d);
+            }
+            InstData::Load { ty, addr } if ty.is_float() => {
+                let d = self.def_freg(result);
+                let a = self.use_reg(addr, S0);
+                self.emit(format!("ldr\t{}, [x{a}]", freg(d, ty)));
+                self.def_done(result, d);
+            }
             InstData::Load { ty, addr } => {
                 let d = self.def_reg(result);
                 let a = self.use_reg(addr, S0);
@@ -398,6 +500,12 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 self.emit(format!("{op}\t{}, [x{a}]", reg(d, ty)));
                 self.def_done(result, d);
+            }
+            InstData::Store { value, addr } if self.ty(value).is_float() => {
+                let ty = self.ty(value);
+                let v = self.use_freg(value, FS0);
+                let a = self.use_reg(addr, S1);
+                self.emit(format!("str\t{}, [x{a}]", freg(v, ty)));
             }
             InstData::Store { value, addr } => {
                 let ty = self.ty(value);
@@ -452,7 +560,7 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Return { args } => {
                 if let Some(&value) = args.first() {
                     let src = self.loc(value);
-                    self.emit_move(Loc::Reg(0), src);
+                    self.emit_move(return_loc(self.ty(value)), src);
                 }
                 self.epilogue();
                 self.emit("ret");
@@ -468,26 +576,81 @@ impl<'a> FunctionCompiler<'a> {
         self.emit(format!("bl\t{symbol}"));
     }
 
-    /// Moves call arguments into x0–x7.
+    /// Moves call arguments into x0–x7 and v0–v7.
     fn move_args(&mut self, args: &[Value]) {
+        let tys: Vec<Type> = args.iter().map(|&a| self.ty(a)).collect();
         let moves: Vec<(Loc, Loc)> = args
             .iter()
-            .enumerate()
-            .map(|(i, &arg)| (Loc::Reg(i as u8), self.loc(arg)))
+            .zip(arg_locs(&tys))
+            .map(|(&arg, dst)| (dst.expect("checked"), self.loc(arg)))
             .collect();
         self.parallel_copy(&moves);
+    }
+
+    /// Moves a call's result, if it has one, from x0 or v0 to its place.
+    fn call_result(&mut self, result: Option<Value>) {
+        if let Some(value) = result
+            && let Some(loc) = self.alloc.loc(value)
+        {
+            self.emit_move(loc, return_loc(self.func.value_type(value)));
+        }
+    }
+
+    /// Lowers a conversion to, from or between floats.
+    fn float_convert(&mut self, op: ConvertOp, to: Type, arg: Value, result: Option<Value>) {
+        let from = self.ty(arg);
+        if to.is_float() {
+            let d = self.def_freg(result);
+            let fd = freg(d, to);
+            if from.is_float() {
+                // fpext, fptrunc
+                let a = self.use_freg(arg, FS0);
+                self.emit(format!("fcvt\t{fd}, {}", freg(a, from)));
+            } else {
+                let a = self.use_reg(arg, S0);
+                match op {
+                    ConvertOp::Bitcast => self.emit(format!("fmov\t{fd}, {}", reg(a, from))),
+                    _ => {
+                        let signed = op == ConvertOp::Sitofp;
+                        let x = reg(self.extend(S0, a, from, signed), from);
+                        let mnemonic = if signed { "scvtf" } else { "ucvtf" };
+                        self.emit(format!("{mnemonic}\t{fd}, {x}"));
+                    }
+                }
+            }
+            self.def_done(result, d);
+        } else {
+            // fptosi, fptoui, bitcast to an integer
+            let d = self.def_reg(result);
+            let a = self.use_freg(arg, FS0);
+            let mnemonic = match op {
+                ConvertOp::Fptosi => "fcvtzs",
+                ConvertOp::Fptoui => "fcvtzu",
+                _ => "fmov",
+            };
+            self.emit(format!("{mnemonic}\t{}, {}", reg(d, to), freg(a, from)));
+            self.def_done(result, d);
+        }
     }
 
     /// Restores the callee-saved registers, `sp` and the frame pointer.
     fn epilogue(&mut self) {
         let saved = self.alloc.callee_saved_used.clone();
-        let pairs = saved.len().div_ceil(2);
+        let float_saved = self.alloc.float_callee_saved_used.clone();
+        let pairs = saved.len().div_ceil(2) + float_saved.len().div_ceil(2);
         // Point `sp` at the last pair pushed and pop in reverse. Measuring
         // from x29 makes the size of the rest of the frame irrelevant.
         if pairs == 0 {
             self.emit("mov\tsp, x29");
         } else {
             self.emit(format!("sub\tsp, x29, #{}", 16 * pairs));
+        }
+        for pair in float_saved.chunks(2).rev() {
+            match pair {
+                [a, b] => self.emit(format!("ldp\td{a}, d{b}, [sp], #16")),
+                [a] => self.emit(format!("ldr\td{a}, [sp], #16")),
+                _ => unreachable!(),
+            }
         }
         for pair in saved.chunks(2).rev() {
             match pair {
@@ -673,6 +836,7 @@ impl<'a> FunctionCompiler<'a> {
                 Type::I16 => self.emit(format!("rev16\tw{d}, w{a}")),
                 _ => self.emit(format!("rev\t{rd}, {ra}")),
             },
+            _ => unreachable!("float operations are lowered in `inst`"),
         }
     }
 
@@ -702,7 +866,8 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// x16 breaks cycles; `emit_move` uses x17 for slot-to-slot moves.
+    /// x16 breaks cycles, of either register class (`fmov` moves bits
+    /// between classes); `emit_move` uses x17 for slot-to-slot moves.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
         for (dst, src) in sequentialize(moves, Loc::Reg(S0)) {
             self.emit_move(dst, src);
@@ -715,8 +880,13 @@ impl<'a> FunctionCompiler<'a> {
         match (dst, src) {
             _ if dst == src => {}
             (Loc::Reg(d), Loc::Reg(s)) => self.emit(format!("mov\tx{d}, x{s}")),
+            (Loc::FReg(d), Loc::FReg(s)) => self.emit(format!("fmov\td{d}, d{s}")),
+            (Loc::Reg(d), Loc::FReg(s)) => self.emit(format!("fmov\tx{d}, d{s}")),
+            (Loc::FReg(d), Loc::Reg(s)) => self.emit(format!("fmov\td{d}, x{s}")),
             (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("ldr\tx{d}, {}", slot(s))),
+            (Loc::FReg(d), Loc::Stack(s)) => self.emit(format!("ldr\td{d}, {}", slot(s))),
             (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("str\tx{s}, {}", slot(d))),
+            (Loc::Stack(d), Loc::FReg(s)) => self.emit(format!("str\td{s}, {}", slot(d))),
             (Loc::Stack(d), Loc::Stack(s)) => {
                 self.emit(format!("ldr\tx{S1}, {}", slot(s)));
                 self.emit(format!("str\tx{S1}, {}", slot(d)));
@@ -792,6 +962,19 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("ldr\tx{scratch}, {}", slot(s)));
                 scratch
             }
+            Loc::FReg(_) => unreachable!("{value} is a float"),
+        }
+    }
+
+    /// [`Self::use_reg`] for floats: the FP register holding `value`.
+    fn use_freg(&mut self, value: Value, scratch: u8) -> u8 {
+        match self.loc(value) {
+            Loc::FReg(r) => r,
+            Loc::Stack(s) => {
+                self.emit(format!("ldr\td{scratch}, {}", slot(s)));
+                scratch
+            }
+            Loc::Reg(_) => unreachable!("{value} is not a float"),
         }
     }
 
@@ -805,10 +988,26 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Stores a spilled result computed into `reg` by [`Self::def_reg`].
+    /// [`Self::def_reg`] for floats: the result's FP register, or v16.
+    fn def_freg(&self, result: Option<Value>) -> u8 {
+        let value = result.expect("instruction has a result");
+        match self.alloc.loc(value) {
+            Some(Loc::FReg(r)) => r,
+            _ => FS0,
+        }
+    }
+
+    /// Stores a spilled result computed into `reg` by [`Self::def_reg`] or
+    /// [`Self::def_freg`].
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
-        if let Some(Loc::Stack(s)) = result.and_then(|v| self.alloc.loc(v)) {
-            self.emit(format!("str\tx{reg}, {}", slot(s)));
+        let Some(value) = result else { return };
+        if let Some(Loc::Stack(s)) = self.alloc.loc(value) {
+            let class = if self.func.value_type(value).is_float() {
+                'd'
+            } else {
+                'x'
+            };
+            self.emit(format!("str\t{class}{reg}, {}", slot(s)));
         }
     }
 
@@ -829,9 +1028,9 @@ impl<'a> FunctionCompiler<'a> {
 /// callees may be C code relying on the full ABI.
 fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(), String> {
     let CallConv::C = sig.cc;
-    if sig.params.len() > 8 {
+    if arg_locs(&sig.params).contains(&None) {
         return Err(format!(
-            "{what}: more than 8 arguments (stack arguments) are not supported yet"
+            "{what}: more than 8 integer or 8 float arguments (stack arguments) are not supported yet"
         ));
     }
     if sig.returns.len() > 1 {
@@ -917,6 +1116,34 @@ fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
     }
 }
 
+/// Where the C convention passes each argument: integers and pointers in
+/// x0–x7, floats in v0–v7, each class counted on its own, so
+/// `f(i64, f64, i64)` uses x0, v0 and x1. `None` once a class runs out.
+fn arg_locs(tys: &[Type]) -> Vec<Option<Loc>> {
+    let (mut ints, mut floats) = (0u8, 0u8);
+    tys.iter()
+        .map(|ty| {
+            let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() {
+                (&mut floats, Loc::FReg)
+            } else {
+                (&mut ints, Loc::Reg)
+            };
+            let loc = (*next < 8).then(|| class(*next));
+            *next += 1;
+            loc
+        })
+        .collect()
+}
+
+/// Where a single return value of type `ty` goes: x0 or v0.
+fn return_loc(ty: Type) -> Loc {
+    if ty.is_float() {
+        Loc::FReg(0)
+    } else {
+        Loc::Reg(0)
+    }
+}
+
 /// The address of spill slot `index`. Spill slots are at the bottom of the
 /// frame, so the offset is small enough for a scaled immediate.
 fn slot(index: u32) -> String {
@@ -926,6 +1153,7 @@ fn slot(index: u32) -> String {
 fn loc_name(loc: Loc) -> String {
     match loc {
         Loc::Reg(r) => format!("x{r}"),
+        Loc::FReg(r) => format!("d{r}"),
         Loc::Stack(s) => slot(s),
     }
 }
@@ -935,6 +1163,14 @@ fn reg(n: u8, ty: Type) -> String {
     match ty.bytes() {
         Some(bytes) if bytes <= 4 => format!("w{n}"),
         _ => format!("x{n}"),
+    }
+}
+
+/// `s<n>` for f32, `d<n>` for f64.
+fn freg(n: u8, ty: Type) -> String {
+    match ty {
+        Type::F32 => format!("s{n}"),
+        _ => format!("d{n}"),
     }
 }
 
@@ -968,5 +1204,22 @@ fn cond_code(cond: IntCC) -> &'static str {
         IntCC::Ule => "ls",
         IntCC::Ugt => "hi",
         IntCC::Uge => "hs",
+    }
+}
+
+/// Condition codes after `fcmp`, which sets N for less, Z for equal, C for
+/// greater or equal *or unordered*, and V only for unordered. `lt` would also
+/// be true when unordered, so less-than tests N (`mi`) and less-or-equal
+/// tests "C clear or Z set" (`ls`).
+fn float_cond_code(cond: FloatCC) -> &'static str {
+    match cond {
+        FloatCC::Eq => "eq",
+        FloatCC::Ne => "ne",
+        FloatCC::Lt => "mi",
+        FloatCC::Le => "ls",
+        FloatCC::Gt => "gt",
+        FloatCC::Ge => "ge",
+        FloatCC::Ord => "vc",
+        FloatCC::Uno => "vs",
     }
 }

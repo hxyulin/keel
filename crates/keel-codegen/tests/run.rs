@@ -5,7 +5,7 @@
 //! line.
 //!
 //! Every program is compiled three times: with the real register set; with
-//! two registers of each kind, which spills most values (running the spill
+//! two registers of each kind (and class), which spills most values (running the spill
 //! code and register/stack mixes in parallel copies on every program); and
 //! after the default optimization pipeline, which must not change what the
 //! program does.
@@ -27,6 +27,8 @@ const CONFIGS: [(Pools, bool, &str); 3] = [
         Pools {
             caller_saved: &[9, 10],
             callee_saved: &[19, 20],
+            float_caller_saved: &[19, 20],
+            float_callee_saved: &[8, 9],
         },
         false,
         "-tiny",
