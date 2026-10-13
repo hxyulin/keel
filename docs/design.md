@@ -100,6 +100,42 @@ resumed by a debugger, so it is an intrinsic.
 - Each function keeps a table of the functions it calls with their
   signatures, so a function can be printed, verified and compiled on its
   own. The module verifier checks those tables against the declarations.
+- `v0 = symbol_addr @f` is the address of a function or data object; one
+  instruction serves both, since both are just linker symbols. It is pure.
+- `v3 = call_indirect v0(v1, v2) : (i64, i64) -> i64` calls through a
+  pointer. The signature is written at the call, because a pointer has no
+  type; functions keep these in a table without duplicates (`SigRef`), so
+  instructions stay small and hashable.
+
+## Data
+
+Named data objects live at module level, next to functions:
+
+```
+data @msg   = const align 1 { b"Hi!\n\0" }
+data @table = const align 8 { ptr @add, ptr @msg + 3, i32 7, zero 4 }
+data @count = align 8 { zero 8 }
+decl data @environ
+```
+
+- Items are byte strings, integers (`i8`–`i64`, little-endian), `zero n`
+  and `ptr @sym [+ n]`. A `ptr` item is a relocation: the address is only
+  known to the linker or loader, so the IR keeps the symbol name.
+- `const` objects may go in read-only memory. Storing to them is not
+  allowed (not checked yet).
+- The verifier checks alignment (a power of two up to 4096), that objects
+  are non-empty, that integers fit, that pointers name a symbol, and that
+  pointers are 8-byte aligned, which Mach-O requires because the loader
+  rewrites them in place.
+- On Apple arm64, constant data without pointers goes in `__TEXT,__const`,
+  constant data with pointers in `__DATA,__const` (the loader writes the
+  pointers, then makes the page read-only), mutable data in `__DATA,__data`,
+  and all-zero mutable data in zero-fill `__bss`. Data is exported, like
+  functions.
+- Code finds a symbol relative to the program counter (`adrp` + `add`), since
+  the executable loads at a random address. Symbols from other images
+  (`decl`s, which may be in a dylib) are read from the global offset table
+  (`adrp` + `ldr` with `@GOTPAGE`): the loader fills it in at startup.
 
 ## ABI
 
@@ -109,7 +145,7 @@ resumed by a debugger, so it is an intrinsic.
 
 Current limits of the aarch64 C convention support: at most 8 arguments (no
 stack arguments), at most one return value, no `i8`/`i16` return values or
-arguments to external functions (Apple's ABI extends those by C signedness,
+arguments to external functions or through `call_indirect` (Apple's ABI extends those by C signedness,
 which the IR does not record), and no variadic calls (Apple passes variadic
 arguments on the stack, so `printf` needs the IR to mark a call variadic).
 
