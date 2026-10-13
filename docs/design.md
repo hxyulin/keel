@@ -118,3 +118,78 @@ arguments on the stack, so `printf` needs the IR to mark a call variadic).
 - First and only target until everything works end to end: **aarch64-apple**
   (Mach-O). Executables must carry an ad-hoc code signature
   (`LC_CODE_SIGNATURE`) or the kernel refuses to run them.
+
+## Register allocation
+
+**Linear scan** (Poletto & Sarkar 1999), in `keel-codegen/src/regalloc.rs`.
+It runs in one pass over sorted intervals, needs no interference graph, and
+is easy to follow, which matters more here than the last few percent that
+graph colouring would give. The first backend spilled every value to the
+stack; it was replaced once it had served as the baseline.
+
+1. **Linearize.** Reachable blocks in reverse postorder, which is also the
+   emission order. Unreachable blocks are not emitted. Each instruction has
+   two program points: it reads operands at `2k` and writes results at
+   `2k + 1`, so a result can reuse the register of an operand that dies
+   there. Block parameters are defined at their block's header point, and
+   block-call arguments are read by the predecessor's terminator.
+2. **Liveness.** Backward dataflow over blocks for live-in/live-out sets.
+   With block arguments instead of phis there is no special case:
+   parameters are definitions and arguments are uses.
+3. **Intervals.** One interval per value, `[start, end]`, covering its
+   definition, its uses and every block it is live into or out of. A value
+   used at the top of a loop body is live out of the latch, so its interval
+   covers the whole loop. Single intervals without holes are conservative
+   but always safe.
+4. **Scan.** Intervals in start order. When no register is free, spill
+   whichever active interval ends last (or the new one, if it ends last). A
+   spilled value lives in a stack slot for its whole life: no splitting.
+   Spill slots are shared by non-overlapping intervals with the same scan.
+
+**Registers on aarch64:**
+
+| Registers | Use |
+|---|---|
+| x0–x7 | call arguments and results; never allocated |
+| x8, x16, x17 | scratch for reloading spilled operands, intermediate values, and parallel copies; never allocated |
+| x9–x15 | allocatable, caller-saved |
+| x18 | reserved by Apple; never touched |
+| x19–x28 | allocatable, callee-saved |
+| x29, x30 | frame pointer, return address |
+
+Keeping x0–x7 out of the pool means a call's arguments can be moved into
+place without moving live values out of the way first.
+
+**Calls** (including the memory intrinsics, which are libc calls) clobber
+the caller-saved registers. An interval live across a call (defined before
+it and used after) may only take a callee-saved register or be spilled;
+other intervals prefer caller-saved registers, which cost nothing to use.
+The prologue saves and the epilogue restores the callee-saved registers the
+function actually uses, with `stp`/`ldp` pairs.
+
+**Parallel copies.** Block arguments move into parameters all at once, and
+so do call arguments into x0–x7 and incoming arguments into their allocated
+locations. `parallel_copy.rs` turns such a copy into ordinary moves: emit
+any move whose destination nobody still needs to read; when only cycles are
+left, save one destination in x16 and redirect its readers there. A
+slot-to-slot move goes through x17. Moves are always 64-bit, since narrow
+values have unspecified upper bits anyway.
+
+**Frame layout,** from `sp` up:
+
+```text
+sp + 0              spill slots, 8 bytes each (only as many as needed)
+...                 IR stack slots, each at its alignment
+...                 padding to 16 bytes
+x29 - 16 * pairs    callee-saved registers used, in pairs
+x29                 saved x29, x30
+```
+
+Spill slots come first so `ldr x, [sp, #imm]` reaches them (at most
+4095 × 8 bytes). The epilogue resets `sp` from x29 before popping the saved
+registers, so it does not depend on the size of the rest of the frame.
+
+Known gaps: no interval splitting (a value spilled anywhere is spilled
+everywhere), no hints to place values in x0–x7 or to coalesce copies,
+blocks are laid out in reverse postorder only, and constants are
+re-materialized into registers rather than folded into immediates.
