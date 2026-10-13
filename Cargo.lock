@@ -20,6 +20,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel-frontend"
+version = "0.1.0"
+dependencies = [
+ "keel-ir",
+]
+
+[[package]]
 name = "keel-ir"
 version = "0.1.0"
 

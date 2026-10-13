@@ -1,0 +1,9 @@
+[package]
+name = "keel-frontend"
+description = "Builds keel IR in SSA form from mutable variables"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
