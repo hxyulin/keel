@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 keel-ir = { path = "../keel-ir" }
 keel-codegen = { path = "../keel-codegen" }
+keel-opt = { path = "../keel-opt" }
