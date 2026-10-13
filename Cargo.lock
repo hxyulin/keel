@@ -3,5 +3,20 @@
 version = 4
 
 [[package]]
+name = "keel"
+version = "0.1.0"
+dependencies = [
+ "keel-codegen",
+ "keel-ir",
+]
+
+[[package]]
+name = "keel-codegen"
+version = "0.1.0"
+dependencies = [
+ "keel-ir",
+]
+
+[[package]]
 name = "keel-ir"
 version = "0.1.0"

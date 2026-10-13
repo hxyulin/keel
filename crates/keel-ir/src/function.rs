@@ -145,6 +145,11 @@ impl Function {
         value
     }
 
+    /// Number of values ever created; value indices are below this.
+    pub fn num_values(&self) -> usize {
+        self.values.len()
+    }
+
     /// Number of blocks ever created; block indices are below this.
     pub fn num_blocks(&self) -> usize {
         self.blocks.len()

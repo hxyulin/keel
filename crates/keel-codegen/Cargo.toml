@@ -1,0 +1,9 @@
+[package]
+name = "keel-codegen"
+description = "Keel machine code generation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }

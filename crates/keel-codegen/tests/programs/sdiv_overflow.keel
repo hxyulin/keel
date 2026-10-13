@@ -1,0 +1,9 @@
+; expect: trap
+; INT32_MIN / -1 does not fit in i32. The hardware wraps; keel traps.
+func @main() -> i32 {
+block0:
+    v0 = iconst.i32 -2147483648
+    v1 = iconst.i32 -1
+    v2 = sdiv v0, v1
+    return v2
+}
