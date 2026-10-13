@@ -1,0 +1,24 @@
+; passes: gvn, dce
+; Repeated pure computations (in either operand order) reuse the first
+; one if it dominates them. Computations in sibling branches do not
+; dominate each other and stay; loads are never merged.
+func @f(i64, i64, ptr) -> i64 {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3 = iadd v0, v1
+    v4 = iadd v1, v0           ; same as v3
+    v5 = load.i64 v2
+    v6 = load.i64 v2           ; memory may have changed: kept
+    v7 = icmp.eq v3, v4
+    brif v7, block1, block2
+
+block1:
+    v8 = iadd v0, v1           ; dominated by v3
+    v9 = imul v8, v8
+    v20 = iadd v9, v5
+    return v20
+
+block2:
+    v10 = imul v3, v3          ; v9 is in a sibling block: kept
+    v21 = iadd v10, v6
+    return v21
+}

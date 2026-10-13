@@ -1,0 +1,26 @@
+; passes: simplify-cfg
+; A constant branch becomes a jump and the untaken side becomes
+; unreachable; an empty forwarding block is skipped; straight-line blocks
+; merge, with block parameters replaced by the jump's arguments.
+func @f(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i8 1
+    brif v1, block1, block2
+
+block1:
+    jump block3
+
+block2:                        ; unreachable once the brif folds
+    v2 = iconst.i64 99
+    return v2
+
+block3:
+    jump block4(v0)
+
+block4(v3: i64):
+    v4 = iadd v3, v3
+    brif v4, block5, block5
+
+block5:
+    return v4
+}

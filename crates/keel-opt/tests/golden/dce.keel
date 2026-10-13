@@ -1,0 +1,19 @@
+; passes: dce
+; Unused pure code goes; pinned instructions stay even if unused (a load
+; may trap). `v4` circulates around the loop but nothing reads it, so it
+; dies with its parameter.
+func @f(i64, ptr) -> i64 {
+block0(v0: i64, v1: ptr):
+    v2 = iconst.i64 1
+    v3 = iadd v0, v2           ; unused
+    v9 = load.i64 v1           ; unused, but kept
+    jump block1(v0, v2)
+
+block1(v5: i64, v4: i64):
+    v6 = iadd v4, v2           ; only feeds v4's next value
+    v7 = isub v5, v2
+    brif v7, block1(v7, v6), block2
+
+block2:
+    return v5
+}

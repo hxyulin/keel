@@ -1,0 +1,11 @@
+func @f(i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: ptr):
+    v2 = iconst.i64 1
+    v4 = load.i64 v1
+    jump block1(v0)
+block1(v5: i64):
+    v8 = isub v5, v2
+    brif v8, block1(v8), block2
+block2:
+    return v5
+}

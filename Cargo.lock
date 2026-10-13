@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "keel-codegen",
  "keel-ir",
+ "keel-opt",
 ]
 
 [[package]]
@@ -15,8 +16,16 @@ name = "keel-codegen"
 version = "0.1.0"
 dependencies = [
  "keel-ir",
+ "keel-opt",
 ]
 
 [[package]]
 name = "keel-ir"
 version = "0.1.0"
+
+[[package]]
+name = "keel-opt"
+version = "0.1.0"
+dependencies = [
+ "keel-ir",
+]

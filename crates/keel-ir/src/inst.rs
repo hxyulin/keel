@@ -217,6 +217,14 @@ impl InstData {
         }
     }
 
+    pub fn branch_dests_mut(&mut self) -> &mut [BlockCall] {
+        match self {
+            InstData::Jump { dest } => std::slice::from_mut(dest),
+            InstData::Brif { dests, .. } => dests,
+            _ => &mut [],
+        }
+    }
+
     /// Visits every value operand, including block-call arguments.
     pub fn for_each_operand(&self, mut f: impl FnMut(Value)) {
         match self {

@@ -1,0 +1,16 @@
+func @f(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3 = iadd v0, v1
+    v5 = load.i64 v2
+    v6 = load.i64 v2
+    v7 = icmp.eq v3, v3
+    brif v7, block1, block2
+block1:
+    v9 = imul v3, v3
+    v10 = iadd v9, v5
+    return v10
+block2:
+    v11 = imul v3, v3
+    v12 = iadd v11, v6
+    return v12
+}

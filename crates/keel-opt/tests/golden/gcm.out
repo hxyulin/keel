@@ -1,0 +1,18 @@
+func @f(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = iconst.i64 0
+    v6 = imul v1, v1
+    jump block1(v2, v2)
+block1(v4: i64, v5: i64):
+    v7 = iadd v5, v6
+    v8 = iconst.i64 1
+    v9 = iadd v4, v8
+    v10 = icmp.ult v9, v0
+    brif v10, block1(v9, v7), block2
+block2:
+    v3 = imul v0, v1
+    v11 = iadd v7, v3
+    v13 = iconst.i64 1
+    v12 = iadd v11, v13
+    return v12
+}

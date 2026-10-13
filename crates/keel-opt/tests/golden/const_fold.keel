@@ -1,0 +1,27 @@
+; passes: const-fold, dce
+; Chains fold in one pass; i8 wraps; shift amounts are taken mod the
+; width; a division that would trap is kept; a select on a constant
+; picks its arm even if the arm is not constant.
+func @f(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 6
+    v2 = iconst.i64 7
+    v3 = imul v1, v2
+    v4 = iconst.i8 127
+    v5 = iconst.i8 1
+    v6 = iadd v4, v5           ; -128
+    v7 = sext.i64 v6
+    v8 = iconst.i32 1
+    v9 = iconst.i64 35
+    v10 = shl v8, v9           ; 1 << 3
+    v11 = uext.i64 v10
+    v12 = iconst.i64 0
+    v13 = udiv v3, v12         ; traps at run time: not folded
+    v14 = icmp.ult v4, v6      ; 127 < 128 unsigned
+    v15 = select v14, v0, v3
+    v16 = iadd v3, v7
+    v17 = iadd v16, v11
+    v18 = iadd v17, v15
+    v19 = iadd v18, v13
+    return v19
+}

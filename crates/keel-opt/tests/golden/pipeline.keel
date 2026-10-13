@@ -1,0 +1,38 @@
+; passes: simplify-cfg, const-fold, simplify-cfg, gvn, dce, gcm
+; The default pipeline on a loop full of redundancy: a constant-folded
+; branch, a repeated address computation, a dead counter and an
+; invariant multiply.
+func @f(ptr, i64) -> i64 {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 0
+    v3 = iconst.i8 0
+    brif v3, block9, block1(v2, v2, v2)
+
+block9:
+    trap
+
+block1(v4: i64, v5: i64, v6: i64):    ; i, sum, dead counter
+    v7 = icmp.ult v4, v1
+    brif v7, block2, block3
+
+block2:
+    v8 = iconst.i64 4
+    v9 = imul v4, v8
+    v10 = ptradd v0, v9
+    v11 = load.i32 v10
+    v12 = imul v4, v8           ; same as v9
+    v13 = ptradd v0, v12        ; same as v10
+    store v11, v13
+    v14 = sext.i64 v11
+    v15 = iconst.i64 2
+    v16 = imul v1, v15          ; invariant
+    v17 = iadd v14, v16
+    v18 = iadd v5, v17
+    v19 = iconst.i64 1
+    v20 = iadd v4, v19
+    v21 = iadd v6, v19
+    jump block1(v20, v18, v21)
+
+block3:
+    return v5
+}

@@ -1,0 +1,94 @@
+//! Global value numbering: a pure instruction identical to one that
+//! dominates it is replaced by that one.
+//!
+//! Blocks are walked in dominator-tree preorder with a scoped hash table
+//! from instruction (with operands resolved) to the value it computes.
+//! Entering a block opens a scope; leaving it forgets what the block added,
+//! so a lookup only ever finds an instruction that dominates the current
+//! one, and the IR stays valid without moving anything.
+//!
+//! Merging two identical computations in sibling branches (hoisting them to
+//! a common dominator) would need code motion first; that is GCM's job.
+//! Pinned instructions are never numbered: two loads of the same address
+//! may see different memory.
+
+use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::{BinaryOp, EntityRef, Function, InstData, IntCC, Value};
+use std::collections::HashMap;
+
+pub fn run(func: &mut Function) -> bool {
+    let cfg = ControlFlowGraph::compute(func);
+    let domtree = DominatorTree::compute(func, &cfg);
+    let Some(entry) = func.entry_block() else {
+        return false;
+    };
+    let children = domtree.children();
+
+    let mut table: HashMap<InstData, Value> = HashMap::new();
+    // Keys added, in order, so a scope can be popped.
+    let mut added: Vec<InstData> = Vec::new();
+    // (block, scope start in `added`, whether its instructions were visited)
+    let mut stack = vec![(entry, 0, false)];
+    let mut changed = false;
+    while let Some((block, scope, visited)) = stack.pop() {
+        if visited {
+            for key in added.drain(scope..) {
+                table.remove(&key);
+            }
+            continue;
+        }
+        stack.push((block, added.len(), true));
+        for inst in func.block_insts(block).to_vec() {
+            let data = func.inst_data(inst);
+            if data.is_pinned() {
+                continue;
+            }
+            let key = canonical(func, data);
+            let result = func.first_result(inst);
+            match table.get(&key) {
+                Some(&existing) => {
+                    func.replace_all_uses(result, existing);
+                    func.remove_inst(inst);
+                    changed = true;
+                }
+                None => {
+                    table.insert(key.clone(), result);
+                    added.push(key);
+                }
+            }
+        }
+        for &child in children[block.index()].iter().rev() {
+            stack.push((child, 0, false));
+        }
+    }
+    changed
+}
+
+/// `data` with operands resolved, and operands of commutative operations
+/// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key.
+fn canonical(func: &Function, data: &InstData) -> InstData {
+    let mut key = data.clone();
+    key.for_each_operand_mut(|v| *v = func.resolve(*v));
+    match &mut key {
+        InstData::Binary { op, args } if is_commutative(*op) => args.sort_by_key(|v| v.index()),
+        InstData::Icmp {
+            cond: IntCC::Eq | IntCC::Ne,
+            args,
+        } => args.sort_by_key(|v| v.index()),
+        _ => {}
+    }
+    key
+}
+
+fn is_commutative(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::Iadd
+            | BinaryOp::Imul
+            | BinaryOp::And
+            | BinaryOp::Or
+            | BinaryOp::Xor
+            | BinaryOp::Umulhi
+            | BinaryOp::Smulhi
+    )
+}

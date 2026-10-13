@@ -1,0 +1,10 @@
+func @f(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v3 = iconst.i64 42
+    v12 = iconst.i64 0
+    v13 = udiv v3, v12
+    v17 = iconst.i64 -78
+    v18 = iadd v17, v0
+    v19 = iadd v18, v13
+    return v19
+}

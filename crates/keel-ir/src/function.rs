@@ -387,6 +387,12 @@ impl Function {
         self.values.len()
     }
 
+    /// Number of instructions ever created; instruction indices are below
+    /// this.
+    pub fn num_insts(&self) -> usize {
+        self.insts.len()
+    }
+
     /// Number of blocks ever created; block indices are below this.
     pub fn num_blocks(&self) -> usize {
         self.blocks.len()
