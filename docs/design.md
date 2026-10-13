@@ -38,11 +38,32 @@ and why they were made.
   `ptradd` with a constant offset, so optimizations only see `ptradd`.
   Bitfields belong to layouts, not to the instruction set.
 
+## Integer operations
+
+- Arithmetic: `iadd isub imul ineg`, `udiv sdiv urem srem` (trap on a zero
+  divisor; `sdiv` also on `MIN / -1`), `umulhi smulhi` (high half of the
+  double-width product).
+- Bitwise: `and or xor bnot`, shifts `shl ushr sshr` and rotates
+  `rotl rotr`. Shift and rotate amounts may be any integer type and are
+  taken modulo the bit width.
+- Bit counting: `clz ctz popcnt` are defined at 0 (`clz 0` and `ctz 0` give
+  the bit width). `bswap` needs at least `i16`.
+- `select c, a, b` picks without branching; `icmp` gives `i8` 0/1.
+
+**Instructions vs intrinsics.** Pure operations the optimizer should fold
+and number are instructions. Adding one costs an enum variant in an existing
+format, so there is no reason to hide them behind calls, as LLVM does for
+`ctpop`/`bswap` because its instructions are expensive to add. Intrinsics
+(one `Intrinsic { id, args }` format with a table of signature, purity and
+trapping) are for call-like or target-specific operations: `memcpy`,
+`memset`, `trap`, aarch64-only instructions. They arrive with `call`.
+
 ## Undefined behaviour
 
 - Integer arithmetic wraps by default.
-- `.trap` variants (`iadd.trap`) are defined: they trap on overflow, and
-  later code may rely on the overflow not having happened.
+- `.trap` variants are defined: they trap on overflow, and later code may
+  rely on the overflow not having happened. Overflow depends on signedness,
+  so they come in pairs (`sadd.trap`/`uadd.trap`); not implemented yet.
 - **The only source of UB is `assume`** (`assume.range`, `assume.nonnull`…).
   Debug builds turn assumptions into trapping checks; release builds trust
   them. UB is therefore opt-in, local and greppable.
