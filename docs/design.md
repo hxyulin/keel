@@ -82,11 +82,28 @@ trapping) are for call-like or target-specific operations: `memcpy`,
   promise disjointness between classes.
 - Atomics and fences follow the C++11 memory model.
 
+## Modules and calls
+
+- A file is one module: `decl @putchar(i32) -> i32` lines for external
+  functions and `func` definitions, in any order. There is no linking of
+  several keel modules yet.
+- `v1 = call @f(v0)` calls a declared or defined function; a call's results
+  follow the callee's signature and must all be named. Calls are pinned.
+- Each function keeps a table of the functions it calls with their
+  signatures, so a function can be printed, verified and compiled on its
+  own. The module verifier checks those tables against the declarations.
+
 ## ABI
 
-- Functions carry a calling-convention descriptor (`cc(c)`), resolved against
-  the target. A single `abi-lower` pass turns calls into explicit register
+- Functions carry a calling-convention descriptor (`cc(c)`, the default),
+  resolved against the target. A single `abi-lower` pass turns calls into explicit register
   and stack moves, using layouts to classify by-value structs.
+
+Current limits of the aarch64 C convention support: at most 8 arguments (no
+stack arguments), at most one return value, no `i8`/`i16` return values or
+arguments to external functions (Apple's ABI extends those by C signedness,
+which the IR does not record), and no variadic calls (Apple passes variadic
+arguments on the stack, so `printf` needs the IR to mark a call variadic).
 
 ## Target
 
