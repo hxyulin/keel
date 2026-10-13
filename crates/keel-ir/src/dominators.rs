@@ -124,6 +124,24 @@ impl DominatorTree {
         a
     }
 
+    /// The deepest block dominating both `a` and `b`, which must be
+    /// reachable.
+    pub fn common_dominator(&self, a: Block, b: Block) -> Block {
+        assert!(self.is_reachable(a) && self.is_reachable(b));
+        self.intersect(a, b)
+    }
+
+    /// Children of each block in the dominator tree, indexed by block.
+    pub fn children(&self) -> Vec<Vec<Block>> {
+        let mut children = vec![Vec::new(); self.idom.len()];
+        for &block in &self.rpo {
+            if let Some(idom) = self.idom[block.index()] {
+                children[idom.index()].push(block);
+            }
+        }
+        children
+    }
+
     pub fn is_reachable(&self, block: Block) -> bool {
         self.rpo_number[block.index()] != 0
     }

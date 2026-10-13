@@ -258,16 +258,21 @@ impl Verifier<'_> {
                 for dest in func.inst_data(inst).branch_dests() {
                     self.check_block_call(inst, dest);
                 }
-                if self.domtree.is_reachable(block) {
-                    // Report each value once, even if it is used several times.
-                    let mut operands = Vec::new();
-                    func.inst_data(inst).for_each_operand(|v| {
-                        let v = func.resolve(v);
-                        if !operands.contains(&v) {
-                            operands.push(v);
-                        }
-                    });
-                    for value in operands {
+                // Report each value once, even if it is used several times.
+                let mut operands = Vec::new();
+                func.inst_data(inst).for_each_operand(|v| {
+                    let v = func.resolve(v);
+                    if !operands.contains(&v) {
+                        operands.push(v);
+                    }
+                });
+                for value in operands {
+                    if !func.is_value_defined(value) {
+                        self.inst_error(
+                            inst,
+                            format!("uses {value}, whose definition was removed"),
+                        );
+                    } else if self.domtree.is_reachable(block) {
                         self.check_dominance(inst, value, &position);
                     }
                 }

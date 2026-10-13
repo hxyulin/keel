@@ -2,6 +2,13 @@
 //!
 //! All mutation goes through methods so invariants (result values, aliases)
 //! stay in one place.
+//!
+//! Removing an instruction or block takes it out of the layout but leaves
+//! its arena entry (handles stay valid, and nothing is renumbered). Values
+//! it defined still exist; using one is an error the verifier reports.
+//! Blocks store their instructions in a `Vec`, so inserting or removing in
+//! the middle of a block is linear in its size; fine for now, and the
+//! methods hide the representation if it needs to change.
 
 use crate::inst::{BlockCall, InstData, Symbol};
 use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, StackSlot, Type, Value};
@@ -82,7 +89,17 @@ struct BlockData {
 struct InstNode {
     data: InstData,
     results: Vec<Value>,
-    block: Block,
+    /// `None` once removed.
+    block: Option<Block>,
+}
+
+/// Where a new or moved instruction goes.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum InsertPoint {
+    /// After the last instruction of the block.
+    End(Block),
+    /// Just before an instruction already in the layout.
+    Before(Inst),
 }
 
 #[derive(Clone, Debug)]
@@ -209,6 +226,12 @@ impl Function {
 
     /// Appends an instruction to `block` and creates its result values.
     pub fn append_inst(&mut self, block: Block, data: InstData) -> Inst {
+        self.insert_inst(InsertPoint::End(block), data)
+    }
+
+    /// Inserts an instruction at `at` and creates its result values, typed
+    /// from its operands.
+    pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
         let result_tys = match &data {
             InstData::Iconst { ty, .. }
             | InstData::Convert { ty, .. }
@@ -227,7 +250,9 @@ impl Function {
             | InstData::Return { .. }
             | InstData::Trap => vec![],
         };
-        self.append_inst_with_results(block, data, &result_tys)
+        let inst = self.create_inst(data, &result_tys);
+        self.place(inst, at);
+        inst
     }
 
     /// Like [`Function::append_inst`] with the result types supplied, for the
@@ -238,10 +263,17 @@ impl Function {
         data: InstData,
         result_tys: &[Type],
     ) -> Inst {
+        let inst = self.create_inst(data, result_tys);
+        self.place(inst, InsertPoint::End(block));
+        inst
+    }
+
+    /// Creates an instruction and its results, outside the layout.
+    fn create_inst(&mut self, data: InstData, result_tys: &[Type]) -> Inst {
         let inst = self.insts.push(InstNode {
             data,
             results: Vec::new(),
-            block,
+            block: None,
         });
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
@@ -250,8 +282,88 @@ impl Function {
             });
             self.insts[inst].results.push(value);
         }
-        self.blocks[block].insts.push(inst);
         inst
+    }
+
+    /// Puts an instruction that is not in the layout at `at`.
+    fn place(&mut self, inst: Inst, at: InsertPoint) {
+        debug_assert!(self.insts[inst].block.is_none());
+        let (block, index) = match at {
+            InsertPoint::End(block) => (block, self.blocks[block].insts.len()),
+            InsertPoint::Before(before) => {
+                let block = self.inst_block(before);
+                (block, self.position(before))
+            }
+        };
+        self.blocks[block].insts.insert(index, inst);
+        self.insts[inst].block = Some(block);
+    }
+
+    /// Index of `inst` within its block.
+    fn position(&self, inst: Inst) -> usize {
+        let block = self.inst_block(inst);
+        self.blocks[block]
+            .insts
+            .iter()
+            .position(|&i| i == inst)
+            .expect("an instruction is in its block")
+    }
+
+    /// Takes `inst` out of the layout. Its results must be unused (or
+    /// replaced with [`Function::replace_all_uses`]) by then.
+    pub fn remove_inst(&mut self, inst: Inst) {
+        let block = self.inst_block(inst);
+        let index = self.position(inst);
+        self.blocks[block].insts.remove(index);
+        self.insts[inst].block = None;
+    }
+
+    /// Moves `inst` to `at`, keeping its results.
+    pub fn move_inst(&mut self, inst: Inst, at: InsertPoint) {
+        self.remove_inst(inst);
+        self.place(inst, at);
+    }
+
+    /// Whether `inst` has been removed from the layout.
+    pub fn is_removed(&self, inst: Inst) -> bool {
+        self.insts[inst].block.is_none()
+    }
+
+    /// Mutable access to an instruction, for rewriting operands or
+    /// replacing it with another instruction **with the same result
+    /// types** (e.g. folding an `iadd` to an `iconst`).
+    pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
+        &mut self.insts[inst].data
+    }
+
+    /// Takes `block` and its instructions out of the layout. Nothing may
+    /// branch to it any more.
+    pub fn remove_block(&mut self, block: Block) {
+        assert_ne!(
+            self.entry_block(),
+            Some(block),
+            "cannot remove the entry block"
+        );
+        for inst in std::mem::take(&mut self.blocks[block].insts) {
+            self.insts[inst].block = None;
+        }
+        self.layout.retain(|&b| b != block);
+    }
+
+    /// Whether `block` is in the layout.
+    pub fn is_block_inserted(&self, block: Block) -> bool {
+        self.layout.contains(&block)
+    }
+
+    /// Removes parameter `index` of `block` and returns its value, which
+    /// must be unused (or replaced). Branches to `block` still pass the
+    /// argument; the caller removes it from each of them.
+    pub fn remove_block_param(&mut self, block: Block, index: usize) -> Value {
+        let value = self.blocks[block].params.remove(index);
+        for (n, &param) in self.blocks[block].params.iter().enumerate().skip(index) {
+            self.values[param].def = ValueDef::Param(block, n as u16);
+        }
+        value
     }
 
     /// Makes every use of `old` read `new` instead. `old`'s defining
@@ -304,8 +416,28 @@ impl Function {
         &self.insts[inst].results
     }
 
+    /// The block containing `inst`. Panics if it was removed.
     pub fn inst_block(&self, inst: Inst) -> Block {
-        self.insts[inst].block
+        self.insts[inst].block.expect("instruction was removed")
+    }
+
+    /// Every instruction in the layout, block by block.
+    pub fn layout_insts(&self) -> impl Iterator<Item = (Block, Inst)> + '_ {
+        self.blocks()
+            .flat_map(move |b| self.block_insts(b).iter().map(move |&i| (b, i)))
+    }
+
+    /// Whether `value` is still defined: by an instruction in the layout,
+    /// or as a parameter its block still has. Aliases resolve first.
+    pub fn is_value_defined(&self, value: Value) -> bool {
+        match self.value_def(self.resolve(value)) {
+            ValueDef::Result(inst, _) => !self.is_removed(inst),
+            ValueDef::Param(block, n) => {
+                self.is_block_inserted(block)
+                    && self.blocks[block].params.get(n as usize) == Some(&self.resolve(value))
+            }
+            ValueDef::Alias(_) => unreachable!("resolved"),
+        }
     }
 
     /// The single result of `inst`. Panics if it has none.
@@ -458,18 +590,8 @@ fn write_list<T: fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::EntityRef;
-    use crate::inst::{BinaryOp, BlockCall, ConvertOp, IntCC};
-
-    fn binary(func: &mut Function, block: Block, op: BinaryOp, a: Value, b: Value) -> Value {
-        let inst = func.append_inst(block, InstData::Binary { op, args: [a, b] });
-        func.first_result(inst)
-    }
-
-    fn iconst(func: &mut Function, block: Block, ty: Type, imm: i64) -> Value {
-        let inst = func.append_inst(block, InstData::Iconst { ty, imm });
-        func.first_result(inst)
-    }
+    use crate::inst::IntCC;
+    use crate::{EntityRef, verify};
 
     /// `fn sum(p: *const i32, n: i64) -> i64`: sums `n` sign-extended i32s.
     fn build_sum() -> Function {
@@ -483,83 +605,86 @@ mod tests {
         let header = func.create_block();
         let body = func.create_block();
         let exit = func.create_block();
+        let end = InsertPoint::End;
 
         let p = func.append_block_param(entry, Type::Ptr);
         let n = func.append_block_param(entry, Type::I64);
-        let zero = iconst(&mut func, entry, Type::I64, 0);
-        func.append_inst(
-            entry,
-            InstData::Jump {
-                dest: BlockCall {
-                    block: header,
-                    args: vec![zero, zero],
-                },
-            },
-        );
+        let zero = func.ins(end(entry)).iconst(Type::I64, 0);
+        func.ins(end(entry)).jump(header, &[zero, zero]);
 
         let i = func.append_block_param(header, Type::I64);
         let acc = func.append_block_param(header, Type::I64);
-        let cond = func.append_inst(
-            header,
-            InstData::Icmp {
-                cond: IntCC::Ult,
-                args: [i, n],
-            },
-        );
-        let cond = func.first_result(cond);
-        func.append_inst(
-            header,
-            InstData::Brif {
-                cond,
-                dests: [
-                    BlockCall {
-                        block: body,
-                        args: vec![],
-                    },
-                    BlockCall {
-                        block: exit,
-                        args: vec![acc],
-                    },
-                ],
-            },
-        );
+        let cond = func.ins(end(header)).icmp(IntCC::Ult, i, n);
+        func.ins(end(header)).brif(cond, body, &[], exit, &[acc]);
 
-        let four = iconst(&mut func, body, Type::I64, 4);
-        let offset = binary(&mut func, body, BinaryOp::Imul, i, four);
-        let addr = binary(&mut func, body, BinaryOp::Ptradd, p, offset);
-        let elem = func.append_inst(
-            body,
-            InstData::Load {
-                ty: Type::I32,
-                addr,
-            },
-        );
-        let elem = func.first_result(elem);
-        let wide = func.append_inst(
-            body,
-            InstData::Convert {
-                op: ConvertOp::Sext,
-                ty: Type::I64,
-                arg: elem,
-            },
-        );
-        let wide = func.first_result(wide);
-        let acc2 = binary(&mut func, body, BinaryOp::Iadd, acc, wide);
-        let one = iconst(&mut func, body, Type::I64, 1);
-        let i2 = binary(&mut func, body, BinaryOp::Iadd, i, one);
-        func.append_inst(
-            body,
-            InstData::Jump {
-                dest: BlockCall {
-                    block: header,
-                    args: vec![i2, acc2],
-                },
-            },
-        );
+        let four = func.ins(end(body)).iconst(Type::I64, 4);
+        let offset = func.ins(end(body)).imul(i, four);
+        let addr = func.ins(end(body)).ptradd(p, offset);
+        let elem = func.ins(end(body)).load(Type::I32, addr);
+        let wide = func.ins(end(body)).sext(Type::I64, elem);
+        let acc2 = func.ins(end(body)).iadd(acc, wide);
+        let one = func.ins(end(body)).iconst(Type::I64, 1);
+        let i2 = func.ins(end(body)).iadd(i, one);
+        func.ins(end(body)).jump(header, &[i2, acc2]);
 
         let result = func.append_block_param(exit, Type::I64);
-        func.append_inst(exit, InstData::Return { args: vec![result] });
+        func.ins(end(exit)).return_(&[result]);
         func
+    }
+
+    fn def_inst(func: &Function, value: Value) -> Inst {
+        match func.value_def(value) {
+            ValueDef::Result(inst, _) => inst,
+            other => panic!("{value} is {other:?}"),
+        }
+    }
+
+    #[test]
+    fn insert_before_and_move() {
+        let mut func = build_sum();
+        // Hoist `v12 = iconst.i64 1` into the entry block, before its jump.
+        let one = Value::new(12);
+        let one_inst = def_inst(&func, one);
+        let entry = func.entry_block().unwrap();
+        let jump = *func.block_insts(entry).last().unwrap();
+        func.move_inst(one_inst, InsertPoint::Before(jump));
+        // And put a new constant before it.
+        let two = func.ins(InsertPoint::Before(one_inst)).iconst(Type::I64, 2);
+        let text = func.to_string();
+        assert!(
+            text.contains(
+                "    v2 = iconst.i64 0\n    v15 = iconst.i64 2\n    v12 = iconst.i64 1\n    jump"
+            ),
+            "{text}"
+        );
+        assert_eq!(func.inst_block(def_inst(&func, two)), entry);
+        verify(&func).unwrap();
+    }
+
+    #[test]
+    fn removed_definitions_are_reported() {
+        let mut func = build_sum();
+        func.remove_inst(def_inst(&func, Value::new(12)));
+        let errors = verify(&func).unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0]
+                .message
+                .contains("uses v12, whose definition was removed")
+        );
+    }
+
+    #[test]
+    fn remove_block_param_renumbers() {
+        let mut func = build_sum();
+        let header = Block::new(1);
+        let (i, acc) = (Value::new(3), Value::new(4));
+        let removed = func.remove_block_param(header, 0);
+        assert_eq!(removed, i);
+        assert_eq!(func.block_params(header), &[acc]);
+        assert_eq!(func.value_def(acc), ValueDef::Param(header, 0));
+        assert!(!func.is_value_defined(i));
+        assert!(func.is_value_defined(acc));
     }
 
     #[test]
