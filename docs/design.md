@@ -32,7 +32,8 @@ and why they were made.
 
 - Values: `i8 i16 i32 i64 i128 f32 f64 ptr`; vector types (`i32x4`…) later.
 - Signedness is on operations, not types. Comparisons return `i8` 0/1.
-- `ptr` is opaque. Memory is untyped bytes.
+- `ptr` is opaque. Memory is untyped bytes. `ptrtoint.i64` and
+  `inttoptr.ptr` convert between a pointer and its address.
 - **Layouts** are named declarations (`layout %Point = c { x: i32, y: i32 }`).
   `field.addr` and `elem.addr` are checked by the verifier and lowered to
   `ptradd` with a constant offset, so optimizations only see `ptradd`.
@@ -53,10 +54,17 @@ and why they were made.
 **Instructions vs intrinsics.** Pure operations the optimizer should fold
 and number are instructions. Adding one costs an enum variant in an existing
 format, so there is no reason to hide them behind calls, as LLVM does for
-`ctpop`/`bswap` because its instructions are expensive to add. Intrinsics
-(one `Intrinsic { id, args }` format with a table of signature, purity and
-trapping) are for call-like or target-specific operations: `memcpy`,
-`memset`, `trap`, aarch64-only instructions. They arrive with `call`.
+`ctpop`/`bswap` because its instructions are expensive to add. Intrinsics are for
+call-like or target-specific operations, written `intrinsic memcpy(v0, v1, v2)`
+(no `@`: they are not symbols). They share one `Intrinsic { id, args }` format;
+everything passes need (signature, purity) is in a per-intrinsic table in
+`intrinsic.rs`. Current ones: `memcpy`, `memmove`, `memset`, `debugtrap`.
+The aarch64 backend lowers the memory ones to libc calls for now.
+
+`trap` is a terminator instruction, not an intrinsic: nothing after it runs,
+and as an ordinary instruction every block using it would need a dummy
+terminator (LLVM's `call @llvm.trap()` + `unreachable`). `debugtrap` can be
+resumed by a debugger, so it is an intrinsic.
 
 ## Undefined behaviour
 
