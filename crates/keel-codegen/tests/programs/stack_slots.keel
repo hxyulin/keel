@@ -46,21 +46,17 @@ block5:
     v32 = icmp.ne v14, v31
     v33 = iconst.i32 1
     v34 = select v32, v33, v30
-    ; checks 2-3: ss3 is 8-byte aligned, ss4 16-byte aligned. There is no
-    ; ptr-to-int op, but memory is untyped: store the address, load an i64.
+    ; checks 2-3: ss3 is 8-byte aligned, ss4 16-byte aligned
     v40 = stack_addr ss3
     v44 = stack_addr ss4
-    v53 = stack_addr ss0
     v45 = iconst.i64 0
-    store v40, v53
-    v48 = load.i64 v53
+    v48 = ptrtoint.i64 v40
     v41 = iconst.i64 7
     v49 = and v48, v41
     v50 = icmp.ne v49, v45
     v46 = iconst.i32 2
     v51 = select v50, v46, v34
-    store v44, v53
-    v54 = load.i64 v53
+    v54 = ptrtoint.i64 v44
     v55 = iconst.i64 15
     v56 = and v54, v55
     v57 = icmp.ne v56, v45
@@ -109,11 +105,8 @@ block5:
     ; check 8: ss1 starts after all 5000 bytes of ss0
     v100 = stack_addr ss0
     v101 = stack_addr ss1
-    v102 = stack_addr ss4
-    store v100, v102
-    v103 = load.i64 v102
-    store v101, v102
-    v104 = load.i64 v102
+    v103 = ptrtoint.i64 v100
+    v104 = ptrtoint.i64 v101
     v105 = isub v104, v103
     v106 = iconst.i64 5000
     v107 = icmp.ult v105, v106

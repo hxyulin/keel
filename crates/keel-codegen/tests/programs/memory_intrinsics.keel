@@ -1,0 +1,70 @@
+; expect: exit 0
+; memset, memcpy, memmove (with overlap), and pointer <-> integer conversion.
+; Returns 0, or the number of the last failing check.
+func @main() -> i32 {
+    ss0 = stack_slot 16, align 8
+    ss1 = stack_slot 16, align 8
+block0:
+    v0 = iconst.i32 0
+    v1 = stack_addr ss0
+    v2 = stack_addr ss1
+    v3 = iconst.i64 8
+    v4 = ptradd v1, v3                 ; &a[8]
+    v5 = iconst.i64 16
+    ; check 1-2: memset(a, 7, 16), then memset(a, 1, 8)
+    v6 = iconst.i8 7
+    intrinsic memset(v1, v6, v5)
+    v7 = iconst.i8 1
+    intrinsic memset(v1, v7, v3)
+    v8 = load.i64 v1
+    v9 = iconst.i64 72340172838076673      ; 0x0101010101010101
+    v10 = icmp.ne v8, v9
+    v11 = iconst.i32 1
+    v12 = select v10, v11, v0
+    v13 = load.i64 v4
+    v14 = iconst.i64 506381209866536711    ; 0x0707070707070707
+    v15 = icmp.ne v13, v14
+    v16 = iconst.i32 2
+    v17 = select v15, v16, v12
+    ; check 3: memcpy(b, a, 16) copies both halves
+    intrinsic memcpy(v2, v1, v5)
+    v18 = ptradd v2, v3
+    v19 = load.i64 v18
+    v20 = icmp.ne v19, v14
+    v21 = iconst.i32 3
+    v22 = select v20, v21, v17
+    ; check 4-5: a = bytes 0..15, then memmove(a + 1, a, 15) shifts them up
+    v23 = iconst.i64 506097522914230528    ; 0x0706050403020100
+    store v23, v1
+    v24 = iconst.i64 1084818905618843912   ; 0x0f0e0d0c0b0a0908
+    store v24, v4
+    v25 = iconst.i64 1
+    v26 = ptradd v1, v25
+    v27 = iconst.i64 15
+    intrinsic memmove(v26, v1, v27)
+    v28 = load.i64 v1
+    v29 = iconst.i64 433757350076153856    ; 0x0605040302010000
+    v30 = icmp.ne v28, v29
+    v31 = iconst.i32 4
+    v32 = select v30, v31, v22
+    v33 = load.i64 v4
+    v34 = iconst.i64 1012478732780767239   ; 0x0e0d0c0b0a090807
+    v35 = icmp.ne v33, v34
+    v36 = iconst.i32 5
+    v37 = select v35, v36, v32
+    ; check 6: ptrtoint(a + 8) - ptrtoint(a) = 8
+    v38 = ptrtoint.i64 v1
+    v39 = ptrtoint.i64 v4
+    v40 = isub v39, v38
+    v41 = icmp.ne v40, v3
+    v42 = iconst.i32 6
+    v43 = select v41, v42, v37
+    ; check 7: inttoptr(ptrtoint(a) + 8) points at a[8]
+    v44 = iadd v38, v3
+    v45 = inttoptr.ptr v44
+    v46 = load.i64 v45
+    v47 = icmp.ne v46, v34
+    v48 = iconst.i32 7
+    v49 = select v47, v48, v43
+    return v49
+}

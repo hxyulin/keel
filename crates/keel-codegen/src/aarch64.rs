@@ -23,7 +23,7 @@
 use crate::CodegenError;
 use keel_ir::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, Inst, InstData, IntCC,
-    Module, Type, UnaryOp, Value,
+    Intrinsic, Module, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -253,6 +253,8 @@ impl<'a> FunctionCompiler<'a> {
                     },
                     // The low bits are already right; upper bits are unspecified.
                     ConvertOp::Trunc => {}
+                    // A pointer is a 64-bit address in a register already.
+                    ConvertOp::PtrToInt | ConvertOp::IntToPtr => {}
                 }
                 self.store_result(result, 9);
             }
@@ -314,6 +316,21 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(format!("b\t{}", self.label(else_dest.block)));
                 }
             }
+            InstData::Intrinsic { id, args } => match id {
+                // The libc functions take the same arguments in the same
+                // order. memset's `int c` only uses its low byte, so the
+                // unspecified upper bits of the i8 are harmless.
+                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
+                    for (i, &arg) in args.iter().enumerate() {
+                        self.load(i as u8, arg);
+                    }
+                    self.emit(format!("bl\t_{id}"));
+                }
+                // What clang emits for __builtin_debugtrap; a debugger can
+                // step past it.
+                Intrinsic::Debugtrap => self.emit("brk\t#0xf000"),
+            },
+            InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
                 if let Some(&value) = args.first() {
                     self.load(0, value);
