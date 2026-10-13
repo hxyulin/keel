@@ -4,9 +4,11 @@
 //! `; stdout: <text>` lines, if present, give the expected output line by
 //! line.
 //!
-//! Every program is compiled twice: with the real register set, and with two
-//! registers of each kind, which spills most values. That runs the spill code
-//! and the register/stack mixes in parallel copies on every program.
+//! Every program is compiled three times: with the real register set; with
+//! two registers of each kind, which spills most values (running the spill
+//! code and register/stack mixes in parallel copies on every program); and
+//! after the default optimization pipeline, which must not change what the
+//! program does.
 
 use keel_codegen::Pools;
 use keel_codegen::aarch64::REGISTERS;
@@ -17,19 +19,22 @@ use std::process::Command;
 /// SIGTRAP, raised by `brk`.
 const SIGTRAP: i32 = 5;
 
-/// Register sets to compile with, and a suffix for the output files.
-const CONFIGS: [(Pools, &str); 2] = [
-    (REGISTERS, ""),
+/// Register sets to compile with, whether to optimize first, and a suffix
+/// for the output files.
+const CONFIGS: [(Pools, bool, &str); 3] = [
+    (REGISTERS, false, ""),
     (
         Pools {
             caller_saved: &[9, 10],
             callee_saved: &[19, 20],
         },
+        false,
         "-tiny",
     ),
+    (REGISTERS, true, "-opt"),
 ];
 
-fn run_program(path: &Path, pools: &Pools, suffix: &str) -> Result<(), String> {
+fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Result<(), String> {
     let src = std::fs::read_to_string(path).unwrap();
     let expect = src
         .lines()
@@ -42,8 +47,11 @@ fn run_program(path: &Path, pools: &Pools, suffix: &str) -> Result<(), String> {
         .map(|l| l.strip_prefix(' ').unwrap_or(l))
         .collect();
 
-    let module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
+    let mut module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
     keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
+    if optimize {
+        keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
+    }
     let asm = keel_codegen::aarch64::compile_with(&module, pools).map_err(|e| e.to_string())?;
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
@@ -107,12 +115,12 @@ fn programs() {
         .flat_map(|p| {
             CONFIGS
                 .iter()
-                .map(move |(pools, suffix)| (p, pools, suffix))
+                .map(move |(pools, optimize, suffix)| (p, pools, *optimize, suffix))
         })
-        .filter_map(|(p, pools, suffix)| {
-            run_program(p, pools, suffix).err().map(|e| {
+        .filter_map(|(p, pools, optimize, suffix)| {
+            run_program(p, pools, optimize, suffix).err().map(|e| {
                 let name = p.file_name().unwrap().to_string_lossy();
-                format!("{name} (registers{suffix}): {e}")
+                format!("{name} (config{suffix}): {e}")
             })
         })
         .collect();

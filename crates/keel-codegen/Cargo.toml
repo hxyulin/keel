@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 keel-ir = { path = "../keel-ir" }
+
+[dev-dependencies]
+keel-opt = { path = "../keel-opt" }
