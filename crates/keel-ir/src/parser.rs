@@ -103,6 +103,8 @@ enum Tok {
     Bytes(Vec<u8>),
     Punct(char),
     Arrow,
+    /// `...`
+    Ellipsis,
     Newline,
     Eof,
 }
@@ -118,6 +120,7 @@ impl fmt::Display for Tok {
             Tok::Bytes(_) => f.write_str("a byte string"),
             Tok::Punct(c) => write!(f, "`{c}`"),
             Tok::Arrow => f.write_str("`->`"),
+            Tok::Ellipsis => f.write_str("`...`"),
             Tok::Newline => f.write_str("end of line"),
             Tok::Eof => f.write_str("end of file"),
         }
@@ -152,6 +155,9 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 let (bytes, end) = lex_bytes(&chars, i + 2, line_no)?;
                 tokens.push((Tok::Bytes(bytes), loc));
                 i = end;
+            } else if chars[i..].starts_with(&['.', '.', '.']) {
+                tokens.push((Tok::Ellipsis, loc));
+                i += 3;
             } else if c == '-' && chars.get(i + 1) == Some(&'>') {
                 tokens.push((Tok::Arrow, loc));
                 i += 2;
@@ -533,9 +539,26 @@ impl Parser {
         }
     }
 
-    /// `(i32, ptr) -> i64 cc(c)`; the return list and `cc(..)` are optional.
+    /// `(i32, ptr) -> i64 cc(c)`; the return list and `cc(..)` are optional,
+    /// and the parameters may end in `...`.
     fn signature(&mut self) -> Result<Signature, ParseError> {
-        let params = self.type_list()?;
+        let mut params = Vec::new();
+        let mut variadic = false;
+        self.expect(Tok::Punct('('))?;
+        if !self.eat(&Tok::Punct(')')) {
+            loop {
+                if self.eat(&Tok::Ellipsis) {
+                    variadic = true;
+                    self.expect(Tok::Punct(')'))?;
+                    break;
+                }
+                params.push(self.ty()?);
+                if self.eat(&Tok::Punct(')')) {
+                    break;
+                }
+                self.expect(Tok::Punct(','))?;
+            }
+        }
         let returns = if self.eat(&Tok::Arrow) {
             if self.at(&Tok::Punct('(')) {
                 self.type_list()?
@@ -560,6 +583,7 @@ impl Parser {
             params,
             returns,
             cc,
+            variadic,
         })
     }
 

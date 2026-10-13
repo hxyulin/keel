@@ -8,8 +8,8 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Type, UnaryOp, Value,
-    ValueDef,
+    BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Signature, Type, UnaryOp,
+    Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -403,13 +403,13 @@ impl Verifier<'_> {
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(*callee);
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if got != decl.sig.params {
+                if !args_match(&decl.sig, &got) {
                     self.inst_error(
                         inst,
                         format!(
                             "@{} takes ({}), got ({})",
                             decl.name,
-                            type_list(&decl.sig.params),
+                            param_list(&decl.sig),
                             type_list(&got)
                         ),
                     );
@@ -424,12 +424,12 @@ impl Verifier<'_> {
                     );
                 }
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if got != sig.params {
+                if !args_match(sig, &got) {
                     self.inst_error(
                         inst,
                         format!(
                             "the signature takes ({}), got ({})",
-                            type_list(&sig.params),
+                            param_list(sig),
                             type_list(&got)
                         ),
                     );
@@ -590,6 +590,31 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         ConvertOp::PtrToInt => "converts ptr to i64",
         ConvertOp::IntToPtr => "converts i64 to ptr",
     })
+}
+
+/// Whether arguments of types `got` fit `sig`: exactly its parameters, or
+/// for a variadic signature its parameters followed by any number of the
+/// types C's default argument promotions produce. (An `i8` or `f32` would
+/// be read back by the callee as an `int` or `double` it is not.)
+fn args_match(sig: &Signature, got: &[Type]) -> bool {
+    let n = sig.params.len();
+    if !sig.variadic {
+        return got == sig.params;
+    }
+    got.len() >= n
+        && got[..n] == sig.params[..]
+        && got[n..]
+            .iter()
+            .all(|ty| matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
+}
+
+/// A signature's parameters for messages, with `...` if variadic.
+fn param_list(sig: &Signature) -> String {
+    let mut list = type_list(&sig.params);
+    if sig.variadic {
+        list.push_str(if list.is_empty() { "..." } else { ", ..." });
+    }
+    list
 }
 
 fn type_list(tys: &[Type]) -> String {

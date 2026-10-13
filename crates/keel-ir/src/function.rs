@@ -25,13 +25,24 @@ pub struct Signature {
     pub params: Vec<Type>,
     pub returns: Vec<Type>,
     pub cc: CallConv,
+    /// Takes more arguments after `params`, like C's `...`. A call passes
+    /// `params` and then any number of `i32`, `i64`, `ptr` or `f64`: the
+    /// types C's default argument promotions leave.
+    pub variadic: bool,
 }
 
 impl fmt::Display for Signature {
-    /// `(i32, ptr) -> i64 cc(c)`
+    /// `(i32, ptr) -> i64 cc(c)`, or `(ptr, ...) -> i32 cc(c)`
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("(")?;
         write_list(f, &self.params)?;
+        if self.variadic {
+            f.write_str(if self.params.is_empty() {
+                "..."
+            } else {
+                ", ..."
+            })?;
+        }
         f.write_str(")")?;
         match self.returns.as_slice() {
             [] => {}
@@ -612,6 +623,7 @@ mod tests {
             params: vec![Type::Ptr, Type::I64],
             returns: vec![Type::I64],
             cc: CallConv::C,
+            variadic: false,
         };
         let mut func = Function::new("sum", sig);
         let entry = func.create_block();

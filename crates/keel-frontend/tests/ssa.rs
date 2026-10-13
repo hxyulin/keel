@@ -9,6 +9,7 @@ fn sig(params: &[Type], returns: &[Type]) -> Signature {
         params: params.to_vec(),
         returns: returns.to_vec(),
         cc: CallConv::C,
+        variadic: false,
     }
 }
 

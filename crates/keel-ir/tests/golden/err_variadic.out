@@ -1,0 +1,5 @@
+verifier errors:
+  @f inst0 `v3 = call @printf()`: @printf takes (ptr, ...), got ()
+  @f inst1 `v4 = call @printf(v0, v1)`: @printf takes (ptr, ...), got (ptr, i8)
+  @f inst2 `v5 = call @printf(v0, v2)`: @printf takes (ptr, ...), got (ptr, f32)
+  @f inst3 `v6 = call @printf(v1, v0)`: @printf takes (ptr, ...), got (i8, ptr)

@@ -1,0 +1,227 @@
+; expect: exit 0
+; stdout: 7 2.500 hi 123456789012 -1 2 3 4 5 6 7 8
+; stdout: no arguments
+; Stack arguments and variadic calls, checked against C in stack_args.c.
+; Past x0-x7 and v0-v7, named arguments go on the stack packed at their
+; natural size (Apple's rule); variadic ones always go on the stack, 8 bytes
+; each.
+decl @c_many(i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, i32, i64, i32, f32, f64, i32) -> f64
+decl @c_vsum(ptr, ...) -> i64
+decl @c_vtail(i64, i64, i64, i64, i64, i64, i64, i64, i32, ...) -> i64
+decl @printf(ptr, ...) -> i32
+
+data @fmt = const align 1 { b"%d %.3f %s %ld %d %d %d %d %d %d %d %d\n\0" }
+data @plain = const align 1 { b"no arguments\n\0" }
+data @hi = const align 1 { b"hi\0" }
+data @types = const align 1 { b"idlpidd\0" }
+
+; a0 * 1 + ... + a7 * 8 + d0 * 11 + ... + d7 * 18
+;   + s0 * 101 + s1 * 103 + s2 * 107 + s3 * 109 + s4 * 113 + s5 * 127
+; s0..s5 are on the stack at offsets 0, 8, 16, 20, 24 and 32.
+func @k_many(i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, i32, i64, i32, f32, f64, i32) -> f64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: f64, v9: f64, v10: f64, v11: f64, v12: f64, v13: f64, v14: f64, v15: f64, v16: i32, v17: i64, v18: i32, v19: f32, v20: f64, v21: i32):
+    v30 = iconst.i64 1
+    v31 = imul v0, v30
+    v32 = iconst.i64 2
+    v33 = imul v1, v32
+    v34 = iadd v31, v33
+    v35 = iconst.i64 3
+    v36 = imul v2, v35
+    v37 = iadd v34, v36
+    v38 = iconst.i64 4
+    v39 = imul v3, v38
+    v40 = iadd v37, v39
+    v41 = iconst.i64 5
+    v42 = imul v4, v41
+    v43 = iadd v40, v42
+    v44 = iconst.i64 6
+    v45 = imul v5, v44
+    v46 = iadd v43, v45
+    v47 = iconst.i64 7
+    v48 = imul v6, v47
+    v49 = iadd v46, v48
+    v50 = iconst.i64 8
+    v51 = imul v7, v50
+    v52 = iadd v49, v51
+    v53 = sitofp.f64 v52
+    v60 = fconst.f64 11.0
+    v61 = fmul v8, v60
+    v62 = fconst.f64 12.0
+    v63 = fmul v9, v62
+    v64 = fadd v61, v63
+    v65 = fconst.f64 13.0
+    v66 = fmul v10, v65
+    v67 = fadd v64, v66
+    v68 = fconst.f64 14.0
+    v69 = fmul v11, v68
+    v70 = fadd v67, v69
+    v71 = fconst.f64 15.0
+    v72 = fmul v12, v71
+    v73 = fadd v70, v72
+    v74 = fconst.f64 16.0
+    v75 = fmul v13, v74
+    v76 = fadd v73, v75
+    v77 = fconst.f64 17.0
+    v78 = fmul v14, v77
+    v79 = fadd v76, v78
+    v80 = fconst.f64 18.0
+    v81 = fmul v15, v80
+    v82 = fadd v79, v81
+    v83 = fadd v53, v82
+    v90 = sitofp.f64 v16
+    v91 = fconst.f64 101.0
+    v92 = fmul v90, v91
+    v93 = sitofp.f64 v17
+    v94 = fconst.f64 103.0
+    v95 = fmul v93, v94
+    v96 = sitofp.f64 v18
+    v97 = fconst.f64 107.0
+    v98 = fmul v96, v97
+    v99 = fpext.f64 v19
+    v100 = fconst.f64 109.0
+    v101 = fmul v99, v100
+    v102 = fconst.f64 113.0
+    v103 = fmul v20, v102
+    v104 = sitofp.f64 v21
+    v105 = fconst.f64 127.0
+    v106 = fmul v104, v105
+    v107 = fadd v83, v92
+    v108 = fadd v107, v95
+    v109 = fadd v108, v98
+    v110 = fadd v109, v101
+    v111 = fadd v110, v103
+    v112 = fadd v111, v106
+    return v112
+}
+
+; Calls `callee` (C's c_many or keel's k_many, by pointer) with arguments
+; derived from x: a_i = x + i, d_i = x * (i + 1) / 4, s0 = -x, s1 = x << 33,
+; s2 = 7 - x, s3 = x / 8, s4 = x * 1.5, s5 = x * 1000.
+func @k_call_many(i64, ptr) -> f64 {
+block0(v0: i64, v100: ptr):
+    v1 = iconst.i64 1
+    v2 = iadd v0, v1
+    v3 = iadd v2, v1
+    v4 = iadd v3, v1
+    v5 = iadd v4, v1
+    v6 = iadd v5, v1
+    v7 = iadd v6, v1
+    v8 = iadd v7, v1
+    v10 = sitofp.f64 v0
+    v11 = fconst.f64 0.25
+    v12 = fmul v10, v11
+    v13 = fadd v12, v12
+    v14 = fadd v13, v12
+    v15 = fadd v14, v12
+    v16 = fadd v15, v12
+    v17 = fadd v16, v12
+    v18 = fadd v17, v12
+    v19 = fadd v18, v12
+    v20 = trunc.i32 v0
+    v21 = ineg v20
+    v22 = iconst.i64 33
+    v23 = shl v0, v22
+    v24 = iconst.i32 7
+    v25 = isub v24, v20
+    v26 = fptrunc.f32 v10
+    v27 = fconst.f32 0.125
+    v28 = fmul v26, v27
+    v29 = fconst.f64 1.5
+    v30 = fmul v10, v29
+    v31 = iconst.i32 1000
+    v32 = imul v20, v31
+    v33 = call_indirect v100(v0, v2, v3, v4, v5, v6, v7, v8, v12, v13, v14, v15, v16, v17, v18, v19, v21, v23, v25, v28, v30, v32) : (i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, i32, i64, i32, f32, f64, i32) -> f64
+    return v33
+}
+
+; The same call, direct, to C.
+func @k_call_c_many(i64) -> f64 {
+block0(v0: i64):
+    v1 = symbol_addr @c_many
+    v2 = call @k_call_many(v0, v1)
+    return v2
+}
+
+; printf with more variadic arguments than there are registers, then with
+; none.
+func @k_print() {
+block0:
+    v0 = symbol_addr @fmt
+    v1 = iconst.i32 7
+    v2 = fconst.f64 2.5
+    v3 = symbol_addr @hi
+    v4 = iconst.i64 123456789012
+    v5 = iconst.i32 -1
+    v6 = iconst.i32 2
+    v7 = iconst.i32 3
+    v8 = iconst.i32 4
+    v9 = iconst.i32 5
+    v10 = iconst.i32 6
+    v11 = iconst.i32 7
+    v12 = iconst.i32 8
+    v13 = call @printf(v0, v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12)
+    v14 = symbol_addr @plain
+    v15 = call @printf(v14)
+    return
+}
+
+; c_vsum("idlpidd", 1, 2.5, 3, &types, -4, 0.25, -1.0), through a pointer.
+func @k_vsum() -> i64 {
+block0:
+    v0 = symbol_addr @types
+    v1 = iconst.i32 1
+    v2 = fconst.f64 2.5
+    v3 = iconst.i64 3
+    v4 = iconst.i32 -4
+    v5 = fconst.f64 0.25
+    v6 = fconst.f64 -1.0
+    v7 = symbol_addr @c_vsum
+    v8 = call_indirect v7(v0, v1, v2, v3, v0, v4, v5, v6) : (ptr, ...) -> i64
+    return v8
+}
+
+; Named arguments past x7 and then variadic ones: s0 is packed at offset
+; 0, and the variadic arguments start at the next 8-byte slot.
+func @k_vtail() -> i64 {
+block0:
+    v0 = iconst.i64 1
+    v1 = iconst.i32 -9
+    v2 = iconst.i64 100
+    v3 = fconst.f64 0.5
+    v4 = iconst.i32 3
+    v5 = call @c_vtail(v0, v0, v0, v0, v0, v0, v0, v0, v1, v2, v3, v4)
+    return v5
+}
+
+; Narrow stack arguments, keel to keel (C would need their signedness):
+; b0 at offset 0, h at 2, b1 at 4, w at 8.
+; b0 + h * 10 + b1 * 1000 + w * 100000, all sign-extended
+func @k_small(i64, i64, i64, i64, i64, i64, i64, i64, i8, i16, i8, i32) -> i64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i8, v9: i16, v10: i8, v11: i32):
+    v12 = sext.i64 v8
+    v13 = sext.i64 v9
+    v14 = iconst.i64 10
+    v15 = imul v13, v14
+    v16 = sext.i64 v10
+    v17 = iconst.i64 1000
+    v18 = imul v16, v17
+    v19 = sext.i64 v11
+    v20 = iconst.i64 100000
+    v21 = imul v19, v20
+    v22 = iadd v12, v15
+    v23 = iadd v22, v18
+    v24 = iadd v23, v21
+    v25 = iadd v24, v7
+    return v25
+}
+
+; k_small(.., x7 = x, -3, -300, 5, x) with x from the caller
+func @k_call_small(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i8 -3
+    v2 = iconst.i16 -300
+    v3 = iconst.i8 5
+    v4 = trunc.i32 v0
+    v5 = call @k_small(v0, v0, v0, v0, v0, v0, v0, v0, v1, v2, v3, v4)
+    return v5
+}

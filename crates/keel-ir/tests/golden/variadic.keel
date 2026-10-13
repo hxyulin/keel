@@ -1,0 +1,15 @@
+; A variadic signature ends in `...`. Calls pass the named parameters, then
+; any number of i32, i64, ptr or f64.
+decl @printf(ptr, ...) -> i32
+decl @anything(...)
+
+func @f(ptr, i32, f64) {
+block0(v0: ptr, v1: i32, v2: f64):
+    v3 = call @printf(v0)
+    v4 = call @printf(v0, v1, v2, v0)
+    call @anything()
+    call @anything(v1)
+    v5 = symbol_addr @printf
+    v6 = call_indirect v5(v0, v2) : (ptr, ...) -> i32
+    return
+}

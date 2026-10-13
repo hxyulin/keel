@@ -45,13 +45,18 @@
 //! From the stack pointer up:
 //!
 //! ```text
-//! sp + 0              spill slots, 8 bytes each
+//! sp + 0              outgoing stack arguments, for the call that needs most
+//! ...                 spill slots, 8 bytes each
 //! ...                 IR stack slots, each at its alignment
 //! ...                 padding to 16 bytes
 //! ...                 callee-saved FP registers this function uses, in pairs
 //! x29 - 16 * pairs    callee-saved general registers it uses, in pairs
 //! x29                 saved x29 (frame pointer), saved x30 (return address)
+//! x29 + 16            incoming stack arguments, in the caller's frame
 //! ```
+//!
+//! Calls store their stack arguments at `sp` directly: the area is part of
+//! the fixed frame, so `sp` never moves after the prologue.
 //!
 //! # Symbols
 //!
@@ -141,13 +146,22 @@ const MAX_SLOT_OFFSET: usize = 4095 * 8;
 /// The largest frame `sub sp` can allocate in two instructions (24 bits).
 const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 
+/// The most bytes of stack arguments a call may pass or a function take.
+/// Stack arguments are addressed with scaled 12-bit offsets (from `sp` by
+/// the caller, from `x29 + 16` by the callee), which a byte-sized argument
+/// beyond this could not reach.
+const MAX_STACK_ARGS: u32 = 4080;
+
 struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
-    /// Spill slots and IR stack slots; the callee-saved area is separate.
+    /// Offset from `sp` of spill slot 0, above the outgoing arguments.
+    spill_base: usize,
+    /// Outgoing arguments, spill slots and IR stack slots; the
+    /// callee-saved area is separate.
     frame_size: usize,
     /// The block emitted after the current one, which a branch can fall
     /// through to.
@@ -163,11 +177,17 @@ impl<'a> FunctionCompiler<'a> {
             message,
         };
         let CallConv::C = func.sig.cc;
-        if arg_locs(&func.sig.params).contains(&None) {
+        if func.sig.variadic {
             return Err(err(
-                "more than 8 integer or 8 float parameters (stack arguments) are not supported yet"
+                "variadic functions can be called but not defined yet (there is no va_start)"
                     .into(),
             ));
+        }
+        let (_, incoming) = arg_locs(&func.sig.params, func.sig.params.len());
+        if incoming > MAX_STACK_ARGS {
+            return Err(err(format!(
+                "{incoming} bytes of stack parameters is more than the {MAX_STACK_ARGS} supported"
+            )));
         }
         match func.sig.returns.as_slice() {
             [] => {}
@@ -204,8 +224,34 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
 
+        // The outgoing argument area at the bottom of the frame must hold
+        // the stack arguments of every call this function makes.
+        let mut outgoing = 0;
+        for (_, inst) in func.layout_insts() {
+            let (args, named) = match func.inst_data(inst) {
+                InstData::Call { func: callee, args } => {
+                    (args, func.callee(*callee).sig.params.len())
+                }
+                InstData::CallIndirect { sig, args, .. } => {
+                    (args, func.signature(*sig).params.len())
+                }
+                _ => continue,
+            };
+            let tys: Vec<Type> = args
+                .iter()
+                .map(|&a| func.value_type(func.resolve(a)))
+                .collect();
+            outgoing = outgoing.max(arg_locs(&tys, named).1);
+        }
+        if outgoing > MAX_STACK_ARGS {
+            return Err(err(format!(
+                "a call passes {outgoing} bytes of stack arguments, more than the {MAX_STACK_ARGS} supported"
+            )));
+        }
+        let spill_base = (outgoing as usize).next_multiple_of(8);
+
         let alloc = regalloc::allocate(func, pools, is_call);
-        let mut offset = 8 * alloc.spill_slots as usize;
+        let mut offset = spill_base + 8 * alloc.spill_slots as usize;
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
                 "{offset} bytes of spill slots is too many for this allocator"
@@ -228,6 +274,7 @@ impl<'a> FunctionCompiler<'a> {
             module,
             alloc,
             stack_slot_offsets,
+            spill_base,
             frame_size,
             next_block: None,
             out: String::new(),
@@ -264,13 +311,21 @@ impl<'a> FunctionCompiler<'a> {
         }
         // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
         // so this copy has no cycles; it may still store to spill slots.
+        // Stack arguments are in the caller's frame, just above ours.
         if let Some(entry) = func.entry_block() {
-            let params = func.block_params(entry);
-            let moves: Vec<(Loc, Loc)> = params
-                .iter()
-                .zip(arg_locs(&func.sig.params))
-                .filter_map(|(&param, src)| Some((self.alloc.loc(param)?, src.expect("checked"))))
-                .collect();
+            let params = func.block_params(entry).to_vec();
+            let tys = &func.sig.params;
+            let (locs, _) = arg_locs(tys, tys.len());
+            let mut moves = Vec::new();
+            for ((param, loc), &ty) in params.into_iter().zip(locs).zip(tys) {
+                let Some(dst) = self.alloc.loc(param) else {
+                    continue;
+                };
+                match loc {
+                    ArgLoc::Reg(src) => moves.push((dst, src)),
+                    ArgLoc::Stack(offset) => self.load_stack_param(dst, ty, 16 + offset),
+                }
+            }
             self.parallel_copy(&moves);
         }
 
@@ -297,7 +352,7 @@ impl<'a> FunctionCompiler<'a> {
         let mut line = String::from("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
-                write!(line, " {value}={}", loc_name(loc)).unwrap();
+                write!(line, " {value}={}", self.loc_name(loc)).unwrap();
             }
         }
         writeln!(self.out, "{line}").unwrap();
@@ -331,11 +386,12 @@ impl<'a> FunctionCompiler<'a> {
                 self.def_done(result, d);
             }
             InstData::Call { func: callee, args } => {
-                self.call(&args, &format!("_{}", func.callee(callee).name));
+                let named = func.callee(callee).sig.params.len();
+                self.call(&args, named, &format!("_{}", func.callee(callee).name));
                 self.call_result(result);
             }
-            InstData::CallIndirect { callee, args, .. } => {
-                self.move_args(&args);
+            InstData::CallIndirect { sig, callee, args } => {
+                self.move_args(&args, func.signature(sig).params.len());
                 // The callee is in an allocated register, which the argument
                 // moves leave alone (they write x0–x7, x16 and x17), or in a
                 // spill slot, reloaded after the moves so x16 is free.
@@ -550,7 +606,7 @@ impl<'a> FunctionCompiler<'a> {
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
                 Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
-                    self.call(&args, &format!("_{id}"));
+                    self.call(&args, args.len(), &format!("_{id}"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
@@ -568,23 +624,68 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Moves the arguments into x0–x7 and calls `symbol`. Values live across
-    /// the call are in callee-saved registers or spill slots (the allocator
-    /// sees to that), so nothing needs saving here.
-    fn call(&mut self, args: &[Value], symbol: &str) {
-        self.move_args(args);
+    /// Moves the arguments into place and calls `symbol`; the first `named`
+    /// are named, the rest variadic. Values live across the call are in
+    /// callee-saved registers or spill slots (the allocator sees to that),
+    /// so nothing needs saving here.
+    fn call(&mut self, args: &[Value], named: usize, symbol: &str) {
+        self.move_args(args, named);
         self.emit(format!("bl\t{symbol}"));
     }
 
-    /// Moves call arguments into x0–x7 and v0–v7.
-    fn move_args(&mut self, args: &[Value]) {
+    /// Moves call arguments into x0–x7, v0–v7 and the outgoing argument
+    /// area at `sp`. The two do not interfere: arguments are never
+    /// allocated to x0–x7 or v0–v7, nor to the outgoing area.
+    fn move_args(&mut self, args: &[Value], named: usize) {
         let tys: Vec<Type> = args.iter().map(|&a| self.ty(a)).collect();
-        let moves: Vec<(Loc, Loc)> = args
-            .iter()
-            .zip(arg_locs(&tys))
-            .map(|(&arg, dst)| (dst.expect("checked"), self.loc(arg)))
-            .collect();
+        let (locs, _) = arg_locs(&tys, named);
+        let mut moves = Vec::new();
+        for ((&arg, loc), &ty) in args.iter().zip(locs).zip(&tys) {
+            match loc {
+                ArgLoc::Reg(dst) => moves.push((dst, self.loc(arg))),
+                ArgLoc::Stack(offset) => self.store_stack_arg(arg, ty, offset),
+            }
+        }
         self.parallel_copy(&moves);
+    }
+
+    /// Stores `arg` at `[sp, #offset]` with its own width.
+    fn store_stack_arg(&mut self, arg: Value, ty: Type, offset: u32) {
+        if ty.is_float() {
+            let r = self.use_freg(arg, FS1);
+            self.emit(format!("str\t{}, [sp, #{offset}]", freg(r, ty)));
+        } else {
+            let r = self.use_reg(arg, S1);
+            let op = match ty {
+                Type::I8 => "strb",
+                Type::I16 => "strh",
+                _ => "str",
+            };
+            self.emit(format!("{op}\t{}, [sp, #{offset}]", reg(r, ty)));
+        }
+    }
+
+    /// Loads a stack parameter at `[x29, #offset]` into `dst`.
+    fn load_stack_param(&mut self, dst: Loc, ty: Type, offset: u32) {
+        let (r, scratch) = match dst {
+            Loc::Reg(r) | Loc::FReg(r) => (r, None),
+            Loc::Stack(s) => (if ty.is_float() { FS0 } else { S0 }, Some(s)),
+        };
+        let op = match ty {
+            Type::I8 => "ldrb",
+            Type::I16 => "ldrh",
+            _ => "ldr",
+        };
+        let rd = if ty.is_float() {
+            freg(r, ty)
+        } else {
+            reg(r, ty)
+        };
+        self.emit(format!("{op}\t{rd}, [x29, #{offset}]"));
+        if let Some(s) = scratch {
+            let class = if ty.is_float() { 'd' } else { 'x' };
+            self.emit(format!("str\t{class}{r}, {}", self.slot(s)));
+        }
     }
 
     /// Moves a call's result, if it has one, from x0 or v0 to its place.
@@ -883,13 +984,13 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::FReg(d), Loc::FReg(s)) => self.emit(format!("fmov\td{d}, d{s}")),
             (Loc::Reg(d), Loc::FReg(s)) => self.emit(format!("fmov\tx{d}, d{s}")),
             (Loc::FReg(d), Loc::Reg(s)) => self.emit(format!("fmov\td{d}, x{s}")),
-            (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("ldr\tx{d}, {}", slot(s))),
-            (Loc::FReg(d), Loc::Stack(s)) => self.emit(format!("ldr\td{d}, {}", slot(s))),
-            (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("str\tx{s}, {}", slot(d))),
-            (Loc::Stack(d), Loc::FReg(s)) => self.emit(format!("str\td{s}, {}", slot(d))),
+            (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("ldr\tx{d}, {}", self.slot(s))),
+            (Loc::FReg(d), Loc::Stack(s)) => self.emit(format!("ldr\td{d}, {}", self.slot(s))),
+            (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("str\tx{s}, {}", self.slot(d))),
+            (Loc::Stack(d), Loc::FReg(s)) => self.emit(format!("str\td{s}, {}", self.slot(d))),
             (Loc::Stack(d), Loc::Stack(s)) => {
-                self.emit(format!("ldr\tx{S1}, {}", slot(s)));
-                self.emit(format!("str\tx{S1}, {}", slot(d)));
+                self.emit(format!("ldr\tx{S1}, {}", self.slot(s)));
+                self.emit(format!("str\tx{S1}, {}", self.slot(d)));
             }
         }
     }
@@ -959,7 +1060,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("ldr\tx{scratch}, {}", slot(s)));
+                self.emit(format!("ldr\tx{scratch}, {}", self.slot(s)));
                 scratch
             }
             Loc::FReg(_) => unreachable!("{value} is a float"),
@@ -971,7 +1072,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("ldr\td{scratch}, {}", slot(s)));
+                self.emit(format!("ldr\td{scratch}, {}", self.slot(s)));
                 scratch
             }
             Loc::Reg(_) => unreachable!("{value} is not a float"),
@@ -1007,12 +1108,26 @@ impl<'a> FunctionCompiler<'a> {
             } else {
                 'x'
             };
-            self.emit(format!("str\t{class}{reg}, {}", slot(s)));
+            self.emit(format!("str\t{class}{reg}, {}", self.slot(s)));
         }
     }
 
     fn ty(&self, value: Value) -> Type {
         self.func.value_type(self.func.resolve(value))
+    }
+
+    /// The address of spill slot `index`: above the outgoing arguments at
+    /// the bottom of the frame, close enough to `sp` for a scaled immediate.
+    fn slot(&self, index: u32) -> String {
+        format!("[sp, #{}]", self.spill_base + 8 * index as usize)
+    }
+
+    fn loc_name(&self, loc: Loc) -> String {
+        match loc {
+            Loc::Reg(r) => format!("x{r}"),
+            Loc::FReg(r) => format!("d{r}"),
+            Loc::Stack(s) => self.slot(s),
+        }
     }
 
     fn label(&self, block: Block) -> String {
@@ -1028,11 +1143,6 @@ impl<'a> FunctionCompiler<'a> {
 /// callees may be C code relying on the full ABI.
 fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(), String> {
     let CallConv::C = sig.cc;
-    if arg_locs(&sig.params).contains(&None) {
-        return Err(format!(
-            "{what}: more than 8 integer or 8 float arguments (stack arguments) are not supported yet"
-        ));
-    }
     if sig.returns.len() > 1 {
         return Err(format!(
             "{what}: multiple return values are not supported by the C convention"
@@ -1116,23 +1226,54 @@ fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
     }
 }
 
-/// Where the C convention passes each argument: integers and pointers in
-/// x0–x7, floats in v0–v7, each class counted on its own, so
-/// `f(i64, f64, i64)` uses x0, v0 and x1. `None` once a class runs out.
-fn arg_locs(tys: &[Type]) -> Vec<Option<Loc>> {
-    let (mut ints, mut floats) = (0u8, 0u8);
-    tys.iter()
-        .map(|ty| {
+/// Where the C convention puts one argument.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum ArgLoc {
+    /// x0–x7 or v0–v7.
+    Reg(Loc),
+    /// At this offset from the caller's `sp` at the call.
+    Stack(u32),
+}
+
+/// Places arguments of types `tys`, the first `named` of them named and the
+/// rest variadic, by Apple's arm64 C convention. Returns each argument's
+/// location and the bytes of stack they take.
+///
+/// - Named integers and pointers go in x0–x7, floats in v0–v7, each class
+///   counted on its own: `f(i64, f64, i64)` uses x0, d0 and x1.
+/// - Once a class runs out, its arguments go on the stack in order, each
+///   at its natural size and alignment: Apple packs them, where standard
+///   AAPCS64 gives each its own 8-byte slot.
+/// - Variadic arguments always go on the stack, each in its own 8-byte
+///   slot (Apple's `va_list` is a pointer stepping 8 bytes at a time).
+fn arg_locs(tys: &[Type], named: usize) -> (Vec<ArgLoc>, u32) {
+    let (mut ints, mut floats, mut stack) = (0u8, 0u8, 0u32);
+    let mut on_stack = |size: u32, align: u32| {
+        let offset = stack.next_multiple_of(align);
+        stack = offset + size;
+        ArgLoc::Stack(offset)
+    };
+    let locs = tys
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            if i >= named {
+                return on_stack(8, 8);
+            }
             let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() {
                 (&mut floats, Loc::FReg)
             } else {
                 (&mut ints, Loc::Reg)
             };
-            let loc = (*next < 8).then(|| class(*next));
-            *next += 1;
-            loc
+            if *next < 8 {
+                *next += 1;
+                return ArgLoc::Reg(class(*next - 1));
+            }
+            let size = ty.bytes().unwrap_or(8);
+            on_stack(size, size)
         })
-        .collect()
+        .collect();
+    (locs, stack)
 }
 
 /// Where a single return value of type `ty` goes: x0 or v0.
@@ -1141,20 +1282,6 @@ fn return_loc(ty: Type) -> Loc {
         Loc::FReg(0)
     } else {
         Loc::Reg(0)
-    }
-}
-
-/// The address of spill slot `index`. Spill slots are at the bottom of the
-/// frame, so the offset is small enough for a scaled immediate.
-fn slot(index: u32) -> String {
-    format!("[sp, #{}]", 8 * index)
-}
-
-fn loc_name(loc: Loc) -> String {
-    match loc {
-        Loc::Reg(r) => format!("x{r}"),
-        Loc::FReg(r) => format!("d{r}"),
-        Loc::Stack(s) => slot(s),
     }
 }
 

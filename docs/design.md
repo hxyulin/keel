@@ -175,13 +175,27 @@ decl data @environ
   resolved against the target. A single `abi-lower` pass turns calls into explicit register
   and stack moves, using layouts to classify by-value structs.
 
-Integers and pointers are passed in x0–x7 and floats in v0–v7, each class
-counted separately (`f(i64, f64, i64)` uses x0, d0, x1). Current limits of
-the aarch64 C convention support: at most 8 arguments of each class (no
-stack arguments), at most one return value, no `i8`/`i16` return values or
-arguments to external functions or through `call_indirect` (Apple's ABI extends those by C signedness,
-which the IR does not record), and no variadic calls (Apple passes variadic
-arguments on the stack, so `printf` needs the IR to mark a call variadic).
+Apple arm64's C convention, as implemented:
+
+- Integers and pointers go in x0–x7 and floats in v0–v7, each class counted
+  separately (`f(i64, f64, i64)` uses x0, d0, x1).
+- Once a class runs out, its arguments go on the stack in order, **packed at
+  their natural size and alignment** (an `i32` takes 4 bytes). Standard
+  AAPCS64 gives every stack argument its own 8-byte slot; Apple does not.
+- **Variadic** arguments always go on the stack, 8 bytes each, even when
+  registers are free: Apple's `va_list` is a pointer that steps 8 bytes at a
+  time. A signature marks this with `...`: `decl @printf(ptr, ...) -> i32`.
+  Calls pass the named parameters and then any number of `i32`, `i64`,
+  `ptr` or `f64`, the types C's default argument promotions leave.
+- Calls store stack arguments at `sp`, in an outgoing-argument area at the
+  bottom of the frame sized for the largest call, so `sp` never moves after
+  the prologue. A function reads its own stack parameters at `x29 + 16`.
+
+Limits: at most one return value; no `i8`/`i16` return values, nor such
+arguments to external functions or through `call_indirect` (Apple's ABI has
+the caller extend them by C signedness, which the IR does not record);
+variadic functions can be called but not defined (no `va_start` yet); no
+by-value structs; at most 4080 bytes of stack arguments per call.
 
 ## Target
 
@@ -255,7 +269,8 @@ values have unspecified upper bits anyway.
 **Frame layout,** from `sp` up:
 
 ```text
-sp + 0              spill slots, 8 bytes each (only as many as needed)
+sp + 0              outgoing stack arguments (for the call that needs most)
+...                 spill slots, 8 bytes each (only as many as needed)
 ...                 IR stack slots, each at its alignment
 ...                 padding to 16 bytes
 ...                 callee-saved FP registers used (d8–d15), in pairs
@@ -263,7 +278,8 @@ x29 - 16 * pairs    callee-saved general registers used, in pairs
 x29                 saved x29, x30
 ```
 
-Spill slots come first so `ldr x, [sp, #imm]` reaches them (at most
+Outgoing arguments must be at `sp` when a call is made. Spill slots come
+right after them so `ldr x, [sp, #imm]` reaches them (at most
 4095 × 8 bytes). The epilogue resets `sp` from x29 before popping the saved
 registers, so it does not depend on the size of the rest of the frame.
 
