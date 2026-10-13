@@ -1,6 +1,8 @@
 //! End-to-end tests: compile each `tests/programs/*.keel` to assembly, link
 //! it with `clang` (plus a same-named `.c` driver if there is one), run it,
 //! and compare with the `; expect:` line, either `exit <code>` or `trap`.
+//! `; stdout: <text>` lines, if present, give the expected output line by
+//! line.
 
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
@@ -16,11 +18,15 @@ fn run_program(path: &Path) -> Result<(), String> {
         .find_map(|l| l.strip_prefix("; expect: "))
         .ok_or("missing `; expect:` line")?;
 
-    let funcs = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
-    for func in &funcs {
-        keel_ir::verify(func).map_err(|e| format!("verifier: {e:?}"))?;
-    }
-    let asm = keel_codegen::aarch64::compile(&funcs).map_err(|e| e.to_string())?;
+    let stdout_lines: Vec<&str> = src
+        .lines()
+        .filter_map(|l| l.strip_prefix("; stdout:"))
+        .map(|l| l.strip_prefix(' ').unwrap_or(l))
+        .collect();
+
+    let module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
+    keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
+    let asm = keel_codegen::aarch64::compile(&module).map_err(|e| e.to_string())?;
 
     let stem = path.file_stem().unwrap().to_string_lossy();
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
@@ -50,6 +56,13 @@ fn run_program(path: &Path) -> Result<(), String> {
         (None, Some(sig)) => format!("signal {sig}"),
         (None, None) => "unknown status".to_string(),
     };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if !stdout_lines.is_empty() {
+        let want: String = stdout_lines.iter().map(|l| format!("{l}\n")).collect();
+        if stdout != want {
+            return Err(format!("stdout was {stdout:?}, want {want:?}"));
+        }
+    }
     if got != expect {
         return Err(format!(
             "expected `{expect}`, got `{got}`\n{}(assembly: {})",

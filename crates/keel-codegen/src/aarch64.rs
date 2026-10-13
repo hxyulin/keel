@@ -23,15 +23,16 @@
 use crate::CodegenError;
 use keel_ir::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, Inst, InstData, IntCC,
-    Type, UnaryOp, Value,
+    Module, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
-/// Compiles `funcs` into one assembly file for `clang`/`as`.
-pub fn compile(funcs: &[Function]) -> Result<String, CodegenError> {
+/// Compiles a module into one assembly file for `clang`/`as`. Declared
+/// functions are left as undefined symbols for the linker to resolve.
+pub fn compile(module: &Module) -> Result<String, CodegenError> {
     let mut out = String::from("\t.section\t__TEXT,__text,regular,pure_instructions\n");
-    for func in funcs {
-        FunctionCompiler::new(func)?.compile(&mut out);
+    for func in &module.functions {
+        FunctionCompiler::new(func, module)?.compile(&mut out);
     }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
@@ -56,7 +57,7 @@ struct FunctionCompiler<'a> {
 }
 
 impl<'a> FunctionCompiler<'a> {
-    fn new(func: &'a Function) -> Result<Self, CodegenError> {
+    fn new(func: &'a Function, module: &Module) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -82,6 +83,36 @@ impl<'a> FunctionCompiler<'a> {
                 return Err(err(
                     "multiple return values are not supported by the C convention".into(),
                 ));
+            }
+        }
+        for (_, callee) in func.callees() {
+            let sig = &callee.sig;
+            let CallConv::C = sig.cc;
+            if sig.params.len() > 8 {
+                return Err(err(format!(
+                    "call to @{}: more than 8 arguments (stack arguments) are not supported yet",
+                    callee.name
+                )));
+            }
+            if sig.returns.len() > 1 {
+                return Err(err(format!(
+                    "call to @{}: multiple return values are not supported by the C convention",
+                    callee.name
+                )));
+            }
+            // The Apple ABI has the caller extend narrow arguments to 32 bits
+            // by C signedness, which the IR does not record. Keel functions
+            // do not rely on it, but external ones may.
+            if module.is_external(&callee.name)
+                && sig
+                    .params
+                    .iter()
+                    .any(|ty| matches!(ty, Type::I8 | Type::I16))
+            {
+                return Err(err(format!(
+                    "call to external @{}: i8/i16 arguments need signedness the IR does not have yet",
+                    callee.name
+                )));
             }
         }
         for value in (0..func.num_values()).map(Value::new) {
@@ -166,6 +197,17 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Iconst { imm, .. } => {
                 self.materialize(9, imm as u64, true);
                 self.store_result(result, 9);
+            }
+            InstData::Call { func: callee, args } => {
+                // Spill-everything keeps no values in registers, so nothing
+                // needs saving around the call; x30 is saved in the prologue.
+                for (i, &arg) in args.iter().enumerate() {
+                    self.load(i as u8, arg);
+                }
+                self.emit(format!("bl\t_{}", func.callee(callee).name));
+                if let Some(result) = result {
+                    self.store_result(Some(result), 0);
+                }
             }
             InstData::StackAddr { slot } => {
                 let offset = self.stack_slot_offsets[slot.index()];

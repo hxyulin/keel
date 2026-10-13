@@ -1,0 +1,50 @@
+; expect: exit 0
+; stdout: ok
+; Passes stack memory to C: stack_to_c.c fills an array, and libc's puts
+; prints a string built on the stack.
+decl @fill_squares(ptr, i64)
+decl @puts(ptr) -> i32
+
+func @main() -> i32 {
+    ss0 = stack_slot 40, align 4       ; int32_t a[10]
+    ss1 = stack_slot 3, align 1        ; "ok\0"
+block0:
+    v0 = stack_addr ss0
+    v1 = iconst.i64 10
+    call @fill_squares(v0, v1)
+    v2 = iconst.i64 0
+    jump block1(v2, v2)
+block1(v3: i64, v4: i64):              ; i, sum
+    v5 = icmp.ult v3, v1
+    brif v5, block2, block3
+block2:
+    v6 = iconst.i64 4
+    v7 = imul v3, v6
+    v8 = ptradd v0, v7
+    v9 = load.i32 v8
+    v10 = sext.i64 v9
+    v11 = iadd v4, v10
+    v12 = iconst.i64 1
+    v13 = iadd v3, v12
+    jump block1(v13, v11)
+block3:
+    v20 = stack_addr ss1
+    v21 = iconst.i8 111                ; 'o'
+    store v21, v20
+    v22 = iconst.i64 1
+    v23 = ptradd v20, v22
+    v24 = iconst.i8 107                ; 'k'
+    store v24, v23
+    v25 = iconst.i64 2
+    v26 = ptradd v20, v25
+    v27 = iconst.i8 0
+    store v27, v26
+    v28 = call @puts(v20)
+    ; 0 + 1 + 4 + ... + 81 = 285
+    v29 = iconst.i64 285
+    v30 = icmp.ne v4, v29
+    v31 = iconst.i32 1
+    v32 = iconst.i32 0
+    v33 = select v30, v31, v32
+    return v33
+}

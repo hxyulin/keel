@@ -1,0 +1,17 @@
+; expect: exit 0
+; stdout: Hi!
+decl @putchar(i32) -> i32
+
+func @main() -> i32 {
+block0:
+    v0 = iconst.i32 72                 ; 'H'
+    v1 = call @putchar(v0)
+    v2 = iconst.i32 105                ; 'i'
+    v3 = call @putchar(v2)
+    v4 = iconst.i32 33                 ; '!'
+    v5 = call @putchar(v4)
+    v6 = iconst.i32 10                 ; '\n'
+    v7 = call @putchar(v6)
+    v8 = iconst.i32 0
+    return v8
+}

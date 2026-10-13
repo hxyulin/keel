@@ -1,0 +1,94 @@
+; expect: exit 0
+; Argument order and types across all eight argument registers, a call
+; without a result, and values that stay live across calls.
+; Returns 0, or the number of the last failing check.
+
+; 1*a + 2*b + ... + 8*h
+func @weigh(i64, i64, i64, i64, i64, i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64):
+    v10 = iconst.i64 2
+    v11 = imul v1, v10
+    v12 = iadd v0, v11
+    v13 = iconst.i64 3
+    v14 = imul v2, v13
+    v15 = iadd v12, v14
+    v16 = iconst.i64 4
+    v17 = imul v3, v16
+    v18 = iadd v15, v17
+    v19 = iconst.i64 5
+    v20 = imul v4, v19
+    v21 = iadd v18, v20
+    v22 = iconst.i64 6
+    v23 = imul v5, v22
+    v24 = iadd v21, v23
+    v25 = iconst.i64 7
+    v26 = imul v6, v25
+    v27 = iadd v24, v26
+    v28 = iconst.i64 8
+    v29 = imul v7, v28
+    v30 = iadd v27, v29
+    return v30
+}
+
+; Mixed widths: an i8 argument must not be confused by its neighbours.
+func @mixed(i32, i8, ptr, i64) -> i64 {
+block0(v0: i32, v1: i8, v2: ptr, v3: i64):
+    v4 = load.i64 v2
+    v5 = sext.i64 v0
+    v6 = sext.i64 v1
+    v7 = iadd v4, v5
+    v8 = iadd v7, v6
+    v9 = iadd v8, v3
+    return v9
+}
+
+; Writes through a pointer; no result.
+func @poke(ptr, i64) {
+block0(v0: ptr, v1: i64):
+    store v1, v0
+    return
+}
+
+func @main() -> i32 {
+    ss0 = stack_slot 8, align 8
+block0:
+    v0 = iconst.i32 0
+    ; check 1: 1*1 + 2*2 + ... + 8*8 = 204
+    v1 = iconst.i64 1
+    v2 = iconst.i64 2
+    v3 = iconst.i64 3
+    v4 = iconst.i64 4
+    v5 = iconst.i64 5
+    v6 = iconst.i64 6
+    v7 = iconst.i64 7
+    v8 = iconst.i64 8
+    v9 = call @weigh(v1, v2, v3, v4, v5, v6, v7, v8)
+    v10 = iconst.i64 204
+    v11 = icmp.ne v9, v10
+    v12 = iconst.i32 1
+    v13 = select v11, v12, v0
+    ; check 2: reversed arguments give 8*1 + 7*2 + ... + 1*8 = 120
+    v14 = call @weigh(v8, v7, v6, v5, v4, v3, v2, v1)
+    v15 = iconst.i64 120
+    v16 = icmp.ne v14, v15
+    v17 = iconst.i32 2
+    v18 = select v16, v17, v13
+    ; check 3: a void call writes memory: poke(&slot, 1000)
+    v19 = stack_addr ss0
+    v20 = iconst.i64 1000
+    call @poke(v19, v20)
+    ; check 4: mixed(-5, -3 as i8, &slot, 100000) = 1000 - 5 - 3 + 100000
+    v21 = iconst.i32 -5
+    v22 = iconst.i8 -3
+    v23 = iconst.i64 100000
+    v24 = call @mixed(v21, v22, v19, v23)
+    v25 = iconst.i64 100992
+    v26 = icmp.ne v24, v25
+    v27 = iconst.i32 4
+    v28 = select v26, v27, v18
+    ; check 5: v9, computed before three calls, is still intact
+    v29 = icmp.ne v9, v10
+    v30 = iconst.i32 5
+    v31 = select v29, v30, v28
+    return v31
+}
