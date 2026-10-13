@@ -1,0 +1,2137 @@
+; expect: exit 0
+; Generated checks: returns 0, or the number of the last failing check.
+; Narrow operands carry junk above their width, which codegen must ignore.
+
+func @main() -> i32 {
+block0:
+    v0 = iconst.i32 0
+    v1 = iconst.i64 -6502179613573254144
+    v2 = trunc.i8 v1
+    v3 = iconst.i64 -6502179613573253889
+    v4 = trunc.i8 v3
+    ; check 1: umulhi.i8 0x0 * 0xff
+    v5 = umulhi v2, v4
+    v6 = iconst.i8 0
+    v7 = icmp.ne v5, v6
+    v8 = iconst.i32 1
+    v9 = select v7, v8, v0
+    v10 = iconst.i64 -6502179613573254144
+    v11 = trunc.i8 v10
+    v12 = iconst.i64 -6502179613573253889
+    v13 = trunc.i8 v12
+    ; check 2: smulhi.i8 0x0 * 0xff
+    v14 = smulhi v11, v13
+    v15 = iconst.i8 0
+    v16 = icmp.ne v14, v15
+    v17 = iconst.i32 2
+    v18 = select v16, v17, v9
+    v19 = iconst.i64 -6502179613573254144
+    v20 = trunc.i8 v19
+    v21 = iconst.i64 -6502179613573254016
+    v22 = trunc.i8 v21
+    ; check 3: umulhi.i8 0x0 * 0x80
+    v23 = umulhi v20, v22
+    v24 = iconst.i8 0
+    v25 = icmp.ne v23, v24
+    v26 = iconst.i32 3
+    v27 = select v25, v26, v18
+    v28 = iconst.i64 -6502179613573254144
+    v29 = trunc.i8 v28
+    v30 = iconst.i64 -6502179613573254016
+    v31 = trunc.i8 v30
+    ; check 4: smulhi.i8 0x0 * 0x80
+    v32 = smulhi v29, v31
+    v33 = iconst.i8 0
+    v34 = icmp.ne v32, v33
+    v35 = iconst.i32 4
+    v36 = select v34, v35, v27
+    v37 = iconst.i64 -6502179613573254144
+    v38 = trunc.i8 v37
+    v39 = iconst.i64 -6502179613573254141
+    v40 = trunc.i8 v39
+    ; check 5: umulhi.i8 0x0 * 0x3
+    v41 = umulhi v38, v40
+    v42 = iconst.i8 0
+    v43 = icmp.ne v41, v42
+    v44 = iconst.i32 5
+    v45 = select v43, v44, v36
+    v46 = iconst.i64 -6502179613573254144
+    v47 = trunc.i8 v46
+    v48 = iconst.i64 -6502179613573254141
+    v49 = trunc.i8 v48
+    ; check 6: smulhi.i8 0x0 * 0x3
+    v50 = smulhi v47, v49
+    v51 = iconst.i8 0
+    v52 = icmp.ne v50, v51
+    v53 = iconst.i32 6
+    v54 = select v52, v53, v45
+    v55 = iconst.i64 -6502179613573254144
+    v56 = trunc.i8 v55
+    v57 = iconst.i64 -6502179613573254017
+    v58 = trunc.i8 v57
+    ; check 7: umulhi.i8 0x0 * 0x7f
+    v59 = umulhi v56, v58
+    v60 = iconst.i8 0
+    v61 = icmp.ne v59, v60
+    v62 = iconst.i32 7
+    v63 = select v61, v62, v54
+    v64 = iconst.i64 -6502179613573254144
+    v65 = trunc.i8 v64
+    v66 = iconst.i64 -6502179613573254017
+    v67 = trunc.i8 v66
+    ; check 8: smulhi.i8 0x0 * 0x7f
+    v68 = smulhi v65, v67
+    v69 = iconst.i8 0
+    v70 = icmp.ne v68, v69
+    v71 = iconst.i32 8
+    v72 = select v70, v71, v63
+    v73 = iconst.i64 -6502179613573254143
+    v74 = trunc.i8 v73
+    v75 = iconst.i64 -6502179613573253889
+    v76 = trunc.i8 v75
+    ; check 9: umulhi.i8 0x1 * 0xff
+    v77 = umulhi v74, v76
+    v78 = iconst.i8 0
+    v79 = icmp.ne v77, v78
+    v80 = iconst.i32 9
+    v81 = select v79, v80, v72
+    v82 = iconst.i64 -6502179613573254143
+    v83 = trunc.i8 v82
+    v84 = iconst.i64 -6502179613573253889
+    v85 = trunc.i8 v84
+    ; check 10: smulhi.i8 0x1 * 0xff
+    v86 = smulhi v83, v85
+    v87 = iconst.i8 -1
+    v88 = icmp.ne v86, v87
+    v89 = iconst.i32 10
+    v90 = select v88, v89, v81
+    v91 = iconst.i64 -6502179613573254143
+    v92 = trunc.i8 v91
+    v93 = iconst.i64 -6502179613573254016
+    v94 = trunc.i8 v93
+    ; check 11: umulhi.i8 0x1 * 0x80
+    v95 = umulhi v92, v94
+    v96 = iconst.i8 0
+    v97 = icmp.ne v95, v96
+    v98 = iconst.i32 11
+    v99 = select v97, v98, v90
+    v100 = iconst.i64 -6502179613573254143
+    v101 = trunc.i8 v100
+    v102 = iconst.i64 -6502179613573254016
+    v103 = trunc.i8 v102
+    ; check 12: smulhi.i8 0x1 * 0x80
+    v104 = smulhi v101, v103
+    v105 = iconst.i8 -1
+    v106 = icmp.ne v104, v105
+    v107 = iconst.i32 12
+    v108 = select v106, v107, v99
+    v109 = iconst.i64 -6502179613573254143
+    v110 = trunc.i8 v109
+    v111 = iconst.i64 -6502179613573254141
+    v112 = trunc.i8 v111
+    ; check 13: umulhi.i8 0x1 * 0x3
+    v113 = umulhi v110, v112
+    v114 = iconst.i8 0
+    v115 = icmp.ne v113, v114
+    v116 = iconst.i32 13
+    v117 = select v115, v116, v108
+    v118 = iconst.i64 -6502179613573254143
+    v119 = trunc.i8 v118
+    v120 = iconst.i64 -6502179613573254141
+    v121 = trunc.i8 v120
+    ; check 14: smulhi.i8 0x1 * 0x3
+    v122 = smulhi v119, v121
+    v123 = iconst.i8 0
+    v124 = icmp.ne v122, v123
+    v125 = iconst.i32 14
+    v126 = select v124, v125, v117
+    v127 = iconst.i64 -6502179613573254143
+    v128 = trunc.i8 v127
+    v129 = iconst.i64 -6502179613573254017
+    v130 = trunc.i8 v129
+    ; check 15: umulhi.i8 0x1 * 0x7f
+    v131 = umulhi v128, v130
+    v132 = iconst.i8 0
+    v133 = icmp.ne v131, v132
+    v134 = iconst.i32 15
+    v135 = select v133, v134, v126
+    v136 = iconst.i64 -6502179613573254143
+    v137 = trunc.i8 v136
+    v138 = iconst.i64 -6502179613573254017
+    v139 = trunc.i8 v138
+    ; check 16: smulhi.i8 0x1 * 0x7f
+    v140 = smulhi v137, v139
+    v141 = iconst.i8 0
+    v142 = icmp.ne v140, v141
+    v143 = iconst.i32 16
+    v144 = select v142, v143, v135
+    v145 = iconst.i64 -6502179613573254142
+    v146 = trunc.i8 v145
+    v147 = iconst.i64 -6502179613573253889
+    v148 = trunc.i8 v147
+    ; check 17: umulhi.i8 0x2 * 0xff
+    v149 = umulhi v146, v148
+    v150 = iconst.i8 1
+    v151 = icmp.ne v149, v150
+    v152 = iconst.i32 17
+    v153 = select v151, v152, v144
+    v154 = iconst.i64 -6502179613573254142
+    v155 = trunc.i8 v154
+    v156 = iconst.i64 -6502179613573253889
+    v157 = trunc.i8 v156
+    ; check 18: smulhi.i8 0x2 * 0xff
+    v158 = smulhi v155, v157
+    v159 = iconst.i8 -1
+    v160 = icmp.ne v158, v159
+    v161 = iconst.i32 18
+    v162 = select v160, v161, v153
+    v163 = iconst.i64 -6502179613573254142
+    v164 = trunc.i8 v163
+    v165 = iconst.i64 -6502179613573254016
+    v166 = trunc.i8 v165
+    ; check 19: umulhi.i8 0x2 * 0x80
+    v167 = umulhi v164, v166
+    v168 = iconst.i8 1
+    v169 = icmp.ne v167, v168
+    v170 = iconst.i32 19
+    v171 = select v169, v170, v162
+    v172 = iconst.i64 -6502179613573254142
+    v173 = trunc.i8 v172
+    v174 = iconst.i64 -6502179613573254016
+    v175 = trunc.i8 v174
+    ; check 20: smulhi.i8 0x2 * 0x80
+    v176 = smulhi v173, v175
+    v177 = iconst.i8 -1
+    v178 = icmp.ne v176, v177
+    v179 = iconst.i32 20
+    v180 = select v178, v179, v171
+    v181 = iconst.i64 -6502179613573254142
+    v182 = trunc.i8 v181
+    v183 = iconst.i64 -6502179613573254141
+    v184 = trunc.i8 v183
+    ; check 21: umulhi.i8 0x2 * 0x3
+    v185 = umulhi v182, v184
+    v186 = iconst.i8 0
+    v187 = icmp.ne v185, v186
+    v188 = iconst.i32 21
+    v189 = select v187, v188, v180
+    v190 = iconst.i64 -6502179613573254142
+    v191 = trunc.i8 v190
+    v192 = iconst.i64 -6502179613573254141
+    v193 = trunc.i8 v192
+    ; check 22: smulhi.i8 0x2 * 0x3
+    v194 = smulhi v191, v193
+    v195 = iconst.i8 0
+    v196 = icmp.ne v194, v195
+    v197 = iconst.i32 22
+    v198 = select v196, v197, v189
+    v199 = iconst.i64 -6502179613573254142
+    v200 = trunc.i8 v199
+    v201 = iconst.i64 -6502179613573254017
+    v202 = trunc.i8 v201
+    ; check 23: umulhi.i8 0x2 * 0x7f
+    v203 = umulhi v200, v202
+    v204 = iconst.i8 0
+    v205 = icmp.ne v203, v204
+    v206 = iconst.i32 23
+    v207 = select v205, v206, v198
+    v208 = iconst.i64 -6502179613573254142
+    v209 = trunc.i8 v208
+    v210 = iconst.i64 -6502179613573254017
+    v211 = trunc.i8 v210
+    ; check 24: smulhi.i8 0x2 * 0x7f
+    v212 = smulhi v209, v211
+    v213 = iconst.i8 0
+    v214 = icmp.ne v212, v213
+    v215 = iconst.i32 24
+    v216 = select v214, v215, v207
+    v217 = iconst.i64 -6502179613573253889
+    v218 = trunc.i8 v217
+    v219 = iconst.i64 -6502179613573253889
+    v220 = trunc.i8 v219
+    ; check 25: umulhi.i8 0xff * 0xff
+    v221 = umulhi v218, v220
+    v222 = iconst.i8 -2
+    v223 = icmp.ne v221, v222
+    v224 = iconst.i32 25
+    v225 = select v223, v224, v216
+    v226 = iconst.i64 -6502179613573253889
+    v227 = trunc.i8 v226
+    v228 = iconst.i64 -6502179613573253889
+    v229 = trunc.i8 v228
+    ; check 26: smulhi.i8 0xff * 0xff
+    v230 = smulhi v227, v229
+    v231 = iconst.i8 0
+    v232 = icmp.ne v230, v231
+    v233 = iconst.i32 26
+    v234 = select v232, v233, v225
+    v235 = iconst.i64 -6502179613573253889
+    v236 = trunc.i8 v235
+    v237 = iconst.i64 -6502179613573254016
+    v238 = trunc.i8 v237
+    ; check 27: umulhi.i8 0xff * 0x80
+    v239 = umulhi v236, v238
+    v240 = iconst.i8 127
+    v241 = icmp.ne v239, v240
+    v242 = iconst.i32 27
+    v243 = select v241, v242, v234
+    v244 = iconst.i64 -6502179613573253889
+    v245 = trunc.i8 v244
+    v246 = iconst.i64 -6502179613573254016
+    v247 = trunc.i8 v246
+    ; check 28: smulhi.i8 0xff * 0x80
+    v248 = smulhi v245, v247
+    v249 = iconst.i8 0
+    v250 = icmp.ne v248, v249
+    v251 = iconst.i32 28
+    v252 = select v250, v251, v243
+    v253 = iconst.i64 -6502179613573253889
+    v254 = trunc.i8 v253
+    v255 = iconst.i64 -6502179613573254141
+    v256 = trunc.i8 v255
+    ; check 29: umulhi.i8 0xff * 0x3
+    v257 = umulhi v254, v256
+    v258 = iconst.i8 2
+    v259 = icmp.ne v257, v258
+    v260 = iconst.i32 29
+    v261 = select v259, v260, v252
+    v262 = iconst.i64 -6502179613573253889
+    v263 = trunc.i8 v262
+    v264 = iconst.i64 -6502179613573254141
+    v265 = trunc.i8 v264
+    ; check 30: smulhi.i8 0xff * 0x3
+    v266 = smulhi v263, v265
+    v267 = iconst.i8 -1
+    v268 = icmp.ne v266, v267
+    v269 = iconst.i32 30
+    v270 = select v268, v269, v261
+    v271 = iconst.i64 -6502179613573253889
+    v272 = trunc.i8 v271
+    v273 = iconst.i64 -6502179613573254017
+    v274 = trunc.i8 v273
+    ; check 31: umulhi.i8 0xff * 0x7f
+    v275 = umulhi v272, v274
+    v276 = iconst.i8 126
+    v277 = icmp.ne v275, v276
+    v278 = iconst.i32 31
+    v279 = select v277, v278, v270
+    v280 = iconst.i64 -6502179613573253889
+    v281 = trunc.i8 v280
+    v282 = iconst.i64 -6502179613573254017
+    v283 = trunc.i8 v282
+    ; check 32: smulhi.i8 0xff * 0x7f
+    v284 = smulhi v281, v283
+    v285 = iconst.i8 -1
+    v286 = icmp.ne v284, v285
+    v287 = iconst.i32 32
+    v288 = select v286, v287, v279
+    v289 = iconst.i64 -6502179613573254016
+    v290 = trunc.i8 v289
+    v291 = iconst.i64 -6502179613573253889
+    v292 = trunc.i8 v291
+    ; check 33: umulhi.i8 0x80 * 0xff
+    v293 = umulhi v290, v292
+    v294 = iconst.i8 127
+    v295 = icmp.ne v293, v294
+    v296 = iconst.i32 33
+    v297 = select v295, v296, v288
+    v298 = iconst.i64 -6502179613573254016
+    v299 = trunc.i8 v298
+    v300 = iconst.i64 -6502179613573253889
+    v301 = trunc.i8 v300
+    ; check 34: smulhi.i8 0x80 * 0xff
+    v302 = smulhi v299, v301
+    v303 = iconst.i8 0
+    v304 = icmp.ne v302, v303
+    v305 = iconst.i32 34
+    v306 = select v304, v305, v297
+    v307 = iconst.i64 -6502179613573254016
+    v308 = trunc.i8 v307
+    v309 = iconst.i64 -6502179613573254016
+    v310 = trunc.i8 v309
+    ; check 35: umulhi.i8 0x80 * 0x80
+    v311 = umulhi v308, v310
+    v312 = iconst.i8 64
+    v313 = icmp.ne v311, v312
+    v314 = iconst.i32 35
+    v315 = select v313, v314, v306
+    v316 = iconst.i64 -6502179613573254016
+    v317 = trunc.i8 v316
+    v318 = iconst.i64 -6502179613573254016
+    v319 = trunc.i8 v318
+    ; check 36: smulhi.i8 0x80 * 0x80
+    v320 = smulhi v317, v319
+    v321 = iconst.i8 64
+    v322 = icmp.ne v320, v321
+    v323 = iconst.i32 36
+    v324 = select v322, v323, v315
+    v325 = iconst.i64 -6502179613573254016
+    v326 = trunc.i8 v325
+    v327 = iconst.i64 -6502179613573254141
+    v328 = trunc.i8 v327
+    ; check 37: umulhi.i8 0x80 * 0x3
+    v329 = umulhi v326, v328
+    v330 = iconst.i8 1
+    v331 = icmp.ne v329, v330
+    v332 = iconst.i32 37
+    v333 = select v331, v332, v324
+    v334 = iconst.i64 -6502179613573254016
+    v335 = trunc.i8 v334
+    v336 = iconst.i64 -6502179613573254141
+    v337 = trunc.i8 v336
+    ; check 38: smulhi.i8 0x80 * 0x3
+    v338 = smulhi v335, v337
+    v339 = iconst.i8 -2
+    v340 = icmp.ne v338, v339
+    v341 = iconst.i32 38
+    v342 = select v340, v341, v333
+    v343 = iconst.i64 -6502179613573254016
+    v344 = trunc.i8 v343
+    v345 = iconst.i64 -6502179613573254017
+    v346 = trunc.i8 v345
+    ; check 39: umulhi.i8 0x80 * 0x7f
+    v347 = umulhi v344, v346
+    v348 = iconst.i8 63
+    v349 = icmp.ne v347, v348
+    v350 = iconst.i32 39
+    v351 = select v349, v350, v342
+    v352 = iconst.i64 -6502179613573254016
+    v353 = trunc.i8 v352
+    v354 = iconst.i64 -6502179613573254017
+    v355 = trunc.i8 v354
+    ; check 40: smulhi.i8 0x80 * 0x7f
+    v356 = smulhi v353, v355
+    v357 = iconst.i8 -64
+    v358 = icmp.ne v356, v357
+    v359 = iconst.i32 40
+    v360 = select v358, v359, v351
+    v361 = iconst.i64 -6502179613573254017
+    v362 = trunc.i8 v361
+    v363 = iconst.i64 -6502179613573253889
+    v364 = trunc.i8 v363
+    ; check 41: umulhi.i8 0x7f * 0xff
+    v365 = umulhi v362, v364
+    v366 = iconst.i8 126
+    v367 = icmp.ne v365, v366
+    v368 = iconst.i32 41
+    v369 = select v367, v368, v360
+    v370 = iconst.i64 -6502179613573254017
+    v371 = trunc.i8 v370
+    v372 = iconst.i64 -6502179613573253889
+    v373 = trunc.i8 v372
+    ; check 42: smulhi.i8 0x7f * 0xff
+    v374 = smulhi v371, v373
+    v375 = iconst.i8 -1
+    v376 = icmp.ne v374, v375
+    v377 = iconst.i32 42
+    v378 = select v376, v377, v369
+    v379 = iconst.i64 -6502179613573254017
+    v380 = trunc.i8 v379
+    v381 = iconst.i64 -6502179613573254016
+    v382 = trunc.i8 v381
+    ; check 43: umulhi.i8 0x7f * 0x80
+    v383 = umulhi v380, v382
+    v384 = iconst.i8 63
+    v385 = icmp.ne v383, v384
+    v386 = iconst.i32 43
+    v387 = select v385, v386, v378
+    v388 = iconst.i64 -6502179613573254017
+    v389 = trunc.i8 v388
+    v390 = iconst.i64 -6502179613573254016
+    v391 = trunc.i8 v390
+    ; check 44: smulhi.i8 0x7f * 0x80
+    v392 = smulhi v389, v391
+    v393 = iconst.i8 -64
+    v394 = icmp.ne v392, v393
+    v395 = iconst.i32 44
+    v396 = select v394, v395, v387
+    v397 = iconst.i64 -6502179613573254017
+    v398 = trunc.i8 v397
+    v399 = iconst.i64 -6502179613573254141
+    v400 = trunc.i8 v399
+    ; check 45: umulhi.i8 0x7f * 0x3
+    v401 = umulhi v398, v400
+    v402 = iconst.i8 1
+    v403 = icmp.ne v401, v402
+    v404 = iconst.i32 45
+    v405 = select v403, v404, v396
+    v406 = iconst.i64 -6502179613573254017
+    v407 = trunc.i8 v406
+    v408 = iconst.i64 -6502179613573254141
+    v409 = trunc.i8 v408
+    ; check 46: smulhi.i8 0x7f * 0x3
+    v410 = smulhi v407, v409
+    v411 = iconst.i8 1
+    v412 = icmp.ne v410, v411
+    v413 = iconst.i32 46
+    v414 = select v412, v413, v405
+    v415 = iconst.i64 -6502179613573254017
+    v416 = trunc.i8 v415
+    v417 = iconst.i64 -6502179613573254017
+    v418 = trunc.i8 v417
+    ; check 47: umulhi.i8 0x7f * 0x7f
+    v419 = umulhi v416, v418
+    v420 = iconst.i8 63
+    v421 = icmp.ne v419, v420
+    v422 = iconst.i32 47
+    v423 = select v421, v422, v414
+    v424 = iconst.i64 -6502179613573254017
+    v425 = trunc.i8 v424
+    v426 = iconst.i64 -6502179613573254017
+    v427 = trunc.i8 v426
+    ; check 48: smulhi.i8 0x7f * 0x7f
+    v428 = smulhi v425, v427
+    v429 = iconst.i8 63
+    v430 = icmp.ne v428, v429
+    v431 = iconst.i32 48
+    v432 = select v430, v431, v423
+    v433 = iconst.i64 -6502179613573254054
+    v434 = trunc.i8 v433
+    v435 = iconst.i64 -6502179613573253889
+    v436 = trunc.i8 v435
+    ; check 49: umulhi.i8 0x5a * 0xff
+    v437 = umulhi v434, v436
+    v438 = iconst.i8 89
+    v439 = icmp.ne v437, v438
+    v440 = iconst.i32 49
+    v441 = select v439, v440, v432
+    v442 = iconst.i64 -6502179613573254054
+    v443 = trunc.i8 v442
+    v444 = iconst.i64 -6502179613573253889
+    v445 = trunc.i8 v444
+    ; check 50: smulhi.i8 0x5a * 0xff
+    v446 = smulhi v443, v445
+    v447 = iconst.i8 -1
+    v448 = icmp.ne v446, v447
+    v449 = iconst.i32 50
+    v450 = select v448, v449, v441
+    v451 = iconst.i64 -6502179613573254054
+    v452 = trunc.i8 v451
+    v453 = iconst.i64 -6502179613573254016
+    v454 = trunc.i8 v453
+    ; check 51: umulhi.i8 0x5a * 0x80
+    v455 = umulhi v452, v454
+    v456 = iconst.i8 45
+    v457 = icmp.ne v455, v456
+    v458 = iconst.i32 51
+    v459 = select v457, v458, v450
+    v460 = iconst.i64 -6502179613573254054
+    v461 = trunc.i8 v460
+    v462 = iconst.i64 -6502179613573254016
+    v463 = trunc.i8 v462
+    ; check 52: smulhi.i8 0x5a * 0x80
+    v464 = smulhi v461, v463
+    v465 = iconst.i8 -45
+    v466 = icmp.ne v464, v465
+    v467 = iconst.i32 52
+    v468 = select v466, v467, v459
+    v469 = iconst.i64 -6502179613573254054
+    v470 = trunc.i8 v469
+    v471 = iconst.i64 -6502179613573254141
+    v472 = trunc.i8 v471
+    ; check 53: umulhi.i8 0x5a * 0x3
+    v473 = umulhi v470, v472
+    v474 = iconst.i8 1
+    v475 = icmp.ne v473, v474
+    v476 = iconst.i32 53
+    v477 = select v475, v476, v468
+    v478 = iconst.i64 -6502179613573254054
+    v479 = trunc.i8 v478
+    v480 = iconst.i64 -6502179613573254141
+    v481 = trunc.i8 v480
+    ; check 54: smulhi.i8 0x5a * 0x3
+    v482 = smulhi v479, v481
+    v483 = iconst.i8 1
+    v484 = icmp.ne v482, v483
+    v485 = iconst.i32 54
+    v486 = select v484, v485, v477
+    v487 = iconst.i64 -6502179613573254054
+    v488 = trunc.i8 v487
+    v489 = iconst.i64 -6502179613573254017
+    v490 = trunc.i8 v489
+    ; check 55: umulhi.i8 0x5a * 0x7f
+    v491 = umulhi v488, v490
+    v492 = iconst.i8 44
+    v493 = icmp.ne v491, v492
+    v494 = iconst.i32 55
+    v495 = select v493, v494, v486
+    v496 = iconst.i64 -6502179613573254054
+    v497 = trunc.i8 v496
+    v498 = iconst.i64 -6502179613573254017
+    v499 = trunc.i8 v498
+    ; check 56: smulhi.i8 0x5a * 0x7f
+    v500 = smulhi v497, v499
+    v501 = iconst.i8 44
+    v502 = icmp.ne v500, v501
+    v503 = iconst.i32 56
+    v504 = select v502, v503, v495
+    v505 = iconst.i64 -6502179613573316608
+    v506 = trunc.i16 v505
+    v507 = iconst.i64 -6502179613573251073
+    v508 = trunc.i16 v507
+    ; check 57: umulhi.i16 0x0 * 0xffff
+    v509 = umulhi v506, v508
+    v510 = iconst.i16 0
+    v511 = icmp.ne v509, v510
+    v512 = iconst.i32 57
+    v513 = select v511, v512, v504
+    v514 = iconst.i64 -6502179613573316608
+    v515 = trunc.i16 v514
+    v516 = iconst.i64 -6502179613573251073
+    v517 = trunc.i16 v516
+    ; check 58: smulhi.i16 0x0 * 0xffff
+    v518 = smulhi v515, v517
+    v519 = iconst.i16 0
+    v520 = icmp.ne v518, v519
+    v521 = iconst.i32 58
+    v522 = select v520, v521, v513
+    v523 = iconst.i64 -6502179613573316608
+    v524 = trunc.i16 v523
+    v525 = iconst.i64 -6502179613573283840
+    v526 = trunc.i16 v525
+    ; check 59: umulhi.i16 0x0 * 0x8000
+    v527 = umulhi v524, v526
+    v528 = iconst.i16 0
+    v529 = icmp.ne v527, v528
+    v530 = iconst.i32 59
+    v531 = select v529, v530, v522
+    v532 = iconst.i64 -6502179613573316608
+    v533 = trunc.i16 v532
+    v534 = iconst.i64 -6502179613573283840
+    v535 = trunc.i16 v534
+    ; check 60: smulhi.i16 0x0 * 0x8000
+    v536 = smulhi v533, v535
+    v537 = iconst.i16 0
+    v538 = icmp.ne v536, v537
+    v539 = iconst.i32 60
+    v540 = select v538, v539, v531
+    v541 = iconst.i64 -6502179613573316608
+    v542 = trunc.i16 v541
+    v543 = iconst.i64 -6502179613573316605
+    v544 = trunc.i16 v543
+    ; check 61: umulhi.i16 0x0 * 0x3
+    v545 = umulhi v542, v544
+    v546 = iconst.i16 0
+    v547 = icmp.ne v545, v546
+    v548 = iconst.i32 61
+    v549 = select v547, v548, v540
+    v550 = iconst.i64 -6502179613573316608
+    v551 = trunc.i16 v550
+    v552 = iconst.i64 -6502179613573316605
+    v553 = trunc.i16 v552
+    ; check 62: smulhi.i16 0x0 * 0x3
+    v554 = smulhi v551, v553
+    v555 = iconst.i16 0
+    v556 = icmp.ne v554, v555
+    v557 = iconst.i32 62
+    v558 = select v556, v557, v549
+    v559 = iconst.i64 -6502179613573316608
+    v560 = trunc.i16 v559
+    v561 = iconst.i64 -6502179613573283841
+    v562 = trunc.i16 v561
+    ; check 63: umulhi.i16 0x0 * 0x7fff
+    v563 = umulhi v560, v562
+    v564 = iconst.i16 0
+    v565 = icmp.ne v563, v564
+    v566 = iconst.i32 63
+    v567 = select v565, v566, v558
+    v568 = iconst.i64 -6502179613573316608
+    v569 = trunc.i16 v568
+    v570 = iconst.i64 -6502179613573283841
+    v571 = trunc.i16 v570
+    ; check 64: smulhi.i16 0x0 * 0x7fff
+    v572 = smulhi v569, v571
+    v573 = iconst.i16 0
+    v574 = icmp.ne v572, v573
+    v575 = iconst.i32 64
+    v576 = select v574, v575, v567
+    v577 = iconst.i64 -6502179613573316607
+    v578 = trunc.i16 v577
+    v579 = iconst.i64 -6502179613573251073
+    v580 = trunc.i16 v579
+    ; check 65: umulhi.i16 0x1 * 0xffff
+    v581 = umulhi v578, v580
+    v582 = iconst.i16 0
+    v583 = icmp.ne v581, v582
+    v584 = iconst.i32 65
+    v585 = select v583, v584, v576
+    v586 = iconst.i64 -6502179613573316607
+    v587 = trunc.i16 v586
+    v588 = iconst.i64 -6502179613573251073
+    v589 = trunc.i16 v588
+    ; check 66: smulhi.i16 0x1 * 0xffff
+    v590 = smulhi v587, v589
+    v591 = iconst.i16 -1
+    v592 = icmp.ne v590, v591
+    v593 = iconst.i32 66
+    v594 = select v592, v593, v585
+    v595 = iconst.i64 -6502179613573316607
+    v596 = trunc.i16 v595
+    v597 = iconst.i64 -6502179613573283840
+    v598 = trunc.i16 v597
+    ; check 67: umulhi.i16 0x1 * 0x8000
+    v599 = umulhi v596, v598
+    v600 = iconst.i16 0
+    v601 = icmp.ne v599, v600
+    v602 = iconst.i32 67
+    v603 = select v601, v602, v594
+    v604 = iconst.i64 -6502179613573316607
+    v605 = trunc.i16 v604
+    v606 = iconst.i64 -6502179613573283840
+    v607 = trunc.i16 v606
+    ; check 68: smulhi.i16 0x1 * 0x8000
+    v608 = smulhi v605, v607
+    v609 = iconst.i16 -1
+    v610 = icmp.ne v608, v609
+    v611 = iconst.i32 68
+    v612 = select v610, v611, v603
+    v613 = iconst.i64 -6502179613573316607
+    v614 = trunc.i16 v613
+    v615 = iconst.i64 -6502179613573316605
+    v616 = trunc.i16 v615
+    ; check 69: umulhi.i16 0x1 * 0x3
+    v617 = umulhi v614, v616
+    v618 = iconst.i16 0
+    v619 = icmp.ne v617, v618
+    v620 = iconst.i32 69
+    v621 = select v619, v620, v612
+    v622 = iconst.i64 -6502179613573316607
+    v623 = trunc.i16 v622
+    v624 = iconst.i64 -6502179613573316605
+    v625 = trunc.i16 v624
+    ; check 70: smulhi.i16 0x1 * 0x3
+    v626 = smulhi v623, v625
+    v627 = iconst.i16 0
+    v628 = icmp.ne v626, v627
+    v629 = iconst.i32 70
+    v630 = select v628, v629, v621
+    v631 = iconst.i64 -6502179613573316607
+    v632 = trunc.i16 v631
+    v633 = iconst.i64 -6502179613573283841
+    v634 = trunc.i16 v633
+    ; check 71: umulhi.i16 0x1 * 0x7fff
+    v635 = umulhi v632, v634
+    v636 = iconst.i16 0
+    v637 = icmp.ne v635, v636
+    v638 = iconst.i32 71
+    v639 = select v637, v638, v630
+    v640 = iconst.i64 -6502179613573316607
+    v641 = trunc.i16 v640
+    v642 = iconst.i64 -6502179613573283841
+    v643 = trunc.i16 v642
+    ; check 72: smulhi.i16 0x1 * 0x7fff
+    v644 = smulhi v641, v643
+    v645 = iconst.i16 0
+    v646 = icmp.ne v644, v645
+    v647 = iconst.i32 72
+    v648 = select v646, v647, v639
+    v649 = iconst.i64 -6502179613573316606
+    v650 = trunc.i16 v649
+    v651 = iconst.i64 -6502179613573251073
+    v652 = trunc.i16 v651
+    ; check 73: umulhi.i16 0x2 * 0xffff
+    v653 = umulhi v650, v652
+    v654 = iconst.i16 1
+    v655 = icmp.ne v653, v654
+    v656 = iconst.i32 73
+    v657 = select v655, v656, v648
+    v658 = iconst.i64 -6502179613573316606
+    v659 = trunc.i16 v658
+    v660 = iconst.i64 -6502179613573251073
+    v661 = trunc.i16 v660
+    ; check 74: smulhi.i16 0x2 * 0xffff
+    v662 = smulhi v659, v661
+    v663 = iconst.i16 -1
+    v664 = icmp.ne v662, v663
+    v665 = iconst.i32 74
+    v666 = select v664, v665, v657
+    v667 = iconst.i64 -6502179613573316606
+    v668 = trunc.i16 v667
+    v669 = iconst.i64 -6502179613573283840
+    v670 = trunc.i16 v669
+    ; check 75: umulhi.i16 0x2 * 0x8000
+    v671 = umulhi v668, v670
+    v672 = iconst.i16 1
+    v673 = icmp.ne v671, v672
+    v674 = iconst.i32 75
+    v675 = select v673, v674, v666
+    v676 = iconst.i64 -6502179613573316606
+    v677 = trunc.i16 v676
+    v678 = iconst.i64 -6502179613573283840
+    v679 = trunc.i16 v678
+    ; check 76: smulhi.i16 0x2 * 0x8000
+    v680 = smulhi v677, v679
+    v681 = iconst.i16 -1
+    v682 = icmp.ne v680, v681
+    v683 = iconst.i32 76
+    v684 = select v682, v683, v675
+    v685 = iconst.i64 -6502179613573316606
+    v686 = trunc.i16 v685
+    v687 = iconst.i64 -6502179613573316605
+    v688 = trunc.i16 v687
+    ; check 77: umulhi.i16 0x2 * 0x3
+    v689 = umulhi v686, v688
+    v690 = iconst.i16 0
+    v691 = icmp.ne v689, v690
+    v692 = iconst.i32 77
+    v693 = select v691, v692, v684
+    v694 = iconst.i64 -6502179613573316606
+    v695 = trunc.i16 v694
+    v696 = iconst.i64 -6502179613573316605
+    v697 = trunc.i16 v696
+    ; check 78: smulhi.i16 0x2 * 0x3
+    v698 = smulhi v695, v697
+    v699 = iconst.i16 0
+    v700 = icmp.ne v698, v699
+    v701 = iconst.i32 78
+    v702 = select v700, v701, v693
+    v703 = iconst.i64 -6502179613573316606
+    v704 = trunc.i16 v703
+    v705 = iconst.i64 -6502179613573283841
+    v706 = trunc.i16 v705
+    ; check 79: umulhi.i16 0x2 * 0x7fff
+    v707 = umulhi v704, v706
+    v708 = iconst.i16 0
+    v709 = icmp.ne v707, v708
+    v710 = iconst.i32 79
+    v711 = select v709, v710, v702
+    v712 = iconst.i64 -6502179613573316606
+    v713 = trunc.i16 v712
+    v714 = iconst.i64 -6502179613573283841
+    v715 = trunc.i16 v714
+    ; check 80: smulhi.i16 0x2 * 0x7fff
+    v716 = smulhi v713, v715
+    v717 = iconst.i16 0
+    v718 = icmp.ne v716, v717
+    v719 = iconst.i32 80
+    v720 = select v718, v719, v711
+    v721 = iconst.i64 -6502179613573251073
+    v722 = trunc.i16 v721
+    v723 = iconst.i64 -6502179613573251073
+    v724 = trunc.i16 v723
+    ; check 81: umulhi.i16 0xffff * 0xffff
+    v725 = umulhi v722, v724
+    v726 = iconst.i16 -2
+    v727 = icmp.ne v725, v726
+    v728 = iconst.i32 81
+    v729 = select v727, v728, v720
+    v730 = iconst.i64 -6502179613573251073
+    v731 = trunc.i16 v730
+    v732 = iconst.i64 -6502179613573251073
+    v733 = trunc.i16 v732
+    ; check 82: smulhi.i16 0xffff * 0xffff
+    v734 = smulhi v731, v733
+    v735 = iconst.i16 0
+    v736 = icmp.ne v734, v735
+    v737 = iconst.i32 82
+    v738 = select v736, v737, v729
+    v739 = iconst.i64 -6502179613573251073
+    v740 = trunc.i16 v739
+    v741 = iconst.i64 -6502179613573283840
+    v742 = trunc.i16 v741
+    ; check 83: umulhi.i16 0xffff * 0x8000
+    v743 = umulhi v740, v742
+    v744 = iconst.i16 32767
+    v745 = icmp.ne v743, v744
+    v746 = iconst.i32 83
+    v747 = select v745, v746, v738
+    v748 = iconst.i64 -6502179613573251073
+    v749 = trunc.i16 v748
+    v750 = iconst.i64 -6502179613573283840
+    v751 = trunc.i16 v750
+    ; check 84: smulhi.i16 0xffff * 0x8000
+    v752 = smulhi v749, v751
+    v753 = iconst.i16 0
+    v754 = icmp.ne v752, v753
+    v755 = iconst.i32 84
+    v756 = select v754, v755, v747
+    v757 = iconst.i64 -6502179613573251073
+    v758 = trunc.i16 v757
+    v759 = iconst.i64 -6502179613573316605
+    v760 = trunc.i16 v759
+    ; check 85: umulhi.i16 0xffff * 0x3
+    v761 = umulhi v758, v760
+    v762 = iconst.i16 2
+    v763 = icmp.ne v761, v762
+    v764 = iconst.i32 85
+    v765 = select v763, v764, v756
+    v766 = iconst.i64 -6502179613573251073
+    v767 = trunc.i16 v766
+    v768 = iconst.i64 -6502179613573316605
+    v769 = trunc.i16 v768
+    ; check 86: smulhi.i16 0xffff * 0x3
+    v770 = smulhi v767, v769
+    v771 = iconst.i16 -1
+    v772 = icmp.ne v770, v771
+    v773 = iconst.i32 86
+    v774 = select v772, v773, v765
+    v775 = iconst.i64 -6502179613573251073
+    v776 = trunc.i16 v775
+    v777 = iconst.i64 -6502179613573283841
+    v778 = trunc.i16 v777
+    ; check 87: umulhi.i16 0xffff * 0x7fff
+    v779 = umulhi v776, v778
+    v780 = iconst.i16 32766
+    v781 = icmp.ne v779, v780
+    v782 = iconst.i32 87
+    v783 = select v781, v782, v774
+    v784 = iconst.i64 -6502179613573251073
+    v785 = trunc.i16 v784
+    v786 = iconst.i64 -6502179613573283841
+    v787 = trunc.i16 v786
+    ; check 88: smulhi.i16 0xffff * 0x7fff
+    v788 = smulhi v785, v787
+    v789 = iconst.i16 -1
+    v790 = icmp.ne v788, v789
+    v791 = iconst.i32 88
+    v792 = select v790, v791, v783
+    v793 = iconst.i64 -6502179613573283840
+    v794 = trunc.i16 v793
+    v795 = iconst.i64 -6502179613573251073
+    v796 = trunc.i16 v795
+    ; check 89: umulhi.i16 0x8000 * 0xffff
+    v797 = umulhi v794, v796
+    v798 = iconst.i16 32767
+    v799 = icmp.ne v797, v798
+    v800 = iconst.i32 89
+    v801 = select v799, v800, v792
+    v802 = iconst.i64 -6502179613573283840
+    v803 = trunc.i16 v802
+    v804 = iconst.i64 -6502179613573251073
+    v805 = trunc.i16 v804
+    ; check 90: smulhi.i16 0x8000 * 0xffff
+    v806 = smulhi v803, v805
+    v807 = iconst.i16 0
+    v808 = icmp.ne v806, v807
+    v809 = iconst.i32 90
+    v810 = select v808, v809, v801
+    v811 = iconst.i64 -6502179613573283840
+    v812 = trunc.i16 v811
+    v813 = iconst.i64 -6502179613573283840
+    v814 = trunc.i16 v813
+    ; check 91: umulhi.i16 0x8000 * 0x8000
+    v815 = umulhi v812, v814
+    v816 = iconst.i16 16384
+    v817 = icmp.ne v815, v816
+    v818 = iconst.i32 91
+    v819 = select v817, v818, v810
+    v820 = iconst.i64 -6502179613573283840
+    v821 = trunc.i16 v820
+    v822 = iconst.i64 -6502179613573283840
+    v823 = trunc.i16 v822
+    ; check 92: smulhi.i16 0x8000 * 0x8000
+    v824 = smulhi v821, v823
+    v825 = iconst.i16 16384
+    v826 = icmp.ne v824, v825
+    v827 = iconst.i32 92
+    v828 = select v826, v827, v819
+    v829 = iconst.i64 -6502179613573283840
+    v830 = trunc.i16 v829
+    v831 = iconst.i64 -6502179613573316605
+    v832 = trunc.i16 v831
+    ; check 93: umulhi.i16 0x8000 * 0x3
+    v833 = umulhi v830, v832
+    v834 = iconst.i16 1
+    v835 = icmp.ne v833, v834
+    v836 = iconst.i32 93
+    v837 = select v835, v836, v828
+    v838 = iconst.i64 -6502179613573283840
+    v839 = trunc.i16 v838
+    v840 = iconst.i64 -6502179613573316605
+    v841 = trunc.i16 v840
+    ; check 94: smulhi.i16 0x8000 * 0x3
+    v842 = smulhi v839, v841
+    v843 = iconst.i16 -2
+    v844 = icmp.ne v842, v843
+    v845 = iconst.i32 94
+    v846 = select v844, v845, v837
+    v847 = iconst.i64 -6502179613573283840
+    v848 = trunc.i16 v847
+    v849 = iconst.i64 -6502179613573283841
+    v850 = trunc.i16 v849
+    ; check 95: umulhi.i16 0x8000 * 0x7fff
+    v851 = umulhi v848, v850
+    v852 = iconst.i16 16383
+    v853 = icmp.ne v851, v852
+    v854 = iconst.i32 95
+    v855 = select v853, v854, v846
+    v856 = iconst.i64 -6502179613573283840
+    v857 = trunc.i16 v856
+    v858 = iconst.i64 -6502179613573283841
+    v859 = trunc.i16 v858
+    ; check 96: smulhi.i16 0x8000 * 0x7fff
+    v860 = smulhi v857, v859
+    v861 = iconst.i16 -16384
+    v862 = icmp.ne v860, v861
+    v863 = iconst.i32 96
+    v864 = select v862, v863, v855
+    v865 = iconst.i64 -6502179613573283841
+    v866 = trunc.i16 v865
+    v867 = iconst.i64 -6502179613573251073
+    v868 = trunc.i16 v867
+    ; check 97: umulhi.i16 0x7fff * 0xffff
+    v869 = umulhi v866, v868
+    v870 = iconst.i16 32766
+    v871 = icmp.ne v869, v870
+    v872 = iconst.i32 97
+    v873 = select v871, v872, v864
+    v874 = iconst.i64 -6502179613573283841
+    v875 = trunc.i16 v874
+    v876 = iconst.i64 -6502179613573251073
+    v877 = trunc.i16 v876
+    ; check 98: smulhi.i16 0x7fff * 0xffff
+    v878 = smulhi v875, v877
+    v879 = iconst.i16 -1
+    v880 = icmp.ne v878, v879
+    v881 = iconst.i32 98
+    v882 = select v880, v881, v873
+    v883 = iconst.i64 -6502179613573283841
+    v884 = trunc.i16 v883
+    v885 = iconst.i64 -6502179613573283840
+    v886 = trunc.i16 v885
+    ; check 99: umulhi.i16 0x7fff * 0x8000
+    v887 = umulhi v884, v886
+    v888 = iconst.i16 16383
+    v889 = icmp.ne v887, v888
+    v890 = iconst.i32 99
+    v891 = select v889, v890, v882
+    v892 = iconst.i64 -6502179613573283841
+    v893 = trunc.i16 v892
+    v894 = iconst.i64 -6502179613573283840
+    v895 = trunc.i16 v894
+    ; check 100: smulhi.i16 0x7fff * 0x8000
+    v896 = smulhi v893, v895
+    v897 = iconst.i16 -16384
+    v898 = icmp.ne v896, v897
+    v899 = iconst.i32 100
+    v900 = select v898, v899, v891
+    v901 = iconst.i64 -6502179613573283841
+    v902 = trunc.i16 v901
+    v903 = iconst.i64 -6502179613573316605
+    v904 = trunc.i16 v903
+    ; check 101: umulhi.i16 0x7fff * 0x3
+    v905 = umulhi v902, v904
+    v906 = iconst.i16 1
+    v907 = icmp.ne v905, v906
+    v908 = iconst.i32 101
+    v909 = select v907, v908, v900
+    v910 = iconst.i64 -6502179613573283841
+    v911 = trunc.i16 v910
+    v912 = iconst.i64 -6502179613573316605
+    v913 = trunc.i16 v912
+    ; check 102: smulhi.i16 0x7fff * 0x3
+    v914 = smulhi v911, v913
+    v915 = iconst.i16 1
+    v916 = icmp.ne v914, v915
+    v917 = iconst.i32 102
+    v918 = select v916, v917, v909
+    v919 = iconst.i64 -6502179613573283841
+    v920 = trunc.i16 v919
+    v921 = iconst.i64 -6502179613573283841
+    v922 = trunc.i16 v921
+    ; check 103: umulhi.i16 0x7fff * 0x7fff
+    v923 = umulhi v920, v922
+    v924 = iconst.i16 16383
+    v925 = icmp.ne v923, v924
+    v926 = iconst.i32 103
+    v927 = select v925, v926, v918
+    v928 = iconst.i64 -6502179613573283841
+    v929 = trunc.i16 v928
+    v930 = iconst.i64 -6502179613573283841
+    v931 = trunc.i16 v930
+    ; check 104: smulhi.i16 0x7fff * 0x7fff
+    v932 = smulhi v929, v931
+    v933 = iconst.i16 16383
+    v934 = icmp.ne v932, v933
+    v935 = iconst.i32 104
+    v936 = select v934, v935, v927
+    v937 = iconst.i64 -6502179613573293478
+    v938 = trunc.i16 v937
+    v939 = iconst.i64 -6502179613573251073
+    v940 = trunc.i16 v939
+    ; check 105: umulhi.i16 0x5a5a * 0xffff
+    v941 = umulhi v938, v940
+    v942 = iconst.i16 23129
+    v943 = icmp.ne v941, v942
+    v944 = iconst.i32 105
+    v945 = select v943, v944, v936
+    v946 = iconst.i64 -6502179613573293478
+    v947 = trunc.i16 v946
+    v948 = iconst.i64 -6502179613573251073
+    v949 = trunc.i16 v948
+    ; check 106: smulhi.i16 0x5a5a * 0xffff
+    v950 = smulhi v947, v949
+    v951 = iconst.i16 -1
+    v952 = icmp.ne v950, v951
+    v953 = iconst.i32 106
+    v954 = select v952, v953, v945
+    v955 = iconst.i64 -6502179613573293478
+    v956 = trunc.i16 v955
+    v957 = iconst.i64 -6502179613573283840
+    v958 = trunc.i16 v957
+    ; check 107: umulhi.i16 0x5a5a * 0x8000
+    v959 = umulhi v956, v958
+    v960 = iconst.i16 11565
+    v961 = icmp.ne v959, v960
+    v962 = iconst.i32 107
+    v963 = select v961, v962, v954
+    v964 = iconst.i64 -6502179613573293478
+    v965 = trunc.i16 v964
+    v966 = iconst.i64 -6502179613573283840
+    v967 = trunc.i16 v966
+    ; check 108: smulhi.i16 0x5a5a * 0x8000
+    v968 = smulhi v965, v967
+    v969 = iconst.i16 -11565
+    v970 = icmp.ne v968, v969
+    v971 = iconst.i32 108
+    v972 = select v970, v971, v963
+    v973 = iconst.i64 -6502179613573293478
+    v974 = trunc.i16 v973
+    v975 = iconst.i64 -6502179613573316605
+    v976 = trunc.i16 v975
+    ; check 109: umulhi.i16 0x5a5a * 0x3
+    v977 = umulhi v974, v976
+    v978 = iconst.i16 1
+    v979 = icmp.ne v977, v978
+    v980 = iconst.i32 109
+    v981 = select v979, v980, v972
+    v982 = iconst.i64 -6502179613573293478
+    v983 = trunc.i16 v982
+    v984 = iconst.i64 -6502179613573316605
+    v985 = trunc.i16 v984
+    ; check 110: smulhi.i16 0x5a5a * 0x3
+    v986 = smulhi v983, v985
+    v987 = iconst.i16 1
+    v988 = icmp.ne v986, v987
+    v989 = iconst.i32 110
+    v990 = select v988, v989, v981
+    v991 = iconst.i64 -6502179613573293478
+    v992 = trunc.i16 v991
+    v993 = iconst.i64 -6502179613573283841
+    v994 = trunc.i16 v993
+    ; check 111: umulhi.i16 0x5a5a * 0x7fff
+    v995 = umulhi v992, v994
+    v996 = iconst.i16 11564
+    v997 = icmp.ne v995, v996
+    v998 = iconst.i32 111
+    v999 = select v997, v998, v990
+    v1000 = iconst.i64 -6502179613573293478
+    v1001 = trunc.i16 v1000
+    v1002 = iconst.i64 -6502179613573283841
+    v1003 = trunc.i16 v1002
+    ; check 112: smulhi.i16 0x5a5a * 0x7fff
+    v1004 = smulhi v1001, v1003
+    v1005 = iconst.i16 11564
+    v1006 = icmp.ne v1004, v1005
+    v1007 = iconst.i32 112
+    v1008 = select v1006, v1007, v999
+    v1009 = iconst.i64 -6502179615371427840
+    v1010 = trunc.i32 v1009
+    v1011 = iconst.i64 -6502179611076460545
+    v1012 = trunc.i32 v1011
+    ; check 113: umulhi.i32 0x0 * 0xffffffff
+    v1013 = umulhi v1010, v1012
+    v1014 = iconst.i32 0
+    v1015 = icmp.ne v1013, v1014
+    v1016 = iconst.i32 113
+    v1017 = select v1015, v1016, v1008
+    v1018 = iconst.i64 -6502179615371427840
+    v1019 = trunc.i32 v1018
+    v1020 = iconst.i64 -6502179611076460545
+    v1021 = trunc.i32 v1020
+    ; check 114: smulhi.i32 0x0 * 0xffffffff
+    v1022 = smulhi v1019, v1021
+    v1023 = iconst.i32 0
+    v1024 = icmp.ne v1022, v1023
+    v1025 = iconst.i32 114
+    v1026 = select v1024, v1025, v1017
+    v1027 = iconst.i64 -6502179615371427840
+    v1028 = trunc.i32 v1027
+    v1029 = iconst.i64 -6502179613223944192
+    v1030 = trunc.i32 v1029
+    ; check 115: umulhi.i32 0x0 * 0x80000000
+    v1031 = umulhi v1028, v1030
+    v1032 = iconst.i32 0
+    v1033 = icmp.ne v1031, v1032
+    v1034 = iconst.i32 115
+    v1035 = select v1033, v1034, v1026
+    v1036 = iconst.i64 -6502179615371427840
+    v1037 = trunc.i32 v1036
+    v1038 = iconst.i64 -6502179613223944192
+    v1039 = trunc.i32 v1038
+    ; check 116: smulhi.i32 0x0 * 0x80000000
+    v1040 = smulhi v1037, v1039
+    v1041 = iconst.i32 0
+    v1042 = icmp.ne v1040, v1041
+    v1043 = iconst.i32 116
+    v1044 = select v1042, v1043, v1035
+    v1045 = iconst.i64 -6502179615371427840
+    v1046 = trunc.i32 v1045
+    v1047 = iconst.i64 -6502179615371427837
+    v1048 = trunc.i32 v1047
+    ; check 117: umulhi.i32 0x0 * 0x3
+    v1049 = umulhi v1046, v1048
+    v1050 = iconst.i32 0
+    v1051 = icmp.ne v1049, v1050
+    v1052 = iconst.i32 117
+    v1053 = select v1051, v1052, v1044
+    v1054 = iconst.i64 -6502179615371427840
+    v1055 = trunc.i32 v1054
+    v1056 = iconst.i64 -6502179615371427837
+    v1057 = trunc.i32 v1056
+    ; check 118: smulhi.i32 0x0 * 0x3
+    v1058 = smulhi v1055, v1057
+    v1059 = iconst.i32 0
+    v1060 = icmp.ne v1058, v1059
+    v1061 = iconst.i32 118
+    v1062 = select v1060, v1061, v1053
+    v1063 = iconst.i64 -6502179615371427840
+    v1064 = trunc.i32 v1063
+    v1065 = iconst.i64 -6502179613223944193
+    v1066 = trunc.i32 v1065
+    ; check 119: umulhi.i32 0x0 * 0x7fffffff
+    v1067 = umulhi v1064, v1066
+    v1068 = iconst.i32 0
+    v1069 = icmp.ne v1067, v1068
+    v1070 = iconst.i32 119
+    v1071 = select v1069, v1070, v1062
+    v1072 = iconst.i64 -6502179615371427840
+    v1073 = trunc.i32 v1072
+    v1074 = iconst.i64 -6502179613223944193
+    v1075 = trunc.i32 v1074
+    ; check 120: smulhi.i32 0x0 * 0x7fffffff
+    v1076 = smulhi v1073, v1075
+    v1077 = iconst.i32 0
+    v1078 = icmp.ne v1076, v1077
+    v1079 = iconst.i32 120
+    v1080 = select v1078, v1079, v1071
+    v1081 = iconst.i64 -6502179615371427839
+    v1082 = trunc.i32 v1081
+    v1083 = iconst.i64 -6502179611076460545
+    v1084 = trunc.i32 v1083
+    ; check 121: umulhi.i32 0x1 * 0xffffffff
+    v1085 = umulhi v1082, v1084
+    v1086 = iconst.i32 0
+    v1087 = icmp.ne v1085, v1086
+    v1088 = iconst.i32 121
+    v1089 = select v1087, v1088, v1080
+    v1090 = iconst.i64 -6502179615371427839
+    v1091 = trunc.i32 v1090
+    v1092 = iconst.i64 -6502179611076460545
+    v1093 = trunc.i32 v1092
+    ; check 122: smulhi.i32 0x1 * 0xffffffff
+    v1094 = smulhi v1091, v1093
+    v1095 = iconst.i32 -1
+    v1096 = icmp.ne v1094, v1095
+    v1097 = iconst.i32 122
+    v1098 = select v1096, v1097, v1089
+    v1099 = iconst.i64 -6502179615371427839
+    v1100 = trunc.i32 v1099
+    v1101 = iconst.i64 -6502179613223944192
+    v1102 = trunc.i32 v1101
+    ; check 123: umulhi.i32 0x1 * 0x80000000
+    v1103 = umulhi v1100, v1102
+    v1104 = iconst.i32 0
+    v1105 = icmp.ne v1103, v1104
+    v1106 = iconst.i32 123
+    v1107 = select v1105, v1106, v1098
+    v1108 = iconst.i64 -6502179615371427839
+    v1109 = trunc.i32 v1108
+    v1110 = iconst.i64 -6502179613223944192
+    v1111 = trunc.i32 v1110
+    ; check 124: smulhi.i32 0x1 * 0x80000000
+    v1112 = smulhi v1109, v1111
+    v1113 = iconst.i32 -1
+    v1114 = icmp.ne v1112, v1113
+    v1115 = iconst.i32 124
+    v1116 = select v1114, v1115, v1107
+    v1117 = iconst.i64 -6502179615371427839
+    v1118 = trunc.i32 v1117
+    v1119 = iconst.i64 -6502179615371427837
+    v1120 = trunc.i32 v1119
+    ; check 125: umulhi.i32 0x1 * 0x3
+    v1121 = umulhi v1118, v1120
+    v1122 = iconst.i32 0
+    v1123 = icmp.ne v1121, v1122
+    v1124 = iconst.i32 125
+    v1125 = select v1123, v1124, v1116
+    v1126 = iconst.i64 -6502179615371427839
+    v1127 = trunc.i32 v1126
+    v1128 = iconst.i64 -6502179615371427837
+    v1129 = trunc.i32 v1128
+    ; check 126: smulhi.i32 0x1 * 0x3
+    v1130 = smulhi v1127, v1129
+    v1131 = iconst.i32 0
+    v1132 = icmp.ne v1130, v1131
+    v1133 = iconst.i32 126
+    v1134 = select v1132, v1133, v1125
+    v1135 = iconst.i64 -6502179615371427839
+    v1136 = trunc.i32 v1135
+    v1137 = iconst.i64 -6502179613223944193
+    v1138 = trunc.i32 v1137
+    ; check 127: umulhi.i32 0x1 * 0x7fffffff
+    v1139 = umulhi v1136, v1138
+    v1140 = iconst.i32 0
+    v1141 = icmp.ne v1139, v1140
+    v1142 = iconst.i32 127
+    v1143 = select v1141, v1142, v1134
+    v1144 = iconst.i64 -6502179615371427839
+    v1145 = trunc.i32 v1144
+    v1146 = iconst.i64 -6502179613223944193
+    v1147 = trunc.i32 v1146
+    ; check 128: smulhi.i32 0x1 * 0x7fffffff
+    v1148 = smulhi v1145, v1147
+    v1149 = iconst.i32 0
+    v1150 = icmp.ne v1148, v1149
+    v1151 = iconst.i32 128
+    v1152 = select v1150, v1151, v1143
+    v1153 = iconst.i64 -6502179615371427838
+    v1154 = trunc.i32 v1153
+    v1155 = iconst.i64 -6502179611076460545
+    v1156 = trunc.i32 v1155
+    ; check 129: umulhi.i32 0x2 * 0xffffffff
+    v1157 = umulhi v1154, v1156
+    v1158 = iconst.i32 1
+    v1159 = icmp.ne v1157, v1158
+    v1160 = iconst.i32 129
+    v1161 = select v1159, v1160, v1152
+    v1162 = iconst.i64 -6502179615371427838
+    v1163 = trunc.i32 v1162
+    v1164 = iconst.i64 -6502179611076460545
+    v1165 = trunc.i32 v1164
+    ; check 130: smulhi.i32 0x2 * 0xffffffff
+    v1166 = smulhi v1163, v1165
+    v1167 = iconst.i32 -1
+    v1168 = icmp.ne v1166, v1167
+    v1169 = iconst.i32 130
+    v1170 = select v1168, v1169, v1161
+    v1171 = iconst.i64 -6502179615371427838
+    v1172 = trunc.i32 v1171
+    v1173 = iconst.i64 -6502179613223944192
+    v1174 = trunc.i32 v1173
+    ; check 131: umulhi.i32 0x2 * 0x80000000
+    v1175 = umulhi v1172, v1174
+    v1176 = iconst.i32 1
+    v1177 = icmp.ne v1175, v1176
+    v1178 = iconst.i32 131
+    v1179 = select v1177, v1178, v1170
+    v1180 = iconst.i64 -6502179615371427838
+    v1181 = trunc.i32 v1180
+    v1182 = iconst.i64 -6502179613223944192
+    v1183 = trunc.i32 v1182
+    ; check 132: smulhi.i32 0x2 * 0x80000000
+    v1184 = smulhi v1181, v1183
+    v1185 = iconst.i32 -1
+    v1186 = icmp.ne v1184, v1185
+    v1187 = iconst.i32 132
+    v1188 = select v1186, v1187, v1179
+    v1189 = iconst.i64 -6502179615371427838
+    v1190 = trunc.i32 v1189
+    v1191 = iconst.i64 -6502179615371427837
+    v1192 = trunc.i32 v1191
+    ; check 133: umulhi.i32 0x2 * 0x3
+    v1193 = umulhi v1190, v1192
+    v1194 = iconst.i32 0
+    v1195 = icmp.ne v1193, v1194
+    v1196 = iconst.i32 133
+    v1197 = select v1195, v1196, v1188
+    v1198 = iconst.i64 -6502179615371427838
+    v1199 = trunc.i32 v1198
+    v1200 = iconst.i64 -6502179615371427837
+    v1201 = trunc.i32 v1200
+    ; check 134: smulhi.i32 0x2 * 0x3
+    v1202 = smulhi v1199, v1201
+    v1203 = iconst.i32 0
+    v1204 = icmp.ne v1202, v1203
+    v1205 = iconst.i32 134
+    v1206 = select v1204, v1205, v1197
+    v1207 = iconst.i64 -6502179615371427838
+    v1208 = trunc.i32 v1207
+    v1209 = iconst.i64 -6502179613223944193
+    v1210 = trunc.i32 v1209
+    ; check 135: umulhi.i32 0x2 * 0x7fffffff
+    v1211 = umulhi v1208, v1210
+    v1212 = iconst.i32 0
+    v1213 = icmp.ne v1211, v1212
+    v1214 = iconst.i32 135
+    v1215 = select v1213, v1214, v1206
+    v1216 = iconst.i64 -6502179615371427838
+    v1217 = trunc.i32 v1216
+    v1218 = iconst.i64 -6502179613223944193
+    v1219 = trunc.i32 v1218
+    ; check 136: smulhi.i32 0x2 * 0x7fffffff
+    v1220 = smulhi v1217, v1219
+    v1221 = iconst.i32 0
+    v1222 = icmp.ne v1220, v1221
+    v1223 = iconst.i32 136
+    v1224 = select v1222, v1223, v1215
+    v1225 = iconst.i64 -6502179611076460545
+    v1226 = trunc.i32 v1225
+    v1227 = iconst.i64 -6502179611076460545
+    v1228 = trunc.i32 v1227
+    ; check 137: umulhi.i32 0xffffffff * 0xffffffff
+    v1229 = umulhi v1226, v1228
+    v1230 = iconst.i32 -2
+    v1231 = icmp.ne v1229, v1230
+    v1232 = iconst.i32 137
+    v1233 = select v1231, v1232, v1224
+    v1234 = iconst.i64 -6502179611076460545
+    v1235 = trunc.i32 v1234
+    v1236 = iconst.i64 -6502179611076460545
+    v1237 = trunc.i32 v1236
+    ; check 138: smulhi.i32 0xffffffff * 0xffffffff
+    v1238 = smulhi v1235, v1237
+    v1239 = iconst.i32 0
+    v1240 = icmp.ne v1238, v1239
+    v1241 = iconst.i32 138
+    v1242 = select v1240, v1241, v1233
+    v1243 = iconst.i64 -6502179611076460545
+    v1244 = trunc.i32 v1243
+    v1245 = iconst.i64 -6502179613223944192
+    v1246 = trunc.i32 v1245
+    ; check 139: umulhi.i32 0xffffffff * 0x80000000
+    v1247 = umulhi v1244, v1246
+    v1248 = iconst.i32 2147483647
+    v1249 = icmp.ne v1247, v1248
+    v1250 = iconst.i32 139
+    v1251 = select v1249, v1250, v1242
+    v1252 = iconst.i64 -6502179611076460545
+    v1253 = trunc.i32 v1252
+    v1254 = iconst.i64 -6502179613223944192
+    v1255 = trunc.i32 v1254
+    ; check 140: smulhi.i32 0xffffffff * 0x80000000
+    v1256 = smulhi v1253, v1255
+    v1257 = iconst.i32 0
+    v1258 = icmp.ne v1256, v1257
+    v1259 = iconst.i32 140
+    v1260 = select v1258, v1259, v1251
+    v1261 = iconst.i64 -6502179611076460545
+    v1262 = trunc.i32 v1261
+    v1263 = iconst.i64 -6502179615371427837
+    v1264 = trunc.i32 v1263
+    ; check 141: umulhi.i32 0xffffffff * 0x3
+    v1265 = umulhi v1262, v1264
+    v1266 = iconst.i32 2
+    v1267 = icmp.ne v1265, v1266
+    v1268 = iconst.i32 141
+    v1269 = select v1267, v1268, v1260
+    v1270 = iconst.i64 -6502179611076460545
+    v1271 = trunc.i32 v1270
+    v1272 = iconst.i64 -6502179615371427837
+    v1273 = trunc.i32 v1272
+    ; check 142: smulhi.i32 0xffffffff * 0x3
+    v1274 = smulhi v1271, v1273
+    v1275 = iconst.i32 -1
+    v1276 = icmp.ne v1274, v1275
+    v1277 = iconst.i32 142
+    v1278 = select v1276, v1277, v1269
+    v1279 = iconst.i64 -6502179611076460545
+    v1280 = trunc.i32 v1279
+    v1281 = iconst.i64 -6502179613223944193
+    v1282 = trunc.i32 v1281
+    ; check 143: umulhi.i32 0xffffffff * 0x7fffffff
+    v1283 = umulhi v1280, v1282
+    v1284 = iconst.i32 2147483646
+    v1285 = icmp.ne v1283, v1284
+    v1286 = iconst.i32 143
+    v1287 = select v1285, v1286, v1278
+    v1288 = iconst.i64 -6502179611076460545
+    v1289 = trunc.i32 v1288
+    v1290 = iconst.i64 -6502179613223944193
+    v1291 = trunc.i32 v1290
+    ; check 144: smulhi.i32 0xffffffff * 0x7fffffff
+    v1292 = smulhi v1289, v1291
+    v1293 = iconst.i32 -1
+    v1294 = icmp.ne v1292, v1293
+    v1295 = iconst.i32 144
+    v1296 = select v1294, v1295, v1287
+    v1297 = iconst.i64 -6502179613223944192
+    v1298 = trunc.i32 v1297
+    v1299 = iconst.i64 -6502179611076460545
+    v1300 = trunc.i32 v1299
+    ; check 145: umulhi.i32 0x80000000 * 0xffffffff
+    v1301 = umulhi v1298, v1300
+    v1302 = iconst.i32 2147483647
+    v1303 = icmp.ne v1301, v1302
+    v1304 = iconst.i32 145
+    v1305 = select v1303, v1304, v1296
+    v1306 = iconst.i64 -6502179613223944192
+    v1307 = trunc.i32 v1306
+    v1308 = iconst.i64 -6502179611076460545
+    v1309 = trunc.i32 v1308
+    ; check 146: smulhi.i32 0x80000000 * 0xffffffff
+    v1310 = smulhi v1307, v1309
+    v1311 = iconst.i32 0
+    v1312 = icmp.ne v1310, v1311
+    v1313 = iconst.i32 146
+    v1314 = select v1312, v1313, v1305
+    v1315 = iconst.i64 -6502179613223944192
+    v1316 = trunc.i32 v1315
+    v1317 = iconst.i64 -6502179613223944192
+    v1318 = trunc.i32 v1317
+    ; check 147: umulhi.i32 0x80000000 * 0x80000000
+    v1319 = umulhi v1316, v1318
+    v1320 = iconst.i32 1073741824
+    v1321 = icmp.ne v1319, v1320
+    v1322 = iconst.i32 147
+    v1323 = select v1321, v1322, v1314
+    v1324 = iconst.i64 -6502179613223944192
+    v1325 = trunc.i32 v1324
+    v1326 = iconst.i64 -6502179613223944192
+    v1327 = trunc.i32 v1326
+    ; check 148: smulhi.i32 0x80000000 * 0x80000000
+    v1328 = smulhi v1325, v1327
+    v1329 = iconst.i32 1073741824
+    v1330 = icmp.ne v1328, v1329
+    v1331 = iconst.i32 148
+    v1332 = select v1330, v1331, v1323
+    v1333 = iconst.i64 -6502179613223944192
+    v1334 = trunc.i32 v1333
+    v1335 = iconst.i64 -6502179615371427837
+    v1336 = trunc.i32 v1335
+    ; check 149: umulhi.i32 0x80000000 * 0x3
+    v1337 = umulhi v1334, v1336
+    v1338 = iconst.i32 1
+    v1339 = icmp.ne v1337, v1338
+    v1340 = iconst.i32 149
+    v1341 = select v1339, v1340, v1332
+    v1342 = iconst.i64 -6502179613223944192
+    v1343 = trunc.i32 v1342
+    v1344 = iconst.i64 -6502179615371427837
+    v1345 = trunc.i32 v1344
+    ; check 150: smulhi.i32 0x80000000 * 0x3
+    v1346 = smulhi v1343, v1345
+    v1347 = iconst.i32 -2
+    v1348 = icmp.ne v1346, v1347
+    v1349 = iconst.i32 150
+    v1350 = select v1348, v1349, v1341
+    v1351 = iconst.i64 -6502179613223944192
+    v1352 = trunc.i32 v1351
+    v1353 = iconst.i64 -6502179613223944193
+    v1354 = trunc.i32 v1353
+    ; check 151: umulhi.i32 0x80000000 * 0x7fffffff
+    v1355 = umulhi v1352, v1354
+    v1356 = iconst.i32 1073741823
+    v1357 = icmp.ne v1355, v1356
+    v1358 = iconst.i32 151
+    v1359 = select v1357, v1358, v1350
+    v1360 = iconst.i64 -6502179613223944192
+    v1361 = trunc.i32 v1360
+    v1362 = iconst.i64 -6502179613223944193
+    v1363 = trunc.i32 v1362
+    ; check 152: smulhi.i32 0x80000000 * 0x7fffffff
+    v1364 = smulhi v1361, v1363
+    v1365 = iconst.i32 -1073741824
+    v1366 = icmp.ne v1364, v1365
+    v1367 = iconst.i32 152
+    v1368 = select v1366, v1367, v1359
+    v1369 = iconst.i64 -6502179613223944193
+    v1370 = trunc.i32 v1369
+    v1371 = iconst.i64 -6502179611076460545
+    v1372 = trunc.i32 v1371
+    ; check 153: umulhi.i32 0x7fffffff * 0xffffffff
+    v1373 = umulhi v1370, v1372
+    v1374 = iconst.i32 2147483646
+    v1375 = icmp.ne v1373, v1374
+    v1376 = iconst.i32 153
+    v1377 = select v1375, v1376, v1368
+    v1378 = iconst.i64 -6502179613223944193
+    v1379 = trunc.i32 v1378
+    v1380 = iconst.i64 -6502179611076460545
+    v1381 = trunc.i32 v1380
+    ; check 154: smulhi.i32 0x7fffffff * 0xffffffff
+    v1382 = smulhi v1379, v1381
+    v1383 = iconst.i32 -1
+    v1384 = icmp.ne v1382, v1383
+    v1385 = iconst.i32 154
+    v1386 = select v1384, v1385, v1377
+    v1387 = iconst.i64 -6502179613223944193
+    v1388 = trunc.i32 v1387
+    v1389 = iconst.i64 -6502179613223944192
+    v1390 = trunc.i32 v1389
+    ; check 155: umulhi.i32 0x7fffffff * 0x80000000
+    v1391 = umulhi v1388, v1390
+    v1392 = iconst.i32 1073741823
+    v1393 = icmp.ne v1391, v1392
+    v1394 = iconst.i32 155
+    v1395 = select v1393, v1394, v1386
+    v1396 = iconst.i64 -6502179613223944193
+    v1397 = trunc.i32 v1396
+    v1398 = iconst.i64 -6502179613223944192
+    v1399 = trunc.i32 v1398
+    ; check 156: smulhi.i32 0x7fffffff * 0x80000000
+    v1400 = smulhi v1397, v1399
+    v1401 = iconst.i32 -1073741824
+    v1402 = icmp.ne v1400, v1401
+    v1403 = iconst.i32 156
+    v1404 = select v1402, v1403, v1395
+    v1405 = iconst.i64 -6502179613223944193
+    v1406 = trunc.i32 v1405
+    v1407 = iconst.i64 -6502179615371427837
+    v1408 = trunc.i32 v1407
+    ; check 157: umulhi.i32 0x7fffffff * 0x3
+    v1409 = umulhi v1406, v1408
+    v1410 = iconst.i32 1
+    v1411 = icmp.ne v1409, v1410
+    v1412 = iconst.i32 157
+    v1413 = select v1411, v1412, v1404
+    v1414 = iconst.i64 -6502179613223944193
+    v1415 = trunc.i32 v1414
+    v1416 = iconst.i64 -6502179615371427837
+    v1417 = trunc.i32 v1416
+    ; check 158: smulhi.i32 0x7fffffff * 0x3
+    v1418 = smulhi v1415, v1417
+    v1419 = iconst.i32 1
+    v1420 = icmp.ne v1418, v1419
+    v1421 = iconst.i32 158
+    v1422 = select v1420, v1421, v1413
+    v1423 = iconst.i64 -6502179613223944193
+    v1424 = trunc.i32 v1423
+    v1425 = iconst.i64 -6502179613223944193
+    v1426 = trunc.i32 v1425
+    ; check 159: umulhi.i32 0x7fffffff * 0x7fffffff
+    v1427 = umulhi v1424, v1426
+    v1428 = iconst.i32 1073741823
+    v1429 = icmp.ne v1427, v1428
+    v1430 = iconst.i32 159
+    v1431 = select v1429, v1430, v1422
+    v1432 = iconst.i64 -6502179613223944193
+    v1433 = trunc.i32 v1432
+    v1434 = iconst.i64 -6502179613223944193
+    v1435 = trunc.i32 v1434
+    ; check 160: smulhi.i32 0x7fffffff * 0x7fffffff
+    v1436 = smulhi v1433, v1435
+    v1437 = iconst.i32 1073741823
+    v1438 = icmp.ne v1436, v1437
+    v1439 = iconst.i32 160
+    v1440 = select v1438, v1439, v1431
+    v1441 = iconst.i64 -6502179613855557030
+    v1442 = trunc.i32 v1441
+    v1443 = iconst.i64 -6502179611076460545
+    v1444 = trunc.i32 v1443
+    ; check 161: umulhi.i32 0x5a5a5a5a * 0xffffffff
+    v1445 = umulhi v1442, v1444
+    v1446 = iconst.i32 1515870809
+    v1447 = icmp.ne v1445, v1446
+    v1448 = iconst.i32 161
+    v1449 = select v1447, v1448, v1440
+    v1450 = iconst.i64 -6502179613855557030
+    v1451 = trunc.i32 v1450
+    v1452 = iconst.i64 -6502179611076460545
+    v1453 = trunc.i32 v1452
+    ; check 162: smulhi.i32 0x5a5a5a5a * 0xffffffff
+    v1454 = smulhi v1451, v1453
+    v1455 = iconst.i32 -1
+    v1456 = icmp.ne v1454, v1455
+    v1457 = iconst.i32 162
+    v1458 = select v1456, v1457, v1449
+    v1459 = iconst.i64 -6502179613855557030
+    v1460 = trunc.i32 v1459
+    v1461 = iconst.i64 -6502179613223944192
+    v1462 = trunc.i32 v1461
+    ; check 163: umulhi.i32 0x5a5a5a5a * 0x80000000
+    v1463 = umulhi v1460, v1462
+    v1464 = iconst.i32 757935405
+    v1465 = icmp.ne v1463, v1464
+    v1466 = iconst.i32 163
+    v1467 = select v1465, v1466, v1458
+    v1468 = iconst.i64 -6502179613855557030
+    v1469 = trunc.i32 v1468
+    v1470 = iconst.i64 -6502179613223944192
+    v1471 = trunc.i32 v1470
+    ; check 164: smulhi.i32 0x5a5a5a5a * 0x80000000
+    v1472 = smulhi v1469, v1471
+    v1473 = iconst.i32 -757935405
+    v1474 = icmp.ne v1472, v1473
+    v1475 = iconst.i32 164
+    v1476 = select v1474, v1475, v1467
+    v1477 = iconst.i64 -6502179613855557030
+    v1478 = trunc.i32 v1477
+    v1479 = iconst.i64 -6502179615371427837
+    v1480 = trunc.i32 v1479
+    ; check 165: umulhi.i32 0x5a5a5a5a * 0x3
+    v1481 = umulhi v1478, v1480
+    v1482 = iconst.i32 1
+    v1483 = icmp.ne v1481, v1482
+    v1484 = iconst.i32 165
+    v1485 = select v1483, v1484, v1476
+    v1486 = iconst.i64 -6502179613855557030
+    v1487 = trunc.i32 v1486
+    v1488 = iconst.i64 -6502179615371427837
+    v1489 = trunc.i32 v1488
+    ; check 166: smulhi.i32 0x5a5a5a5a * 0x3
+    v1490 = smulhi v1487, v1489
+    v1491 = iconst.i32 1
+    v1492 = icmp.ne v1490, v1491
+    v1493 = iconst.i32 166
+    v1494 = select v1492, v1493, v1485
+    v1495 = iconst.i64 -6502179613855557030
+    v1496 = trunc.i32 v1495
+    v1497 = iconst.i64 -6502179613223944193
+    v1498 = trunc.i32 v1497
+    ; check 167: umulhi.i32 0x5a5a5a5a * 0x7fffffff
+    v1499 = umulhi v1496, v1498
+    v1500 = iconst.i32 757935404
+    v1501 = icmp.ne v1499, v1500
+    v1502 = iconst.i32 167
+    v1503 = select v1501, v1502, v1494
+    v1504 = iconst.i64 -6502179613855557030
+    v1505 = trunc.i32 v1504
+    v1506 = iconst.i64 -6502179613223944193
+    v1507 = trunc.i32 v1506
+    ; check 168: smulhi.i32 0x5a5a5a5a * 0x7fffffff
+    v1508 = smulhi v1505, v1507
+    v1509 = iconst.i32 757935404
+    v1510 = icmp.ne v1508, v1509
+    v1511 = iconst.i32 168
+    v1512 = select v1510, v1511, v1503
+    v1513 = iconst.i64 0
+    v1514 = iconst.i64 -1
+    ; check 169: umulhi.i64 0x0 * 0xffffffffffffffff
+    v1515 = umulhi v1513, v1514
+    v1516 = iconst.i64 0
+    v1517 = icmp.ne v1515, v1516
+    v1518 = iconst.i32 169
+    v1519 = select v1517, v1518, v1512
+    v1520 = iconst.i64 0
+    v1521 = iconst.i64 -1
+    ; check 170: smulhi.i64 0x0 * 0xffffffffffffffff
+    v1522 = smulhi v1520, v1521
+    v1523 = iconst.i64 0
+    v1524 = icmp.ne v1522, v1523
+    v1525 = iconst.i32 170
+    v1526 = select v1524, v1525, v1519
+    v1527 = iconst.i64 0
+    v1528 = iconst.i64 -9223372036854775808
+    ; check 171: umulhi.i64 0x0 * 0x8000000000000000
+    v1529 = umulhi v1527, v1528
+    v1530 = iconst.i64 0
+    v1531 = icmp.ne v1529, v1530
+    v1532 = iconst.i32 171
+    v1533 = select v1531, v1532, v1526
+    v1534 = iconst.i64 0
+    v1535 = iconst.i64 -9223372036854775808
+    ; check 172: smulhi.i64 0x0 * 0x8000000000000000
+    v1536 = smulhi v1534, v1535
+    v1537 = iconst.i64 0
+    v1538 = icmp.ne v1536, v1537
+    v1539 = iconst.i32 172
+    v1540 = select v1538, v1539, v1533
+    v1541 = iconst.i64 0
+    v1542 = iconst.i64 3
+    ; check 173: umulhi.i64 0x0 * 0x3
+    v1543 = umulhi v1541, v1542
+    v1544 = iconst.i64 0
+    v1545 = icmp.ne v1543, v1544
+    v1546 = iconst.i32 173
+    v1547 = select v1545, v1546, v1540
+    v1548 = iconst.i64 0
+    v1549 = iconst.i64 3
+    ; check 174: smulhi.i64 0x0 * 0x3
+    v1550 = smulhi v1548, v1549
+    v1551 = iconst.i64 0
+    v1552 = icmp.ne v1550, v1551
+    v1553 = iconst.i32 174
+    v1554 = select v1552, v1553, v1547
+    v1555 = iconst.i64 0
+    v1556 = iconst.i64 9223372036854775807
+    ; check 175: umulhi.i64 0x0 * 0x7fffffffffffffff
+    v1557 = umulhi v1555, v1556
+    v1558 = iconst.i64 0
+    v1559 = icmp.ne v1557, v1558
+    v1560 = iconst.i32 175
+    v1561 = select v1559, v1560, v1554
+    v1562 = iconst.i64 0
+    v1563 = iconst.i64 9223372036854775807
+    ; check 176: smulhi.i64 0x0 * 0x7fffffffffffffff
+    v1564 = smulhi v1562, v1563
+    v1565 = iconst.i64 0
+    v1566 = icmp.ne v1564, v1565
+    v1567 = iconst.i32 176
+    v1568 = select v1566, v1567, v1561
+    v1569 = iconst.i64 1
+    v1570 = iconst.i64 -1
+    ; check 177: umulhi.i64 0x1 * 0xffffffffffffffff
+    v1571 = umulhi v1569, v1570
+    v1572 = iconst.i64 0
+    v1573 = icmp.ne v1571, v1572
+    v1574 = iconst.i32 177
+    v1575 = select v1573, v1574, v1568
+    v1576 = iconst.i64 1
+    v1577 = iconst.i64 -1
+    ; check 178: smulhi.i64 0x1 * 0xffffffffffffffff
+    v1578 = smulhi v1576, v1577
+    v1579 = iconst.i64 -1
+    v1580 = icmp.ne v1578, v1579
+    v1581 = iconst.i32 178
+    v1582 = select v1580, v1581, v1575
+    v1583 = iconst.i64 1
+    v1584 = iconst.i64 -9223372036854775808
+    ; check 179: umulhi.i64 0x1 * 0x8000000000000000
+    v1585 = umulhi v1583, v1584
+    v1586 = iconst.i64 0
+    v1587 = icmp.ne v1585, v1586
+    v1588 = iconst.i32 179
+    v1589 = select v1587, v1588, v1582
+    v1590 = iconst.i64 1
+    v1591 = iconst.i64 -9223372036854775808
+    ; check 180: smulhi.i64 0x1 * 0x8000000000000000
+    v1592 = smulhi v1590, v1591
+    v1593 = iconst.i64 -1
+    v1594 = icmp.ne v1592, v1593
+    v1595 = iconst.i32 180
+    v1596 = select v1594, v1595, v1589
+    v1597 = iconst.i64 1
+    v1598 = iconst.i64 3
+    ; check 181: umulhi.i64 0x1 * 0x3
+    v1599 = umulhi v1597, v1598
+    v1600 = iconst.i64 0
+    v1601 = icmp.ne v1599, v1600
+    v1602 = iconst.i32 181
+    v1603 = select v1601, v1602, v1596
+    v1604 = iconst.i64 1
+    v1605 = iconst.i64 3
+    ; check 182: smulhi.i64 0x1 * 0x3
+    v1606 = smulhi v1604, v1605
+    v1607 = iconst.i64 0
+    v1608 = icmp.ne v1606, v1607
+    v1609 = iconst.i32 182
+    v1610 = select v1608, v1609, v1603
+    v1611 = iconst.i64 1
+    v1612 = iconst.i64 9223372036854775807
+    ; check 183: umulhi.i64 0x1 * 0x7fffffffffffffff
+    v1613 = umulhi v1611, v1612
+    v1614 = iconst.i64 0
+    v1615 = icmp.ne v1613, v1614
+    v1616 = iconst.i32 183
+    v1617 = select v1615, v1616, v1610
+    v1618 = iconst.i64 1
+    v1619 = iconst.i64 9223372036854775807
+    ; check 184: smulhi.i64 0x1 * 0x7fffffffffffffff
+    v1620 = smulhi v1618, v1619
+    v1621 = iconst.i64 0
+    v1622 = icmp.ne v1620, v1621
+    v1623 = iconst.i32 184
+    v1624 = select v1622, v1623, v1617
+    v1625 = iconst.i64 2
+    v1626 = iconst.i64 -1
+    ; check 185: umulhi.i64 0x2 * 0xffffffffffffffff
+    v1627 = umulhi v1625, v1626
+    v1628 = iconst.i64 1
+    v1629 = icmp.ne v1627, v1628
+    v1630 = iconst.i32 185
+    v1631 = select v1629, v1630, v1624
+    v1632 = iconst.i64 2
+    v1633 = iconst.i64 -1
+    ; check 186: smulhi.i64 0x2 * 0xffffffffffffffff
+    v1634 = smulhi v1632, v1633
+    v1635 = iconst.i64 -1
+    v1636 = icmp.ne v1634, v1635
+    v1637 = iconst.i32 186
+    v1638 = select v1636, v1637, v1631
+    v1639 = iconst.i64 2
+    v1640 = iconst.i64 -9223372036854775808
+    ; check 187: umulhi.i64 0x2 * 0x8000000000000000
+    v1641 = umulhi v1639, v1640
+    v1642 = iconst.i64 1
+    v1643 = icmp.ne v1641, v1642
+    v1644 = iconst.i32 187
+    v1645 = select v1643, v1644, v1638
+    v1646 = iconst.i64 2
+    v1647 = iconst.i64 -9223372036854775808
+    ; check 188: smulhi.i64 0x2 * 0x8000000000000000
+    v1648 = smulhi v1646, v1647
+    v1649 = iconst.i64 -1
+    v1650 = icmp.ne v1648, v1649
+    v1651 = iconst.i32 188
+    v1652 = select v1650, v1651, v1645
+    v1653 = iconst.i64 2
+    v1654 = iconst.i64 3
+    ; check 189: umulhi.i64 0x2 * 0x3
+    v1655 = umulhi v1653, v1654
+    v1656 = iconst.i64 0
+    v1657 = icmp.ne v1655, v1656
+    v1658 = iconst.i32 189
+    v1659 = select v1657, v1658, v1652
+    v1660 = iconst.i64 2
+    v1661 = iconst.i64 3
+    ; check 190: smulhi.i64 0x2 * 0x3
+    v1662 = smulhi v1660, v1661
+    v1663 = iconst.i64 0
+    v1664 = icmp.ne v1662, v1663
+    v1665 = iconst.i32 190
+    v1666 = select v1664, v1665, v1659
+    v1667 = iconst.i64 2
+    v1668 = iconst.i64 9223372036854775807
+    ; check 191: umulhi.i64 0x2 * 0x7fffffffffffffff
+    v1669 = umulhi v1667, v1668
+    v1670 = iconst.i64 0
+    v1671 = icmp.ne v1669, v1670
+    v1672 = iconst.i32 191
+    v1673 = select v1671, v1672, v1666
+    v1674 = iconst.i64 2
+    v1675 = iconst.i64 9223372036854775807
+    ; check 192: smulhi.i64 0x2 * 0x7fffffffffffffff
+    v1676 = smulhi v1674, v1675
+    v1677 = iconst.i64 0
+    v1678 = icmp.ne v1676, v1677
+    v1679 = iconst.i32 192
+    v1680 = select v1678, v1679, v1673
+    v1681 = iconst.i64 -1
+    v1682 = iconst.i64 -1
+    ; check 193: umulhi.i64 0xffffffffffffffff * 0xffffffffffffffff
+    v1683 = umulhi v1681, v1682
+    v1684 = iconst.i64 -2
+    v1685 = icmp.ne v1683, v1684
+    v1686 = iconst.i32 193
+    v1687 = select v1685, v1686, v1680
+    v1688 = iconst.i64 -1
+    v1689 = iconst.i64 -1
+    ; check 194: smulhi.i64 0xffffffffffffffff * 0xffffffffffffffff
+    v1690 = smulhi v1688, v1689
+    v1691 = iconst.i64 0
+    v1692 = icmp.ne v1690, v1691
+    v1693 = iconst.i32 194
+    v1694 = select v1692, v1693, v1687
+    v1695 = iconst.i64 -1
+    v1696 = iconst.i64 -9223372036854775808
+    ; check 195: umulhi.i64 0xffffffffffffffff * 0x8000000000000000
+    v1697 = umulhi v1695, v1696
+    v1698 = iconst.i64 9223372036854775807
+    v1699 = icmp.ne v1697, v1698
+    v1700 = iconst.i32 195
+    v1701 = select v1699, v1700, v1694
+    v1702 = iconst.i64 -1
+    v1703 = iconst.i64 -9223372036854775808
+    ; check 196: smulhi.i64 0xffffffffffffffff * 0x8000000000000000
+    v1704 = smulhi v1702, v1703
+    v1705 = iconst.i64 0
+    v1706 = icmp.ne v1704, v1705
+    v1707 = iconst.i32 196
+    v1708 = select v1706, v1707, v1701
+    v1709 = iconst.i64 -1
+    v1710 = iconst.i64 3
+    ; check 197: umulhi.i64 0xffffffffffffffff * 0x3
+    v1711 = umulhi v1709, v1710
+    v1712 = iconst.i64 2
+    v1713 = icmp.ne v1711, v1712
+    v1714 = iconst.i32 197
+    v1715 = select v1713, v1714, v1708
+    v1716 = iconst.i64 -1
+    v1717 = iconst.i64 3
+    ; check 198: smulhi.i64 0xffffffffffffffff * 0x3
+    v1718 = smulhi v1716, v1717
+    v1719 = iconst.i64 -1
+    v1720 = icmp.ne v1718, v1719
+    v1721 = iconst.i32 198
+    v1722 = select v1720, v1721, v1715
+    v1723 = iconst.i64 -1
+    v1724 = iconst.i64 9223372036854775807
+    ; check 199: umulhi.i64 0xffffffffffffffff * 0x7fffffffffffffff
+    v1725 = umulhi v1723, v1724
+    v1726 = iconst.i64 9223372036854775806
+    v1727 = icmp.ne v1725, v1726
+    v1728 = iconst.i32 199
+    v1729 = select v1727, v1728, v1722
+    v1730 = iconst.i64 -1
+    v1731 = iconst.i64 9223372036854775807
+    ; check 200: smulhi.i64 0xffffffffffffffff * 0x7fffffffffffffff
+    v1732 = smulhi v1730, v1731
+    v1733 = iconst.i64 -1
+    v1734 = icmp.ne v1732, v1733
+    v1735 = iconst.i32 200
+    v1736 = select v1734, v1735, v1729
+    v1737 = iconst.i64 -9223372036854775808
+    v1738 = iconst.i64 -1
+    ; check 201: umulhi.i64 0x8000000000000000 * 0xffffffffffffffff
+    v1739 = umulhi v1737, v1738
+    v1740 = iconst.i64 9223372036854775807
+    v1741 = icmp.ne v1739, v1740
+    v1742 = iconst.i32 201
+    v1743 = select v1741, v1742, v1736
+    v1744 = iconst.i64 -9223372036854775808
+    v1745 = iconst.i64 -1
+    ; check 202: smulhi.i64 0x8000000000000000 * 0xffffffffffffffff
+    v1746 = smulhi v1744, v1745
+    v1747 = iconst.i64 0
+    v1748 = icmp.ne v1746, v1747
+    v1749 = iconst.i32 202
+    v1750 = select v1748, v1749, v1743
+    v1751 = iconst.i64 -9223372036854775808
+    v1752 = iconst.i64 -9223372036854775808
+    ; check 203: umulhi.i64 0x8000000000000000 * 0x8000000000000000
+    v1753 = umulhi v1751, v1752
+    v1754 = iconst.i64 4611686018427387904
+    v1755 = icmp.ne v1753, v1754
+    v1756 = iconst.i32 203
+    v1757 = select v1755, v1756, v1750
+    v1758 = iconst.i64 -9223372036854775808
+    v1759 = iconst.i64 -9223372036854775808
+    ; check 204: smulhi.i64 0x8000000000000000 * 0x8000000000000000
+    v1760 = smulhi v1758, v1759
+    v1761 = iconst.i64 4611686018427387904
+    v1762 = icmp.ne v1760, v1761
+    v1763 = iconst.i32 204
+    v1764 = select v1762, v1763, v1757
+    v1765 = iconst.i64 -9223372036854775808
+    v1766 = iconst.i64 3
+    ; check 205: umulhi.i64 0x8000000000000000 * 0x3
+    v1767 = umulhi v1765, v1766
+    v1768 = iconst.i64 1
+    v1769 = icmp.ne v1767, v1768
+    v1770 = iconst.i32 205
+    v1771 = select v1769, v1770, v1764
+    v1772 = iconst.i64 -9223372036854775808
+    v1773 = iconst.i64 3
+    ; check 206: smulhi.i64 0x8000000000000000 * 0x3
+    v1774 = smulhi v1772, v1773
+    v1775 = iconst.i64 -2
+    v1776 = icmp.ne v1774, v1775
+    v1777 = iconst.i32 206
+    v1778 = select v1776, v1777, v1771
+    v1779 = iconst.i64 -9223372036854775808
+    v1780 = iconst.i64 9223372036854775807
+    ; check 207: umulhi.i64 0x8000000000000000 * 0x7fffffffffffffff
+    v1781 = umulhi v1779, v1780
+    v1782 = iconst.i64 4611686018427387903
+    v1783 = icmp.ne v1781, v1782
+    v1784 = iconst.i32 207
+    v1785 = select v1783, v1784, v1778
+    v1786 = iconst.i64 -9223372036854775808
+    v1787 = iconst.i64 9223372036854775807
+    ; check 208: smulhi.i64 0x8000000000000000 * 0x7fffffffffffffff
+    v1788 = smulhi v1786, v1787
+    v1789 = iconst.i64 -4611686018427387904
+    v1790 = icmp.ne v1788, v1789
+    v1791 = iconst.i32 208
+    v1792 = select v1790, v1791, v1785
+    v1793 = iconst.i64 9223372036854775807
+    v1794 = iconst.i64 -1
+    ; check 209: umulhi.i64 0x7fffffffffffffff * 0xffffffffffffffff
+    v1795 = umulhi v1793, v1794
+    v1796 = iconst.i64 9223372036854775806
+    v1797 = icmp.ne v1795, v1796
+    v1798 = iconst.i32 209
+    v1799 = select v1797, v1798, v1792
+    v1800 = iconst.i64 9223372036854775807
+    v1801 = iconst.i64 -1
+    ; check 210: smulhi.i64 0x7fffffffffffffff * 0xffffffffffffffff
+    v1802 = smulhi v1800, v1801
+    v1803 = iconst.i64 -1
+    v1804 = icmp.ne v1802, v1803
+    v1805 = iconst.i32 210
+    v1806 = select v1804, v1805, v1799
+    v1807 = iconst.i64 9223372036854775807
+    v1808 = iconst.i64 -9223372036854775808
+    ; check 211: umulhi.i64 0x7fffffffffffffff * 0x8000000000000000
+    v1809 = umulhi v1807, v1808
+    v1810 = iconst.i64 4611686018427387903
+    v1811 = icmp.ne v1809, v1810
+    v1812 = iconst.i32 211
+    v1813 = select v1811, v1812, v1806
+    v1814 = iconst.i64 9223372036854775807
+    v1815 = iconst.i64 -9223372036854775808
+    ; check 212: smulhi.i64 0x7fffffffffffffff * 0x8000000000000000
+    v1816 = smulhi v1814, v1815
+    v1817 = iconst.i64 -4611686018427387904
+    v1818 = icmp.ne v1816, v1817
+    v1819 = iconst.i32 212
+    v1820 = select v1818, v1819, v1813
+    v1821 = iconst.i64 9223372036854775807
+    v1822 = iconst.i64 3
+    ; check 213: umulhi.i64 0x7fffffffffffffff * 0x3
+    v1823 = umulhi v1821, v1822
+    v1824 = iconst.i64 1
+    v1825 = icmp.ne v1823, v1824
+    v1826 = iconst.i32 213
+    v1827 = select v1825, v1826, v1820
+    v1828 = iconst.i64 9223372036854775807
+    v1829 = iconst.i64 3
+    ; check 214: smulhi.i64 0x7fffffffffffffff * 0x3
+    v1830 = smulhi v1828, v1829
+    v1831 = iconst.i64 1
+    v1832 = icmp.ne v1830, v1831
+    v1833 = iconst.i32 214
+    v1834 = select v1832, v1833, v1827
+    v1835 = iconst.i64 9223372036854775807
+    v1836 = iconst.i64 9223372036854775807
+    ; check 215: umulhi.i64 0x7fffffffffffffff * 0x7fffffffffffffff
+    v1837 = umulhi v1835, v1836
+    v1838 = iconst.i64 4611686018427387903
+    v1839 = icmp.ne v1837, v1838
+    v1840 = iconst.i32 215
+    v1841 = select v1839, v1840, v1834
+    v1842 = iconst.i64 9223372036854775807
+    v1843 = iconst.i64 9223372036854775807
+    ; check 216: smulhi.i64 0x7fffffffffffffff * 0x7fffffffffffffff
+    v1844 = smulhi v1842, v1843
+    v1845 = iconst.i64 4611686018427387903
+    v1846 = icmp.ne v1844, v1845
+    v1847 = iconst.i32 216
+    v1848 = select v1846, v1847, v1841
+    v1849 = iconst.i64 6510615555426900570
+    v1850 = iconst.i64 -1
+    ; check 217: umulhi.i64 0x5a5a5a5a5a5a5a5a * 0xffffffffffffffff
+    v1851 = umulhi v1849, v1850
+    v1852 = iconst.i64 6510615555426900569
+    v1853 = icmp.ne v1851, v1852
+    v1854 = iconst.i32 217
+    v1855 = select v1853, v1854, v1848
+    v1856 = iconst.i64 6510615555426900570
+    v1857 = iconst.i64 -1
+    ; check 218: smulhi.i64 0x5a5a5a5a5a5a5a5a * 0xffffffffffffffff
+    v1858 = smulhi v1856, v1857
+    v1859 = iconst.i64 -1
+    v1860 = icmp.ne v1858, v1859
+    v1861 = iconst.i32 218
+    v1862 = select v1860, v1861, v1855
+    v1863 = iconst.i64 6510615555426900570
+    v1864 = iconst.i64 -9223372036854775808
+    ; check 219: umulhi.i64 0x5a5a5a5a5a5a5a5a * 0x8000000000000000
+    v1865 = umulhi v1863, v1864
+    v1866 = iconst.i64 3255307777713450285
+    v1867 = icmp.ne v1865, v1866
+    v1868 = iconst.i32 219
+    v1869 = select v1867, v1868, v1862
+    v1870 = iconst.i64 6510615555426900570
+    v1871 = iconst.i64 -9223372036854775808
+    ; check 220: smulhi.i64 0x5a5a5a5a5a5a5a5a * 0x8000000000000000
+    v1872 = smulhi v1870, v1871
+    v1873 = iconst.i64 -3255307777713450285
+    v1874 = icmp.ne v1872, v1873
+    v1875 = iconst.i32 220
+    v1876 = select v1874, v1875, v1869
+    v1877 = iconst.i64 6510615555426900570
+    v1878 = iconst.i64 3
+    ; check 221: umulhi.i64 0x5a5a5a5a5a5a5a5a * 0x3
+    v1879 = umulhi v1877, v1878
+    v1880 = iconst.i64 1
+    v1881 = icmp.ne v1879, v1880
+    v1882 = iconst.i32 221
+    v1883 = select v1881, v1882, v1876
+    v1884 = iconst.i64 6510615555426900570
+    v1885 = iconst.i64 3
+    ; check 222: smulhi.i64 0x5a5a5a5a5a5a5a5a * 0x3
+    v1886 = smulhi v1884, v1885
+    v1887 = iconst.i64 1
+    v1888 = icmp.ne v1886, v1887
+    v1889 = iconst.i32 222
+    v1890 = select v1888, v1889, v1883
+    v1891 = iconst.i64 6510615555426900570
+    v1892 = iconst.i64 9223372036854775807
+    ; check 223: umulhi.i64 0x5a5a5a5a5a5a5a5a * 0x7fffffffffffffff
+    v1893 = umulhi v1891, v1892
+    v1894 = iconst.i64 3255307777713450284
+    v1895 = icmp.ne v1893, v1894
+    v1896 = iconst.i32 223
+    v1897 = select v1895, v1896, v1890
+    v1898 = iconst.i64 6510615555426900570
+    v1899 = iconst.i64 9223372036854775807
+    ; check 224: smulhi.i64 0x5a5a5a5a5a5a5a5a * 0x7fffffffffffffff
+    v1900 = smulhi v1898, v1899
+    v1901 = iconst.i64 3255307777713450284
+    v1902 = icmp.ne v1900, v1901
+    v1903 = iconst.i32 224
+    v1904 = select v1902, v1903, v1897
+    return v1904
+}

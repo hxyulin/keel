@@ -22,7 +22,7 @@
 use crate::CodegenError;
 use keel_ir::{
     BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, Function, Inst, InstData, IntCC,
-    Type, Value,
+    Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -147,8 +147,22 @@ impl<'a> FunctionCompiler<'a> {
                 self.materialize(9, imm as u64, true);
                 self.store_result(result, 9);
             }
+            InstData::Unary { op, arg } => {
+                self.unary(op, arg);
+                self.store_result(result, 9);
+            }
             InstData::Binary { op, args } => {
                 self.binary(op, args);
+                self.store_result(result, 9);
+            }
+            InstData::Select { args } => {
+                let ty = self.ty(args[1]);
+                self.load(9, args[0]);
+                self.test_nonzero(9, self.ty(args[0]));
+                self.load(10, args[1]);
+                self.load(11, args[2]);
+                let (a, b, dst) = (reg(10, ty), reg(11, ty), reg(9, ty));
+                self.emit(format!("csel\t{dst}, {a}, {b}, ne"));
                 self.store_result(result, 9);
             }
             InstData::Convert { op, ty, arg } => {
@@ -212,13 +226,7 @@ impl<'a> FunctionCompiler<'a> {
                 dests: [then_dest, else_dest],
             } => {
                 self.load(9, cond);
-                match self.ty(cond) {
-                    // Only the low bits of a narrow value are defined.
-                    Type::I8 => self.emit("tst\tw9, #0xff"),
-                    Type::I16 => self.emit("tst\tw9, #0xffff"),
-                    Type::I32 => self.emit("cmp\tw9, #0"),
-                    _ => self.emit("cmp\tx9, #0"),
-                }
+                self.test_nonzero(9, self.ty(cond));
                 // Block arguments are copied on the edge, so a branch with
                 // else-arguments needs its own landing pad.
                 let else_edge = if else_dest.args.is_empty() {
@@ -266,6 +274,60 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match op {
+            BinaryOp::Rotl | BinaryOp::Rotr => match narrow_bits(ty) {
+                // `ror` takes its amount modulo the width; rotating left by
+                // n is rotating right by -n.
+                None => {
+                    if op == BinaryOp::Rotl {
+                        self.emit(format!("neg\t{b}, {b}"));
+                    }
+                    self.emit(format!("ror\t{a}, {a}, {b}"));
+                }
+                // No narrow rotate instruction: (x << n) | (x >> (bits - n))
+                // on the zero-extended value. n = 0 shifts right by `bits`,
+                // which gives 0 in a 32-bit register, as needed.
+                Some(bits) => {
+                    self.extend(9, ty, false);
+                    self.emit(format!("and\tw10, w10, #{}", bits - 1));
+                    self.emit(format!("mov\tw12, #{bits}"));
+                    self.emit("sub\tw12, w12, w10");
+                    let (first, second) = match op {
+                        BinaryOp::Rotl => ("lsl", "lsr"),
+                        _ => ("lsr", "lsl"),
+                    };
+                    self.emit(format!("{first}\tw11, w9, w10"));
+                    self.emit(format!("{second}\tw12, w9, w12"));
+                    self.emit("orr\tw9, w11, w12");
+                }
+            },
+            BinaryOp::Umulhi | BinaryOp::Smulhi => {
+                let signed = op == BinaryOp::Smulhi;
+                match ty {
+                    Type::I64 => {
+                        let mnemonic = if signed { "smulh" } else { "umulh" };
+                        self.emit(format!("{mnemonic}\tx9, x9, x10"));
+                    }
+                    // Widening 32x32 -> 64 multiply, then take the top half.
+                    Type::I32 => {
+                        let (mul, shr) = if signed {
+                            ("smull", "asr")
+                        } else {
+                            ("umull", "lsr")
+                        };
+                        self.emit(format!("{mul}\tx9, w9, w10"));
+                        self.emit(format!("{shr}\tx9, x9, #32"));
+                    }
+                    // The full product of two extended i8/i16 fits in 32 bits.
+                    _ => {
+                        let bits = narrow_bits(ty).expect("i8 or i16");
+                        self.extend(9, ty, signed);
+                        self.extend(10, ty, signed);
+                        self.emit("mul\tw9, w9, w10");
+                        let shr = if signed { "asr" } else { "lsr" };
+                        self.emit(format!("{shr}\tw9, w9, #{bits}"));
+                    }
+                }
+            }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                 // Shift amounts are taken modulo the bit width. The hardware
                 // does that for 32 and 64 bits; narrower types need a mask.
@@ -312,6 +374,64 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             _ => unreachable!("handled above"),
+        }
+    }
+
+    /// Computes `op arg` into x9.
+    fn unary(&mut self, op: UnaryOp, arg: Value) {
+        let ty = self.ty(arg);
+        let a = reg(9, ty);
+        self.load(9, arg);
+        match op {
+            UnaryOp::Ineg => self.emit(format!("neg\t{a}, {a}")),
+            UnaryOp::Bnot => self.emit(format!("mvn\t{a}, {a}")),
+            UnaryOp::Clz => {
+                // Count in 32 bits, then drop the zeros above the narrow width.
+                self.extend(9, ty, false);
+                self.emit(format!("clz\t{a}, {a}"));
+                if let Some(bits) = narrow_bits(ty) {
+                    self.emit(format!("sub\tw9, w9, #{}", 32 - bits));
+                }
+            }
+            UnaryOp::Ctz => {
+                // ctz = clz of the bit-reversed value. For narrow types, a
+                // set bit just above the width caps the count at the width
+                // and hides the unspecified upper bits.
+                if let Some(bits) = narrow_bits(ty) {
+                    self.emit(format!("orr\tw9, w9, #{:#x}", 1u32 << bits));
+                }
+                self.emit(format!("rbit\t{a}, {a}"));
+                self.emit(format!("clz\t{a}, {a}"));
+            }
+            UnaryOp::Popcnt => {
+                // No scalar popcount: count bits per byte in a SIMD register
+                // (`cnt`), then add the byte counts (`addv`).
+                self.extend(9, ty, false);
+                if ty == Type::I64 {
+                    self.emit("fmov\td0, x9");
+                } else {
+                    self.emit("fmov\ts0, w9");
+                }
+                self.emit("cnt\tv0.8b, v0.8b");
+                self.emit("addv\tb0, v0.8b");
+                self.emit("fmov\tw9, s0");
+            }
+            UnaryOp::Bswap => match ty {
+                // Swaps the bytes within each halfword; the low one is ours.
+                Type::I16 => self.emit("rev16\tw9, w9"),
+                _ => self.emit(format!("rev\t{a}, {a}")),
+            },
+        }
+    }
+
+    /// Sets flags so that `ne` means the value in `reg` is non-zero.
+    fn test_nonzero(&mut self, reg: u8, ty: Type) {
+        match ty {
+            // Only the low bits of a narrow value are defined.
+            Type::I8 => self.emit(format!("tst\tw{reg}, #0xff")),
+            Type::I16 => self.emit(format!("tst\tw{reg}, #0xffff")),
+            Type::I32 => self.emit(format!("cmp\tw{reg}, #0")),
+            _ => self.emit(format!("cmp\tx{reg}, #0")),
         }
     }
 

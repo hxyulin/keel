@@ -1,0 +1,549 @@
+; expect: exit 0
+; Generated checks: returns 0, or the number of the last failing check.
+; Narrow operands carry junk above their width, which codegen must ignore.
+
+func @main() -> i32 {
+block0:
+    v0 = iconst.i32 0
+    v1 = iconst.i64 -6502179613573254144
+    v2 = trunc.i8 v1
+    v3 = iconst.i64 -6502179613573254076
+    v4 = trunc.i8 v3
+    v5 = iconst.i64 -6502179613573253991
+    v6 = trunc.i8 v5
+    ; check 1: select.i8 on i8 0x0
+    v7 = select v2, v4, v6
+    v8 = iconst.i8 -103
+    v9 = icmp.ne v7, v8
+    v10 = iconst.i32 1
+    v11 = select v9, v10, v0
+    v12 = iconst.i64 -6502179613573254144
+    v13 = trunc.i8 v12
+    v14 = iconst.i64 -6502179613573299132
+    v15 = trunc.i16 v14
+    v16 = iconst.i64 -6502179613573277287
+    v17 = trunc.i16 v16
+    ; check 2: select.i16 on i8 0x0
+    v18 = select v13, v15, v17
+    v19 = iconst.i16 -26215
+    v20 = icmp.ne v18, v19
+    v21 = iconst.i32 2
+    v22 = select v20, v21, v11
+    v23 = iconst.i64 -6502179613573254144
+    v24 = trunc.i8 v23
+    v25 = iconst.i64 -6502179614512430012
+    v26 = trunc.i32 v25
+    v27 = iconst.i64 -6502179613939754599
+    v28 = trunc.i32 v27
+    ; check 3: select.i32 on i8 0x0
+    v29 = select v24, v26, v28
+    v30 = iconst.i32 1431673241
+    v31 = icmp.ne v29, v30
+    v32 = iconst.i32 3
+    v33 = select v31, v32, v22
+    v34 = iconst.i64 -6502179613573254144
+    v35 = trunc.i8 v34
+    v36 = iconst.i64 1229801703532086340
+    v37 = iconst.i64 8608461802446363033
+    ; check 4: select.i64 on i8 0x0
+    v38 = select v35, v36, v37
+    v39 = iconst.i64 8608461802446363033
+    v40 = icmp.ne v38, v39
+    v41 = iconst.i32 4
+    v42 = select v40, v41, v33
+    v43 = iconst.i64 -6502179613573254143
+    v44 = trunc.i8 v43
+    v45 = iconst.i64 -6502179613573254076
+    v46 = trunc.i8 v45
+    v47 = iconst.i64 -6502179613573253991
+    v48 = trunc.i8 v47
+    ; check 5: select.i8 on i8 0x1
+    v49 = select v44, v46, v48
+    v50 = iconst.i8 68
+    v51 = icmp.ne v49, v50
+    v52 = iconst.i32 5
+    v53 = select v51, v52, v42
+    v54 = iconst.i64 -6502179613573254143
+    v55 = trunc.i8 v54
+    v56 = iconst.i64 -6502179613573299132
+    v57 = trunc.i16 v56
+    v58 = iconst.i64 -6502179613573277287
+    v59 = trunc.i16 v58
+    ; check 6: select.i16 on i8 0x1
+    v60 = select v55, v57, v59
+    v61 = iconst.i16 17476
+    v62 = icmp.ne v60, v61
+    v63 = iconst.i32 6
+    v64 = select v62, v63, v53
+    v65 = iconst.i64 -6502179613573254143
+    v66 = trunc.i8 v65
+    v67 = iconst.i64 -6502179614512430012
+    v68 = trunc.i32 v67
+    v69 = iconst.i64 -6502179613939754599
+    v70 = trunc.i32 v69
+    ; check 7: select.i32 on i8 0x1
+    v71 = select v66, v68, v70
+    v72 = iconst.i32 858997828
+    v73 = icmp.ne v71, v72
+    v74 = iconst.i32 7
+    v75 = select v73, v74, v64
+    v76 = iconst.i64 -6502179613573254143
+    v77 = trunc.i8 v76
+    v78 = iconst.i64 1229801703532086340
+    v79 = iconst.i64 8608461802446363033
+    ; check 8: select.i64 on i8 0x1
+    v80 = select v77, v78, v79
+    v81 = iconst.i64 1229801703532086340
+    v82 = icmp.ne v80, v81
+    v83 = iconst.i32 8
+    v84 = select v82, v83, v75
+    v85 = iconst.i64 -6502179613573254016
+    v86 = trunc.i8 v85
+    v87 = iconst.i64 -6502179613573254076
+    v88 = trunc.i8 v87
+    v89 = iconst.i64 -6502179613573253991
+    v90 = trunc.i8 v89
+    ; check 9: select.i8 on i8 0x80
+    v91 = select v86, v88, v90
+    v92 = iconst.i8 68
+    v93 = icmp.ne v91, v92
+    v94 = iconst.i32 9
+    v95 = select v93, v94, v84
+    v96 = iconst.i64 -6502179613573254016
+    v97 = trunc.i8 v96
+    v98 = iconst.i64 -6502179613573299132
+    v99 = trunc.i16 v98
+    v100 = iconst.i64 -6502179613573277287
+    v101 = trunc.i16 v100
+    ; check 10: select.i16 on i8 0x80
+    v102 = select v97, v99, v101
+    v103 = iconst.i16 17476
+    v104 = icmp.ne v102, v103
+    v105 = iconst.i32 10
+    v106 = select v104, v105, v95
+    v107 = iconst.i64 -6502179613573254016
+    v108 = trunc.i8 v107
+    v109 = iconst.i64 -6502179614512430012
+    v110 = trunc.i32 v109
+    v111 = iconst.i64 -6502179613939754599
+    v112 = trunc.i32 v111
+    ; check 11: select.i32 on i8 0x80
+    v113 = select v108, v110, v112
+    v114 = iconst.i32 858997828
+    v115 = icmp.ne v113, v114
+    v116 = iconst.i32 11
+    v117 = select v115, v116, v106
+    v118 = iconst.i64 -6502179613573254016
+    v119 = trunc.i8 v118
+    v120 = iconst.i64 1229801703532086340
+    v121 = iconst.i64 8608461802446363033
+    ; check 12: select.i64 on i8 0x80
+    v122 = select v119, v120, v121
+    v123 = iconst.i64 1229801703532086340
+    v124 = icmp.ne v122, v123
+    v125 = iconst.i32 12
+    v126 = select v124, v125, v117
+    v127 = iconst.i64 -6502179613573316608
+    v128 = trunc.i16 v127
+    v129 = iconst.i64 -6502179613573254076
+    v130 = trunc.i8 v129
+    v131 = iconst.i64 -6502179613573253991
+    v132 = trunc.i8 v131
+    ; check 13: select.i8 on i16 0x0
+    v133 = select v128, v130, v132
+    v134 = iconst.i8 -103
+    v135 = icmp.ne v133, v134
+    v136 = iconst.i32 13
+    v137 = select v135, v136, v126
+    v138 = iconst.i64 -6502179613573316608
+    v139 = trunc.i16 v138
+    v140 = iconst.i64 -6502179613573299132
+    v141 = trunc.i16 v140
+    v142 = iconst.i64 -6502179613573277287
+    v143 = trunc.i16 v142
+    ; check 14: select.i16 on i16 0x0
+    v144 = select v139, v141, v143
+    v145 = iconst.i16 -26215
+    v146 = icmp.ne v144, v145
+    v147 = iconst.i32 14
+    v148 = select v146, v147, v137
+    v149 = iconst.i64 -6502179613573316608
+    v150 = trunc.i16 v149
+    v151 = iconst.i64 -6502179614512430012
+    v152 = trunc.i32 v151
+    v153 = iconst.i64 -6502179613939754599
+    v154 = trunc.i32 v153
+    ; check 15: select.i32 on i16 0x0
+    v155 = select v150, v152, v154
+    v156 = iconst.i32 1431673241
+    v157 = icmp.ne v155, v156
+    v158 = iconst.i32 15
+    v159 = select v157, v158, v148
+    v160 = iconst.i64 -6502179613573316608
+    v161 = trunc.i16 v160
+    v162 = iconst.i64 1229801703532086340
+    v163 = iconst.i64 8608461802446363033
+    ; check 16: select.i64 on i16 0x0
+    v164 = select v161, v162, v163
+    v165 = iconst.i64 8608461802446363033
+    v166 = icmp.ne v164, v165
+    v167 = iconst.i32 16
+    v168 = select v166, v167, v159
+    v169 = iconst.i64 -6502179613573316607
+    v170 = trunc.i16 v169
+    v171 = iconst.i64 -6502179613573254076
+    v172 = trunc.i8 v171
+    v173 = iconst.i64 -6502179613573253991
+    v174 = trunc.i8 v173
+    ; check 17: select.i8 on i16 0x1
+    v175 = select v170, v172, v174
+    v176 = iconst.i8 68
+    v177 = icmp.ne v175, v176
+    v178 = iconst.i32 17
+    v179 = select v177, v178, v168
+    v180 = iconst.i64 -6502179613573316607
+    v181 = trunc.i16 v180
+    v182 = iconst.i64 -6502179613573299132
+    v183 = trunc.i16 v182
+    v184 = iconst.i64 -6502179613573277287
+    v185 = trunc.i16 v184
+    ; check 18: select.i16 on i16 0x1
+    v186 = select v181, v183, v185
+    v187 = iconst.i16 17476
+    v188 = icmp.ne v186, v187
+    v189 = iconst.i32 18
+    v190 = select v188, v189, v179
+    v191 = iconst.i64 -6502179613573316607
+    v192 = trunc.i16 v191
+    v193 = iconst.i64 -6502179614512430012
+    v194 = trunc.i32 v193
+    v195 = iconst.i64 -6502179613939754599
+    v196 = trunc.i32 v195
+    ; check 19: select.i32 on i16 0x1
+    v197 = select v192, v194, v196
+    v198 = iconst.i32 858997828
+    v199 = icmp.ne v197, v198
+    v200 = iconst.i32 19
+    v201 = select v199, v200, v190
+    v202 = iconst.i64 -6502179613573316607
+    v203 = trunc.i16 v202
+    v204 = iconst.i64 1229801703532086340
+    v205 = iconst.i64 8608461802446363033
+    ; check 20: select.i64 on i16 0x1
+    v206 = select v203, v204, v205
+    v207 = iconst.i64 1229801703532086340
+    v208 = icmp.ne v206, v207
+    v209 = iconst.i32 20
+    v210 = select v208, v209, v201
+    v211 = iconst.i64 -6502179613573283840
+    v212 = trunc.i16 v211
+    v213 = iconst.i64 -6502179613573254076
+    v214 = trunc.i8 v213
+    v215 = iconst.i64 -6502179613573253991
+    v216 = trunc.i8 v215
+    ; check 21: select.i8 on i16 0x8000
+    v217 = select v212, v214, v216
+    v218 = iconst.i8 68
+    v219 = icmp.ne v217, v218
+    v220 = iconst.i32 21
+    v221 = select v219, v220, v210
+    v222 = iconst.i64 -6502179613573283840
+    v223 = trunc.i16 v222
+    v224 = iconst.i64 -6502179613573299132
+    v225 = trunc.i16 v224
+    v226 = iconst.i64 -6502179613573277287
+    v227 = trunc.i16 v226
+    ; check 22: select.i16 on i16 0x8000
+    v228 = select v223, v225, v227
+    v229 = iconst.i16 17476
+    v230 = icmp.ne v228, v229
+    v231 = iconst.i32 22
+    v232 = select v230, v231, v221
+    v233 = iconst.i64 -6502179613573283840
+    v234 = trunc.i16 v233
+    v235 = iconst.i64 -6502179614512430012
+    v236 = trunc.i32 v235
+    v237 = iconst.i64 -6502179613939754599
+    v238 = trunc.i32 v237
+    ; check 23: select.i32 on i16 0x8000
+    v239 = select v234, v236, v238
+    v240 = iconst.i32 858997828
+    v241 = icmp.ne v239, v240
+    v242 = iconst.i32 23
+    v243 = select v241, v242, v232
+    v244 = iconst.i64 -6502179613573283840
+    v245 = trunc.i16 v244
+    v246 = iconst.i64 1229801703532086340
+    v247 = iconst.i64 8608461802446363033
+    ; check 24: select.i64 on i16 0x8000
+    v248 = select v245, v246, v247
+    v249 = iconst.i64 1229801703532086340
+    v250 = icmp.ne v248, v249
+    v251 = iconst.i32 24
+    v252 = select v250, v251, v243
+    v253 = iconst.i64 -6502179615371427840
+    v254 = trunc.i32 v253
+    v255 = iconst.i64 -6502179613573254076
+    v256 = trunc.i8 v255
+    v257 = iconst.i64 -6502179613573253991
+    v258 = trunc.i8 v257
+    ; check 25: select.i8 on i32 0x0
+    v259 = select v254, v256, v258
+    v260 = iconst.i8 -103
+    v261 = icmp.ne v259, v260
+    v262 = iconst.i32 25
+    v263 = select v261, v262, v252
+    v264 = iconst.i64 -6502179615371427840
+    v265 = trunc.i32 v264
+    v266 = iconst.i64 -6502179613573299132
+    v267 = trunc.i16 v266
+    v268 = iconst.i64 -6502179613573277287
+    v269 = trunc.i16 v268
+    ; check 26: select.i16 on i32 0x0
+    v270 = select v265, v267, v269
+    v271 = iconst.i16 -26215
+    v272 = icmp.ne v270, v271
+    v273 = iconst.i32 26
+    v274 = select v272, v273, v263
+    v275 = iconst.i64 -6502179615371427840
+    v276 = trunc.i32 v275
+    v277 = iconst.i64 -6502179614512430012
+    v278 = trunc.i32 v277
+    v279 = iconst.i64 -6502179613939754599
+    v280 = trunc.i32 v279
+    ; check 27: select.i32 on i32 0x0
+    v281 = select v276, v278, v280
+    v282 = iconst.i32 1431673241
+    v283 = icmp.ne v281, v282
+    v284 = iconst.i32 27
+    v285 = select v283, v284, v274
+    v286 = iconst.i64 -6502179615371427840
+    v287 = trunc.i32 v286
+    v288 = iconst.i64 1229801703532086340
+    v289 = iconst.i64 8608461802446363033
+    ; check 28: select.i64 on i32 0x0
+    v290 = select v287, v288, v289
+    v291 = iconst.i64 8608461802446363033
+    v292 = icmp.ne v290, v291
+    v293 = iconst.i32 28
+    v294 = select v292, v293, v285
+    v295 = iconst.i64 -6502179615371427839
+    v296 = trunc.i32 v295
+    v297 = iconst.i64 -6502179613573254076
+    v298 = trunc.i8 v297
+    v299 = iconst.i64 -6502179613573253991
+    v300 = trunc.i8 v299
+    ; check 29: select.i8 on i32 0x1
+    v301 = select v296, v298, v300
+    v302 = iconst.i8 68
+    v303 = icmp.ne v301, v302
+    v304 = iconst.i32 29
+    v305 = select v303, v304, v294
+    v306 = iconst.i64 -6502179615371427839
+    v307 = trunc.i32 v306
+    v308 = iconst.i64 -6502179613573299132
+    v309 = trunc.i16 v308
+    v310 = iconst.i64 -6502179613573277287
+    v311 = trunc.i16 v310
+    ; check 30: select.i16 on i32 0x1
+    v312 = select v307, v309, v311
+    v313 = iconst.i16 17476
+    v314 = icmp.ne v312, v313
+    v315 = iconst.i32 30
+    v316 = select v314, v315, v305
+    v317 = iconst.i64 -6502179615371427839
+    v318 = trunc.i32 v317
+    v319 = iconst.i64 -6502179614512430012
+    v320 = trunc.i32 v319
+    v321 = iconst.i64 -6502179613939754599
+    v322 = trunc.i32 v321
+    ; check 31: select.i32 on i32 0x1
+    v323 = select v318, v320, v322
+    v324 = iconst.i32 858997828
+    v325 = icmp.ne v323, v324
+    v326 = iconst.i32 31
+    v327 = select v325, v326, v316
+    v328 = iconst.i64 -6502179615371427839
+    v329 = trunc.i32 v328
+    v330 = iconst.i64 1229801703532086340
+    v331 = iconst.i64 8608461802446363033
+    ; check 32: select.i64 on i32 0x1
+    v332 = select v329, v330, v331
+    v333 = iconst.i64 1229801703532086340
+    v334 = icmp.ne v332, v333
+    v335 = iconst.i32 32
+    v336 = select v334, v335, v327
+    v337 = iconst.i64 -6502179613223944192
+    v338 = trunc.i32 v337
+    v339 = iconst.i64 -6502179613573254076
+    v340 = trunc.i8 v339
+    v341 = iconst.i64 -6502179613573253991
+    v342 = trunc.i8 v341
+    ; check 33: select.i8 on i32 0x80000000
+    v343 = select v338, v340, v342
+    v344 = iconst.i8 68
+    v345 = icmp.ne v343, v344
+    v346 = iconst.i32 33
+    v347 = select v345, v346, v336
+    v348 = iconst.i64 -6502179613223944192
+    v349 = trunc.i32 v348
+    v350 = iconst.i64 -6502179613573299132
+    v351 = trunc.i16 v350
+    v352 = iconst.i64 -6502179613573277287
+    v353 = trunc.i16 v352
+    ; check 34: select.i16 on i32 0x80000000
+    v354 = select v349, v351, v353
+    v355 = iconst.i16 17476
+    v356 = icmp.ne v354, v355
+    v357 = iconst.i32 34
+    v358 = select v356, v357, v347
+    v359 = iconst.i64 -6502179613223944192
+    v360 = trunc.i32 v359
+    v361 = iconst.i64 -6502179614512430012
+    v362 = trunc.i32 v361
+    v363 = iconst.i64 -6502179613939754599
+    v364 = trunc.i32 v363
+    ; check 35: select.i32 on i32 0x80000000
+    v365 = select v360, v362, v364
+    v366 = iconst.i32 858997828
+    v367 = icmp.ne v365, v366
+    v368 = iconst.i32 35
+    v369 = select v367, v368, v358
+    v370 = iconst.i64 -6502179613223944192
+    v371 = trunc.i32 v370
+    v372 = iconst.i64 1229801703532086340
+    v373 = iconst.i64 8608461802446363033
+    ; check 36: select.i64 on i32 0x80000000
+    v374 = select v371, v372, v373
+    v375 = iconst.i64 1229801703532086340
+    v376 = icmp.ne v374, v375
+    v377 = iconst.i32 36
+    v378 = select v376, v377, v369
+    v379 = iconst.i64 0
+    v380 = iconst.i64 -6502179613573254076
+    v381 = trunc.i8 v380
+    v382 = iconst.i64 -6502179613573253991
+    v383 = trunc.i8 v382
+    ; check 37: select.i8 on i64 0x0
+    v384 = select v379, v381, v383
+    v385 = iconst.i8 -103
+    v386 = icmp.ne v384, v385
+    v387 = iconst.i32 37
+    v388 = select v386, v387, v378
+    v389 = iconst.i64 0
+    v390 = iconst.i64 -6502179613573299132
+    v391 = trunc.i16 v390
+    v392 = iconst.i64 -6502179613573277287
+    v393 = trunc.i16 v392
+    ; check 38: select.i16 on i64 0x0
+    v394 = select v389, v391, v393
+    v395 = iconst.i16 -26215
+    v396 = icmp.ne v394, v395
+    v397 = iconst.i32 38
+    v398 = select v396, v397, v388
+    v399 = iconst.i64 0
+    v400 = iconst.i64 -6502179614512430012
+    v401 = trunc.i32 v400
+    v402 = iconst.i64 -6502179613939754599
+    v403 = trunc.i32 v402
+    ; check 39: select.i32 on i64 0x0
+    v404 = select v399, v401, v403
+    v405 = iconst.i32 1431673241
+    v406 = icmp.ne v404, v405
+    v407 = iconst.i32 39
+    v408 = select v406, v407, v398
+    v409 = iconst.i64 0
+    v410 = iconst.i64 1229801703532086340
+    v411 = iconst.i64 8608461802446363033
+    ; check 40: select.i64 on i64 0x0
+    v412 = select v409, v410, v411
+    v413 = iconst.i64 8608461802446363033
+    v414 = icmp.ne v412, v413
+    v415 = iconst.i32 40
+    v416 = select v414, v415, v408
+    v417 = iconst.i64 1
+    v418 = iconst.i64 -6502179613573254076
+    v419 = trunc.i8 v418
+    v420 = iconst.i64 -6502179613573253991
+    v421 = trunc.i8 v420
+    ; check 41: select.i8 on i64 0x1
+    v422 = select v417, v419, v421
+    v423 = iconst.i8 68
+    v424 = icmp.ne v422, v423
+    v425 = iconst.i32 41
+    v426 = select v424, v425, v416
+    v427 = iconst.i64 1
+    v428 = iconst.i64 -6502179613573299132
+    v429 = trunc.i16 v428
+    v430 = iconst.i64 -6502179613573277287
+    v431 = trunc.i16 v430
+    ; check 42: select.i16 on i64 0x1
+    v432 = select v427, v429, v431
+    v433 = iconst.i16 17476
+    v434 = icmp.ne v432, v433
+    v435 = iconst.i32 42
+    v436 = select v434, v435, v426
+    v437 = iconst.i64 1
+    v438 = iconst.i64 -6502179614512430012
+    v439 = trunc.i32 v438
+    v440 = iconst.i64 -6502179613939754599
+    v441 = trunc.i32 v440
+    ; check 43: select.i32 on i64 0x1
+    v442 = select v437, v439, v441
+    v443 = iconst.i32 858997828
+    v444 = icmp.ne v442, v443
+    v445 = iconst.i32 43
+    v446 = select v444, v445, v436
+    v447 = iconst.i64 1
+    v448 = iconst.i64 1229801703532086340
+    v449 = iconst.i64 8608461802446363033
+    ; check 44: select.i64 on i64 0x1
+    v450 = select v447, v448, v449
+    v451 = iconst.i64 1229801703532086340
+    v452 = icmp.ne v450, v451
+    v453 = iconst.i32 44
+    v454 = select v452, v453, v446
+    v455 = iconst.i64 -9223372036854775808
+    v456 = iconst.i64 -6502179613573254076
+    v457 = trunc.i8 v456
+    v458 = iconst.i64 -6502179613573253991
+    v459 = trunc.i8 v458
+    ; check 45: select.i8 on i64 0x8000000000000000
+    v460 = select v455, v457, v459
+    v461 = iconst.i8 68
+    v462 = icmp.ne v460, v461
+    v463 = iconst.i32 45
+    v464 = select v462, v463, v454
+    v465 = iconst.i64 -9223372036854775808
+    v466 = iconst.i64 -6502179613573299132
+    v467 = trunc.i16 v466
+    v468 = iconst.i64 -6502179613573277287
+    v469 = trunc.i16 v468
+    ; check 46: select.i16 on i64 0x8000000000000000
+    v470 = select v465, v467, v469
+    v471 = iconst.i16 17476
+    v472 = icmp.ne v470, v471
+    v473 = iconst.i32 46
+    v474 = select v472, v473, v464
+    v475 = iconst.i64 -9223372036854775808
+    v476 = iconst.i64 -6502179614512430012
+    v477 = trunc.i32 v476
+    v478 = iconst.i64 -6502179613939754599
+    v479 = trunc.i32 v478
+    ; check 47: select.i32 on i64 0x8000000000000000
+    v480 = select v475, v477, v479
+    v481 = iconst.i32 858997828
+    v482 = icmp.ne v480, v481
+    v483 = iconst.i32 47
+    v484 = select v482, v483, v474
+    v485 = iconst.i64 -9223372036854775808
+    v486 = iconst.i64 1229801703532086340
+    v487 = iconst.i64 8608461802446363033
+    ; check 48: select.i64 on i64 0x8000000000000000
+    v488 = select v485, v486, v487
+    v489 = iconst.i64 1229801703532086340
+    v490 = icmp.ne v488, v489
+    v491 = iconst.i32 48
+    v492 = select v490, v491, v484
+    return v492
+}
