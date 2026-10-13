@@ -32,6 +32,9 @@
 //! SIMD/FP registers: two register classes that never interfere. One scan
 //! handles both; each interval only competes for registers of its class.
 //!
+//! An `i128` is two 64-bit halves, each with its own interval over the same
+//! range, so each half gets its own register or spill slot.
+//!
 //! # Program points
 //!
 //! Every instruction gets two points: it reads its operands at the even
@@ -55,7 +58,7 @@
 //! call and its result starts after it, so neither counts as crossing it.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-use keel_ir::{Block, EntityRef, Function, InstData, Value, ValueDef};
+use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
 use std::collections::BTreeSet;
 
 /// Where a value lives for its whole life.
@@ -87,9 +90,10 @@ pub struct Allocation {
     /// The reachable blocks in the order the intervals were numbered, which
     /// is also the order they must be emitted in.
     pub order: Vec<Block>,
-    /// By value index. `None` for values with no interval: those defined in
-    /// unreachable code, and aliases.
-    locs: Vec<Option<Loc>>,
+    /// By half (0, or 1 for the high half of an `i128`), then value index.
+    /// `None` for values with no interval: those defined in unreachable
+    /// code, and aliases.
+    locs: [Vec<Option<Loc>>; 2],
     /// Number of 8-byte spill slots the frame needs.
     pub spill_slots: u32,
     /// The callee-saved registers handed out, sorted, which the prologue
@@ -102,7 +106,12 @@ impl Allocation {
     /// The location of `value`. Operands must be resolved through
     /// [`Function::resolve`] first.
     pub fn loc(&self, value: Value) -> Option<Loc> {
-        self.locs[value.index()]
+        self.locs[0][value.index()]
+    }
+
+    /// The location of the high half of `i128` value `value`.
+    pub fn hi_loc(&self, value: Value) -> Option<Loc> {
+        self.locs[1][value.index()]
     }
 }
 
@@ -113,13 +122,14 @@ pub fn allocate(func: &Function, pools: &Pools, is_call: impl Fn(&InstData) -> b
     let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
     let intervals = build_intervals(func, &cfg, &order, &is_call);
 
-    let mut locs = vec![None; func.num_values()];
+    let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let mut spilled = linear_scan(&intervals, pools, &mut locs);
     let spill_slots = assign_spill_slots(&mut spilled, &mut locs);
 
     let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
         let mut regs: Vec<u8> = locs
             .iter()
+            .flatten()
             .filter_map(|&loc| want(loc?))
             .filter(|r| pool.contains(r))
             .collect();
@@ -154,6 +164,8 @@ pub fn allocate(func: &Function, pools: &Pools, is_call: impl Fn(&InstData) -> b
 #[derive(Clone, Debug)]
 struct Interval {
     value: Value,
+    /// 1 for the high half of an `i128`.
+    half: usize,
     start: u32,
     end: u32,
     crosses_call: bool,
@@ -287,32 +299,41 @@ fn build_intervals(
         }
     }
 
-    ranges
-        .iter()
-        .enumerate()
-        .filter_map(|(i, range)| {
-            let (start, end) = (*range)?;
-            // Crossing a call means being live on both sides of its read
-            // point: the first call after `start` comes before `end`.
-            let next_call = calls.partition_point(|&c| c <= start);
-            let crosses_call = calls.get(next_call).is_some_and(|&c| c < end);
-            let value = Value::new(i);
-            Some(Interval {
+    let mut intervals = Vec::new();
+    for (i, range) in ranges.iter().enumerate() {
+        let Some((start, end)) = *range else {
+            continue;
+        };
+        // Crossing a call means being live on both sides of its read
+        // point: the first call after `start` comes before `end`.
+        let next_call = calls.partition_point(|&c| c <= start);
+        let crosses_call = calls.get(next_call).is_some_and(|&c| c < end);
+        let value = Value::new(i);
+        let ty = func.value_type(value);
+        let halves = if ty == Type::I128 { 2 } else { 1 };
+        for half in 0..halves {
+            intervals.push(Interval {
                 value,
+                half,
                 start,
                 end,
                 crosses_call,
-                float: func.value_type(value).is_float(),
-            })
-        })
-        .collect()
+                float: ty.is_float(),
+            });
+        }
+    }
+    intervals
 }
 
 /// Gives each interval a register from `pools` or spills it. Fills in the
 /// register locations and returns the spilled intervals.
-fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) -> Vec<Interval> {
+fn linear_scan(
+    intervals: &[Interval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
-    sorted.sort_by_key(|iv| (iv.start, iv.value));
+    sorted.sort_by_key(|iv| (iv.start, iv.value, iv.half));
 
     // Intervals holding a register, with that register.
     let mut active: Vec<(&Interval, Loc)> = Vec::new();
@@ -346,7 +367,7 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
             .copied()
             .find(|&r| active.iter().all(|&(_, used)| used != r));
         if let Some(reg) = free {
-            locs[cur.value.index()] = Some(reg);
+            locs[cur.half][cur.value.index()] = Some(reg);
             active.push((cur, reg));
             continue;
         }
@@ -363,9 +384,9 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
         match victim {
             Some(i) if active[i].0.end > cur.end => {
                 let (evicted, reg) = active.swap_remove(i);
-                locs[evicted.value.index()] = None;
+                locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted.clone());
-                locs[cur.value.index()] = Some(reg);
+                locs[cur.half][cur.value.index()] = Some(reg);
                 active.push((cur, reg));
             }
             _ => spilled.push(cur.clone()),
@@ -377,8 +398,8 @@ fn linear_scan(intervals: &[Interval], pools: &Pools, locs: &mut [Option<Loc>]) 
 /// Gives each spilled interval a stack slot, reusing the slots of intervals
 /// that have ended: linear scan again, with as many "registers" as needed.
 /// Returns the number of slots.
-fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Option<Loc>]) -> u32 {
-    spilled.sort_by_key(|iv| (iv.start, iv.value));
+fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
+    spilled.sort_by_key(|iv| (iv.start, iv.value, iv.half));
     // (end, slot) of slots in use.
     let mut active: Vec<(u32, u32)> = Vec::new();
     let mut count = 0;
@@ -389,7 +410,7 @@ fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Option<Loc>]) -> u32
             .expect("some slot is free");
         active.push((iv.end, slot));
         count = count.max(slot + 1);
-        locs[iv.value.index()] = Some(Loc::Stack(slot));
+        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
     }
     count
 }
@@ -508,7 +529,8 @@ mod tests {
                 let cfg = ControlFlowGraph::compute(func);
                 let ivs = build_intervals(func, &cfg, &alloc.order, &is_call);
                 for (i, a) in ivs.iter().enumerate() {
-                    let loc = alloc.loc(a.value).expect("every interval is allocated");
+                    let loc =
+                        alloc.locs[a.half][a.value.index()].expect("every interval is allocated");
                     assert!(
                         match loc {
                             Loc::Reg(_) => !a.float,
@@ -531,7 +553,7 @@ mod tests {
                     for b in &ivs[i + 1..] {
                         let overlap = a.start <= b.end && b.start <= a.end;
                         assert!(
-                            !overlap || alloc.loc(b.value) != Some(loc),
+                            !overlap || alloc.locs[b.half][b.value.index()] != Some(loc),
                             "{}: {} and {} overlap but share {loc:?}",
                             func.name,
                             a.value,

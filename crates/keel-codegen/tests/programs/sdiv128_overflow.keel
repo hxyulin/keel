@@ -1,0 +1,12 @@
+; expect: trap
+; i128 MIN / -1 does not fit in i128, so keel traps, as for narrower types.
+func @main() -> i32 {
+block0:
+    v0 = iconst.i128 1
+    v1 = iconst.i32 127
+    v2 = shl v0, v1
+    v3 = iconst.i128 -1
+    v4 = sdiv v2, v3
+    v5 = trunc.i32 v4
+    return v5
+}

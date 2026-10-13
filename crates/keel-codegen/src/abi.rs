@@ -61,7 +61,8 @@ pub fn classify(layout: &Layout) -> StructClass {
     }
 }
 
-/// Where one scalar, or one struct's address, is.
+/// Where one scalar, or one struct's address, is. An `i128` in registers
+/// is in this one (its low half) and the next.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Slot {
     /// x0–x7 or v0–v7.
@@ -135,6 +136,15 @@ impl Cursor {
     }
 
     fn scalar(&mut self, ty: Type) -> Slot {
+        // An i128 takes the next two general registers (Apple does not
+        // round up to an even one, as AAPCS64 does), or 16 aligned bytes
+        // of stack, closing the general registers.
+        if ty == Type::I128 {
+            return match Self::regs(&mut self.ints, 2, Loc::Reg) {
+                Some(regs) => Slot::Reg(regs[0]),
+                None => Slot::Stack(self.stack(16, 16)),
+            };
+        }
         let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() {
             (&mut self.floats, Loc::FReg)
         } else {
@@ -172,16 +182,12 @@ impl Cursor {
                     }
                 }
             }
-            StructClass::Gprs { count } => {
-                // A 16-byte aligned struct starts at an even register.
-                if layout.align() == 16 {
-                    self.ints = self.ints.next_multiple_of(2);
-                }
-                match Self::regs(&mut self.ints, count, Loc::Reg) {
-                    Some(regs) => ArgLoc::InRegs(regs),
-                    None => ArgLoc::OnStack(self.stack(8 * count, layout.align().max(8) as u32)),
-                }
-            }
+            // Even a 16-byte aligned struct takes the next registers, with no
+            // rounding to an even one: Apple differs from AAPCS64 here.
+            StructClass::Gprs { count } => match Self::regs(&mut self.ints, count, Loc::Reg) {
+                Some(regs) => ArgLoc::InRegs(regs),
+                None => ArgLoc::OnStack(self.stack(8 * count, layout.align().max(8) as u32)),
+            },
         }
     }
 }

@@ -131,11 +131,15 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     Ok(out)
 }
 
-/// Instructions that clobber the caller-saved registers: calls, and the
-/// memory intrinsics, which are calls to libc.
-fn is_call(data: &InstData) -> bool {
+/// Instructions that clobber the caller-saved registers: calls, the memory
+/// intrinsics, which are calls to libc, and `i128` division, a call to
+/// compiler-rt.
+fn is_call(func: &Function, data: &InstData) -> bool {
     match data {
         InstData::Call { .. } | InstData::CallIndirect { .. } => true,
+        InstData::Binary { op, args } => {
+            op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
+        }
         InstData::Intrinsic { id, .. } => match id {
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
             Intrinsic::Debugtrap | Intrinsic::VaStart => false,
@@ -233,12 +237,14 @@ impl<'a> FunctionCompiler<'a> {
         for (_, sig) in func.signatures() {
             check_call_signature(&format!("indirect call {sig}"), sig, true).map_err(err)?;
         }
-        for value in (0..func.num_values()).map(Value::new) {
-            let ty = func.value_type(value);
-            if ty == Type::I128 {
-                return Err(err(format!(
-                    "{value}: type {ty} is not supported by aarch64 codegen yet"
-                )));
+        for (_, inst) in func.layout_insts() {
+            if let InstData::Binary {
+                op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
+                args,
+            } = func.inst_data(inst)
+                && func.value_type(func.resolve(args[0])) == Type::I128
+            {
+                return Err(err(format!("{op} on i128 is not supported yet")));
             }
         }
 
@@ -293,7 +299,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         let spill_base = offset.next_multiple_of(8);
 
-        let alloc = regalloc::allocate(func, pools, is_call);
+        let alloc = regalloc::allocate(func, pools, |data| is_call(func, data));
         let mut offset = spill_base + 8 * alloc.spill_slots as usize;
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
@@ -373,12 +379,21 @@ impl<'a> FunctionCompiler<'a> {
                     continue;
                 };
                 let abi_param = &func.sig.params[i];
+                let hi = self.alloc.hi_loc(param);
                 match loc {
                     ArgLoc::Value(Slot::Reg(src)) | ArgLoc::Copy(Slot::Reg(src)) => {
-                        moves.push((dst, src))
+                        moves.push((dst, src));
+                        if let Some(hi) = hi {
+                            moves.push((hi, Loc::Reg(loc_reg(src) + 1)));
+                        }
                     }
                     ArgLoc::Value(Slot::Stack(offset)) | ArgLoc::Copy(Slot::Stack(offset)) => {
-                        self.load_stack_param(dst, abi_param.ty, 16 + offset)
+                        if let Some(hi) = hi {
+                            self.load_stack_param(dst, Type::I64, 16 + offset);
+                            self.load_stack_param(hi, Type::I64, 24 + offset);
+                        } else {
+                            self.load_stack_param(dst, abi_param.ty, 16 + offset)
+                        }
                     }
                     ArgLoc::SretMemory => moves.push((dst, Loc::Reg(8))),
                     // The struct's address is where its bytes are now.
@@ -425,6 +440,9 @@ impl<'a> FunctionCompiler<'a> {
             if let Some(loc) = self.alloc.loc(value) {
                 write!(line, " {value}={}", self.loc_name(loc)).unwrap();
             }
+            if let Some(hi) = self.alloc.hi_loc(value) {
+                write!(line, ":{}", self.loc_name(hi)).unwrap();
+            }
         }
         writeln!(self.out, "{line}").unwrap();
     }
@@ -432,6 +450,9 @@ impl<'a> FunctionCompiler<'a> {
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
+        if self.lower_i128(inst, func.inst_data(inst), result) {
+            return;
+        }
         match func.inst_data(inst).clone() {
             InstData::Iconst { imm, .. } => {
                 let d = self.def_reg(result);
@@ -541,8 +562,7 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Select { args } if self.ty(args[1]).is_float() => {
                 let ty = self.ty(args[1]);
                 let d = self.def_freg(result);
-                let c = self.use_reg(args[0], S0);
-                self.test_nonzero(c, self.ty(args[0]));
+                self.test_value(args[0]);
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);
                 let (a, b, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
@@ -552,8 +572,7 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Select { args } => {
                 let d = self.def_reg(result);
                 let ty = self.ty(args[1]);
-                let c = self.use_reg(args[0], S0);
-                self.test_nonzero(c, self.ty(args[0]));
+                self.test_value(args[0]);
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
                 let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
@@ -671,8 +690,7 @@ impl<'a> FunctionCompiler<'a> {
                 cond,
                 dests: [then_dest, else_dest],
             } => {
-                let c = self.use_reg(cond, S0);
-                self.test_nonzero(c, self.ty(cond));
+                self.test_value(cond);
                 // Block arguments are copied on the edge, so a branch with
                 // else-arguments needs its own landing pad. The copies only
                 // move data, so the flags survive them.
@@ -727,6 +745,10 @@ impl<'a> FunctionCompiler<'a> {
                 if let Some(&value) = args.first() {
                     let src = self.loc(value);
                     self.emit_move(return_loc(self.ty(value)), src);
+                    if self.ty(value) == Type::I128 {
+                        let hi = self.hi(value);
+                        self.emit_move(Loc::Reg(1), hi);
+                    }
                     let ret = &func.sig.returns[0];
                     self.extend_in_place(0, ret.ty, ret.ext);
                 }
@@ -779,6 +801,9 @@ impl<'a> FunctionCompiler<'a> {
             match loc {
                 ArgLoc::Value(Slot::Reg(dst)) => {
                     moves.push((dst, self.loc(arg)));
+                    if self.ty(arg) == Type::I128 {
+                        moves.push((Loc::Reg(loc_reg(dst) + 1), self.hi(arg)));
+                    }
                     if let (Some(param), Loc::Reg(r)) = (params.get(i), dst) {
                         extend.push((r, param.ty, param.ext));
                     }
@@ -850,7 +875,12 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Stores `arg` at `[sp, #offset]` with its own width.
     fn store_stack_arg(&mut self, arg: Value, ty: Type, offset: u32) {
-        if ty.is_float() {
+        if ty == Type::I128 {
+            let lo = self.use_reg(arg, S1);
+            self.emit(format!("str\tx{lo}, [sp, #{offset}]"));
+            let hi = self.use_reg_hi(arg, S1);
+            self.emit(format!("str\tx{hi}, [sp, #{}]", offset + 8));
+        } else if ty.is_float() {
             let r = self.use_freg(arg, FS1);
             self.emit(format!("str\t{}, [sp, #{offset}]", freg(r, ty)));
         } else {
@@ -887,6 +917,302 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    /// Lowers `data` if it takes or makes an `i128`, and returns whether it
+    /// did. Operands are first copied into x0–x7 (which hold nothing
+    /// outside calls) in order, an `i128` as a pair with its low half
+    /// first; the result is built in x4:x5 (or wherever the lowering says)
+    /// and moved out last, so every operand is read before the result is
+    /// written.
+    fn lower_i128(&mut self, inst: Inst, data: &InstData, result: Option<Value>) -> bool {
+        let wide = |this: &Self, v: Value| this.ty(v) == Type::I128;
+        let wide_result = result.is_some_and(|r| self.func.value_type(r) == Type::I128);
+        match *data {
+            InstData::Iconst {
+                ty: Type::I128,
+                imm,
+            } => {
+                self.materialize(4, imm as u64, true);
+                self.materialize(5, (imm >> 63) as u64, true);
+                self.pair_out(result, 4, 5);
+            }
+            InstData::Binary { op, args } if wide_result => {
+                self.operands(&args);
+                let (lo, hi) = self.binary_i128(inst, op);
+                self.pair_out(result, lo, hi);
+            }
+            InstData::Unary { op, arg } if wide_result => {
+                self.operands(&[arg]);
+                self.unary_i128(op);
+                self.pair_out(result, 4, 5);
+            }
+            InstData::Icmp { cond, args } if wide(self, args[0]) => {
+                self.operands(&args);
+                let d = self.def_reg(result);
+                match cond {
+                    IntCC::Eq | IntCC::Ne => {
+                        self.emit("cmp\tx0, x2");
+                        self.emit("ccmp\tx1, x3, #0, eq");
+                    }
+                    // a > b is b < a, and a <= b is b >= a: compare
+                    // swapped. The borrow of the low halves feeds the high.
+                    _ => {
+                        let swap =
+                            matches!(cond, IntCC::Sgt | IntCC::Sle | IntCC::Ugt | IntCC::Ule);
+                        let (x, y) = if swap { (2, 0) } else { (0, 2) };
+                        self.emit(format!("cmp\tx{x}, x{y}"));
+                        self.emit(format!("sbcs\txzr, x{}, x{}", x + 1, y + 1));
+                    }
+                }
+                let code = match cond {
+                    IntCC::Eq => "eq",
+                    IntCC::Ne => "ne",
+                    IntCC::Slt | IntCC::Sgt => "lt",
+                    IntCC::Sle | IntCC::Sge => "ge",
+                    IntCC::Ult | IntCC::Ugt => "lo",
+                    IntCC::Ule | IntCC::Uge => "hs",
+                };
+                self.emit(format!("cset\tw{d}, {code}"));
+                self.def_done(result, d);
+            }
+            InstData::Select { args } if wide(self, args[1]) => {
+                // x0:x1 and x2:x3 are the arms, x4 (or x4:x5) the condition.
+                self.operands(&[args[1], args[2], args[0]]);
+                if wide(self, args[0]) {
+                    self.emit("orr\tx6, x4, x5");
+                    self.emit("cmp\tx6, #0");
+                } else {
+                    self.test_nonzero(4, self.ty(args[0]));
+                }
+                self.emit("csel\tx6, x0, x2, ne");
+                self.emit("csel\tx7, x1, x3, ne");
+                self.pair_out(result, 6, 7);
+            }
+            InstData::Convert {
+                op: op @ (ConvertOp::Sext | ConvertOp::Uext),
+                ty: Type::I128,
+                arg,
+            } => {
+                self.operands(&[arg]);
+                let signed = op == ConvertOp::Sext;
+                match (self.ty(arg), signed) {
+                    (Type::I64, _) => self.emit("mov\tx4, x0"),
+                    (Type::I32, true) => self.emit("sxtw\tx4, w0"),
+                    (Type::I32, false) => self.emit("mov\tw4, w0"),
+                    (Type::I16, true) => self.emit("sxth\tx4, w0"),
+                    (Type::I16, false) => self.emit("uxth\tw4, w0"),
+                    (_, true) => self.emit("sxtb\tx4, w0"),
+                    (_, false) => self.emit("uxtb\tw4, w0"),
+                }
+                if signed {
+                    self.emit("asr\tx5, x4, #63");
+                } else {
+                    self.emit("mov\tx5, #0");
+                }
+                self.pair_out(result, 4, 5);
+            }
+            InstData::Load {
+                ty: Type::I128,
+                addr,
+            } => {
+                let a = self.use_reg(addr, S0);
+                self.emit(format!("ldp\tx4, x5, [x{a}]"));
+                self.pair_out(result, 4, 5);
+            }
+            InstData::Store { value, addr } if wide(self, value) => {
+                self.operands(&[value, addr]);
+                self.emit("stp\tx0, x1, [x2]");
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Copies `values` into x0, x1, ... in order, an `i128` taking two.
+    fn operands(&mut self, values: &[Value]) {
+        let mut moves = Vec::new();
+        let mut next = 0;
+        for &v in values {
+            moves.push((Loc::Reg(next), self.loc(v)));
+            next += 1;
+            if self.ty(v) == Type::I128 {
+                moves.push((Loc::Reg(next), self.hi(v)));
+                next += 1;
+            }
+        }
+        self.parallel_copy(&moves);
+    }
+
+    /// Moves an `i128` result from `x<lo>`:`x<hi>` to its locations.
+    fn pair_out(&mut self, result: Option<Value>, lo: u8, hi: u8) {
+        let Some(value) = result else { return };
+        if let Some(loc) = self.alloc.loc(value) {
+            self.emit_move(loc, Loc::Reg(lo));
+        }
+        if let Some(loc) = self.alloc.hi_loc(value) {
+            self.emit_move(loc, Loc::Reg(hi));
+        }
+    }
+
+    /// `x0:x1 op x2:x3` (or `x0:x1 op x2` for a shift amount), returning
+    /// the registers of the result.
+    fn binary_i128(&mut self, inst: Inst, op: BinaryOp) -> (u8, u8) {
+        let pair = |this: &mut Self, lo: &str, hi: &str| {
+            this.emit(format!("{lo}\tx4, x0, x2"));
+            this.emit(format!("{hi}\tx5, x1, x3"));
+        };
+        match op {
+            BinaryOp::Iadd => pair(self, "adds", "adc"),
+            BinaryOp::Isub => pair(self, "subs", "sbc"),
+            BinaryOp::And => pair(self, "and", "and"),
+            BinaryOp::Or => pair(self, "orr", "orr"),
+            BinaryOp::Xor => pair(self, "eor", "eor"),
+            // (a1:a0)(b1:b0) mod 2^128 = a0 b0 + 2^64 (a0 b1 + a1 b0)
+            BinaryOp::Imul => {
+                self.emit("mul\tx4, x0, x2");
+                self.emit("umulh\tx5, x0, x2");
+                self.emit("madd\tx5, x0, x3, x5");
+                self.emit("madd\tx5, x1, x2, x5");
+            }
+            BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+                self.emit("and\tx2, x2, #127");
+                self.shift_i128(op, 2, (4, 5), [3, 6, 7]);
+            }
+            // rotl(x, n) = (x << n) | (x >> (-n mod 128)), and the mirror.
+            BinaryOp::Rotl | BinaryOp::Rotr => {
+                self.emit("and\tx2, x2, #127");
+                self.emit("neg\tx3, x2");
+                self.emit("and\tx3, x3, #127");
+                let (first, second) = match op {
+                    BinaryOp::Rotl => (BinaryOp::Shl, BinaryOp::Ushr),
+                    _ => (BinaryOp::Ushr, BinaryOp::Shl),
+                };
+                self.shift_i128(first, 2, (4, 5), [6, 7, 8]);
+                self.shift_i128(second, 3, (6, 7), [8, 16, 17]);
+                self.emit("orr\tx4, x4, x6");
+                self.emit("orr\tx5, x5, x7");
+            }
+            // compiler-rt takes and returns the pairs in x0:x1 and x2:x3,
+            // where they already are. Traps first, as for narrower types.
+            BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
+                let trap = self.trap_label();
+                self.emit(format!("orr\tx{S0}, x2, x3"));
+                self.emit(format!("cbz\tx{S0}, {trap}"));
+                if op == BinaryOp::Sdiv {
+                    // MIN / -1: the divisor's halves are both all ones and
+                    // the dividend is 2^127.
+                    let ok = format!("L{}_{inst}_divok", self.func.name);
+                    self.emit(format!("and\tx{S0}, x2, x3"));
+                    self.emit(format!("cmn\tx{S0}, #1"));
+                    self.emit(format!("b.ne\t{ok}"));
+                    self.emit(format!("cbnz\tx0, {ok}"));
+                    self.materialize(S0, 1 << 63, true);
+                    self.emit(format!("cmp\tx1, x{S0}"));
+                    self.emit(format!("b.eq\t{trap}"));
+                    writeln!(self.out, "{ok}:").unwrap();
+                }
+                let function = match op {
+                    BinaryOp::Udiv => "___udivti3",
+                    BinaryOp::Sdiv => "___divti3",
+                    BinaryOp::Urem => "___umodti3",
+                    _ => "___modti3",
+                };
+                self.emit(format!("bl\t{function}"));
+                return (0, 1);
+            }
+            _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
+        }
+        (4, 5)
+    }
+
+    /// A 128-bit shift of x0:x1 by `x<n>` (already in 0..128) into
+    /// `out`, using three temporaries; x0, x1 and `x<n>` are left alone.
+    /// The halves shift by `n mod 64`; when `n >= 64` the result comes from
+    /// the other half. The bits crossing between halves are `x >> (64 - n)`,
+    /// computed as `(x >> 1) >> (63 - n)` so that `n = 0` gives 0.
+    fn shift_i128(&mut self, op: BinaryOp, n: u8, (ol, oh): (u8, u8), [a, b, c]: [u8; 3]) {
+        match op {
+            BinaryOp::Shl => {
+                self.emit(format!("lsl\tx{a}, x1, x{n}"));
+                self.emit(format!("mvn\tw{b}, w{n}"));
+                self.emit(format!("lsr\tx{c}, x0, #1"));
+                self.emit(format!("lsr\tx{c}, x{c}, x{b}"));
+                self.emit(format!("orr\tx{a}, x{a}, x{c}"));
+                self.emit(format!("lsl\tx{c}, x0, x{n}"));
+                self.emit(format!("tst\tx{n}, #64"));
+                self.emit(format!("csel\tx{oh}, x{c}, x{a}, ne"));
+                self.emit(format!("csel\tx{ol}, xzr, x{c}, ne"));
+            }
+            _ => {
+                let shr = if op == BinaryOp::Sshr { "asr" } else { "lsr" };
+                self.emit(format!("lsr\tx{a}, x0, x{n}"));
+                self.emit(format!("mvn\tw{b}, w{n}"));
+                self.emit(format!("lsl\tx{c}, x1, #1"));
+                self.emit(format!("lsl\tx{c}, x{c}, x{b}"));
+                self.emit(format!("orr\tx{a}, x{a}, x{c}"));
+                self.emit(format!("{shr}\tx{c}, x1, x{n}"));
+                // What fills the high half once n >= 64.
+                if op == BinaryOp::Sshr {
+                    self.emit(format!("asr\tx{b}, x1, #63"));
+                } else {
+                    self.emit(format!("mov\tx{b}, #0"));
+                }
+                self.emit(format!("tst\tx{n}, #64"));
+                self.emit(format!("csel\tx{ol}, x{c}, x{a}, ne"));
+                self.emit(format!("csel\tx{oh}, x{b}, x{c}, ne"));
+            }
+        }
+    }
+
+    /// `op x0:x1` into x4:x5.
+    fn unary_i128(&mut self, op: UnaryOp) {
+        match op {
+            UnaryOp::Ineg => {
+                self.emit("negs\tx4, x0");
+                self.emit("ngc\tx5, x1");
+            }
+            UnaryOp::Bnot => {
+                self.emit("mvn\tx4, x0");
+                self.emit("mvn\tx5, x1");
+            }
+            // The high half's count, or 64 plus the low half's.
+            UnaryOp::Clz => {
+                self.emit("cmp\tx1, #0");
+                self.emit("clz\tx4, x1");
+                self.emit("clz\tx5, x0");
+                self.emit("add\tx5, x5, #64");
+                self.emit("csel\tx4, x4, x5, ne");
+                self.emit("mov\tx5, #0");
+            }
+            UnaryOp::Ctz => {
+                self.emit("cmp\tx0, #0");
+                self.emit("rbit\tx4, x0");
+                self.emit("clz\tx4, x4");
+                self.emit("rbit\tx5, x1");
+                self.emit("clz\tx5, x5");
+                self.emit("add\tx5, x5, #64");
+                self.emit("csel\tx4, x4, x5, ne");
+                self.emit("mov\tx5, #0");
+            }
+            UnaryOp::Popcnt => {
+                self.emit("fmov\td0, x0");
+                self.emit("fmov\td1, x1");
+                self.emit("cnt\tv0.8b, v0.8b");
+                self.emit("cnt\tv1.8b, v1.8b");
+                self.emit("addv\tb0, v0.8b");
+                self.emit("addv\tb1, v1.8b");
+                self.emit("fmov\tw4, s0");
+                self.emit("fmov\tw5, s1");
+                self.emit("add\tx4, x4, x5");
+                self.emit("mov\tx5, #0");
+            }
+            UnaryOp::Bswap => {
+                self.emit("rev\tx4, x1");
+                self.emit("rev\tx5, x0");
+            }
+            _ => unreachable!("{op} is not an integer operation"),
+        }
+    }
+
     /// Moves a call's result, if it has one, from x0 or v0 to its place,
     /// and stores a struct result that came back in registers to its
     /// `sret` address.
@@ -895,6 +1221,9 @@ impl<'a> FunctionCompiler<'a> {
             && let Some(loc) = self.alloc.loc(value)
         {
             self.emit_move(loc, return_loc(self.func.value_type(value)));
+            if let Some(hi) = self.alloc.hi_loc(value) {
+                self.emit_move(hi, Loc::Reg(1));
+            }
         }
         if let Some((regs, layout)) = sret {
             let save = self.sret_save.expect("planned");
@@ -1379,12 +1708,17 @@ impl<'a> FunctionCompiler<'a> {
     /// they go through the parallel-copy sequentializer.
     fn block_args(&mut self, call: &BlockCall) {
         let params = self.func.block_params(call.block);
-        let moves: Vec<(Loc, Loc)> = params
-            .iter()
-            .zip(&call.args)
+        let mut moves = Vec::new();
+        for (&param, &arg) in params.iter().zip(&call.args) {
             // A parameter with no location is an alias, never read.
-            .filter_map(|(&param, &arg)| Some((self.alloc.loc(param)?, self.loc(arg))))
-            .collect();
+            let Some(dst) = self.alloc.loc(param) else {
+                continue;
+            };
+            moves.push((dst, self.loc(arg)));
+            if let Some(hi) = self.alloc.hi_loc(param) {
+                moves.push((hi, self.hi(arg)));
+            }
+        }
         self.parallel_copy(&moves);
     }
 
@@ -1486,6 +1820,39 @@ impl<'a> FunctionCompiler<'a> {
                 scratch
             }
             Loc::FReg(_) => unreachable!("{value} is a float"),
+        }
+    }
+
+    /// The high half of `i128` operand `value`, like [`Self::use_reg`].
+    fn use_reg_hi(&mut self, value: Value, scratch: u8) -> u8 {
+        match self.hi(value) {
+            Loc::Reg(r) => r,
+            Loc::Stack(s) => {
+                self.emit(format!("ldr\tx{scratch}, {}", self.slot(s)));
+                scratch
+            }
+            Loc::FReg(_) => unreachable!("an integer half"),
+        }
+    }
+
+    /// The location of the high half of `i128` operand `value`.
+    fn hi(&self, value: Value) -> Loc {
+        self.alloc
+            .hi_loc(self.func.resolve(value))
+            .expect("operand in reachable code is allocated")
+    }
+
+    /// Sets flags so that `ne` means `value` is non-zero; an `i128` is
+    /// non-zero if either half is.
+    fn test_value(&mut self, value: Value) {
+        if self.ty(value) == Type::I128 {
+            let lo = self.use_reg(value, S0);
+            let hi = self.use_reg_hi(value, S1);
+            self.emit(format!("orr\tx{S0}, x{lo}, x{hi}"));
+            self.emit(format!("cmp\tx{S0}, #0"));
+        } else {
+            let c = self.use_reg(value, S0);
+            self.test_nonzero(c, self.ty(value));
         }
     }
 

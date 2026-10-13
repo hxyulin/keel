@@ -62,6 +62,9 @@ and why they were made.
 - Bit counting: `clz ctz popcnt` are defined at 0 (`clz 0` and `ctz 0` give
   the bit width). `bswap` needs at least `i16`.
 - `select c, a, b` picks without branching; `icmp` gives `i8` 0/1.
+- `i128` has all of these but `umulhi smulhi`. On aarch64 it lives in a
+  pair of registers (or two spill slots), and its division calls
+  compiler-rt (`__udivti3` and friends) after the same trap checks.
 
 **Instructions vs intrinsics.** Pure operations the optimizer should fold
 and number are instructions. Adding one costs an enum variant in an existing
@@ -202,6 +205,10 @@ Apple arm64's C convention, as implemented:
   narrow parameters, and every defined function on a narrow result, since it
   is exported. On the stack, narrow arguments take their own size and need
   no extension.
+- An `i128` takes the next two x registers, low half first, with no
+  rounding to an even register (AAPCS64 rounds; Apple does not). If only x7
+  is left it goes to the stack, 16 bytes at 16-byte alignment, and closes
+  the x registers. It is returned in x0:x1.
 - **Structs by value.** A parameter `ptr byval {i32, f64}` passes the struct
   at that address by value: the callee receives the address of its own
   copy. `ptr sret {..}` as the first parameter (of a function returning
@@ -261,7 +268,8 @@ stack; it was replaced once it had served as the baseline.
    definition, its uses and every block it is live into or out of. A value
    used at the top of a loop body is live out of the latch, so its interval
    covers the whole loop. Single intervals without holes are conservative
-   but always safe.
+   but always safe. An `i128` gets two intervals with the same range, one
+   per half, so its halves are allocated (and spilled) independently.
 4. **Scan.** Intervals in start order. Integers and floats are separate
    register classes (general-purpose and SIMD/FP registers) that never
    interfere: each interval only competes for registers of its own class. When no register is free, spill
@@ -285,9 +293,12 @@ stack; it was replaced once it had served as the baseline.
 | v19–v31 | allocatable, caller-saved |
 
 Keeping x0–x7 out of the pool means a call's arguments can be moved into
-place without moving live values out of the way first.
+place without moving live values out of the way first. It also gives the
+`i128` lowerings free working registers: they copy their operands into
+x0–x7 as pairs, compute there, and move the result out.
 
-**Calls** (including the memory intrinsics, which are libc calls) clobber
+**Calls** (including the memory intrinsics, which are libc calls, and
+`i128` division) clobber
 the caller-saved registers. An interval live across a call (defined before
 it and used after) may only take a callee-saved register or be spilled;
 other intervals prefer caller-saved registers, which cost nothing to use.

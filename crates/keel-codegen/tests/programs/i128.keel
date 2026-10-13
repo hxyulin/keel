@@ -1,0 +1,403 @@
+; expect: exit 0
+; i128 operations and calling convention, checked against C's __int128 in
+; i128.c. An i128 takes the next two x registers, low half first, with no
+; rounding to an even register (Apple's rule); on the stack it takes 16
+; bytes, 16-aligned; it is returned in x0:x1.
+
+func @k_iadd(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = iadd v0, v1
+    return v2
+}
+
+func @k_isub(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = isub v0, v1
+    return v2
+}
+
+func @k_imul(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = imul v0, v1
+    return v2
+}
+
+func @k_udiv(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = udiv v0, v1
+    return v2
+}
+
+func @k_sdiv(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = sdiv v0, v1
+    return v2
+}
+
+func @k_urem(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = urem v0, v1
+    return v2
+}
+
+func @k_srem(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = srem v0, v1
+    return v2
+}
+
+func @k_and(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = and v0, v1
+    return v2
+}
+
+func @k_or(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = or v0, v1
+    return v2
+}
+
+func @k_xor(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = xor v0, v1
+    return v2
+}
+
+func @k_shl(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = shl v0, v1
+    return v2
+}
+
+func @k_ushr(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = ushr v0, v1
+    return v2
+}
+
+func @k_sshr(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = sshr v0, v1
+    return v2
+}
+
+func @k_rotl(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = rotl v0, v1
+    return v2
+}
+
+func @k_rotr(i128, i128) -> i128 {
+block0(v0: i128, v1: i128):
+    v2 = rotr v0, v1
+    return v2
+}
+
+func @k_ineg(i128) -> i128 {
+block0(v0: i128):
+    v1 = ineg v0
+    return v1
+}
+
+func @k_bnot(i128) -> i128 {
+block0(v0: i128):
+    v1 = bnot v0
+    return v1
+}
+
+func @k_clz(i128) -> i128 {
+block0(v0: i128):
+    v1 = clz v0
+    return v1
+}
+
+func @k_ctz(i128) -> i128 {
+block0(v0: i128):
+    v1 = ctz v0
+    return v1
+}
+
+func @k_popcnt(i128) -> i128 {
+block0(v0: i128):
+    v1 = popcnt v0
+    return v1
+}
+
+func @k_bswap(i128) -> i128 {
+block0(v0: i128):
+    v1 = bswap v0
+    return v1
+}
+
+func @k_eq(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.eq v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_ne(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.ne v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_slt(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.slt v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_sle(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.sle v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_sgt(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.sgt v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_sge(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.sge v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_ult(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.ult v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_ule(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.ule v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_ugt(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.ugt v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+func @k_uge(i128, i128) -> i32 {
+block0(v0: i128, v1: i128):
+    v2 = icmp.uge v0, v1
+    v3 = uext.i32 v2
+    return v3
+}
+
+; c ? a : b, with an i128 condition and with a narrow one
+func @k_select(i128, i128, i128) -> i128 {
+block0(v0: i128, v1: i128, v2: i128):
+    v3 = select v0, v1, v2
+    return v3
+}
+
+func @k_select32(i32, i128, i128) -> i128 {
+block0(v0: i32, v1: i128, v2: i128):
+    v3 = select v0, v1, v2
+    return v3
+}
+
+; c ? x : y for 64-bit arms, and a branch, on an i128 condition: 1, 2 or 4
+func @k_truth(i128) -> i64 {
+block0(v0: i128):
+    v1 = iconst.i64 1
+    v2 = iconst.i64 0
+    v3 = select v0, v1, v2
+    brif v0, block1, block2
+block1:
+    v4 = iconst.i64 2
+    v5 = iadd v3, v4
+    return v5
+block2:
+    v6 = iconst.i64 4
+    v7 = iadd v3, v6
+    return v7
+}
+
+; sext and uext of x's low 8, 32 and 64 bits, combined with distinct weights:
+; s64 + 3 u64 + 5 s32 + 7 u32 + 11 s8 + 13 u8
+func @k_ext(i64) -> i128 {
+block0(v0: i64):
+    v1 = trunc.i32 v0
+    v2 = trunc.i8 v0
+    v10 = sext.i128 v0
+    v11 = uext.i128 v0
+    v12 = sext.i128 v1
+    v13 = uext.i128 v1
+    v14 = sext.i128 v2
+    v15 = uext.i128 v2
+    v20 = iconst.i128 3
+    v21 = iconst.i128 5
+    v22 = iconst.i128 7
+    v23 = iconst.i128 11
+    v24 = iconst.i128 13
+    v30 = imul v11, v20
+    v31 = imul v12, v21
+    v32 = imul v13, v22
+    v33 = imul v14, v23
+    v34 = imul v15, v24
+    v40 = iadd v10, v30
+    v41 = iadd v40, v31
+    v42 = iadd v41, v32
+    v43 = iadd v42, v33
+    v44 = iadd v43, v34
+    return v44
+}
+
+; The low and high halves, by trunc and by shifting
+func @k_lo(i128) -> i64 {
+block0(v0: i128):
+    v1 = trunc.i64 v0
+    return v1
+}
+
+func @k_hi(i128) -> i64 {
+block0(v0: i128):
+    v1 = iconst.i32 64
+    v2 = ushr v0, v1
+    v3 = trunc.i64 v2
+    return v3
+}
+
+; *p = *q + 1, and returns the old *p
+func @k_mem(ptr, ptr) -> i128 {
+block0(v0: ptr, v1: ptr):
+    v2 = load.i128 v0
+    v3 = load.i128 v1
+    v4 = iconst.i128 1
+    v5 = iadd v3, v4
+    store v5, v0
+    return v2
+}
+
+; -1, as a constant: both halves all ones
+func @k_minus_one() -> i128 {
+block0:
+    v0 = iconst.i128 -1
+    return v0
+}
+
+; a + b * 3 - c, with b in x2:x3 after a 64-bit a, and c on the stack at 16
+; after seven 64-bit arguments, so the stack offset 0 is padding.
+func @k_args(i64, i128, i64) -> i128 {
+block0(v0: i64, v1: i128, v2: i64):
+    v3 = sext.i128 v0
+    v4 = iconst.i128 3
+    v5 = imul v1, v4
+    v6 = iadd v3, v5
+    v7 = sext.i128 v2
+    v8 = isub v6, v7
+    return v8
+}
+
+; Seven integers fill x0-x6: the i128 does not fit in x7 and goes to the
+; stack at 0, and that closes the registers, so the last i64 goes at 16.
+; a0 + ... + a6 + w * 1000 + z * 7
+func @k_tail(i64, i64, i64, i64, i64, i64, i64, i128, i64) -> i128 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i128, v8: i64):
+    v20 = iadd v0, v1
+    v21 = iadd v20, v2
+    v22 = iadd v21, v3
+    v23 = iadd v22, v4
+    v24 = iadd v23, v5
+    v25 = iadd v24, v6
+    v26 = sext.i128 v25
+    v27 = iconst.i128 1000
+    v28 = imul v7, v27
+    v29 = iadd v26, v28
+    v30 = sext.i128 v8
+    v31 = iconst.i128 7
+    v32 = imul v30, v31
+    v33 = iadd v29, v32
+    return v33
+}
+
+decl @c_args(i64, i128, i64) -> i128
+decl @c_tail(i64, i64, i64, i64, i64, i64, i64, i128, i64) -> i128
+
+; Calls C with the same shapes, keeping x live across both calls (in
+; callee-saved registers or on the stack): c_args(1, x, 2) + c_tail(1..7, x, -5) + x
+func @k_call_c(i128) -> i128 {
+block0(v0: i128):
+    v1 = iconst.i64 1
+    v2 = iconst.i64 2
+    v3 = call @c_args(v1, v0, v2)
+    v4 = iconst.i64 3
+    v5 = iconst.i64 4
+    v6 = iconst.i64 5
+    v7 = iconst.i64 6
+    v8 = iconst.i64 7
+    v9 = iconst.i64 -5
+    v10 = call @c_tail(v1, v2, v4, v5, v6, v7, v8, v0, v9)
+    v11 = iadd v3, v10
+    v12 = iadd v11, v0
+    return v12
+}
+
+; x^n by squaring, carrying i128 block arguments around a loop
+func @k_pow(i128, i64) -> i128 {
+block0(v0: i128, v1: i64):
+    v2 = iconst.i128 1
+    jump block1(v0, v1, v2)
+block1(v3: i128, v4: i64, v5: i128):
+    brif v4, block2, block3(v5)
+block2:
+    v6 = iconst.i64 1
+    v7 = and v4, v6
+    v8 = imul v5, v3
+    v9 = select v7, v8, v5
+    v10 = imul v3, v3
+    v11 = ushr v4, v6
+    jump block1(v10, v11, v9)
+block3(v12: i128):
+    return v12
+}
+
+; After x0-x7 and an i64 on the stack at 0, w is rounded up to 16.
+; a0 + ... + a7 + s * 3 + w * 1000
+func @k_tail16(i64, i64, i64, i64, i64, i64, i64, i64, i64, i128) -> i128 {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64, v9: i128):
+    v20 = iadd v0, v1
+    v21 = iadd v20, v2
+    v22 = iadd v21, v3
+    v23 = iadd v22, v4
+    v24 = iadd v23, v5
+    v25 = iadd v24, v6
+    v26 = iadd v25, v7
+    v27 = iconst.i64 3
+    v28 = imul v8, v27
+    v29 = iadd v26, v28
+    v30 = sext.i128 v29
+    v31 = iconst.i128 1000
+    v32 = imul v9, v31
+    v33 = iadd v30, v32
+    return v33
+}
+
+; a % b + a + b + c: a, b and c live across the call to compiler-rt, which
+; i128.c replaces with one that clobbers every caller-saved register.
+func @k_rem_live(i128, i128, i64) -> i128 {
+block0(v0: i128, v1: i128, v2: i64):
+    v3 = urem v0, v1
+    v4 = iadd v3, v0
+    v5 = iadd v4, v1
+    v6 = sext.i128 v2
+    v7 = iadd v5, v6
+    return v7
+}
