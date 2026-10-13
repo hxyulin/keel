@@ -48,7 +48,7 @@ pub const PASSES: &[Pass] = &[
     },
     Pass {
         name: "gcm",
-        description: "place pure instructions: out of loops, otherwise just before their first use",
+        description: "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
         run: gcm::run,
     },
 ];
