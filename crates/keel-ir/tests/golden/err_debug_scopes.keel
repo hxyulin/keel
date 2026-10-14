@@ -1,0 +1,15 @@
+; Scopes nest in ones before them, and are defined; enums are of base types.
+dtype dt0 = base "int" signed 4
+dtype dt1 = pointer dt0
+dtype dt2 = enum dt1 { "a" 0 }
+file f0 = "f.c"
+
+func @f() {
+    ss0 = stack_slot 4, align 4
+    dloc f0:1:1
+    dscope ds0 in ds1
+    dscope ds1
+    dvar "x" dt0 ss0 in ds4
+block0:
+    return !f0:2:1 ds7
+}

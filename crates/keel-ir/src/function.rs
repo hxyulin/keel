@@ -192,18 +192,24 @@ pub struct StackSlotData {
 }
 
 /// Where an instruction came from: a line and column in one of the module's
-/// source files, counted from 1. 0 means unknown, as in DWARF.
+/// source files, counted from 1. 0 means unknown, as in DWARF. And the
+/// lexical scope it is in, if not just the function's.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct SourceLoc {
     pub file: SourceFile,
     pub line: u32,
     pub col: u32,
+    pub scope: Option<crate::DebugScope>,
 }
 
 impl fmt::Display for SourceLoc {
-    /// `f0:12:5`
+    /// `f0:12:5`, or `f0:12:5 ds1` in a scope.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}:{}", self.file, self.line, self.col)
+        write!(f, "{}:{}:{}", self.file, self.line, self.col)?;
+        if let Some(scope) = self.scope {
+            write!(f, " {scope}")?;
+        }
+        Ok(())
     }
 }
 
@@ -260,6 +266,12 @@ pub struct Function {
     /// The source-level return type, `dreturn dt0`, for debuggers; none
     /// for `void` or if unknown.
     pub debug_return: Option<crate::DebugType>,
+    /// Where it is declared, `dloc f0:12:5`: the prologue's location.
+    /// Without it the prologue takes the first instruction's line.
+    pub debug_loc: Option<SourceLoc>,
+    /// Lexical scopes, by [`crate::DebugScope`]: each one's parent, or
+    /// `None` for one directly in the function. A parent comes first.
+    pub debug_scopes: Vec<Option<crate::DebugScope>>,
     /// Source-level variables, for debuggers; see [`crate::debug`].
     pub debug_vars: Vec<crate::DebugVar>,
 }
@@ -280,6 +292,8 @@ impl Function {
             personality: None,
             local: false,
             debug_return: None,
+            debug_loc: None,
+            debug_scopes: Vec::new(),
             debug_vars: Vec::new(),
         }
     }
@@ -651,6 +665,20 @@ impl fmt::Display for Function {
         }
         if let Some(ty) = self.debug_return {
             writeln!(f, "    dreturn {ty}")?;
+        }
+        if let Some(loc) = self.debug_loc {
+            writeln!(f, "    dloc {loc}")?;
+        }
+        for (i, parent) in self.debug_scopes.iter().enumerate() {
+            write!(
+                f,
+                "    dscope {}",
+                <crate::DebugScope as crate::EntityRef>::new(i)
+            )?;
+            if let Some(parent) = parent {
+                write!(f, " in {parent}")?;
+            }
+            f.write_str("\n")?;
         }
         for var in &self.debug_vars {
             writeln!(f, "    {var}")?;

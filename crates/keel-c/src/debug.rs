@@ -1,9 +1,7 @@
-//! C types as debug types, for `-g`.
-//!
-//! What a debugger is not told: typedef names (`size_t` is shown as
-//! `unsigned long`), enums (shown as their integer type) and qualifiers,
-//! none of which the parser's types keep.
+//! C types as debug types, for `-g`: a [`Ty`] with its [`Sugar`], which
+//! adds the typedef names, enums and qualifiers.
 
+use crate::parse::Parser;
 use crate::types::*;
 use keel_ir::{DebugMember, DebugType, DebugTypeData, Encoding, EntityRef, MemberLocation, Module};
 use std::collections::HashMap;
@@ -15,6 +13,10 @@ pub struct DebugTypes {
     pointers: HashMap<Option<DebugType>, DebugType>,
     arrays: HashMap<(DebugType, Option<u64>), DebugType>,
     structs: HashMap<usize, DebugType>,
+    typedefs: HashMap<usize, DebugType>,
+    enums: HashMap<usize, DebugType>,
+    /// By the type qualified and whether `volatile`.
+    qualified: HashMap<(Option<DebugType>, bool), DebugType>,
     function: Option<DebugType>,
 }
 
@@ -24,13 +26,88 @@ fn push(module: &mut Module, data: DebugTypeData) -> DebugType {
 }
 
 impl DebugTypes {
-    /// The debug type of `ty`, `None` for `void`.
+    /// The debug type of `ty` with `sugar`, `None` for `void`.
     pub fn get(
         &mut self,
         module: &mut Module,
-        structs: &[StructDef],
+        p: &Parser,
         ty: &Ty,
+        sugar: &Sugar,
     ) -> Option<DebugType> {
+        match (sugar, ty) {
+            (Sugar::Typedef(i), _) => {
+                if let Some(&dt) = self.typedefs.get(i) {
+                    return Some(dt);
+                }
+                let def = &p.typedefs[*i];
+                let target = self.get(module, p, &def.ty, &def.sugar);
+                let dt = push(
+                    module,
+                    DebugTypeData::Typedef {
+                        name: def.name.clone(),
+                        ty: target,
+                    },
+                );
+                self.typedefs.insert(*i, dt);
+                Some(dt)
+            }
+            (Sugar::Enum(i), Ty::Int(_)) => {
+                if let Some(&dt) = self.enums.get(i) {
+                    return Some(dt);
+                }
+                let def = &p.enums[*i];
+                let base = self.get(module, p, &def.ty, &Sugar::Plain)?;
+                let dt = push(
+                    module,
+                    DebugTypeData::Enum {
+                        name: def.tag.clone(),
+                        ty: base,
+                        values: def.values.clone(),
+                    },
+                );
+                self.enums.insert(*i, dt);
+                Some(dt)
+            }
+            (Sugar::Const(inner) | Sugar::Volatile(inner), _) => {
+                let volatile = matches!(sugar, Sugar::Volatile(_));
+                let inner = self.get(module, p, ty, inner);
+                Some(*self.qualified.entry((inner, volatile)).or_insert_with(|| {
+                    let data = if volatile {
+                        DebugTypeData::Volatile(inner)
+                    } else {
+                        DebugTypeData::Const(inner)
+                    };
+                    push(module, data)
+                }))
+            }
+            (Sugar::Ptr(inner), Ty::Ptr(pointee)) => {
+                let pointee = self.get(module, p, pointee, inner);
+                Some(self.pointer(module, pointee))
+            }
+            (Sugar::Array(inner), Ty::Array(elem, count)) => {
+                let elem = self.get(module, p, elem, inner)?;
+                Some(self.array(module, elem, *count))
+            }
+            _ => self.plain(module, p, ty),
+        }
+    }
+
+    fn pointer(&mut self, module: &mut Module, pointee: Option<DebugType>) -> DebugType {
+        *self
+            .pointers
+            .entry(pointee)
+            .or_insert_with(|| push(module, DebugTypeData::Pointer(pointee)))
+    }
+
+    fn array(&mut self, module: &mut Module, elem: DebugType, count: Option<u64>) -> DebugType {
+        *self
+            .arrays
+            .entry((elem, count))
+            .or_insert_with(|| push(module, DebugTypeData::Array { elem, count }))
+    }
+
+    /// `ty` with nothing more known.
+    fn plain(&mut self, module: &mut Module, p: &Parser, ty: &Ty) -> Option<DebugType> {
         Some(match ty {
             Ty::Void => return None,
             Ty::Int(_) | Ty::Float | Ty::Double | Ty::Half => {
@@ -47,23 +124,12 @@ impl DebugTypes {
                 })
             }
             Ty::Ptr(pointee) => {
-                let pointee = self.get(module, structs, pointee);
-                *self
-                    .pointers
-                    .entry(pointee)
-                    .or_insert_with(|| push(module, DebugTypeData::Pointer(pointee)))
+                let pointee = self.plain(module, p, pointee);
+                self.pointer(module, pointee)
             }
             Ty::Array(elem, count) => {
-                let elem = self.get(module, structs, elem)?;
-                *self.arrays.entry((elem, *count)).or_insert_with(|| {
-                    push(
-                        module,
-                        DebugTypeData::Array {
-                            elem,
-                            count: *count,
-                        },
-                    )
-                })
+                let elem = self.plain(module, p, elem)?;
+                self.array(module, elem, *count)
             }
             Ty::Func(_) => *self
                 .function
@@ -72,7 +138,7 @@ impl DebugTypes {
                 if let Some(&dt) = self.structs.get(id) {
                     return Some(dt);
                 }
-                let def = &structs[*id];
+                let def = &p.structs[*id];
                 // Enter it before its members, which may point back to it.
                 let dt = push(
                     module,
@@ -90,7 +156,7 @@ impl DebugTypes {
                         .iter()
                         .map(|m| DebugMember {
                             name: m.name.clone(),
-                            ty: self.get(module, structs, &m.ty).expect("a void member"),
+                            ty: self.get(module, p, &m.ty, &m.sugar).expect("a void member"),
                             location: match m.bits {
                                 None => MemberLocation::Byte(m.offset),
                                 Some(b) => MemberLocation::Bits {

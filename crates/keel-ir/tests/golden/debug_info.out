@@ -1,3 +1,4 @@
+file f0 = "f.c"
 dtype dt0 = base "int" signed 4
 dtype dt1 = struct "node" 16 { "value" dt0 0, "next" dt2 8 }
 dtype dt2 = pointer dt1
@@ -14,17 +15,30 @@ dtype dt12 = struct "opaque" declared
 dtype dt13 = function
 dtype dt14 = pointer dt13
 dtype dt15 = base "char \"quoted\"" signed_char 1
+dtype dt16 = const dt9
+dtype dt17 = volatile void
+dtype dt18 = enum "color" dt4 { "red" 0, "green" 5 }
+dtype dt19 = enum dt6 { "small" -1 }
+dtype dt20 = enum dt0 {}
 dglobal "head" dt1 @head
+dglobal "per_thread" dt16 @per_thread
+dlanguage c11
 data @head = align 8 { i32 1, zero 12 }
+data @per_thread = thread_local align 4 { i32 0 }
 
 func @f(i32) -> i32 cc(c) {
     ss0 = stack_slot 4, align 4
     ss1 = stack_slot 16, align 4
     dreturn dt0
+    dloc f0:1:5
+    dscope ds0
+    dscope ds1 in ds0
     dparam "n" dt0 ss0
-    dvar "a" dt7 ss1
+    dvar "a" dt7 ss1 in ds1
 block0(v0: i32):
     v1 = stack_addr ss0
     store v0, v1
-    return v0
+    v2 = stack_addr ss1 !f0:3:9 ds1
+    store v0, v2 !f0:3:9 ds1
+    return v0 !f0:4:5
 }

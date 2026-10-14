@@ -86,7 +86,8 @@
 //!
 //! If the module names source files, instructions with a location get a
 //! `.loc` directive, from which the assembler builds the DWARF line table.
-//! The prologue takes the first location in the function with column 0,
+//! The prologue takes the function's `dloc`, or else the first location
+//! in the function, with column 0,
 //! and the first located instruction is marked `prologue_end`, where a
 //! debugger stops for a breakpoint on the function. An instruction
 //! without a location continues the previous one's. `__debug_info` has
@@ -101,10 +102,10 @@ use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     AbiParam, ArgExt, AsmClobber, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause,
-    ConvertOp, DataInit, DataItem, DataObject, DataRef, DebugType, DebugTypeData, Encoding,
-    EntityRef, FloatCC, Function, InlineAsm, Inst, InstData, IntCC, Intrinsic, Layout,
-    MemberLocation, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature, SourceFile,
-    SourceLoc, Type, UnaryOp, Value, ValueDef,
+    ConvertOp, DataInit, DataItem, DataObject, DataRef, DebugScope, DebugType, DebugTypeData,
+    Encoding, EntityRef, FloatCC, Function, InlineAsm, Inst, InstData, IntCC, Intrinsic, Language,
+    Layout, MemberLocation, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature,
+    SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
 use std::fmt::Write;
 
@@ -161,13 +162,13 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
             writeln!(out, "\t.file\t{} {}", i + 1, asm_string(path)).unwrap();
         }
     }
-    // Where each function's stack slots are, from `x29`, for variables.
     let mut frames = Vec::new();
     for func in &module.functions {
         let mut compiler = FunctionCompiler::new(func, module, pools)?;
         compiler.debug = debug;
-        frames.push(compiler.slot_frame_offsets());
-        compiler.compile(&mut out);
+        let slots = compiler.slot_frame_offsets();
+        let scope_marks = compiler.compile(&mut out);
+        frames.push(FrameDebug { slots, scope_marks });
     }
     for data in &module.data {
         if let Some(init) = &data.init {
@@ -179,6 +180,15 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
+}
+
+/// What the debug info needs to know of a compiled function.
+struct FrameDebug {
+    /// Where each stack slot is, from `x29`.
+    slots: Vec<i64>,
+    /// The labels where the code's lexical scope changes, and the new
+    /// scope. The function starts in its own (`None`).
+    scope_marks: Vec<(String, Option<DebugScope>)>,
 }
 
 /// Instructions that clobber the caller-saved registers: calls, the memory
@@ -274,6 +284,9 @@ struct FunctionCompiler<'a> {
     srcloc: Option<SourceLoc>,
     /// Whether the next `.loc` ends the prologue.
     prologue_end: bool,
+    /// The lexical scope of the code being emitted, and where it changed.
+    scope: Option<DebugScope>,
+    scope_marks: Vec<(String, Option<DebugScope>)>,
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -548,10 +561,14 @@ impl<'a> FunctionCompiler<'a> {
             debug: false,
             srcloc: None,
             prologue_end: false,
+            scope: None,
+            scope_marks: Vec::new(),
         })
     }
 
-    fn compile(mut self, out: &mut String) {
+    /// Appends the function's assembly to `out`; gives where its lexical
+    /// scopes begin and end.
+    fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
         let func = self.func;
         let name = &func.name;
         if !func.local {
@@ -561,12 +578,18 @@ impl<'a> FunctionCompiler<'a> {
         self.allocation_comment();
 
         if self.debug {
-            let first = func
-                .layout_insts()
-                .find_map(|(_, inst)| func.inst_loc(inst));
+            let first = func.debug_loc.or_else(|| {
+                func.layout_insts()
+                    .find_map(|(_, inst)| func.inst_loc(inst))
+            });
             let file = first.map_or(SourceFile::new(0), |loc| loc.file);
             let line = first.map_or(0, |loc| loc.line);
-            self.set_srcloc(Some(SourceLoc { file, line, col: 0 }));
+            self.set_srcloc(Some(SourceLoc {
+                file,
+                line,
+                col: 0,
+                scope: None,
+            }));
             self.prologue_end = true;
         }
         self.emit(".cfi_startproc");
@@ -685,16 +708,30 @@ impl<'a> FunctionCompiler<'a> {
             self.eh.emit(&mut self.out, name);
         }
         out.push_str(&self.out);
+        self.scope_marks
     }
 
     /// Emits a `.loc` for the code that follows, unless it would repeat
     /// the last one. `None` keeps the last one.
+    /// A change of lexical scope is marked with a label.
     fn set_srcloc(&mut self, loc: Option<SourceLoc>) {
         let Some(loc) = loc else { return };
-        if self.srcloc == Some(loc) && !self.prologue_end {
+        if loc.scope != self.scope {
+            let label = format!("L{}_ds{}", self.func.name, self.scope_marks.len());
+            writeln!(self.out, "{label}:").unwrap();
+            self.scope_marks.push((label, loc.scope));
+            self.scope = loc.scope;
+        }
+        if self
+            .srcloc
+            .is_some_and(|l| (l.file, l.line, l.col) == (loc.file, loc.line, loc.col))
+            && !self.prologue_end
+        {
             return;
         }
-        let SourceLoc { file, line, col } = loc;
+        let SourceLoc {
+            file, line, col, ..
+        } = loc;
         let flag = if self.prologue_end {
             " prologue_end"
         } else {
@@ -2730,7 +2767,7 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
 /// `frames[i]` has the `x29` offsets of function `i`'s stack slots: each
 /// subprogram's frame base is `x29`, and its variables are at fixed
 /// offsets from it (`DW_OP_fbreg`).
-fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
+fn emit_debug_info(out: &mut String, module: &Module, frames: &[FrameDebug]) {
     out.push_str("\t.section\t__DWARF,__debug_abbrev,regular,debug\n");
     for (code, (tag, children, attrs)) in ABBREVS.iter().enumerate() {
         writeln!(
@@ -2759,8 +2796,21 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
     // DWARF 4, abbreviations at offset 0, 8-byte addresses; then the
     // compile unit.
     out.push_str("\t.short\t4\n\t.long\t0\n\t.byte\t8\n");
-    writeln!(out, "\t.byte\t{}", Abbrev::CompileUnit as u8).unwrap();
+    let abbrev = match module.debug_language {
+        Some(_) => Abbrev::CompileUnitLanguage,
+        None => Abbrev::CompileUnit,
+    };
+    writeln!(out, "\t.byte\t{}", abbrev as u8).unwrap();
     writeln!(out, "\t.asciz\t{}", asm_string("keel")).unwrap();
+    if let Some(language) = module.debug_language {
+        // DW_LANG_C89, DW_LANG_C99, DW_LANG_C11.
+        let code = match language {
+            Language::C89 => 0x01,
+            Language::C99 => 0x0c,
+            Language::C11 => 0x1d,
+        };
+        writeln!(out, "\t.short\t{code:#x}").unwrap();
+    }
     writeln!(out, "\t.asciz\t{}", asm_string(&module.files[0])).unwrap();
     writeln!(out, "\t.asciz\t{}", asm_string(&comp_dir)).unwrap();
     // The assembler's line table is all of `__debug_line`.
@@ -2788,6 +2838,9 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
     let udata = |out: &mut String, n: u64| {
         writeln!(out, "\t.uleb128\t{n}").unwrap();
     };
+    // Range lists of scopes whose code is not contiguous, for
+    // `__debug_ranges`.
+    let mut range_lists: Vec<(String, Vec<(String, String)>)> = Vec::new();
     for (func, frame) in module.functions.iter().zip(frames) {
         let name = &func.name;
         let abbrev = match (func.local, func.debug_return.is_some()) {
@@ -2808,9 +2861,8 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
         .unwrap();
         // The frame base: an expression of one byte, DW_OP_reg29.
         out.push_str("\t.byte\t1, 0x6d\n");
-        // Parameters first, as debuggers list them in order.
-        let vars = func.debug_vars.iter().filter(|v| v.param);
-        for var in vars.chain(func.debug_vars.iter().filter(|v| !v.param)) {
+        let ranges = scope_ranges(func, &frame.scope_marks);
+        let var = |out: &mut String, var: &keel_ir::DebugVar| {
             die(
                 out,
                 if var.param {
@@ -2822,24 +2874,64 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
             string(out, &var.name);
             type_ref(out, var.ty);
             // DW_OP_fbreg and the offset.
-            let offset = sleb128(frame[var.slot.index()]);
+            let offset = sleb128(frame.slots[var.slot.index()]);
             write!(out, "\t.byte\t{}, 0x91", offset.len() + 1).unwrap();
             for b in offset {
                 write!(out, ", {b:#x}").unwrap();
             }
             out.push('\n');
+        };
+        // Parameters first, as debuggers list them in order; then the
+        // scopes, each with its variables and the scopes in it.
+        let in_scope = |scope: Option<DebugScope>| {
+            let vars = func.debug_vars.iter().filter(move |v| v.scope == scope);
+            vars.clone()
+                .filter(|v| v.param)
+                .chain(vars.filter(|v| !v.param))
+        };
+        for v in in_scope(None) {
+            var(out, v);
+        }
+        // A stack of (scope, whether its children are next), depth first.
+        let children = |parent: Option<DebugScope>| {
+            (0..func.debug_scopes.len())
+                .rev()
+                .map(DebugScope::new)
+                .filter(move |s| func.debug_scopes[s.index()] == parent)
+        };
+        let mut stack: Vec<(DebugScope, bool)> = children(None).map(|s| (s, false)).collect();
+        while let Some((scope, opened)) = stack.pop() {
+            if opened {
+                out.push_str("\t.byte\t0\n");
+                continue;
+            }
+            // A scope without code cannot be stopped in.
+            let scope_ranges = &ranges[scope.index()];
+            match scope_ranges.as_slice() {
+                [] => continue,
+                [(begin, end)] => {
+                    die(out, Abbrev::LexicalBlock);
+                    writeln!(out, "\t.quad\t{begin}\n\t.long\t{end}-{begin}").unwrap();
+                }
+                _ => {
+                    die(out, Abbrev::LexicalBlockRanges);
+                    let list = format!("Ldebug_ranges{}", range_lists.len());
+                    writeln!(out, "\t.long\t{list}-Ldebug_ranges").unwrap();
+                    range_lists.push((format!("L{name}_begin"), scope_ranges.clone()));
+                }
+            }
+            for v in in_scope(Some(scope)) {
+                var(out, v);
+            }
+            stack.push((scope, true));
+            stack.extend(children(Some(scope)).map(|s| (s, false)));
         }
         out.push_str("\t.byte\t0\n");
     }
     for global in &module.debug_globals {
-        // A thread-local's address differs per thread; it needs an
-        // expression keel does not write yet.
         let Some(data) = module.data_object(&global.symbol) else {
             continue;
         };
-        if data.thread_local {
-            continue;
-        }
         die(
             out,
             if data.local {
@@ -2850,8 +2942,20 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
         );
         string(out, &global.name);
         type_ref(out, global.ty);
-        // Nine bytes: DW_OP_addr and the address.
-        writeln!(out, "\t.byte\t9, 0x03\n\t.quad\t_{}", global.symbol).unwrap();
+        if data.thread_local {
+            // The address of the thread-local's descriptor
+            // (DW_OP_const8u), which DW_OP_form_tls_address turns into
+            // this thread's copy, as clang writes it.
+            writeln!(
+                out,
+                "\t.byte\t10, 0x0e\n\t.quad\t_{}\n\t.byte\t0x9b",
+                global.symbol
+            )
+            .unwrap();
+        } else {
+            // Nine bytes: DW_OP_addr and the address.
+            writeln!(out, "\t.byte\t9, 0x03\n\t.quad\t_{}", global.symbol).unwrap();
+        }
     }
     for (i, ty) in module.debug_types.iter().enumerate() {
         writeln!(out, "Ldt{i}:").unwrap();
@@ -2969,10 +3073,86 @@ fn emit_debug_info(out: &mut String, module: &Module, frames: &[Vec<i64>]) {
                 }
             }
             DebugTypeData::Function => die(out, Abbrev::Function),
+            DebugTypeData::Const(inner) | DebugTypeData::Volatile(inner) => {
+                let volatile = matches!(ty, DebugTypeData::Volatile(_));
+                let abbrev = match (volatile, inner) {
+                    (false, Some(_)) => Abbrev::Const,
+                    (false, None) => Abbrev::VoidConst,
+                    (true, Some(_)) => Abbrev::Volatile,
+                    (true, None) => Abbrev::VoidVolatile,
+                };
+                die(out, abbrev);
+                if let Some(inner) = inner {
+                    type_ref(out, *inner);
+                }
+            }
+            DebugTypeData::Enum { name, ty, values } => {
+                die(
+                    out,
+                    if name.is_some() {
+                        Abbrev::Enum
+                    } else {
+                        Abbrev::AnonEnum
+                    },
+                );
+                if let Some(name) = name {
+                    string(out, name);
+                }
+                type_ref(out, *ty);
+                let DebugTypeData::Base { size, .. } = module.debug_types[ty.index()] else {
+                    unreachable!("the verifier checks an enum's type")
+                };
+                udata(out, u64::from(size));
+                for (name, value) in values {
+                    die(out, Abbrev::Enumerator);
+                    string(out, name);
+                    writeln!(out, "\t.sleb128\t{value}").unwrap();
+                }
+                out.push_str("\t.byte\t0\n");
+            }
         }
     }
     out.push_str("\t.byte\t0\n");
     out.push_str("Ldebug_info_end:\n");
+    if !range_lists.is_empty() {
+        // Each list starts from its function (a base address entry, -1
+        // and the address), so the entries are differences within one
+        // function, which the assembler computes.
+        out.push_str("\t.section\t__DWARF,__debug_ranges,regular,debug\nLdebug_ranges:\n");
+        for (i, (base, ranges)) in range_lists.iter().enumerate() {
+            writeln!(out, "Ldebug_ranges{i}:\n\t.quad\t-1\n\t.quad\t{base}").unwrap();
+            for (begin, end) in ranges {
+                writeln!(out, "\t.quad\t{begin}-{base}\n\t.quad\t{end}-{base}").unwrap();
+            }
+            out.push_str("\t.quad\t0\n\t.quad\t0\n");
+        }
+    }
+}
+
+/// The code of each lexical scope of `func`, as (begin, end) labels: the
+/// code marked with it, and that of the scopes nested in it.
+fn scope_ranges(
+    func: &Function,
+    marks: &[(String, Option<DebugScope>)],
+) -> Vec<Vec<(String, String)>> {
+    let name = &func.name;
+    let mut ranges: Vec<Vec<(String, String)>> = vec![Vec::new(); func.debug_scopes.len()];
+    for (i, (begin, scope)) in marks.iter().enumerate() {
+        let end = marks
+            .get(i + 1)
+            .map_or_else(|| format!("L{name}_end"), |(label, _)| label.clone());
+        let mut scope = *scope;
+        while let Some(s) = scope {
+            let list = &mut ranges[s.index()];
+            match list.last_mut() {
+                // Continues the range: the scope was only nested deeper.
+                Some(last) if last.1 == *begin => last.1 = end.clone(),
+                _ => list.push((begin.clone(), end.clone())),
+            }
+            scope = func.debug_scopes[s.index()];
+        }
+    }
+    ranges
 }
 
 /// The DIE kinds keel writes, numbered from 1 as in [`ABBREVS`].
@@ -3005,6 +3185,16 @@ enum Abbrev {
     Typedef,
     VoidTypedef,
     Function,
+    CompileUnitLanguage,
+    LexicalBlock,
+    LexicalBlockRanges,
+    Const,
+    VoidConst,
+    Volatile,
+    VoidVolatile,
+    Enum,
+    AnonEnum,
+    Enumerator,
 }
 
 // DWARF attributes and forms.
@@ -3015,6 +3205,11 @@ const AT_STMT_LIST: u8 = 0x10;
 const AT_LOW_PC: u8 = 0x11;
 const AT_HIGH_PC: u8 = 0x12;
 const AT_COMP_DIR: u8 = 0x1b;
+const AT_LANGUAGE: u8 = 0x13;
+const AT_CONST_VALUE: u8 = 0x1c;
+const AT_RANGES: u8 = 0x55;
+const FORM_DATA2: u8 = 0x05;
+const FORM_SDATA: u8 = 0x0d;
 const AT_PROTOTYPED: u8 = 0x27;
 const AT_PRODUCER: u8 = 0x25;
 const AT_COUNT: u8 = 0x37;
@@ -3113,6 +3308,28 @@ const ABBREVS: &[AbbrevDecl] = {
         (0x16, false, &[NAME, TYPE]), // DW_TAG_typedef
         (0x16, false, &[NAME]),
         (0x15, false, &[]), // DW_TAG_subroutine_type
+        (
+            0x11,
+            true,
+            &[
+                (AT_PRODUCER, FORM_STRING),
+                (AT_LANGUAGE, FORM_DATA2),
+                NAME,
+                (AT_COMP_DIR, FORM_STRING),
+                (AT_STMT_LIST, FORM_SEC_OFFSET),
+                PC[0],
+                PC[1],
+            ],
+        ),
+        (0x0b, true, &[PC[0], PC[1]]), // DW_TAG_lexical_block
+        (0x0b, true, &[(AT_RANGES, FORM_SEC_OFFSET)]),
+        (0x26, false, &[TYPE]), // DW_TAG_const_type
+        (0x26, false, &[]),
+        (0x35, false, &[TYPE]), // DW_TAG_volatile_type
+        (0x35, false, &[]),
+        (0x04, true, &[NAME, TYPE, SIZE]), // DW_TAG_enumeration_type
+        (0x04, true, &[TYPE, SIZE]),
+        (0x28, false, &[NAME, (AT_CONST_VALUE, FORM_SDATA)]), // DW_TAG_enumerator
     ]
 };
 

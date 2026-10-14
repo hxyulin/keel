@@ -1,0 +1,5 @@
+verifier errors:
+  dt2: is an enum of dt1, which is not a base type
+  @f ds0: is in ds1, which does not come before it
+  @f inst0: is in ds7, which is not defined
+  @f dvar "x" dt0 ss0 in ds4: is in ds4, which is not defined

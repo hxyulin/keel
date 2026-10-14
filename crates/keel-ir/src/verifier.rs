@@ -12,7 +12,7 @@ use crate::{
     Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type, UnaryOp, Value,
     ValueDef,
 };
-use crate::{DataInit, DataItem, DebugType, Module};
+use crate::{DataInit, DataItem, DebugScope, DebugType, DebugTypeData, Module};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -154,6 +154,16 @@ fn check_debug_info(module: &Module) -> Vec<VerifierError> {
                 });
             }
         }
+        // Its size is the base type's.
+        if let DebugTypeData::Enum { ty, .. } = data
+            && known(*ty)
+            && !matches!(module.debug_types[ty.index()], DebugTypeData::Base { .. })
+        {
+            errors.push(VerifierError {
+                location: DebugType::new(i).to_string(),
+                message: format!("is an enum of {ty}, which is not a base type"),
+            });
+        }
     }
     for global in &module.debug_globals {
         let location = format!("dglobal {:?}", global.name);
@@ -179,8 +189,48 @@ fn check_debug_info(module: &Module) -> Vec<VerifierError> {
                 message: format!("returns {ty}, which is not defined"),
             });
         }
+        if let Some(loc) = func.debug_loc
+            && loc.file.index() >= module.files.len()
+        {
+            errors.push(VerifierError {
+                location: format!("@{}", func.name),
+                message: format!(
+                    "is declared at {loc}, but the module has no file {}",
+                    loc.file
+                ),
+            });
+        }
+        let scopes = func.debug_scopes.len();
+        for (i, parent) in func.debug_scopes.iter().enumerate() {
+            if let Some(parent) = parent
+                && parent.index() >= i
+            {
+                errors.push(VerifierError {
+                    location: format!("@{} {}", func.name, DebugScope::new(i)),
+                    message: format!("is in {parent}, which does not come before it"),
+                });
+            }
+        }
+        for (_, inst) in func.layout_insts() {
+            if let Some(scope) = func.inst_loc(inst).and_then(|loc| loc.scope)
+                && scope.index() >= scopes
+            {
+                errors.push(VerifierError {
+                    location: format!("@{} {inst}", func.name),
+                    message: format!("is in {scope}, which is not defined"),
+                });
+            }
+        }
         for var in &func.debug_vars {
             let location = format!("@{} {var}", func.name);
+            if let Some(scope) = var.scope
+                && scope.index() >= scopes
+            {
+                errors.push(VerifierError {
+                    location: location.clone(),
+                    message: format!("is in {scope}, which is not defined"),
+                });
+            }
             if !known(var.ty) {
                 errors.push(VerifierError {
                     location: location.clone(),

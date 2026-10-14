@@ -21,7 +21,8 @@ pub use asm::{AsmClobber, AsmOperand, InlineAsm, PhysReg};
 pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
 pub use debug::{
-    DebugGlobal, DebugMember, DebugType, DebugTypeData, DebugVar, Encoding, MemberLocation,
+    DebugGlobal, DebugMember, DebugScope, DebugType, DebugTypeData, DebugVar, Encoding, Language,
+    MemberLocation,
 };
 pub use entity::{Arena, EntityRef};
 pub use function::{

@@ -96,20 +96,17 @@ fn programs() {
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }
 
-/// With `-g`, lldb sees every variable, parameter and global of
-/// `tests/debug/vars.c` with its type, can change them, and can call
-/// functions, as with clang -O0. With and without -O, which leaves the
-/// stack slots alone.
+/// With `-g`, lldb shows `tests/debug/vars.c` as it does when clang -O0
+/// builds it: the same variables in each scope, with the same types and
+/// values; changes to them take effect; functions can be called. The
+/// same session runs on both builds and its output is compared, less what
+/// differs between any two builds (addresses, columns). Also with -O,
+/// which leaves stack slots alone.
 #[test]
 fn debugger() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/debug/vars.c");
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-debug");
-    std::fs::create_dir_all(&out_dir).unwrap();
     let i_path = out_dir.join("vars.i");
-    run(Command::new("clang")
-        .args(["-E", "-std=c11", "-o"])
-        .arg(&i_path)
-        .arg(&path));
     let commands = [
         "b stop",
         "b area",
@@ -120,57 +117,133 @@ fn debugger() {
         "p *a.next",
         "p arr[1] + *ptr",
         "p counter + scale",
+        "p per_thread",
         "expr d = 10.5",
         "continue",
-        "frame variable",
+        "frame variable n",
         "expr total = 100",
+        "continue",
+        "up",
+        // In the loop: `i` and `sq` are in scope.
+        "frame variable",
+        "continue",
+        "up",
+        // In the block after it: the inner `total`, not `i`.
+        "frame variable",
+        "p total",
         "finish",
         "continue",
         "frame variable p k",
         "p sum(4)",
         "continue",
     ];
-    let want = [
-        "(point) p = (x = 3, y = 4)",
-        "(flags) fl = (a = 5, b = 17, c = -3)",
-        "(wrap) w = {",
-        "d = 0.25",
-        "(int[4]) arr = ([0] = 1, [1] = 2, [2] = 3, [3] = 4)",
-        "(char[8]) name = \"keel\"",
-        "(double) d = 3.25",
-        "(int *) ptr = 0x",
-        "(node) {\n  value = 2\n  next = ",
-        "(int) 5\n",
-        "(double) 6.5\n",
-        "sum(n=7) at vars.c:18",
-        "(int) n = 7\n(int) total = ",
-        // `total` is set before the line that initializes it runs: the
-        // function still returns 0 + 1 + .. + 6.
-        "Return value: (int) $",
-        " = 21\n",
-        "(int) k = 2",
-        "(int) 6\n",
-        // 21 + 24 + 10 + 5, with `d` as changed in the debugger.
-        "exited with status = 60",
-    ];
-    for optimize in [false, true] {
-        let exe = out_dir.join(if optimize { "vars-opt" } else { "vars" });
-        let opts = keel_c::Options { debug_info: true };
-        if let Err(e) = build(&i_path, &exe, optimize, opts) {
-            panic!("building vars.c: {e}");
+    let mut sessions = Vec::new();
+    for build_ in ["clang", "keel", "keel-opt"] {
+        let dir = out_dir.join(build_);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("vars");
+        if build_ == "clang" {
+            run(Command::new("clang")
+                .args(["-g", "-O0", "-w", "-std=c11", "-o"])
+                .arg(&exe)
+                .arg(&path));
+            run(Command::new("clang")
+                .args(["-E", "-std=c11", "-o"])
+                .arg(&i_path)
+                .arg(&path));
+        } else {
+            let opts = keel_c::Options { debug_info: true };
+            if let Err(e) = build(&i_path, &exe, build_ == "keel-opt", opts) {
+                panic!("building vars.c: {e}");
+            }
         }
         let mut lldb = Command::new("lldb");
-        lldb.arg("--batch");
+        lldb.arg("--batch").current_dir(&dir);
         for command in commands {
             lldb.arg("-o").arg(command);
         }
-        let out = run_with_timeout(lldb.arg(&exe));
-        let missing: Vec<_> = want.iter().filter(|w| !out.contains(*w)).collect();
+        let out = run_with_timeout(lldb.arg("vars")).replace(dir.to_str().unwrap(), "DIR");
+        sessions.push((build_, normalize(&out)));
+    }
+    let (_, clang) = &sessions[0];
+    // So that the comparison is not between two sessions that both fail.
+    for want in [
+        "(point_t) p = (x = 3, y = 4)",
+        "(color) c = GREEN",
+        "(size_t) len = 16",
+        "(const char *) greeting = 0x",
+        "next = NULL",
+        "(int) 8\n",
+        "(int) sq = 4",
+        "(int) total = 99",
+        "Return value: (int) $",
+        "(int) 6\n",
+        // 21 + 24 + 10 + 5 + 1 + 16 + 1 + 8, with `d` changed.
+        "exited with status = 86",
+    ] {
         assert!(
-            missing.is_empty(),
-            "lldb output (optimize: {optimize}) lacks {missing:?}:\n{out}"
+            clang.contains(want),
+            "clang's session lacks `{want}`:\n{clang}"
         );
     }
+    for (build_, session) in &sessions[1..] {
+        if session != clang {
+            let diff: Vec<String> = clang
+                .lines()
+                .zip(session.lines())
+                .filter(|(a, b)| a != b)
+                .map(|(a, b)| format!("clang: {a}\n{build_}: {b}"))
+                .collect();
+            panic!(
+                "lldb on the {build_} build differs from clang's:\n{}\n\n{session}",
+                diff.join("\n")
+            );
+        }
+    }
+}
+
+/// lldb output without what differs between two correct builds:
+/// addresses, process ids, offsets into functions (where a breakpoint
+/// goes after the prologue), columns and the column markers (`^`) under
+/// source lines.
+fn normalize(out: &str) -> String {
+    let mut lines = Vec::new();
+    for line in out.lines() {
+        if line.trim() == "^" {
+            continue;
+        }
+        let mut s = String::new();
+        let mut rest = line;
+        while let Some(c) = rest.chars().next() {
+            if let Some(after) = rest.strip_prefix("0x") {
+                s.push_str("0x");
+                rest = after.trim_start_matches(|c: char| c.is_ascii_hexdigit());
+            } else if let Some(after) = rest.strip_prefix("Process ") {
+                s.push_str("Process N");
+                rest = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            } else if let Some(after) = rest.strip_prefix(" + ")
+                && after.starts_with(|c: char| c.is_ascii_digit())
+            {
+                rest = after.trim_start_matches(|c: char| c.is_ascii_digit());
+            } else if let Some(after) = rest.strip_prefix(".c:") {
+                // `vars.c:12:5`: keep the line.
+                let line_end = after
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(after.len());
+                s.push_str(".c:");
+                s.push_str(&after[..line_end]);
+                rest = &after[line_end..];
+                if let Some(col) = rest.strip_prefix(':') {
+                    rest = col.trim_start_matches(|c: char| c.is_ascii_digit());
+                }
+            } else {
+                s.push(c);
+                rest = &rest[c.len_utf8()..];
+            }
+        }
+        lines.push(s);
+    }
+    lines.join("\n")
 }
 
 /// Runs `cmd` for at most a minute, giving its stdout and stderr.

@@ -5,7 +5,7 @@
 //! generation only has to follow it.
 
 use crate::Loc;
-use crate::types::{BitField, FuncTy, Ty};
+use crate::types::{BitField, FuncTy, Sugar, Ty};
 use std::rc::Rc;
 
 pub type LocalId = usize;
@@ -167,6 +167,9 @@ pub enum Stmt {
     /// old value (from the last trip round a loop) is not needed.
     Declare(LocalId),
     Block(Vec<Stmt>),
+    /// Statements in a block scope (a compound statement or a `for`), by
+    /// its index in the function's scopes.
+    Scoped(usize, Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     While(Expr, Box<Stmt>),
     DoWhile(Box<Stmt>, Expr),
@@ -200,6 +203,10 @@ pub struct Local {
     /// `.` (`compound literal.3`).
     pub name: String,
     pub ty: Ty,
+    pub sugar: Sugar,
+    /// The block scope it is declared in, `None` for the function's
+    /// outermost one.
+    pub scope: Option<usize>,
     /// Its address is taken (or it is an aggregate, or `volatile`), so it
     /// lives in memory rather than in an SSA variable.
     pub in_memory: bool,
@@ -212,6 +219,8 @@ pub struct FuncDef {
     pub ty: Rc<FuncTy>,
     pub params: Vec<LocalId>,
     pub locals: Vec<Local>,
+    /// The parent of each block scope; `None` for the outermost.
+    pub scopes: Vec<Option<usize>>,
     pub body: Vec<Stmt>,
     pub loc: Loc,
 }
@@ -224,6 +233,8 @@ pub struct Global {
     /// The linker name (`__asm("_" "realpath" "$DARWIN_EXTSN")` renames).
     pub symbol: String,
     pub ty: Ty,
+    /// From the last declaration.
+    pub sugar: Sugar,
     /// `static`, or a C99 `inline` definition without `extern`.
     pub internal: bool,
     /// Defined in this file: a function body, an initializer, or a

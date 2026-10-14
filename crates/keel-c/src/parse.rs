@@ -31,7 +31,8 @@ pub struct StrLit {
 enum Sym {
     Local(LocalId),
     Global(usize),
-    Typedef(Ty),
+    /// By index in the typedef table.
+    Typedef(usize),
     Enum(i64),
 }
 
@@ -41,6 +42,8 @@ struct Scope {
     /// Struct, union and enum tags; enums are just `int`, so only their
     /// existence is recorded.
     tags: HashMap<String, Option<usize>>,
+    /// Enum tags, by index in the enum table, for debug info.
+    enums: HashMap<String, usize>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -53,6 +56,7 @@ enum Storage {
 
 struct DeclSpec {
     ty: Ty,
+    sugar: Sugar,
     storage: Storage,
     is_const: bool,
     is_volatile: bool,
@@ -72,6 +76,7 @@ pub struct Attrs {
 pub struct Declarator {
     pub name: Option<(String, Loc)>,
     pub ty: Ty,
+    pub sugar: Sugar,
     /// `const` or `volatile` on the declared object itself.
     pub is_const: bool,
     pub is_volatile: bool,
@@ -87,6 +92,9 @@ pub(crate) struct SwitchCtx {
 /// Per-function state.
 pub(crate) struct FuncState {
     pub locals: Vec<Local>,
+    /// Block scopes, by their parent, and the one being parsed.
+    pub scopes: Vec<Option<usize>>,
+    pub scope: Option<usize>,
     pub ret: Ty,
     pub name: String,
     pub switches: Vec<SwitchCtx>,
@@ -97,6 +105,8 @@ pub struct Parser {
     pos: usize,
     scopes: Vec<Scope>,
     pub structs: Vec<StructDef>,
+    pub typedefs: Vec<TypedefDef>,
+    pub enums: Vec<EnumDef>,
     pub globals: Vec<Global>,
     pub funcs: Vec<FuncDef>,
     pub strings: Vec<StrLit>,
@@ -106,7 +116,7 @@ pub struct Parser {
     external_def: HashSet<usize>,
     /// Parameters of the last parameter list parsed: those of a function
     /// definition's declarator, when its body follows.
-    last_params: Vec<(Option<String>, Ty, Loc)>,
+    last_params: Vec<(Option<String>, Ty, Sugar, Loc)>,
     /// Counts names made up for static locals and compound literals.
     unique: usize,
 }
@@ -187,6 +197,8 @@ impl Parser {
             pos: 0,
             scopes: vec![Scope::default()],
             structs: Vec::new(),
+            typedefs: Vec::new(),
+            enums: Vec::new(),
             globals: Vec::new(),
             funcs: Vec::new(),
             strings: Vec::new(),
@@ -302,6 +314,22 @@ impl Parser {
         self.scopes.pop();
     }
 
+    /// Opens a block scope in a function, giving its index.
+    fn push_block(&mut self) -> usize {
+        self.push_scope();
+        let fs = self.fs.as_mut().unwrap();
+        fs.scopes.push(fs.scope);
+        let id = fs.scopes.len() - 1;
+        fs.scope = Some(id);
+        id
+    }
+
+    fn pop_block(&mut self) {
+        self.pop_scope();
+        let fs = self.fs.as_mut().unwrap();
+        fs.scope = fs.scopes[fs.scope.unwrap()];
+    }
+
     fn lookup(&self, name: &str) -> Option<&Sym> {
         self.scopes.iter().rev().find_map(|s| s.names.get(name))
     }
@@ -324,7 +352,7 @@ impl Parser {
 
     pub(crate) fn typedef_type(&self, name: &str) -> Option<Ty> {
         match self.lookup(name) {
-            Some(Sym::Typedef(ty)) => Some(ty.clone()),
+            Some(Sym::Typedef(i)) => Some(self.typedefs[*i].ty.clone()),
             _ => None,
         }
     }
@@ -367,12 +395,20 @@ impl Parser {
         self.fs.as_mut().unwrap().locals[id].in_memory = true;
     }
 
-    pub(crate) fn new_local(&mut self, name: String, ty: Ty, volatile: bool) -> LocalId {
+    pub(crate) fn new_local(
+        &mut self,
+        name: String,
+        ty: Ty,
+        sugar: Sugar,
+        volatile: bool,
+    ) -> LocalId {
         let in_memory = volatile || !ty.is_scalar();
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
             name: name.clone(),
             ty,
+            sugar,
+            scope: fs.scope,
             in_memory,
         });
         let id = fs.locals.len() - 1;
@@ -393,6 +429,7 @@ impl Parser {
             symbol: name.clone(),
             name,
             ty,
+            sugar: Sugar::Plain,
             internal: true,
             defined: true,
             init: Some(init),
@@ -442,7 +479,7 @@ impl Parser {
         }
         loop {
             let loc = self.loc();
-            let d = self.declarator(spec.ty.clone())?;
+            let d = self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?;
             let mut attrs = spec.attrs;
             let label = self.asm_label_and_attrs(&mut attrs)?;
             let Some((name, name_loc)) = d.name.clone() else {
@@ -459,9 +496,15 @@ impl Parser {
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
-                self.bind(name, Sym::Typedef(d.ty));
+                self.typedefs.push(TypedefDef {
+                    name: name.clone(),
+                    ty: d.ty,
+                    sugar: d.sugar,
+                });
+                self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
             } else if let Ty::Func(fty) = &d.ty {
                 let g = self.declare_function(&name, label, fty.clone(), &spec, attrs, file_scope);
+                self.globals[g].sugar = d.sugar.clone();
                 if file_scope && self.is("{") {
                     self.function_body(g, fty.clone(), name_loc)?;
                     return Ok(out);
@@ -469,7 +512,7 @@ impl Parser {
             } else if !file_scope && spec.storage == Storage::None {
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
-                let id = self.new_local(name.clone(), d.ty.clone(), is_volatile);
+                let id = self.new_local(name.clone(), d.ty.clone(), d.sugar.clone(), is_volatile);
                 let mut ty = d.ty;
                 let mut init = None;
                 if self.eat("=") {
@@ -547,6 +590,7 @@ impl Parser {
                 name: name.clone(),
                 symbol,
                 ty: d.ty.clone(),
+                sugar: d.sugar.clone(),
                 internal: true,
                 defined: true,
                 init: None,
@@ -561,6 +605,7 @@ impl Parser {
         } else {
             let g = self.global(&name, label, d.ty.clone());
             let global = &mut self.globals[g];
+            global.sugar = d.sugar.clone();
             if spec.storage == Storage::Static {
                 global.internal = true;
             }
@@ -615,6 +660,7 @@ impl Parser {
                     name: name.to_string(),
                     symbol: name.to_string(),
                     ty,
+                    sugar: Sugar::Plain,
                     internal: false,
                     defined: false,
                     init: None,
@@ -682,17 +728,19 @@ impl Parser {
         let name = self.globals[g].name.clone();
         self.fs = Some(FuncState {
             locals: Vec::new(),
+            scopes: Vec::new(),
+            scope: None,
             ret: fty.ret.clone(),
             name,
             switches: Vec::new(),
         });
         self.push_scope();
         let mut ids = Vec::new();
-        for (name, ty, ploc) in params {
+        for (name, ty, sugar, ploc) in params {
             let Some(name) = name else {
                 return Err(Error::new(ploc, "parameter needs a name"));
             };
-            ids.push(self.new_local(name, ty, false));
+            ids.push(self.new_local(name, ty, sugar, false));
         }
         self.expect("{")?;
         let body = self.block_items()?;
@@ -703,6 +751,7 @@ impl Parser {
             ty: fty,
             params: ids,
             locals: fs.locals,
+            scopes: fs.scopes,
             body,
             loc,
         });
@@ -802,6 +851,7 @@ impl Parser {
         let loc = self.loc();
         let mut spec = DeclSpec {
             ty: Ty::Int(IntKind::Int),
+            sugar: Sugar::Plain,
             storage: Storage::None,
             is_const: false,
             is_volatile: false,
@@ -864,7 +914,9 @@ impl Parser {
                         }
                         "enum" => {
                             self.advance();
-                            Some(self.enum_spec()?)
+                            let (ty, sugar) = self.enum_spec()?;
+                            spec.sugar = sugar;
+                            Some(ty)
                         }
                         "typeof" | "__typeof__" | "__typeof" => {
                             self.advance();
@@ -890,9 +942,11 @@ impl Parser {
                             Some(Ty::Int(IntKind::UInt128))
                         }
                         _ if counter == 0 && other.is_none() => {
-                            if let Some(ty) = self.typedef_type(&word) {
+                            if let Some(Sym::Typedef(i)) = self.lookup(&word) {
+                                let i = *i;
                                 self.advance();
-                                Some(ty)
+                                spec.sugar = Sugar::Typedef(i);
+                                Some(self.typedefs[i].ty.clone())
                             } else {
                                 None
                             }
@@ -976,6 +1030,12 @@ impl Parser {
             HALF => Ty::Half,
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
         };
+        if spec.is_volatile {
+            spec.sugar = Sugar::Volatile(Rc::new(spec.sugar));
+        }
+        if spec.is_const {
+            spec.sugar = Sugar::Const(Rc::new(spec.sugar));
+        }
         Ok(spec)
     }
 
@@ -1007,13 +1067,25 @@ impl Parser {
     }
 
     /// A declarator, possibly abstract, applied to the specifiers' type.
-    pub(crate) fn declarator(&mut self, mut ty: Ty) -> R<Declarator> {
+    pub(crate) fn declarator(&mut self, ty: Ty) -> R<Declarator> {
+        self.declarator_sugar(ty, Sugar::Plain)
+    }
+
+    /// A declarator applied to the specifiers' type and its sugar.
+    fn declarator_sugar(&mut self, mut ty: Ty, mut sugar: Sugar) -> R<Declarator> {
         let (mut is_const, mut is_volatile) = (false, false);
         // `^` is a block pointer (Apple's closures, in headers when
         // `__BLOCKS__` is defined); as a value it is just a pointer.
         while self.eat("*") || self.eat("^") {
             ty = Ty::ptr_to(ty);
+            sugar = sugar.wrap(Sugar::Ptr);
             (is_const, is_volatile) = self.qualifiers()?;
+            if is_volatile {
+                sugar = Sugar::Volatile(Rc::new(sugar));
+            }
+            if is_const {
+                sugar = Sugar::Const(Rc::new(sugar));
+            }
         }
         self.attributes(&mut Attrs::default())?;
         if self.is("(") && self.nested_declarator_follows() {
@@ -1022,10 +1094,10 @@ impl Parser {
             self.advance();
             let start = self.pos;
             self.skip_parens()?;
-            let ty = self.type_suffix(ty)?;
+            let (ty, sugar) = self.type_suffix(ty, sugar)?;
             let end = self.pos;
             self.pos = start;
-            let d = self.declarator(ty)?;
+            let d = self.declarator_sugar(ty, sugar)?;
             self.expect(")")?;
             self.pos = end;
             return Ok(d);
@@ -1039,7 +1111,7 @@ impl Parser {
             }
             _ => None,
         };
-        let ty = self.type_suffix(ty)?;
+        let (ty, sugar) = self.type_suffix(ty, sugar)?;
         if !matches!(ty, Ty::Ptr(_)) {
             // Qualifiers apply to the pointer only when it is the object.
             is_const = false;
@@ -1048,6 +1120,7 @@ impl Parser {
         Ok(Declarator {
             name,
             ty,
+            sugar,
             is_const,
             is_volatile,
         })
@@ -1065,10 +1138,10 @@ impl Parser {
         }
     }
 
-    fn type_suffix(&mut self, ty: Ty) -> R<Ty> {
+    fn type_suffix(&mut self, ty: Ty, sugar: Sugar) -> R<(Ty, Sugar)> {
         if self.eat("(") {
             let fty = self.params(ty)?;
-            return Ok(Ty::Func(Rc::new(fty)));
+            return Ok((Ty::Func(Rc::new(fty)), sugar.wrap(Sugar::Func)));
         }
         if self.eat("[") {
             while self.eat("static") || self.qualifiers()? != (false, false) {}
@@ -1088,10 +1161,10 @@ impl Parser {
                 }
             };
             self.expect("]")?;
-            let elem = self.type_suffix(ty)?;
-            return Ok(Ty::Array(Rc::new(elem), len));
+            let (elem, sugar) = self.type_suffix(ty, sugar)?;
+            return Ok((Ty::Array(Rc::new(elem), len), sugar.wrap(Sugar::Array)));
         }
-        Ok(ty)
+        Ok((ty, sugar))
     }
 
     /// A parameter list, after the `(`.
@@ -1127,15 +1200,21 @@ impl Parser {
                 ));
             }
             let spec = self.decl_spec()?;
-            let d = self.declarator(spec.ty)?;
+            let d = self.declarator_sugar(spec.ty, spec.sugar)?;
             self.attributes(&mut Attrs::default())?;
+            // Arrays and functions are passed as pointers.
+            let sugar = match (&d.ty, d.sugar) {
+                (Ty::Func(_), s) => s.wrap(Sugar::Ptr),
+                (_, Sugar::Array(elem)) => Sugar::Ptr(elem),
+                (_, s) => s,
+            };
             let ty = match d.ty {
                 Ty::Array(elem, _) => Ty::Ptr(elem),
                 Ty::Func(_) => Ty::ptr_to(d.ty),
                 ty => ty,
             };
             fty.params.push(ty.clone());
-            names.push((d.name.map(|(n, _)| n), ty, loc));
+            names.push((d.name.map(|(n, _)| n), ty, sugar, loc));
             if !self.eat(",") {
                 break;
             }
@@ -1209,16 +1288,16 @@ impl Parser {
             if self.eat(";") {
                 // An anonymous struct or union member.
                 if matches!(spec.ty, Ty::Struct(_)) {
-                    fields.push((None, spec.ty, None));
+                    fields.push((None, spec.ty, Sugar::Plain, None));
                 }
                 continue;
             }
             loop {
-                let (name, ty) = if self.is(":") {
-                    (None, spec.ty.clone())
+                let (name, ty, sugar) = if self.is(":") {
+                    (None, spec.ty.clone(), spec.sugar.clone())
                 } else {
-                    let d = self.declarator(spec.ty.clone())?;
-                    (d.name.map(|(n, _)| n), d.ty)
+                    let d = self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?;
+                    (d.name.map(|(n, _)| n), d.ty, d.sugar)
                 };
                 let width = if self.eat(":") {
                     let w = self.const_int()?;
@@ -1239,7 +1318,7 @@ impl Parser {
                     // the struct's own alignment.
                     attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(a));
                 }
-                fields.push((name, ty, width));
+                fields.push((name, ty, sugar, width));
                 if !self.eat(",") {
                     break;
                 }
@@ -1265,14 +1344,17 @@ impl Parser {
         Ok(Ty::Struct(id))
     }
 
-    fn enum_spec(&mut self) -> R<Ty> {
+    /// An enum specifier: its values' type, and the enum for debug info.
+    fn enum_spec(&mut self) -> R<(Ty, Sugar)> {
         self.attributes(&mut Attrs::default())?;
+        let mut tag = None;
         if let Tok::Ident(s) = self.peek()
             && !is_keyword(s)
         {
-            let tag = s.clone();
+            let s = s.clone();
             self.advance();
-            self.scopes.last_mut().unwrap().tags.insert(tag, None);
+            self.scopes.last_mut().unwrap().tags.insert(s.clone(), None);
+            tag = Some(s);
         }
         // C23's fixed underlying type, `enum : uint32_t { .. }`, which
         // Apple's headers use; otherwise the type is `int`.
@@ -1282,8 +1364,12 @@ impl Parser {
             INT
         };
         if !self.eat("{") {
-            return Ok(ty);
+            let known = tag
+                .as_ref()
+                .and_then(|t| self.scopes.iter().rev().find_map(|s| s.enums.get(t)));
+            return Ok((ty, known.map_or(Sugar::Plain, |&i| Sugar::Enum(i))));
         }
+        let mut values = Vec::new();
         let mut next: i64 = 0;
         while !self.eat("}") {
             let name = self.ident()?;
@@ -1291,6 +1377,7 @@ impl Parser {
             if self.eat("=") {
                 next = self.const_int()?;
             }
+            values.push((name.clone(), next));
             self.bind(name, Sym::Enum(next));
             next = next.wrapping_add(1);
             if !self.eat(",") {
@@ -1299,7 +1386,16 @@ impl Parser {
             }
         }
         self.attributes(&mut Attrs::default())?;
-        Ok(ty)
+        self.enums.push(EnumDef {
+            tag: tag.clone(),
+            ty: ty.clone(),
+            values,
+        });
+        let i = self.enums.len() - 1;
+        if let Some(tag) = tag {
+            self.scopes.last_mut().unwrap().enums.insert(tag, i);
+        }
+        Ok((ty, Sugar::Enum(i)))
     }
 
     /// An integer constant expression.
@@ -1370,7 +1466,7 @@ impl Parser {
                 "for" => {
                     self.advance();
                     self.expect("(")?;
-                    self.push_scope();
+                    let scope = self.push_block();
                     let init = if self.eat(";") {
                         None
                     } else if self.is_declaration_start() {
@@ -1393,13 +1489,14 @@ impl Parser {
                     };
                     self.expect(")")?;
                     let body = self.statement()?;
-                    self.pop_scope();
-                    return Ok(Stmt::For {
+                    self.pop_block();
+                    let for_ = Stmt::For {
                         init,
                         cond,
                         step,
                         body: Box::new(body),
-                    });
+                    };
+                    return Ok(Stmt::Scoped(scope, vec![for_]));
                 }
                 "switch" => {
                     self.advance();
@@ -1509,10 +1606,10 @@ impl Parser {
             }
         }
         if self.eat("{") {
-            self.push_scope();
+            let scope = self.push_block();
             let items = self.block_items()?;
-            self.pop_scope();
-            return Ok(Stmt::Block(items));
+            self.pop_block();
+            return Ok(Stmt::Scoped(scope, items));
         }
         if self.eat(";") {
             return Ok(Stmt::Block(Vec::new()));

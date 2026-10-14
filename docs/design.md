@@ -429,14 +429,28 @@ Limits: at most one return value (return structs through `sret`); at most
   registers follow Apple's pairing, and into `__eh_frame` otherwise.
 - **Variables and types.** The module has a table of source-level types
   (`dtype dt0 = base "int" signed 4`, pointers, structs and unions with
-  byte or bit-field members, arrays, typedefs, function types) and
-  globals (`dglobal "count" dt0 @count`); a function has its return type
-  (`dreturn dt0`) and variables, each in one of its stack slots (`dvar
-  "x" dt0 ss1`, `dparam` for parameters). Codegen turns them into DIEs:
-  the subprogram's frame base is `x29`, which stays put even when dynamic
-  allocations move `sp`, and a variable is at a fixed `DW_OP_fbreg`
-  offset from it. lldb then prints, changes and passes them (`p x`,
-  `expr x = 3`, `p f(x)`, `finish` showing the return value).
+  byte or bit-field members, arrays, typedefs, `const` and `volatile`,
+  enums, function types), globals (`dglobal "count" dt0 @count`,
+  thread-local ones too) and the source language (`dlanguage c11`, so
+  lldb reads expressions as C). A function has its return type (`dreturn
+  dt0`), where it is declared (`dloc f0:12:5`, the prologue's line) and
+  variables, each in one of its stack slots (`dvar "x" dt0 ss1`, `dparam`
+  for parameters). Codegen turns them into DIEs: the subprogram's frame
+  base is `x29`, which stays put even when dynamic allocations move `sp`,
+  and a variable is at a fixed `DW_OP_fbreg` offset from it. lldb then
+  prints, changes and passes them (`p x`, `expr x = 3`, `p f(x)`,
+  `finish` showing the return value).
+- **Lexical scopes**, so that a variable is only shown in its block: a
+  function lists its scopes (`dscope ds1 in ds0`), a variable names its
+  scope (`dvar "i" dt0 ss2 in ds1`), and so does each instruction's
+  location (`!f0:5:9 ds1`). Scopes are on locations, as in LLVM, so that
+  passes moving or copying an instruction take its scope with it. Codegen
+  puts a label wherever the scope of the code changes; a scope's code is
+  what lies between its labels, plus that of the scopes in it, and
+  becomes a `DW_TAG_lexical_block` with one address range or, if passes
+  or the block layout scattered it, a range list (`__debug_ranges`, each
+  list based at its function so that its entries are differences the
+  assembler computes, as for the unit's size).
 - **Why variables only live in stack slots.** A value in a register has a
   location only between its definition and last use, and after
   allocation; describing that takes location lists, built from the
@@ -447,11 +461,8 @@ Limits: at most one return value (return structs through `sret`); at most
   like C compilers at -O0, and pays for it in speed: `keel cc -g` runs
   at clang -O0's speed rather than keel's. Passes do not touch stack
   slots, so `-g -O` stays correct.
-- Not yet: lexical scopes (a variable is visible in the whole function,
-  so `i` shows a stale value before its loop, and shadowing names appear
-  twice), locations of values in registers, the source language (lldb
-  reads expressions as C++, so a null pointer prints as `nullptr`),
-  thread-local variables, inlined call sites.
+- Not yet: locations of values in registers, `DW_AT_decl_line` on
+  variables, macros, inlined call sites.
 
 ## Register allocation
 
@@ -642,11 +653,16 @@ diagnostics and `-g`.
   function. With `-g` every named local is in a stack slot instead, so a
   debugger can see it (see Debug info), and a struct parameter is copied
   from the caller's memory into its own.
-- **Debug types** come from the parser's types (`debug.rs`), so what
-  those do not keep a debugger does not see: typedef names (`size_t`
-  shows as `unsigned long`), enums (their integer type) and qualifiers
-  (`const char *` shows as `char *`). `static` locals are globals at file
-  scope.
+- **Debug types.** Type checking compares `Ty`s, in which a typedef is
+  the type it names, an enum is `int` and qualifiers are gone, as C's
+  compatibility rules want. A debugger wants them back, so a declaration
+  also records a `Sugar` (`types.rs`): a tree of the same shape that adds
+  typedef names, enums and `const`/`volatile` where the declaration had
+  them and is `Plain` below that; `debug.rs` reads the two together.
+  Keeping the names in `Ty` instead would have made every comparison look
+  through them. A compound statement and a `for` are scopes; only those
+  that declare variables become debug scopes. `static` locals are
+  globals at file scope.
 - **Aggregates** are addresses: a struct-typed expression evaluates to a
   pointer to its bytes, assignment copies (with loads and stores up to 64
   bytes, `memcpy` beyond), and calls pass them `byval` and return them

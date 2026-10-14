@@ -19,7 +19,8 @@
 //!    parameters and results, in text order), infer result types, and build.
 
 use crate::debug::{
-    DebugGlobal, DebugMember, DebugType, DebugTypeData, DebugVar, Encoding, MemberLocation,
+    DebugGlobal, DebugMember, DebugScope, DebugType, DebugTypeData, DebugVar, Encoding, Language,
+    MemberLocation,
 };
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
@@ -68,6 +69,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
     let mut parsed = Vec::new();
     let mut debug_types = Vec::new();
     let mut debug_globals = Vec::new();
+    let mut debug_language = None;
     parser.skip_newlines();
     while !parser.at(&Tok::Eof) {
         let (kw, loc) = parser.ident("`func`, `data`, `decl` or `file`")?;
@@ -103,6 +105,13 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                 parser.expect(Tok::Punct('='))?;
                 debug_types.push(parser.debug_type()?);
                 parser.expect(Tok::Newline)?;
+            }
+            "dlanguage" => {
+                let (name, name_loc) = parser.ident("a language like `c11`")?;
+                let language = Language::from_name(&name)
+                    .ok_or_else(|| error(name_loc, format!("unknown language `{name}`")))?;
+                parser.expect(Tok::Newline)?;
+                debug_language = Some(language);
             }
             "dglobal" => {
                 let name = parser.string("a variable name")?;
@@ -165,6 +174,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         files,
         debug_types,
         debug_globals,
+        debug_language,
     })
 }
 
@@ -444,8 +454,10 @@ struct ParsedFunction {
     personality: Option<String>,
     slots: Vec<StackSlotData>,
     debug_return: Option<DebugType>,
+    debug_loc: Option<SourceLoc>,
     /// `dvar`/`dparam` lines, with the slot by name.
-    debug_vars: Vec<(String, DebugType, String, bool, Loc)>,
+    debug_vars: Vec<(String, DebugType, String, bool, Option<DebugScope>, Loc)>,
+    debug_scopes: Vec<Option<DebugScope>>,
     blocks: Vec<ParsedBlock>,
     names: Names,
 }
@@ -754,14 +766,47 @@ impl Parser {
             self.expect(Tok::Newline)?;
             self.skip_newlines();
         }
+        let mut debug_loc = None;
+        if self.eat(&Tok::Ident("dloc".into())) {
+            debug_loc = Some(self.srcloc()?);
+            self.expect(Tok::Newline)?;
+            self.skip_newlines();
+        }
+        let mut debug_scopes = Vec::new();
+        while self.eat(&Tok::Ident("dscope".into())) {
+            let loc = self.loc();
+            let scope = self.debug_scope_ref()?;
+            if scope.index() != debug_scopes.len() {
+                return Err(error(
+                    loc,
+                    format!(
+                        "scopes are numbered in order: expected `{}`",
+                        DebugScope::new(debug_scopes.len())
+                    ),
+                ));
+            }
+            let parent = if self.eat(&Tok::Ident("in".into())) {
+                Some(self.debug_scope_ref()?)
+            } else {
+                None
+            };
+            self.expect(Tok::Newline)?;
+            debug_scopes.push(parent);
+            self.skip_newlines();
+        }
         let mut debug_vars = Vec::new();
         while self.at(&Tok::Ident("dvar".into())) || self.at(&Tok::Ident("dparam".into())) {
             let param = self.next().0 == Tok::Ident("dparam".into());
             let name = self.string("a variable name")?;
             let ty = self.debug_type_ref()?;
             let (slot, loc) = self.ident("a stack slot like `ss0`")?;
+            let scope = if self.eat(&Tok::Ident("in".into())) {
+                Some(self.debug_scope_ref()?)
+            } else {
+                None
+            };
             self.expect(Tok::Newline)?;
-            debug_vars.push((name, ty, slot, param, loc));
+            debug_vars.push((name, ty, slot, param, scope, loc));
             self.skip_newlines();
         }
         let mut blocks = Vec::new();
@@ -779,10 +824,21 @@ impl Parser {
             personality,
             slots,
             debug_return,
+            debug_loc,
             debug_vars,
+            debug_scopes,
             blocks,
             names,
         })
+    }
+
+    /// `ds3`
+    fn debug_scope_ref(&mut self) -> Result<DebugScope, ParseError> {
+        let (name, loc) = self.ident("a scope like `ds0`")?;
+        name.strip_prefix("ds")
+            .and_then(|n| n.parse::<usize>().ok())
+            .map(DebugScope::new)
+            .ok_or_else(|| error(loc, format!("expected a scope like `ds0`, found `{name}`")))
     }
 
     /// `dt3`
@@ -885,6 +941,26 @@ impl Parser {
                 DebugTypeData::Typedef { name, ty }
             }
             "function" => DebugTypeData::Function,
+            "const" => DebugTypeData::Const(self.opt_debug_type()?),
+            "volatile" => DebugTypeData::Volatile(self.opt_debug_type()?),
+            "enum" => {
+                let name = match self.peek() {
+                    Tok::Str(_) => Some(self.string("an enum name")?),
+                    _ => None,
+                };
+                let ty = self.debug_type_ref()?;
+                self.expect(Tok::Punct('{'))?;
+                let mut values = Vec::new();
+                while !self.eat(&Tok::Punct('}')) {
+                    let name = self.string("an enumerator name")?;
+                    values.push((name, self.int("a value")?));
+                    if !self.eat(&Tok::Punct(',')) {
+                        self.expect(Tok::Punct('}'))?;
+                        break;
+                    }
+                }
+                DebugTypeData::Enum { name, ty, values }
+            }
             _ => return Err(error(loc, format!("unknown debug type kind `{kind}`"))),
         })
     }
@@ -1607,7 +1683,16 @@ impl Parser {
         let line = self.u32("a line number")?;
         self.expect(Tok::Punct(':'))?;
         let col = self.u32("a column number")?;
-        Ok(SourceLoc { file, line, col })
+        let scope = match self.peek() {
+            Tok::Ident(s) if s.starts_with("ds") => Some(self.debug_scope_ref()?),
+            _ => None,
+        };
+        Ok(SourceLoc {
+            file,
+            line,
+            col,
+            scope,
+        })
     }
 
     /// `(v0, v1, ...)`
@@ -1672,7 +1757,9 @@ fn build(
         personality,
         slots,
         debug_return,
+        debug_loc,
         debug_vars,
+        debug_scopes,
         blocks,
         names,
     } = parsed;
@@ -1816,7 +1903,9 @@ fn build(
         func.create_stack_slot(slot.size, slot.align);
     }
     func.debug_return = *debug_return;
-    for (var, ty, slot, param, loc) in debug_vars {
+    func.debug_loc = *debug_loc;
+    func.debug_scopes = debug_scopes.clone();
+    for (var, ty, slot, param, scope, loc) in debug_vars {
         let Some(&slot) = names.slots.get(slot) else {
             return Err(error(*loc, format!("unknown stack slot `{slot}`")));
         };
@@ -1825,6 +1914,7 @@ fn build(
             ty: *ty,
             slot,
             param: *param,
+            scope: *scope,
         });
     }
     for (callee, sig) in callee_sigs {
@@ -1903,6 +1993,7 @@ fn build(
                 file,
                 line: inst.loc.line,
                 col: inst.loc.col,
+                scope: None,
             });
             func.set_inst_loc(created, inst.srcloc.or(ir_loc));
             debug_assert!(

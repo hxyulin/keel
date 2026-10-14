@@ -19,6 +19,8 @@ pub struct Module {
     pub debug_types: Vec<DebugTypeData>,
     /// Source-level variables with static storage.
     pub debug_globals: Vec<DebugGlobal>,
+    /// The source language, for debuggers.
+    pub debug_language: Option<crate::Language>,
 }
 
 impl Module {
@@ -74,6 +76,9 @@ impl fmt::Display for Module {
         for global in &self.debug_globals {
             writeln!(f, "{global}")?;
         }
+        if let Some(language) = self.debug_language {
+            writeln!(f, "dlanguage {language}")?;
+        }
         for decl in &self.decls {
             writeln!(f, "decl @{}{}", decl.name, decl.sig)?;
         }
@@ -83,7 +88,8 @@ impl fmt::Display for Module {
         let header = !self.files.is_empty()
             || !self.decls.is_empty()
             || !self.data.is_empty()
-            || !self.debug_types.is_empty();
+            || !self.debug_types.is_empty()
+            || self.debug_language.is_some();
         for (i, func) in self.functions.iter().enumerate() {
             if i > 0 || header {
                 f.write_str("\n")?;

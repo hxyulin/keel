@@ -889,7 +889,7 @@ impl Parser {
         }
         // The name cannot clash: it is not an identifier.
         let name = self.unique_name("compound literal");
-        let id = self.new_local(name, ty.clone(), true);
+        let id = self.new_local(name, ty.clone(), Sugar::Plain, true);
         Ok(mk(ExprKind::CompoundLit(id, Box::new(init)), ty, loc))
     }
 

@@ -99,6 +99,51 @@ pub struct FuncTy {
     pub prototyped: bool,
 }
 
+/// What a declaration says about a type that [`Ty`] does not keep, for
+/// debuggers: typedef names, enums and qualifiers. It has the shape of
+/// the `Ty` it goes with, down to where it stops saying more (`Plain`).
+/// Type checking only looks at the `Ty`.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub enum Sugar {
+    #[default]
+    Plain,
+    /// The typedef by its index in the typedef table.
+    Typedef(usize),
+    /// The enum by its index in the enum table.
+    Enum(usize),
+    Const(Rc<Sugar>),
+    Volatile(Rc<Sugar>),
+    /// A pointer, an array, or a function (its return type).
+    Ptr(Rc<Sugar>),
+    Array(Rc<Sugar>),
+    Func(Rc<Sugar>),
+}
+
+impl Sugar {
+    /// `Plain` when nothing is known, else `wrap` of `self`.
+    pub fn wrap(self, wrap: fn(Rc<Sugar>) -> Sugar) -> Sugar {
+        match self {
+            Sugar::Plain => Sugar::Plain,
+            s => wrap(Rc::new(s)),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedefDef {
+    pub name: String,
+    pub ty: Ty,
+    pub sugar: Sugar,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumDef {
+    pub tag: Option<String>,
+    /// The type of its values.
+    pub ty: Ty,
+    pub values: Vec<(String, i64)>,
+}
+
 #[derive(Clone, Debug)]
 pub struct StructDef {
     pub tag: Option<String>,
@@ -115,6 +160,7 @@ pub struct Member {
     /// as if they were this struct's, and for unnamed bit-fields.
     pub name: Option<String>,
     pub ty: Ty,
+    pub sugar: Sugar,
     pub offset: u64,
     pub bits: Option<BitField>,
 }
@@ -318,14 +364,14 @@ impl Types<'_> {
 pub fn layout_struct(
     types: &Types,
     is_union: bool,
-    fields: Vec<(Option<String>, Ty, Option<u32>)>,
+    fields: Vec<(Option<String>, Ty, Sugar, Option<u32>)>,
     max_align: Option<u64>,
 ) -> (Vec<Member>, u64, u64) {
     let mut members = Vec::new();
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
     let mut align: u64 = 1;
-    for (name, ty, width) in fields {
+    for (name, ty, sugar, width) in fields {
         let falign = types.align(&ty).min(max_align.unwrap_or(u64::MAX));
         let fsize = types.size(&ty);
         if is_union {
@@ -344,6 +390,7 @@ pub fn layout_struct(
                 members.push(Member {
                     name,
                     ty,
+                    sugar,
                     offset,
                     bits: Some(BitField {
                         shift: (bit - offset * 8) as u32,
@@ -358,6 +405,7 @@ pub fn layout_struct(
                 members.push(Member {
                     name,
                     ty,
+                    sugar,
                     offset: bit / 8,
                     bits: None,
                 });

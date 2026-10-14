@@ -23,9 +23,9 @@ use crate::types::*;
 use crate::{Error, Loc};
 use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
-    AbiParam, ArgExt, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal, DebugType,
-    DebugVar, FloatCC, FuncDecl, Function, IntCC, Intrinsic, Module, Ordering, Purpose, Signature,
-    SourceFile, SourceLoc, StackSlot, Symbol, Type, Value,
+    AbiParam, ArgExt, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal, DebugScope,
+    DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic, Language,
+    Module, Ordering, Purpose, Signature, SourceFile, SourceLoc, StackSlot, Symbol, Type, Value,
 };
 use std::collections::HashMap;
 
@@ -96,7 +96,9 @@ impl<'p> Gen<'p> {
                     self.module.data.push(data);
                     // Made-up names (compound literals) are not identifiers.
                     if self.debug && !global.name.contains('.') {
-                        let ty = self.debug_type(&global.ty).expect("a void object");
+                        let ty = self
+                            .debug_type(&global.ty, &global.sugar)
+                            .expect("a void object");
                         self.module.debug_globals.push(DebugGlobal {
                             name: global.name.clone(),
                             ty,
@@ -111,6 +113,9 @@ impl<'p> Gen<'p> {
                     init: None,
                 }),
             }
+        }
+        if self.debug {
+            self.module.debug_language = Some(Language::C11);
         }
         Ok(self.module)
     }
@@ -177,6 +182,7 @@ impl<'p> Gen<'p> {
             file,
             line: loc.line,
             col: loc.col,
+            scope: None,
         })
     }
 
@@ -184,8 +190,8 @@ impl<'p> Gen<'p> {
         self.p.types()
     }
 
-    fn debug_type(&mut self, ty: &Ty) -> Option<DebugType> {
-        self.dtypes.get(&mut self.module, &self.p.structs, ty)
+    fn debug_type(&mut self, ty: &Ty, sugar: &Sugar) -> Option<DebugType> {
+        self.dtypes.get(&mut self.module, self.p, ty, sugar)
     }
 
     /// How a value of C type `ty` crosses a call.
@@ -255,6 +261,9 @@ impl<'p> Gen<'p> {
             labels: HashMap::new(),
             cases: Vec::new(),
             terminated: false,
+            scopes: Vec::new(),
+            loc: None,
+            scope: None,
         };
         for local in &def.locals {
             let storage = if !fg.g.debug && !local.in_memory && local.ty.is_scalar() {
@@ -271,17 +280,39 @@ impl<'p> Gen<'p> {
             fg.locals.push(storage);
         }
         if fg.g.debug {
-            fg.b.func.debug_return = fg.g.debug_type(&def.ty.ret);
+            fg.b.func.debug_loc = fg.g.srcloc(def.loc);
+            let ret = match &fg.g.p.globals[def.global].sugar {
+                Sugar::Func(ret) => ret.as_ref().clone(),
+                _ => Sugar::Plain,
+            };
+            fg.b.func.debug_return = fg.g.debug_type(&def.ty.ret, &ret);
+            // Only scopes with variables need to be told apart.
+            let named = |local: &&Local| !local.name.contains('.');
+            let mut has_vars = vec![false; def.scopes.len()];
+            for scope in def.locals.iter().filter(named).filter_map(|l| l.scope) {
+                has_vars[scope] = true;
+            }
+            for (scope, parent) in def.scopes.iter().enumerate() {
+                let parent = parent.and_then(|p| fg.scopes[p]);
+                let own = has_vars[scope].then(|| {
+                    fg.b.func.debug_scopes.push(parent);
+                    DebugScope::new(fg.b.func.debug_scopes.len() - 1)
+                });
+                fg.scopes.push(own.or(parent));
+            }
             for (id, local) in def.locals.iter().enumerate() {
                 if let Storage::Slot(slot) = fg.locals[id]
-                    && !local.name.contains('.')
+                    && named(&local)
                 {
-                    let ty = fg.g.debug_type(&local.ty).expect("a void local");
+                    let ty =
+                        fg.g.debug_type(&local.ty, &local.sugar)
+                            .expect("a void local");
                     fg.b.func.debug_vars.push(DebugVar {
                         name: local.name.clone(),
                         ty,
                         slot,
                         param: def.params.contains(&id),
+                        scope: local.scope.and_then(|s| fg.scopes[s]),
                     });
                 }
             }
@@ -314,7 +345,7 @@ impl<'p> Gen<'p> {
         // Storing the parameters has no location, so it is part of the
         // prologue: a breakpoint on the function stops after it, where the
         // debugger can read them.
-        fg.b.set_srcloc(fg.g.srcloc(def.loc));
+        fg.set_loc(def.loc);
         for stmt in &def.body {
             fg.stmt(stmt)?;
         }
@@ -493,6 +524,12 @@ struct FnGen<'g, 'p, 'f> {
     /// The current block ends in a terminator; code that follows goes in a
     /// new, unreachable block.
     terminated: bool,
+    /// The debug scope of each block scope: its own if it declares
+    /// variables, else its parent's. Empty without debug info.
+    scopes: Vec<Option<DebugScope>>,
+    /// The location being given to instructions, and their scope.
+    loc: Option<SourceLoc>,
+    scope: Option<DebugScope>,
 }
 
 impl FnGen<'_, '_, '_> {
@@ -522,8 +559,17 @@ impl FnGen<'_, '_, '_> {
     }
 
     fn set_loc(&mut self, loc: Loc) {
-        let loc = self.g.srcloc(loc);
-        self.b.set_srcloc(loc);
+        self.loc = self.g.srcloc(loc);
+        self.set_scope(self.scope);
+    }
+
+    /// Puts the instructions that follow in lexical scope `scope`.
+    fn set_scope(&mut self, scope: Option<DebugScope>) {
+        self.scope = scope;
+        if let Some(loc) = &mut self.loc {
+            loc.scope = scope;
+        }
+        self.b.set_srcloc(self.loc);
     }
 
     fn size(&self, ty: &Ty) -> u64 {
@@ -594,6 +640,14 @@ impl FnGen<'_, '_, '_> {
                     self.stmt(s)?;
                 }
             }
+            Stmt::Scoped(scope, stmts) => {
+                let outer = self.scope;
+                self.set_scope(self.scopes.get(*scope).copied().flatten());
+                for s in stmts {
+                    self.stmt(s)?;
+                }
+                self.set_scope(outer);
+            }
             Stmt::If(cond, then, els) => {
                 self.ensure_block();
                 self.set_loc(cond.loc);
@@ -605,8 +659,11 @@ impl FnGen<'_, '_, '_> {
                 self.stmt(then)?;
                 self.jump_to(end);
                 self.switch_to(f);
-                if let Some(els) = els {
-                    self.stmt(els)?;
+                match els {
+                    Some(els) => self.stmt(els)?,
+                    // The jump past the `then` branch is the condition's,
+                    // not the last line of that branch's.
+                    None => self.set_loc(cond.loc),
                 }
                 self.jump_to(end);
                 self.b.seal_block(end);
