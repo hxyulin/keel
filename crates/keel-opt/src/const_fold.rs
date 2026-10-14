@@ -60,6 +60,8 @@ fn fold(func: &Function, data: &InstData) -> Option<InstData> {
         }
         InstData::Unary { op, arg } if op.is_float() => Folded::Float(fp::unary(op, float(arg)?)),
         InstData::Unary { op, arg } => Folded::Int(unary(op, int(arg)?)?),
+        // An `i128` result does not fit `iconst`'s `i64` immediate.
+        InstData::Convert { ty: Type::I128, .. } => return None,
         InstData::Convert { op, ty, arg } => match op {
             ConvertOp::Fpext | ConvertOp::Fptrunc => Folded::Float(fp::convert(ty, float(arg)?)),
             ConvertOp::Fptosi | ConvertOp::Fptoui => {
