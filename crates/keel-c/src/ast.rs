@@ -152,6 +152,8 @@ pub enum Builtin {
     Hint,
     Alloca,
     Trap,
+    /// A resumable debugger breakpoint, unlike the terminating `Trap`.
+    Debugtrap,
     /// `__builtin_frame_address(0)`.
     FrameAddress,
     /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),

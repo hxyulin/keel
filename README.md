@@ -42,7 +42,10 @@ For C, preprocessing must use the same target and its headers, for example
   value numbering, dead-code elimination and global code motion.
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
-  Atomic pointer prefix/postfix `++` and `--` are supported.
+  Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
+  builtins, alignment/branch hints and resumable `__builtin_debugtrap`
+  are supported. Hints preserve values and side effects but do not
+  currently guide optimization.
 - C variable-length arrays, complex arithmetic, nested functions and
   inline assembly statements are not supported. The ARM64 IR backend
   supports inline assembly and exceptions; the x86-64 backend does not.

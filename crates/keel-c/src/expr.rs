@@ -1092,6 +1092,7 @@ impl Parser {
                 ))
             }
             "trap" | "unreachable" => self.builtin_call(Builtin::Trap, &[], Ty::Void, loc),
+            "debugtrap" => self.builtin_call(Builtin::Debugtrap, &[], Ty::Void, loc),
             _ => {
                 // `__builtin_memcpy` and friends: the library function.
                 if let Ok(e) = self.lookup_value(base, loc)

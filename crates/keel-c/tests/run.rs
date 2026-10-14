@@ -520,6 +520,38 @@ fn hint_argument_calls_survive_optimization() {
     }
 }
 
+/// A debugger trap is pinned but permits later instructions and return.
+#[test]
+fn debugtrap_preserves_continuation_on_both_targets() {
+    let src = "int f(void) { __builtin_debugtrap(); return 42; }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            let text = module.to_string();
+            assert_eq!(text.matches("intrinsic debugtrap()").count(), 1, "{text}");
+            assert!(text.contains("return "), "{text}");
+            let asm = keel_codegen::compile(&module, target).unwrap();
+            let breakpoint = match target {
+                keel_ir::Target::Aarch64AppleDarwin => "brk\t#0xf000",
+                keel_ir::Target::X86_64LinuxGnu => "int3",
+            };
+            assert!(asm.contains(breakpoint), "{asm}");
+        }
+    }
+}
+
 /// Programs keel-c does not compile get an error at the right place.
 #[test]
 fn rejected() {
@@ -687,6 +719,10 @@ fn rejected() {
         (
             "int g(void); void *f(void *p) { return __builtin_assume_aligned(p, (g(), 8)); }",
             "error: alignment must be a constant integer",
+        ),
+        (
+            "void f(void) { __builtin_debugtrap(1); }",
+            "error: builtin takes 0 argument(s)",
         ),
     ];
     let mut failures = Vec::new();

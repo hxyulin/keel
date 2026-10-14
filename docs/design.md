@@ -783,8 +783,9 @@ operations and `_Generic`. `setjmp` and friends are marked `returns_twice`.
 Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
 `constant_p`, variadic access, `bswap16/32/64`, `clz/ctz/popcount` and their
 `l`/`ll` forms, floating-point classification, `fabs`, `alloca` and
-`frame_address(0)`. GCC/Clang atomic builtin families are supported for
-selected scalar operations, with the limits below. A `__builtin_` name
+`frame_address(0)` and `debugtrap`. The fixed-type overflow and hint
+builtins are described below. GCC/Clang atomic builtin families are
+supported for selected scalar operations, with the limits below. A `__builtin_` name
 with a declared library equivalent can also resolve to that function;
 this is not blanket support for every builtin.
 
@@ -828,6 +829,12 @@ compared against Clang.
 
 ### Implementation details
 
+- **Debugger entry.** `__builtin_debugtrap()` emits the resumable
+  `debugtrap` intrinsic (`brk #0xf000` on Apple ARM64, `int3` on x86-64).
+  Instructions after it remain reachable, including with `-O`. A
+  debugger or signal handler can resume execution; without one it normally
+  raises SIGTRAP. This differs from the terminating `__builtin_trap`.
+  See [Clang's builtin documentation](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
 - **Checked arithmetic.** The fixed-type `__builtin_sadd/ssub/smul_*` and
   `__builtin_uadd/usub/umul_*` overflow families are supported for `int`,
   `long` and `long long` (the `l` and `ll` suffixes). Operands are converted
@@ -892,9 +899,6 @@ Useful candidates for small follow-up patches, rather than current support:
   value and argument-evaluation behavior, but optimization from their
   metadata would require additional IR and optimizer support. See
   [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/Other-Builtins.html).
-- **Debugger entry:** Clang's `__builtin_debugtrap` can use the existing
-  resumable `debugtrap` IR intrinsic. It differs from the terminating
-  `__builtin_trap`; see [Clang's language extensions](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
 
 Linkage attributes (`weak`, `alias`, `visibility`), scope-exit `cleanup`
 and C inline assembly are useful larger additions. Attributes whose
@@ -903,6 +907,12 @@ silently parsing them does not establish compatibility.
 
 **Testing.** Test programs are built by clang and by keel and must behave
 the same, so they print what they compute instead of hard-coding answers.
+The overflow fixture checks all 18 fixed-type forms at integer boundaries,
+the hint fixture checks argument side effects and returned values, and the
+debugtrap fixture catches SIGTRAP and resumes twice. Separate frontend
+tests verify and generate assembly for both targets, before and after
+optimization. The signal-based breakpoint test does not require LLDB;
+debug information is checked by the separate debugger tests.
 The suite in `suite/` (run by `cargo suite`, see
 [suite/README.md](../suite/README.md)) builds Lua 5.4.7 with POSIX extras
 and computed gotos and runs its portable test mode, builds thread-safe

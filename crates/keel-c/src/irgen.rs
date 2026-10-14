@@ -1717,6 +1717,10 @@ impl FnGen<'_, '_, '_> {
                     }
                 }
             }
+            Builtin::Debugtrap => {
+                ins.intrinsic(Intrinsic::Debugtrap, &[]);
+                return Ok(None);
+            }
             Builtin::Trap => {
                 ins.trap();
                 self.terminated = true;
