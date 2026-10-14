@@ -762,8 +762,8 @@ Beyond ISO C11 it accepts what Apple's headers and real GNU C programs
 use: `__attribute__((..))` (`aligned`, `packed` and `returns_twice` are
 honoured), `#pragma pack`, `__asm("_name")` symbol renames, C23 enums with
 a fixed type, zero-length arrays and empty structs, block pointers (`^`,
-as plain pointers), `__int128`, `typeof`, `__extension__`, statement
-expressions, `a ?: b`, case ranges (`case 'a' ... 'z':`), range
+as plain pointers), `__int128`, `typeof`, `__auto_type`, `__extension__`,
+statement expressions, `a ?: b`, case ranges (`case 'a' ... 'z':`), range
 designators (`[0 ... 9] = x`), computed `goto`, the `__builtin_`s the
 headers expand to (and `__builtin_frame_address(0)`,
 `types_compatible_p`, `choose_expr`), and `_Generic`. `_FORTIFY_SOURCE`'s
@@ -792,14 +792,23 @@ marked `returns_twice`.
   pointee's size and use an integer RMW on the 64-bit address, converting
   the old (postfix) or new (prefix) address back to a pointer. Pointer
   compound assignments (`+=` and `-=`) are not supported yet.
+- **Type inference.** GNU `__auto_type` declares one variable with a plain
+  identifier and an initializer. The initializer determines its type,
+  with array/function decay and atomic loads as for an ordinary value.
+  The name enters scope after the initializer, so a same-named outer
+  variable remains visible while it is parsed. Explicit qualifiers and
+  storage classes apply to the inferred type; structs are copied as with
+  explicitly typed declarations. Bit-fields and incomplete values cannot
+  supply the type, and inference is not allowed in parameters, members,
+  typedefs or type names.
 - **Constants** are `i64`s, sign extended to wider types, so an unsigned
   64-bit constant above `i64::MAX` converted to `__int128` is not folded
   but extended at run time: folded, it came out negative, which broke
   QuickJS's decimal arithmetic (multiplying by `17014118346046923173`).
 
 Not supported: `_Complex`, variable-length arrays, K&R definitions,
-`__auto_type`, nested functions, `_Atomic` structs and floats, the
-generic (non-`_n`) `__atomic_*` forms, and inline assembly statements
+nested functions, `_Atomic` structs and floats, the generic (non-`_n`)
+`__atomic_*` forms, and inline assembly statements
 (the backend has them; the frontend does not pass them through yet).
 
 **Testing.** Test programs are built by clang and by keel and must behave

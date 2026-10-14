@@ -58,6 +58,7 @@ enum Storage {
 struct DeclSpec {
     ty: Ty,
     sugar: Sugar,
+    infer: bool,
     storage: Storage,
     is_const: bool,
     is_volatile: bool,
@@ -178,6 +179,7 @@ const TYPE_KEYWORDS: &[&str] = &[
     "typeof",
     "__typeof__",
     "__typeof",
+    "__auto_type",
     "_Complex",
     "_Atomic",
 ];
@@ -516,16 +518,71 @@ impl Parser {
             return Ok(out);
         }
         let spec = self.decl_spec()?;
-        if self.eat(";") {
+        if spec.infer && spec.storage == Storage::Typedef {
+            return Err(Error::new(
+                self.loc(),
+                "`__auto_type` cannot declare a typedef",
+            ));
+        }
+        if !spec.infer && self.eat(";") {
             return Ok(out);
         }
         loop {
             let loc = self.loc();
-            let d = self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?;
+            let mut d = if spec.infer {
+                let name = self.ident()?;
+                Declarator {
+                    name: Some((name, loc)),
+                    ty: spec.ty.clone(),
+                    sugar: spec.sugar.clone(),
+                    is_const: false,
+                    is_volatile: false,
+                }
+            } else {
+                self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?
+            };
             let mut attrs = spec.attrs;
             let label = self.asm_label_and_attrs(&mut attrs)?;
             let Some((name, name_loc)) = d.name.clone() else {
                 return Err(Error::new(loc, "declaration needs a name"));
+            };
+            let inferred_init = if spec.infer {
+                if !self.eat("=") {
+                    return Err(Error::new(
+                        self.loc(),
+                        "`__auto_type` needs an initializer and a plain identifier",
+                    ));
+                }
+                // Unlike ordinary declarations, the name is not in scope
+                // until after its initializer has been parsed.
+                let expr = self.assign()?;
+                if matches!(expr.kind, ExprKind::Member { bits: Some(_), .. }) {
+                    return Err(Error::new(
+                        expr.loc,
+                        "`__auto_type` cannot infer from a bit-field",
+                    ));
+                }
+                let expr = self.rvalue(expr);
+                if self.incomplete(&expr.ty) {
+                    return Err(Error::new(
+                        expr.loc,
+                        "`__auto_type` initializer has an incomplete type",
+                    ));
+                }
+                d.ty = if matches!(spec.ty, Ty::Atomic(_)) {
+                    self.atomic_type(expr.ty.clone(), name_loc)?
+                } else {
+                    expr.ty.clone()
+                };
+                Some(Init {
+                    items: vec![InitItem::Expr {
+                        offset: 0,
+                        expr,
+                        bits: None,
+                    }],
+                })
+            } else {
+                None
             };
             // The specifiers' qualifiers are on the object only if the
             // declarator adds nothing but arrays: `const char *a[2]` is an
@@ -534,7 +591,7 @@ impl Parser {
             while let Ty::Array(inner, _) = elem {
                 elem = inner;
             }
-            let base = *elem == spec.ty;
+            let base = spec.infer || *elem == spec.ty;
             if let Some(what) = elem.unusable()
                 && !matches!(spec.storage, Storage::Typedef | Storage::Extern)
             {
@@ -564,8 +621,8 @@ impl Parser {
                 // malloc(sizeof *p)` refers to itself.
                 let id = self.new_local(name.clone(), d.ty.clone(), d.sugar.clone(), is_volatile);
                 let mut ty = d.ty;
-                let mut init = None;
-                if self.eat("=") {
+                let mut init = inferred_init;
+                if init.is_none() && self.eat("=") {
                     let (i, complete) = self.initializer(&ty)?;
                     ty = complete;
                     init = Some(i);
@@ -589,7 +646,13 @@ impl Parser {
                     None => Stmt::Declare(id),
                 });
             } else {
-                self.object_declaration(&spec, d, name, label, is_const, file_scope)?;
+                self.object_declaration(&spec, d, label, is_const, file_scope, inferred_init)?;
+            }
+            if spec.infer && self.is(",") {
+                return Err(Error::new(
+                    self.loc(),
+                    "`__auto_type` declares only one variable",
+                ));
             }
             if !self.eat(",") {
                 break;
@@ -622,11 +685,12 @@ impl Parser {
         &mut self,
         spec: &DeclSpec,
         d: Declarator,
-        name: String,
         label: Option<String>,
         is_const: bool,
         file_scope: bool,
+        inferred_init: Option<Init>,
     ) -> R<()> {
+        let name = d.name.as_ref().unwrap().0.clone();
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
             let func = &self.fs.as_ref().unwrap().name;
@@ -667,7 +731,7 @@ impl Parser {
             }
             g
         };
-        if self.eat("=") {
+        if inferred_init.is_some() || self.eat("=") {
             let loc = self.loc();
             if !file_scope && !local_static {
                 return Err(Error::new(
@@ -676,7 +740,10 @@ impl Parser {
                 ));
             }
             let ty = self.globals[g].ty.clone();
-            let (init, ty) = self.initializer(&ty)?;
+            let (init, ty) = match inferred_init {
+                Some(init) => (init, ty),
+                None => self.initializer(&ty)?,
+            };
             let global = &mut self.globals[g];
             global.ty = ty;
             global.init = Some(init);
@@ -906,11 +973,13 @@ impl Parser {
         const UNSIGNED: u32 = 1 << 18;
         const INT128: u32 = 1 << 19;
         const HALF: u32 = 1 << 20;
+        const AUTO: u32 = 1 << 21;
 
         let loc = self.loc();
         let mut spec = DeclSpec {
             ty: Ty::Int(IntKind::Int),
             sugar: Sugar::Plain,
+            infer: false,
             storage: Storage::None,
             is_const: false,
             is_volatile: false,
@@ -1048,6 +1117,7 @@ impl Parser {
                         "unsigned" => UNSIGNED,
                         "__int128" => INT128,
                         "_Float16" => HALF,
+                        "__auto_type" => AUTO,
                         _ => break,
                     };
                     if other.is_some() {
@@ -1059,7 +1129,9 @@ impl Parser {
             self.advance();
         }
         use IntKind::*;
+        spec.infer = counter == AUTO;
         spec.ty = match counter {
+            AUTO => Ty::Int(Int), // Replaced after parsing the initializer.
             OTHER => other.unwrap(),
             0 => {
                 if spec.storage == Storage::None && !spec.is_const && !spec.inline {
@@ -1113,6 +1185,12 @@ impl Parser {
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
         };
         if is_complex {
+            if spec.infer {
+                return Err(Error::new(
+                    loc,
+                    "`__auto_type` cannot be combined with `_Complex`",
+                ));
+            }
             let size = 2 * Types(&self.structs).size(&spec.ty);
             spec.ty = Ty::Opaque {
                 name: "_Complex",
@@ -1135,6 +1213,12 @@ impl Parser {
     /// declarator.
     pub(crate) fn type_name(&mut self) -> R<Ty> {
         let spec = self.decl_spec()?;
+        if spec.infer {
+            return Err(Error::new(
+                self.loc(),
+                "`__auto_type` is only allowed in variable declarations",
+            ));
+        }
         Ok(self.declarator(spec.ty)?.ty)
     }
 
@@ -1310,6 +1394,9 @@ impl Parser {
                 ));
             }
             let spec = self.decl_spec()?;
+            if spec.infer {
+                return Err(Error::new(loc, "`__auto_type` cannot declare a parameter"));
+            }
             let d = self.declarator_sugar(spec.ty, spec.sugar)?;
             self.attributes(&mut Attrs::default())?;
             // Arrays and functions are passed as pointers.
@@ -1395,6 +1482,12 @@ impl Parser {
             }
             let floc = self.loc();
             let spec = self.decl_spec()?;
+            if spec.infer {
+                return Err(Error::new(
+                    floc,
+                    "`__auto_type` cannot declare a struct member",
+                ));
+            }
             if self.eat(";") {
                 // An anonymous struct or union member.
                 if matches!(spec.ty, Ty::Struct(_)) {

@@ -350,6 +350,42 @@ fn uninitialized_locals_do_not_live_across_iterations() {
     assert_eq!(header.matches(": f64").count(), 1, "only `s`:\n{text}");
 }
 
+/// GNU inference keeps an outer name visible until the initializer ends.
+/// Clang rejects this shadowing case, so check the folded result directly.
+#[test]
+fn auto_type_initializer_uses_outer_scope() {
+    let mut module =
+        compile("int f(void) { int x = 40; { __auto_type x = x + 2; return x; } }").unwrap();
+    keel_opt::optimize(&mut module).unwrap();
+    let text = module.to_string();
+    assert!(text.contains("iconst.i32 42"), "{text}");
+}
+
+/// An explicit atomic qualifier applies to the inferred type, including
+/// pointers, while an atomic initializer is read as its underlying type.
+#[test]
+fn auto_type_atomic_qualifier_applies_to_inferred_type() {
+    let src = "int *f(int *a) { _Atomic __auto_type p = a; return p++; }\n\
+               int g(_Atomic(int) *a) { __auto_type x = *a; return x + 1; }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        keel_opt::optimize(&mut module).unwrap();
+        keel_codegen::compile(&module, target).unwrap();
+        let text = module.to_string();
+        assert_eq!(text.matches("atomic_rmw.add seq_cst").count(), 1, "{text}");
+        assert_eq!(text.matches("atomic_load.i32 seq_cst").count(), 1, "{text}");
+    }
+}
+
 /// Only what is used is emitted: unused `static` and `inline` functions
 /// and unused declarations leave nothing behind.
 #[test]
@@ -419,6 +455,50 @@ fn rejected() {
         (
             "void f(_Atomic(int (*)(void)) *p) { --*p; }",
             "error: arithmetic on a function pointer",
+        ),
+        (
+            "void f(void) { __auto_type x; }",
+            "error: `__auto_type` needs an initializer and a plain identifier",
+        ),
+        (
+            "void f(void) { __auto_type *x = 0; }",
+            "error: expected an identifier",
+        ),
+        (
+            "void f(void) { __auto_type x = 1, y = 2; }",
+            "error: `__auto_type` declares only one variable",
+        ),
+        (
+            "void f(void) { __auto_type x = x; }",
+            "error: `x` is not declared",
+        ),
+        (
+            "void g(void); void f(void) { __auto_type x = g(); }",
+            "error: `__auto_type` initializer has an incomplete type",
+        ),
+        (
+            "struct s { unsigned x:3; }; void f(struct s s) { __auto_type x = s.x; }",
+            "error: `__auto_type` cannot infer from a bit-field",
+        ),
+        (
+            "void f(__auto_type x) {}",
+            "error: `__auto_type` cannot declare a parameter",
+        ),
+        (
+            "struct s { __auto_type x; };",
+            "error: `__auto_type` cannot declare a struct member",
+        ),
+        (
+            "int f(void) { return sizeof(__auto_type); }",
+            "error: `__auto_type` is only allowed in variable declarations",
+        ),
+        (
+            "typedef __auto_type T;",
+            "error: `__auto_type` cannot declare a typedef",
+        ),
+        (
+            "void f(void) { unsigned __auto_type x = 1; }",
+            "error: invalid combination of type specifiers",
         ),
     ];
     let mut failures = Vec::new();
