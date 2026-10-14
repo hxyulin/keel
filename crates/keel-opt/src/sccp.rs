@@ -141,6 +141,31 @@ impl<'a> Solver<'a> {
         let results = self.func.inst_results(inst);
         if results.len() == 1 {
             self.update(results[0], self.evaluate(data));
+        } else if matches!(data, InstData::Overflow { .. }) {
+            if let Some(constants) = const_fold::fold_overflow(data, |v| match self.state(v) {
+                State::Constant(c) => Some(c.clone()),
+                _ => None,
+            }) {
+                for (&result, constant) in results.iter().zip(constants) {
+                    self.update(result, State::Constant(constant));
+                }
+            } else {
+                let mut state = State::Unknown;
+                data.for_each_operand(|v| {
+                    if *self.state(v) == State::Overdefined {
+                        state = State::Overdefined;
+                    }
+                });
+                // Known but unsupported widths must not stall control flow.
+                let mut all_known = true;
+                data.for_each_operand(|v| all_known &= !matches!(self.state(v), State::Unknown));
+                if all_known {
+                    state = State::Overdefined;
+                }
+                for &result in results {
+                    self.update(result, state.clone());
+                }
+            }
         } else {
             for &result in results {
                 self.update(result, State::Overdefined);
@@ -274,6 +299,20 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             let results = func.inst_results(inst);
+            if results.len() == 2 && matches!(func.inst_data(inst), InstData::Overflow { .. }) {
+                let constants: Option<Vec<_>> = results
+                    .iter()
+                    .map(|result| match &values[result.index()] {
+                        State::Constant(data) => Some(data.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(constants) = constants {
+                    const_fold::replace_with_constants(func, inst, &constants);
+                    changed = true;
+                    continue;
+                }
+            }
             if results.len() == 1
                 && results[0].index() < values.len()
                 && let State::Constant(data) = &values[results[0].index()]

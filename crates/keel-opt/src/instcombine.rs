@@ -5,7 +5,7 @@
 //! A use worklist revisits consumers after substitutions, including when
 //! layout order differs from definition order across blocks.
 
-use crate::const_fold;
+use crate::const_fold::{self, constant_data as constant};
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
     Value, ValueDef,
@@ -14,16 +14,7 @@ use keel_ir::{
 enum Fold {
     Value(Value),
     Data(InstData),
-}
-
-fn constant(func: &Function, v: Value) -> Option<InstData> {
-    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
-        return None;
-    };
-    match func.inst_data(inst) {
-        data @ (InstData::Iconst { .. } | InstData::Fconst { .. }) => Some(data.clone()),
-        _ => None,
-    }
+    Multi([InstData; 2]),
 }
 
 fn bits(func: &Function, v: Value) -> Option<u128> {
@@ -44,6 +35,9 @@ fn zero(ty: Type) -> Fold {
 fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     data.for_each_operand_mut(|v| *v = func.resolve(*v));
+    if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
+        return Some(Fold::Multi(constants));
+    }
     let result = *func.inst_results(inst).first()?;
     let ty = func.value_type(result);
     if let InstData::Select { args: [cond, a, b] } = data {
@@ -210,15 +204,24 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
-        if func.is_removed(inst) || func.inst_results(inst).len() != 1 {
+        if func.is_removed(inst) || func.inst_results(inst).is_empty() {
             continue;
         }
         let Some(fold) = simplify(func, inst) else {
             continue;
         };
         let result = func.first_result(inst);
-        let waiting = users[result.index()].clone();
+        let waiting: Vec<_> = func
+            .inst_results(inst)
+            .iter()
+            .flat_map(|result| users[result.index()].iter().copied())
+            .collect();
         match fold {
+            Fold::Multi(constants) => {
+                const_fold::replace_with_constants(func, inst, &constants);
+                users.resize_with(func.num_values(), Vec::new);
+                queued.resize(func.num_insts(), false);
+            }
             Fold::Value(value) => {
                 let value = func.resolve(value);
                 if value == result {

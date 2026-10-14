@@ -745,7 +745,16 @@ showed roughly neutral application runtime and extra compiler cost. The
 `keel-basic-sccp` and `keel-O-sccp` suite configurations replace `const-fold`
 with `sccp` while preserving the other stages. `keel compile -p ...` and
 `keel cc -p ...` select explicit pipelines, overriding optimization tiers.
-The numeric folding kernel is shared with `const-fold`. Regression tests
+The numeric folding kernel is shared with `const-fold` and `instcombine`.
+All three also fold both results of signed/unsigned checked add, subtract
+and multiply at widths through i64. SCCP tracks the wrapped value and
+overflow flag independently, allowing checked results to drive branches.
+Every i8 operand pair is checked against Rust overflow operations, with
+wide-boundary and native regressions. i128 folds remain conservative because
+the constant immediate cannot represent general i128 results. Application
+assembly was identical in all 44 files and compile timing was neutral; see
+[`checked-fold-aarch64-2026-10-15.json`](../suite/reports/checked-fold-aarch64-2026-10-15.json).
+Regression tests
 compare SCCP followed by all 32 subsets of the original five passes against
 an independent execution model, and
 native codegen tests exercise constant loop parameters with ordinary and

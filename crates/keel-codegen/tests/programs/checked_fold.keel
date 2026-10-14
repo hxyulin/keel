@@ -1,0 +1,13 @@
+; expect: exit 0
+; opt-passes: sccp, instcombine, simplify-cfg, gvn, dce, gcm
+func @checked_fold() -> i64 {
+block0:
+    v0 = iconst.i64 9223372036854775807
+    v1 = iconst.i64 1
+    jump block1(v0, v1)
+block1(v2: i64, v3: i64):
+    v4, v5 = sadd_overflow v2, v3
+    v6 = uext.i64 v5
+    v7 = xor v4, v6
+    return v7
+}
