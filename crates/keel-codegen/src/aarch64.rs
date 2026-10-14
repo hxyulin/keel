@@ -2747,9 +2747,15 @@ fn emit_debug_info(out: &mut String, module: &Module) {
     writeln!(out, "\t.asciz\t{}", asm_string(&comp_dir)).unwrap();
     // The assembler's line table is all of `__debug_line`.
     out.push_str("\t.long\t0\n");
+    // The unit's size spans several functions, which `.subsections_via_
+    // symbols` makes separate atoms: written directly, the difference
+    // becomes a relocation pair dsymutil does not support ("unsupported
+    // relocation in __debug_info"). Through `.set` the assembler computes
+    // it as a constant, as clang does.
     writeln!(
         out,
-        "\t.quad\tL{first}_begin\n\t.long\tL{last}_end-L{first}_begin"
+        "Ldebug_unit_size = L{last}_end-L{first}_begin\n\
+         \t.quad\tL{first}_begin\n\t.long\tLdebug_unit_size"
     )
     .unwrap();
     for func in &module.functions {

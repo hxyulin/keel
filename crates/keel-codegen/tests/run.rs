@@ -256,10 +256,12 @@ fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) 
         .arg(driver)
         .output()
         .unwrap();
+    // dsymutil, which `clang -g` runs, warns about debug info it cannot
+    // use rather than failing.
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        out.status.success(),
-        "clang failed:\n{}",
-        String::from_utf8_lossy(&out.stderr)
+        out.status.success() && !stderr.contains("warning"),
+        "clang failed or warned:\n{stderr}"
     );
 
     let mut lldb = Command::new("lldb");
