@@ -102,7 +102,7 @@ use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
-use crate::{CodegenError, Format};
+use crate::{CodegenError, Format, loc_reg, pieces};
 use keel_ir::{
     AbiParam, ArgExt, AsmClobber, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause,
     ConvertOp, DataRef, DebugScope, EntityRef, FloatCC, Function, InlineAsm, Inst, InstData, IntCC,
@@ -3135,31 +3135,6 @@ fn asm_text(
 }
 
 /// The register number of an argument register.
-fn loc_reg(loc: Loc) -> u8 {
-    match loc {
-        Loc::Reg(r) | Loc::FReg(r) => r,
-        Loc::Stack(_) => unreachable!("not a register"),
-    }
-}
-
-/// Splits `n` bytes into naturally aligned loads: 8-byte pieces, then at
-/// most one each of 4, 2 and 1. Returns (offset, size) pairs.
-fn pieces(n: u64) -> Vec<(u64, u64)> {
-    let mut out = Vec::new();
-    let mut at = 0;
-    while n - at >= 8 {
-        out.push((at, 8));
-        at += 8;
-    }
-    for size in [4, 2, 1] {
-        if n - at >= size {
-            out.push((at, size));
-            at += size;
-        }
-    }
-    out
-}
-
 /// Load and store mnemonics for a piece of `size` bytes.
 fn piece_ops(size: u64) -> (&'static str, &'static str) {
     match size {

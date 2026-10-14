@@ -1,13 +1,10 @@
 ; expect: exit 0
-; stdout: forwarded 42 and 2.50 and keel
 ; Variadic functions defined in keel, checked in variadic.c: va_start and
-; va_arg, a va_list passed on to vprintf, and variadic arguments after
-; named ones that spill to the stack.
-decl @vprintf(ptr, ptr) -> i32
-
+; va_arg, and variadic arguments after named ones that spill to the stack.
+; Passing a va_list on is ABI-specific: see variadic_vprintf*.keel.
 ; Sum of n i64 arguments.
 func @k_sum(i32, ...) -> i64 {
-    ss0 = stack_slot 8, align 8         ; va_list
+    ss0 = stack_slot 24, align 8        ; va_list: 8 bytes on Apple arm64, 24 on SysV
 block0(v0: i32):
     v1 = stack_addr ss0
     intrinsic va_start(v1)
@@ -29,7 +26,7 @@ block3:
 
 ; Reads (i32, f64) pairs n times: sum of i * d.
 func @k_pairs(i32, ...) -> f64 {
-    ss0 = stack_slot 8, align 8
+    ss0 = stack_slot 24, align 8
 block0(v0: i32):
     v1 = stack_addr ss0
     intrinsic va_start(v1)
@@ -52,22 +49,11 @@ block3:
     return v5
 }
 
-; printf through vprintf: the va_list is a pointer, passed by value.
-func @k_printf(ptr, ...) -> i32 {
-    ss0 = stack_slot 8, align 8
-block0(v0: ptr):
-    v1 = stack_addr ss0
-    intrinsic va_start(v1)
-    v2 = load.ptr v1
-    v3 = call @vprintf(v0, v2)
-    return v3
-}
-
 ; Eight named integers fill x0-x7 and a ninth goes on the stack, so the
 ; variadic arguments start one slot further up. Returns the ninth plus
 ; the first two variadic ones (a ptr's target and an i64).
 func @k_tail(i64, i64, i64, i64, i64, i64, i64, i64, i32, ...) -> i64 {
-    ss0 = stack_slot 8, align 8
+    ss0 = stack_slot 24, align 8
 block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i32):
     v9 = stack_addr ss0
     intrinsic va_start(v9)

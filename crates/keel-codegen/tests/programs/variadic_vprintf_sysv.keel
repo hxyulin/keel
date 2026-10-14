@@ -1,0 +1,15 @@
+; target: x86_64-unknown-linux-gnu
+; expect: exit 0
+; stdout: forwarded 42 and 2.50 and keel
+; printf through vprintf. SysV's va_list is an array of one 24-byte
+; struct, so C passes its address.
+decl @vprintf(ptr, ptr) -> i32
+
+func @k_printf(ptr, ...) -> i32 {
+    ss0 = stack_slot 24, align 8
+block0(v0: ptr):
+    v1 = stack_addr ss0
+    intrinsic va_start(v1)
+    v2 = call @vprintf(v0, v1)
+    return v2
+}

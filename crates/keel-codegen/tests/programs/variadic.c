@@ -3,7 +3,6 @@
 
 int64_t k_sum(int32_t, ...);
 double k_pairs(int32_t, ...);
-int32_t k_printf(const char *, ...);
 int64_t k_tail(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int32_t,
                ...);
 int64_t k_sum_three(int64_t, int64_t, int64_t);
@@ -30,7 +29,6 @@ int main(void) {
     int64_t target = 1000;
     CHECK(k_tail(1, 2, 3, 4, 5, 6, 7, 8, -5, &target, (int64_t)70000), -5 + 1000 + 70000 + 8);
     CHECK(k_sum_three(4, 5, -6), 3);
-    CHECK(k_printf("forwarded %d and %.2f and %s\n", 42, 2.5, "keel"), 31);
     /* An exit status is taken mod 256. */
     return failures != 0;
 }

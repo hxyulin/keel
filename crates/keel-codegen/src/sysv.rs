@@ -185,9 +185,21 @@ impl Cursor {
     }
 }
 
-/// Places arguments `args`. Returns each one's location, the bytes of
-/// stack they take, and the number of vector registers used (for `al`).
-pub fn arg_locs(args: &[ArgKind]) -> (Vec<ArgLoc>, u32, u8) {
+/// Where a call's arguments go.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Placement {
+    /// Each argument's location.
+    pub locs: Vec<ArgLoc>,
+    /// Bytes of stack arguments.
+    pub stack: u32,
+    /// General-purpose and vector argument registers used: where a
+    /// variadic function's `va_start` begins, and `al` for its callers.
+    pub ints: u8,
+    pub floats: u8,
+}
+
+/// Places arguments `args`.
+pub fn arg_locs(args: &[ArgKind]) -> Placement {
     let mut cursor = Cursor::default();
     let locs = args
         .iter()
@@ -204,7 +216,12 @@ pub fn arg_locs(args: &[ArgKind]) -> (Vec<ArgLoc>, u32, u8) {
             },
         })
         .collect();
-    (locs, cursor.stack, cursor.floats)
+    Placement {
+        locs,
+        stack: cursor.stack,
+        ints: cursor.ints as u8,
+        floats: cursor.floats,
+    }
 }
 
 /// Where a scalar result comes back: rax (and rdx for the high half of
@@ -246,7 +263,12 @@ mod tests {
         let mut args: Vec<ArgKind> = (0..7).map(|_| ArgKind::Value(Type::I64)).collect();
         args.push(ArgKind::Value(Type::F64));
         args.push(ArgKind::Value(Type::I8));
-        let (locs, stack, floats) = arg_locs(&args);
+        let Placement {
+            locs,
+            stack,
+            floats,
+            ..
+        } = arg_locs(&args);
         assert_eq!(locs[0], ArgLoc::Value(Slot::Regs(vec![Loc::Reg(RDI)])));
         assert_eq!(locs[5], ArgLoc::Value(Slot::Regs(vec![Loc::Reg(9)])));
         assert_eq!(locs[6], ArgLoc::Value(Slot::Stack(0)));
@@ -264,7 +286,7 @@ mod tests {
         let mut args: Vec<ArgKind> = (0..5).map(|_| ArgKind::Value(Type::I64)).collect();
         args.push(ArgKind::ByVal(&ll));
         args.push(ArgKind::Value(Type::I32));
-        let (locs, stack, _) = arg_locs(&args);
+        let Placement { locs, stack, .. } = arg_locs(&args);
         assert_eq!(locs[5], ArgLoc::OnStack(0));
         assert_eq!(locs[6], ArgLoc::Value(Slot::Regs(vec![Loc::Reg(9)])));
         assert_eq!(stack, 16);
@@ -275,7 +297,7 @@ mod tests {
         let big = s(vec![t(Type::I64), t(Type::I64), t(Type::I64)]);
         let dl = s(vec![t(Type::F64), t(Type::I64)]);
         let args = [ArgKind::Sret(&big), ArgKind::Value(Type::I64)];
-        let (locs, _, _) = arg_locs(&args);
+        let locs = arg_locs(&args).locs;
         assert_eq!(
             locs,
             [
@@ -283,7 +305,7 @@ mod tests {
                 ArgLoc::Value(Slot::Regs(vec![Loc::Reg(RSI)]))
             ]
         );
-        let (locs, _, _) = arg_locs(&[ArgKind::Sret(&dl)]);
+        let locs = arg_locs(&[ArgKind::Sret(&dl)]).locs;
         assert_eq!(locs, [ArgLoc::SretRegs(vec![Loc::FReg(0), Loc::Reg(RAX)])]);
     }
 }

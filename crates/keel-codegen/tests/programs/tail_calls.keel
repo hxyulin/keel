@@ -68,9 +68,11 @@ block2:
 
 ; The arguments are computed before a call, so they live in callee-saved
 ; registers (or spill slots, with few registers), which the epilogue
-; restores before the jump: the moves must come first.
-func @k_to_c(i64) -> i64 cc(c) {
-block0(v0: i64):
+; restores before the jump: the moves must come first. Eight arguments
+; take the stack on x86-64, where the tail call reuses the space this
+; function's own stack arguments came in.
+func @k_to_c(i64, i64, i64, i64, i64, i64, i64, i64) -> i64 cc(c) {
+block0(v0: i64, v9: i64, v10: i64, v11: i64, v12: i64, v13: i64, v14: i64, v15: i64):
     v1 = iconst.i64 1
     v2 = iadd v0, v1
     v3 = iadd v2, v1
@@ -84,8 +86,8 @@ block0(v0: i64):
 }
 
 ; The target pointer too lives in a callee-saved register.
-func @k_to_c_indirect(ptr, i64) -> i64 cc(c) {
-block0(v0: ptr, v1: i64):
+func @k_to_c_indirect(ptr, i64, i64, i64, i64, i64, i64, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64, v9: i64, v10: i64, v11: i64, v12: i64, v13: i64, v14: i64):
     call @clobber()
     return_call_indirect v0(v1, v1, v1, v1, v1, v1, v1, v1) : (i64, i64, i64, i64, i64, i64, i64, i64) -> i64 cc(c)
 }

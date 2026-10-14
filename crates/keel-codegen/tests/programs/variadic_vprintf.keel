@@ -1,0 +1,16 @@
+; target: aarch64-apple-darwin
+; expect: exit 0
+; stdout: forwarded 42 and 2.50 and keel
+; printf through vprintf. Apple's va_list is a pointer to the next
+; argument, passed by value.
+decl @vprintf(ptr, ptr) -> i32
+
+func @k_printf(ptr, ...) -> i32 {
+    ss0 = stack_slot 8, align 8
+block0(v0: ptr):
+    v1 = stack_addr ss0
+    intrinsic va_start(v1)
+    v2 = load.ptr v1
+    v3 = call @vprintf(v0, v2)
+    return v3
+}

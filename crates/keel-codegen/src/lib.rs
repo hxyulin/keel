@@ -13,6 +13,8 @@ pub mod x86_64;
 
 pub use regalloc::Pools;
 
+use regalloc::Loc;
+
 use keel_ir::Module;
 
 /// A machine and operating system to generate code for.
@@ -110,3 +112,29 @@ impl fmt::Display for CodegenError {
 }
 
 impl std::error::Error for CodegenError {}
+
+/// The register of a register location.
+pub(crate) fn loc_reg(loc: Loc) -> u8 {
+    match loc {
+        Loc::Reg(r) | Loc::FReg(r) => r,
+        Loc::Stack(_) => unreachable!("not a register"),
+    }
+}
+
+/// Splits `n` bytes into naturally aligned loads: 8-byte pieces, then at
+/// most one each of 4, 2 and 1. Returns (offset, size) pairs.
+pub(crate) fn pieces(n: u64) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while n - at >= 8 {
+        out.push((at, 8));
+        at += 8;
+    }
+    for size in [4, 2, 1] {
+        if n - at >= size {
+            out.push((at, size));
+            at += size;
+        }
+    }
+    out
+}

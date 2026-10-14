@@ -3,7 +3,8 @@
 //! `.cpp` one, built with `clang++ -O2`), run it,
 //! and compare with the `; expect:` line, either `exit <code>` or `trap`.
 //! `; stdout: <text>` lines, if present, give the expected output line by
-//! line.
+//! line. A `; target: <triple>` line runs the program only on that target,
+//! for what the IR leaves to the ABI.
 //!
 //! Every program is compiled three times: with the real register set; with
 //! two registers of each kind (and class), which spills most values (running the spill
@@ -65,6 +66,11 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
         .map(|l| l.strip_prefix(' ').unwrap_or(l))
         .collect();
 
+    if let Some(target) = src.lines().find_map(|l| l.strip_prefix("; target: "))
+        && Some(target) != keel_codegen::Target::host().map(|t| t.triple())
+    {
+        return Ok(());
+    }
     let mut module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
     keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
     if optimize {

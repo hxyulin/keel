@@ -72,12 +72,12 @@
 use crate::fold::{self, iconst};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
-use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDX, Slot};
-use crate::{CodegenError, Format, data};
+use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDI, RDX, Slot};
+use crate::{CodegenError, Format, data, loc_reg, pieces};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, FloatCC,
-    Function, Inst, InstData, IntCC, Intrinsic, Module, Ordering, OverflowOp, Purpose, RmwOp, Type,
-    UnaryOp, Value, ValueDef,
+    Function, Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose,
+    RmwOp, Type, UnaryOp, Value, ValueDef,
 };
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -136,40 +136,42 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     Ok(out)
 }
 
-/// What this backend does not handle yet, if `data` needs it.
-fn unsupported(func: &Function, module: &Module, inst: Inst) -> Option<&'static str> {
+/// What this backend does not handle yet, if `inst` needs it.
+fn unsupported(func: &Function, inst: Inst) -> Option<&'static str> {
     let data = func.inst_data(inst);
     let wide = |v: Value| func.value_type(func.resolve(v)) == Type::I128;
-    let mut i128_operand = false;
-    data.for_each_operand(|v| i128_operand |= wide(v));
-    if i128_operand || func.inst_results(inst).iter().any(|&r| wide(r)) {
-        return Some("i128");
-    }
     Some(match data {
-        InstData::VaArg { .. }
-        | InstData::Intrinsic {
-            id: Intrinsic::VaStart,
-            ..
-        } => "variadic function definitions",
+        InstData::Binary {
+            op: BinaryOp::Umulhi | BinaryOp::Smulhi,
+            args,
+        } if wide(args[0]) => "i128 umulhi/smulhi",
+        InstData::Overflow {
+            op: OverflowOp::Umul | OverflowOp::Smul,
+            args,
+        } if wide(args[0]) => "i128 overflow multiplication",
+        InstData::Convert { ty, arg, .. } if (*ty == Type::I128) != wide(*arg) => match data {
+            InstData::Convert {
+                op: ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc,
+                ..
+            } => return None,
+            _ => "conversions between i128 and floats",
+        },
+        InstData::Switch { arg, .. } if wide(*arg) => "switch on i128",
         InstData::Invoke { .. } | InstData::LandingPad { .. } | InstData::EhTypeid { .. } => {
             "exceptions"
         }
         InstData::InlineAsm { .. } => "inline assembly",
-        InstData::SymbolAddr { symbol }
-            if module
-                .data_object(func.symbol_name(*symbol))
-                .is_some_and(|d| d.thread_local) =>
-        {
-            "thread-locals"
-        }
         _ => return None,
     })
 }
 
 /// Instructions that clobber the caller-saved registers: calls, and the
-/// operations that are calls to libc.
-fn is_call(data: &InstData) -> bool {
+/// operations that are calls to libc or libgcc (`i128` division).
+fn is_call(func: &Function, data: &InstData) -> bool {
     match data {
+        InstData::Binary { op, args } => {
+            op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
+        }
         InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Fma { .. } => true,
         InstData::Intrinsic { id, .. } => {
             matches!(
@@ -239,8 +241,10 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 /// The operands of `data` folded into it: the stack address of a load or
 /// store, which addresses the slot as `[rbp - n]`, and a [`folded_imm`].
 fn folds(func: &Function, data: &InstData) -> Vec<Value> {
+    let wide = |v: Value| func.value_type(func.resolve(v)) == Type::I128;
     let addr = match *data {
-        InstData::Load { addr, .. } | InstData::Store { addr, .. } => Some(addr),
+        InstData::Load { ty, addr } if ty != Type::I128 => Some(addr),
+        InstData::Store { value, addr } if !wide(value) => Some(addr),
         _ => None,
     }
     .filter(|&addr| stack_slot(func, addr).is_some());
@@ -270,8 +274,26 @@ struct FunctionCompiler<'a> {
     /// need no code.
     folded_values: HashSet<Value>,
     fused_compares: HashSet<Value>,
-    /// Offset from `rsp` of spill slot 0, above the outgoing arguments.
+    /// Bytes at the bottom of the frame for outgoing stack arguments,
+    /// rounded to 16; memory from `stack_alloc` starts just above.
+    outgoing: usize,
+    /// Offset from `rsp` of spill slot 0. Slots past the allocator's are
+    /// staging for struct arguments in registers; see [`Self::move_args`].
     spill_base: usize,
+    /// Offset from `rsp` of an 8-byte slot keeping a call's `sret` address
+    /// across the call, for results that come back in registers.
+    sret_save: Option<usize>,
+    /// Offset from `rsp` of the slot keeping this function's own `sret`
+    /// address, which it returns in rax.
+    sret_ptr: Option<usize>,
+    /// Offset from `rsp` of the memory behind each `byval` parameter that
+    /// arrived in registers, and behind an `sret` result returned in them.
+    param_areas: Vec<Option<usize>>,
+    /// Offset from `rsp` of a variadic function's register save area:
+    /// rdi–r9 (48 bytes), then xmm0–xmm7 (16 bytes each).
+    reg_save: Option<usize>,
+    /// The named parameters' registers and stack, where `va_start` begins.
+    named: sysv::Placement,
     /// Outgoing arguments, spill slots and IR stack slots: what `sub rsp`
     /// allocates below the saved registers.
     frame_size: usize,
@@ -291,16 +313,7 @@ impl<'a> FunctionCompiler<'a> {
             message,
         };
         let CallConv::C = func.sig.cc;
-        let structs =
-            |params: &[AbiParam]| params.iter().any(|p| !matches!(p.purpose, Purpose::Normal));
         let not_yet = |what: &str| err(format!("{what} not supported on x86-64 yet"));
-        if structs(&func.sig.params) || func.sig.variadic {
-            return Err(not_yet(if func.sig.variadic {
-                "variadic function definitions are"
-            } else {
-                "struct parameters and results are"
-            }));
-        }
         match func.sig.returns.as_slice() {
             [] => {}
             // clang assumes the callee extends these to 32 bits.
@@ -316,7 +329,6 @@ impl<'a> FunctionCompiler<'a> {
                         .into(),
                 ));
             }
-            [ret] if ret.ty == Type::I128 => return Err(not_yet("i128 is")),
             [_] => {}
             _ => {
                 return Err(err(
@@ -327,54 +339,101 @@ impl<'a> FunctionCompiler<'a> {
         if func.personality.is_some() {
             return Err(not_yet("exceptions are"));
         }
-        for (_, callee) in func.callees() {
-            if structs(&callee.sig.params) {
-                return Err(not_yet("struct arguments are"));
-            }
-        }
-        for (_, sig) in func.signatures() {
-            if structs(&sig.params) {
-                return Err(not_yet("struct arguments are"));
-            }
-        }
         for (_, inst) in func.layout_insts() {
-            if let Some(what) = unsupported(func, module, inst) {
+            if let Some(what) = unsupported(func, inst) {
                 return Err(err(format!(
                     "`{}`: {what} not supported on x86-64 yet",
                     func.display_inst(inst)
                 )));
             }
         }
-        // A tail call's arguments must all go in registers: the caller's
-        // frame, where stack arguments would go, is gone by the jump.
+        let named = sysv::arg_locs(&param_kinds(&func.sig.params));
+        // A tail call jumps to the callee with our caller's return address
+        // on the stack, so its stack arguments go where ours came in:
+        // they must fit there. Structs are not supported.
+        let byval_on_stack = named.locs.iter().any(|l| matches!(l, ArgLoc::OnStack(_)));
         for (_, inst) in func.layout_insts() {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
                 _ => continue,
             };
-            let (_, stack, _) = sysv::arg_locs(&arg_kinds(func, &sig.params, args));
-            if stack > 0 {
+            let placement = sysv::arg_locs(&arg_kinds(func, &sig.params, args));
+            let scalars = placement.locs.iter().all(|l| matches!(l, ArgLoc::Value(_)));
+            let has_sret = func
+                .sig
+                .params
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Sret(_)));
+            if !scalars || has_sret || byval_on_stack || placement.stack > named.stack {
                 return Err(err(format!(
-                    "`{}` needs stack arguments, which tail calls do not support",
+                    "`{}` needs more stack arguments than this function received, or \
+                     involves structs, which tail calls do not support",
                     func.display_inst(inst)
                 )));
             }
         }
 
-        let mut outgoing = 0;
+        // The bottom of the frame holds what calls need: their stack
+        // arguments, staging for struct arguments in registers, and a slot
+        // for an `sret` address.
+        let (mut outgoing, mut staging, mut needs_sret_save) = (0, 0, false);
         for (_, inst) in func.layout_insts() {
             let (args, params) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
                 InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
                 _ => continue,
             };
-            let (_, stack, _) = sysv::arg_locs(&arg_kinds(func, params, args));
-            outgoing = outgoing.max(stack);
+            let placement = sysv::arg_locs(&arg_kinds(func, params, args));
+            outgoing = outgoing.max(placement.stack);
+            let mut halves = 0;
+            for loc in &placement.locs {
+                match loc {
+                    ArgLoc::InRegs(regs) => halves += regs.len(),
+                    ArgLoc::SretRegs(_) => needs_sret_save = true,
+                    _ => {}
+                }
+            }
+            staging = staging.max(halves);
         }
-        let alloc = regalloc::allocate(func, pools, is_call, |data| returns_twice(func, data));
-        let spill_base = (outgoing as usize).next_multiple_of(8);
-        let mut offset = spill_base + 8 * alloc.spill_slots as usize;
+        let outgoing = (outgoing as usize).next_multiple_of(16);
+        let mut offset = outgoing;
+        let slot8 = |offset: &mut usize| {
+            *offset += 8;
+            *offset - 8
+        };
+        let sret_save = needs_sret_save.then(|| slot8(&mut offset));
+        let sret_ptr = named
+            .locs
+            .contains(&ArgLoc::SretMemory)
+            .then(|| slot8(&mut offset));
+        let mut param_areas = Vec::new();
+        for (loc, param) in named.locs.iter().zip(&func.sig.params) {
+            param_areas.push(match loc {
+                ArgLoc::InRegs(_) | ArgLoc::SretRegs(_) => {
+                    let layout = param.layout().expect("a struct");
+                    offset = offset.next_multiple_of(layout.align().max(8) as usize);
+                    let area = offset;
+                    offset += layout.size().next_multiple_of(8) as usize;
+                    Some(area)
+                }
+                _ => None,
+            });
+        }
+        // `movaps` stores need 16-byte alignment.
+        let reg_save = func.sig.variadic.then(|| {
+            offset = offset.next_multiple_of(16) + 176;
+            offset - 176
+        });
+
+        let alloc = regalloc::allocate(
+            func,
+            pools,
+            |data| is_call(func, data),
+            |data| returns_twice(func, data),
+        );
+        let spill_base = offset.next_multiple_of(8);
+        let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
         let mut stack_slot_offsets = Vec::new();
         for (_, slot) in func.stack_slots() {
             offset = offset.next_multiple_of(slot.align as usize);
@@ -395,7 +454,13 @@ impl<'a> FunctionCompiler<'a> {
             folded_values: fold::folded_values(func, |data| folds(func, data)),
             fused_compares: fold::fused_compares(func),
             stack_slot_offsets,
+            outgoing,
             spill_base,
+            sret_save,
+            sret_ptr,
+            param_areas,
+            reg_save,
+            named,
             frame_size,
             saved,
             next_block: None,
@@ -431,31 +496,7 @@ impl<'a> FunctionCompiler<'a> {
         if self.frame_size > 0 {
             self.emit(format!("sub\trsp, {}", self.frame_size));
         }
-        // Arguments arrive in registers, some of which are allocatable, so
-        // they move as one parallel copy. Stack arguments are in the
-        // caller's frame, above the return address.
-        if let Some(entry) = func.entry_block() {
-            let params = func.block_params(entry).to_vec();
-            let kinds = param_kinds(&func.sig.params);
-            let (locs, _, _) = sysv::arg_locs(&kinds);
-            let (mut moves, mut loads) = (Vec::new(), Vec::new());
-            for ((param, loc), abi_param) in params.into_iter().zip(locs).zip(&func.sig.params) {
-                let Some(dst) = self.alloc.loc(param) else {
-                    continue;
-                };
-                match loc {
-                    ArgLoc::Value(Slot::Regs(regs)) => moves.push((dst, regs[0])),
-                    ArgLoc::Value(Slot::Stack(offset)) => loads.push((dst, abi_param.ty, offset)),
-                    _ => unreachable!("structs are rejected in `new`"),
-                }
-            }
-            // A stack parameter may be allocated to an argument register,
-            // so it loads once the registers have moved out.
-            self.parallel_copy(&moves);
-            for (dst, ty, offset) in loads {
-                self.load_into(dst, ty, &format!("[rbp + {}]", 16 + offset));
-            }
-        }
+        self.entry();
 
         // Only reachable blocks, in the order the allocator numbered them.
         let order = self.alloc.order.clone();
@@ -477,9 +518,111 @@ impl<'a> FunctionCompiler<'a> {
         out.push_str(&self.out);
     }
 
+    /// Moves the parameters to their places. Arguments arrive in
+    /// registers, some of which are allocatable, so they move as one
+    /// parallel copy; before it, nothing may write an argument register,
+    /// so what is read from them directly comes first:
+    ///
+    /// - a variadic function saves every argument register to its save
+    ///   area, where `va_arg` finds them (the vector ones only if `al`,
+    ///   the count the caller passes, is non-zero);
+    /// - an `sret` address in rdi is kept, to return in rax;
+    /// - a struct in registers is stored to memory, and its parameter is
+    ///   that memory's address.
+    ///
+    /// Stack parameters are in the caller's frame, above the return
+    /// address, and load after the copy: one may be allocated to an
+    /// argument register.
+    fn entry(&mut self) {
+        let func = self.func;
+        let Some(entry) = func.entry_block() else {
+            return;
+        };
+        if let Some(area) = self.reg_save {
+            for (k, &r) in sysv::INT_ARGS.iter().enumerate() {
+                let at = self.frame(area + 8 * k);
+                self.emit(format!("mov\tqword ptr {at}, {}", r64(r)));
+            }
+            let skip = format!(".L{}_saved", func.name);
+            self.emit("test\tal, al");
+            self.emit(format!("je\t{skip}"));
+            for k in 0..8 {
+                let at = self.frame(area + 48 + 16 * k);
+                self.emit(format!("movaps\txmmword ptr {at}, xmm{k}"));
+            }
+            writeln!(self.out, "{skip}:").unwrap();
+        }
+        if let Some(slot) = self.sret_ptr {
+            let at = self.frame(slot);
+            self.emit(format!("mov\tqword ptr {at}, rdi"));
+        }
+        let params = func.block_params(entry).to_vec();
+        let locs = self.named.locs.clone();
+        // What happens after the copy: a stack parameter loads, a struct's
+        // parameter gets the address of its bytes.
+        enum Later {
+            Load(Loc, Type, String),
+            Address(Loc, String),
+        }
+        let (mut moves, mut later) = (Vec::new(), Vec::new());
+        for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
+            let Some(dst) = self.alloc.loc(param) else {
+                continue;
+            };
+            let abi_param = &func.sig.params[i];
+            match loc {
+                ArgLoc::Value(Slot::Regs(regs)) => {
+                    moves.push((dst, regs[0]));
+                    if let Some(hi) = self.alloc.hi_loc(param) {
+                        moves.push((hi, regs[1]));
+                    }
+                }
+                ArgLoc::Value(Slot::Stack(offset)) => {
+                    let at = |o: u32| format!("[rbp + {}]", 16 + offset + o);
+                    match self.alloc.hi_loc(param) {
+                        Some(hi) => {
+                            later.push(Later::Load(dst, Type::I64, at(0)));
+                            later.push(Later::Load(hi, Type::I64, at(8)));
+                        }
+                        None => later.push(Later::Load(dst, abi_param.ty, at(0))),
+                    }
+                }
+                ArgLoc::SretMemory => moves.push((dst, Loc::Reg(RDI))),
+                ArgLoc::InRegs(regs) => {
+                    let area = self.param_areas[i].expect("planned");
+                    for (k, r) in regs.into_iter().enumerate() {
+                        let at = format!("qword ptr {}", self.frame(area + 8 * k));
+                        match r {
+                            Loc::Reg(r) => self.emit(format!("mov\t{at}, {}", r64(r))),
+                            _ => self.emit(format!("movsd\t{at}, {}", xmm(loc_reg(r)))),
+                        }
+                    }
+                    later.push(Later::Address(dst, self.frame(area)));
+                }
+                ArgLoc::SretRegs(_) => {
+                    let area = self.param_areas[i].expect("planned");
+                    later.push(Later::Address(dst, self.frame(area)));
+                }
+                ArgLoc::OnStack(offset) => {
+                    later.push(Later::Address(dst, format!("[rbp + {}]", 16 + offset)))
+                }
+            }
+        }
+        self.parallel_copy(&moves);
+        for step in later {
+            match step {
+                Later::Load(dst, ty, at) => self.load_into(dst, ty, &at),
+                Later::Address(dst, at) => self.address(dst, &at),
+            }
+        }
+    }
+
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
+        if self.lower_i128(inst, func.inst_data(inst), result) {
+            return;
+        }
         match func.inst_data(inst).clone() {
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
@@ -502,21 +645,21 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(callee);
-                self.move_args(&args, &decl.sig, None);
+                let sret = self.move_args(&args, &decl.sig, None, false);
                 let target = self.call_target(&decl.name);
                 self.emit(format!("call\t{target}"));
-                self.call_result(result);
+                self.call_result(result, sret);
             }
             InstData::CallIndirect { sig, callee, args } => {
-                self.move_args(&args, func.signature(sig), Some(callee));
+                let sret = self.move_args(&args, func.signature(sig), Some(callee), false);
                 self.emit(format!("call\t{}", r64(R10)));
-                self.call_result(result);
+                self.call_result(result, sret);
             }
             // Arguments into registers, then this function's epilogue, then
             // a jump: the callee returns straight to our caller.
             InstData::ReturnCall { func: callee, args } => {
                 let decl = func.callee(callee);
-                self.move_args(&args, &decl.sig, None);
+                self.move_args(&args, &decl.sig, None, true);
                 self.epilogue();
                 let target = self.call_target(&decl.name);
                 self.emit(format!("jmp\t{target}"));
@@ -524,14 +667,32 @@ impl<'a> FunctionCompiler<'a> {
             // The epilogue only restores callee-saved registers and rbp,
             // so the target stays in r10.
             InstData::ReturnCallIndirect { sig, callee, args } => {
-                self.move_args(&args, func.signature(sig), Some(callee));
+                self.move_args(&args, func.signature(sig), Some(callee), true);
                 self.epilogue();
                 self.emit(format!("jmp\t{}", r64(R10)));
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
                 let name = func.symbol_name(symbol);
-                if self.module.defines(name) {
+                let thread_local = self
+                    .module
+                    .data_object(name)
+                    .is_some_and(|d| d.thread_local);
+                // A thread's copies of the thread-locals are at fixed
+                // offsets from its thread pointer, the base of fs, whose
+                // first word points to itself. An executable knows the
+                // offsets of its own at link time (local-exec); others come
+                // from the GOT (initial-exec).
+                if thread_local && self.module.defines(name) {
+                    self.emit(format!("mov\t{}, qword ptr fs:0", r64(d)));
+                    self.emit(format!("lea\t{0}, [{0} + {name}@tpoff]", r64(d)));
+                } else if thread_local {
+                    self.emit(format!(
+                        "mov\t{}, qword ptr [rip + {name}@gottpoff]",
+                        r64(d)
+                    ));
+                    self.emit(format!("add\t{}, qword ptr fs:0", r64(d)));
+                } else if self.module.defines(name) {
                     self.emit(format!("lea\t{}, [rip + {name}]", r64(d)));
                 } else {
                     self.emit(format!(
@@ -565,7 +726,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.parallel_copy(&moves);
                 let name = if ty == Type::F32 { "fmaf" } else { "fma" };
                 self.emit(format!("call\t{name}@PLT"));
-                self.call_result(result);
+                self.call_result(result, None);
             }
             InstData::Overflow { op, args } => self.overflow(inst, op, args),
             InstData::Binary { op, args } if op.is_float() => {
@@ -778,7 +939,7 @@ impl<'a> FunctionCompiler<'a> {
                         variadic: false,
                         returns_twice: false,
                     };
-                    self.move_args(&args, &sig, None);
+                    self.move_args(&args, &sig, None, false);
                     self.emit(format!("call\t{id}@PLT"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
@@ -792,7 +953,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit("and\trax, -16");
                     self.emit("sub\trsp, rax");
                     let d = self.def_reg(result);
-                    self.emit(format!("lea\t{}, [rsp + {}]", r64(d), self.spill_base));
+                    self.emit(format!("lea\t{}, [rsp + {}]", r64(d), self.outgoing));
                     self.def_done(result, d);
                 }
                 Intrinsic::StackSave => {
@@ -811,24 +972,481 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(format!("mov\t{}, rbp", r64(d)));
                     self.def_done(result, d);
                 }
-                Intrinsic::VaStart => unreachable!("rejected in `new`"),
+                // SysV's va_list: the offsets of the next general and vector
+                // register in the save area (vector registers are 16 bytes,
+                // after the 48 of the general ones), the next stack argument
+                // and the save area.
+                Intrinsic::VaStart => {
+                    let p = self.use_reg(args[0], S1);
+                    let p = r64(p);
+                    let (ints, floats) = (self.named.ints, self.named.floats);
+                    self.emit(format!("mov\tdword ptr [{p}], {}", 8 * u32::from(ints)));
+                    self.emit(format!(
+                        "mov\tdword ptr [{p} + 4], {}",
+                        48 + 16 * u32::from(floats)
+                    ));
+                    self.emit(format!("lea\trax, [rbp + {}]", 16 + self.named.stack));
+                    self.emit(format!("mov\tqword ptr [{p} + 8], rax"));
+                    let save = self.frame(self.reg_save.expect("a variadic function"));
+                    self.emit(format!("lea\trax, {save}"));
+                    self.emit(format!("mov\tqword ptr [{p} + 16], rax"));
+                }
             },
             InstData::Trap => self.emit("ud2"),
             InstData::Return { args } => {
+                // A struct result in registers is loaded from where the
+                // function wrote it; one in memory returns its address.
+                if let Some(ArgLoc::SretRegs(regs)) = self.named.locs.first().cloned() {
+                    let area = self.param_areas[0].expect("planned");
+                    for (k, r) in regs.into_iter().enumerate() {
+                        let at = format!("qword ptr {}", self.frame(area + 8 * k));
+                        match r {
+                            Loc::Reg(r) => self.emit(format!("mov\t{}, {at}", r64(r))),
+                            _ => self.emit(format!("movsd\t{}, {at}", xmm(loc_reg(r)))),
+                        }
+                    }
+                }
+                if let Some(slot) = self.sret_ptr {
+                    let at = self.frame(slot);
+                    self.emit(format!("mov\trax, qword ptr {at}"));
+                }
                 if let Some(&value) = args.first() {
                     let ty = self.ty(value);
                     self.emit_move(sysv::return_loc(ty), self.loc(value));
+                    if ty == Type::I128 {
+                        self.emit_move(Loc::Reg(RDX), self.hi(value));
+                    }
                     let ret = &func.sig.returns[0];
                     self.extend_in_place(RAX, ret.ty, ret.ext);
                 }
                 self.epilogue();
                 self.emit("ret");
             }
-            InstData::VaArg { .. }
-            | InstData::Invoke { .. }
+            InstData::VaArg { ty, list } => self.va_arg(inst, ty, list, result),
+            InstData::Invoke { .. }
             | InstData::LandingPad { .. }
             | InstData::EhTypeid { .. }
             | InstData::InlineAsm { .. } => unreachable!("rejected in `new`"),
+        }
+    }
+
+    /// The next variadic argument from the `va_list` at `list`: from the
+    /// register save area while registers of its class are left (the
+    /// offset is below 48 for general ones, 176 for vector ones), then from
+    /// the stack, 8 bytes each. Its address ends up in rax.
+    fn va_arg(&mut self, inst: Inst, ty: Type, list: Value, result: Option<Value>) {
+        let p = r64(self.use_reg(list, S2));
+        let (field, end, step) = if ty.is_float() {
+            (4, 176, 16)
+        } else {
+            (0, 48, 8)
+        };
+        let (stack, load) = (
+            format!(".L{}_{inst}_stack", self.func.name),
+            format!(".L{}_{inst}_load", self.func.name),
+        );
+        self.emit(format!("mov\tecx, dword ptr [{p} + {field}]"));
+        self.emit(format!("cmp\tecx, {end}"));
+        self.emit(format!("jae\t{stack}"));
+        self.emit(format!("mov\trax, qword ptr [{p} + 16]"));
+        self.emit("add\trax, rcx");
+        self.emit(format!("add\tecx, {step}"));
+        self.emit(format!("mov\tdword ptr [{p} + {field}], ecx"));
+        self.emit(format!("jmp\t{load}"));
+        writeln!(self.out, "{stack}:").unwrap();
+        self.emit(format!("mov\trax, qword ptr [{p} + 8]"));
+        self.emit("lea\trcx, [rax + 8]");
+        self.emit(format!("mov\tqword ptr [{p} + 8], rcx"));
+        writeln!(self.out, "{load}:").unwrap();
+        if ty.is_float() {
+            let d = self.def_freg(result);
+            self.emit(format!("movsd\t{}, qword ptr [rax]", xmm(d)));
+            self.def_done(result, d);
+        } else {
+            let d = self.def_reg(result);
+            self.emit(format!("mov\t{}, {} [rax]", reg(d, ty), ptr(ty)));
+            self.def_done(result, d);
+        }
+    }
+
+    /// Lowers `data` if it takes or makes an `i128`, and returns whether it
+    /// did. An `i128` is a pair of 64-bit halves, each in its own register
+    /// or spill slot. x86 instructions take their second operand from
+    /// either, so the halves are read where they are ([`Self::half`]); the
+    /// result is built in rax (low) and rdx (high) and moved out last, so
+    /// every operand is read before the result is written.
+    fn lower_i128(&mut self, inst: Inst, data: &InstData, result: Option<Value>) -> bool {
+        let wide = |this: &Self, v: Value| this.ty(v) == Type::I128;
+        let wide_result = result.is_some_and(|r| self.func.value_type(r) == Type::I128);
+        match *data {
+            InstData::Iconst {
+                ty: Type::I128,
+                imm,
+            } => {
+                self.materialize(S0, imm, Type::I64);
+                self.materialize(S2, imm >> 63, Type::I64);
+                self.pair_out(result);
+            }
+            InstData::Binary { op, args } if wide_result => {
+                self.binary_i128(inst, op, args);
+                self.pair_out(result);
+            }
+            InstData::Unary { op, arg } if wide_result => {
+                self.unary_i128(inst, op, arg);
+                self.pair_out(result);
+            }
+            InstData::Icmp { cond, args } if wide(self, args[0]) => {
+                let [a0, a1] = self.halves(args[0]);
+                let [b0, b1] = self.halves(args[1]);
+                let code = match cond {
+                    // Equal if both halves are: their XORs are zero.
+                    IntCC::Eq | IntCC::Ne => {
+                        self.emit(format!("mov\trax, {a0}"));
+                        self.emit(format!("xor\trax, {b0}"));
+                        self.emit(format!("mov\trdx, {a1}"));
+                        self.emit(format!("xor\trdx, {b1}"));
+                        self.emit("or\trax, rdx");
+                        cond_code(cond)
+                    }
+                    // a - b, with the borrow of the low halves feeding the
+                    // high: the flags compare all 128 bits. a > b is b < a,
+                    // and a <= b is b >= a: compare swapped.
+                    _ => {
+                        let swap =
+                            matches!(cond, IntCC::Sgt | IntCC::Sle | IntCC::Ugt | IntCC::Ule);
+                        let ((x0, x1), (y0, y1)) = if swap {
+                            ((b0, b1), (a0, a1))
+                        } else {
+                            ((a0, a1), (b0, b1))
+                        };
+                        self.emit(format!("mov\trax, {x0}"));
+                        self.emit(format!("cmp\trax, {y0}"));
+                        self.emit(format!("mov\trdx, {x1}"));
+                        self.emit(format!("sbb\trdx, {y1}"));
+                        match cond {
+                            IntCC::Slt | IntCC::Sgt => "l",
+                            IntCC::Sle | IntCC::Sge => "ge",
+                            IntCC::Ult | IntCC::Ugt => "b",
+                            _ => "ae",
+                        }
+                    }
+                };
+                let d = self.def_reg(result);
+                self.emit(format!("set{code}\t{}", r8(d)));
+                self.def_done(result, d);
+            }
+            InstData::Select { args } if wide(self, args[1]) => {
+                if wide(self, args[0]) {
+                    let [c0, c1] = self.halves(args[0]);
+                    self.emit(format!("mov\trax, {c0}"));
+                    self.emit(format!("or\trax, {c1}"));
+                } else {
+                    self.test_value(args[0]);
+                }
+                let [t0, t1] = self.halves(args[1]);
+                let [f0, f1] = self.halves(args[2]);
+                self.emit(format!("mov\trax, {f0}"));
+                self.emit(format!("cmovne\trax, {t0}"));
+                self.emit(format!("mov\trdx, {f1}"));
+                self.emit(format!("cmovne\trdx, {t1}"));
+                self.pair_out(result);
+            }
+            InstData::Convert {
+                op: op @ (ConvertOp::Sext | ConvertOp::Uext),
+                ty: Type::I128,
+                arg,
+            } => {
+                let from = self.ty(arg);
+                let a = self.use_reg(arg, S0);
+                let signed = op == ConvertOp::Sext;
+                match (from, signed) {
+                    (Type::I64, _) => self.emit(format!("mov\trax, {}", r64(a))),
+                    (Type::I32, true) => self.emit(format!("movsxd\trax, {}", r32(a))),
+                    (Type::I32, false) => self.emit(format!("mov\teax, {}", r32(a))),
+                    (_, true) => self.emit(format!("movsx\trax, {}", reg(a, from))),
+                    (_, false) => self.emit(format!("movzx\teax, {}", reg(a, from))),
+                }
+                if signed {
+                    self.emit("mov\trdx, rax");
+                    self.emit("sar\trdx, 63");
+                } else {
+                    self.emit("xor\tedx, edx");
+                }
+                self.pair_out(result);
+            }
+            InstData::Load {
+                ty: Type::I128,
+                addr,
+            } => {
+                let a = r64(self.use_reg(addr, S1));
+                self.emit(format!("mov\trax, qword ptr [{a}]"));
+                self.emit(format!("mov\trdx, qword ptr [{a} + 8]"));
+                self.pair_out(result);
+            }
+            InstData::Store { value, addr } if wide(self, value) => {
+                let [v0, v1] = self.halves(value);
+                let a = r64(self.use_reg(addr, S1));
+                self.emit(format!("mov\trax, {v0}"));
+                self.emit(format!("mov\tqword ptr [{a}], rax"));
+                self.emit(format!("mov\trax, {v1}"));
+                self.emit(format!("mov\tqword ptr [{a} + 8], rax"));
+            }
+            // The carry or borrow of the low halves feeds the high; the
+            // flags then describe the whole 128 bits. Multiplication is
+            // rejected in `new`.
+            InstData::Overflow { op, args } if wide(self, args[0]) => {
+                let [a0, a1] = self.halves(args[0]);
+                let [b0, b1] = self.halves(args[1]);
+                let (lo, hi, code) = match op {
+                    OverflowOp::Uadd => ("add", "adc", "c"),
+                    OverflowOp::Sadd => ("add", "adc", "o"),
+                    OverflowOp::Usub => ("sub", "sbb", "c"),
+                    OverflowOp::Ssub => ("sub", "sbb", "o"),
+                    OverflowOp::Umul | OverflowOp::Smul => unreachable!("rejected"),
+                };
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("{lo}\trax, {b0}"));
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit(format!("{hi}\trdx, {b1}"));
+                self.emit(format!("set{code}\tcl"));
+                self.pair_out(result);
+                let flag = self.func.inst_results(inst)[1];
+                if let Some(loc) = self.alloc.loc(flag) {
+                    self.emit_move(loc, Loc::Reg(S1));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// The halves of `i128` operand `value`, low first, as operands: a
+    /// register or a spill slot.
+    fn halves(&self, value: Value) -> [String; 2] {
+        [self.loc(value), self.hi(value)].map(|loc| self.operand(loc))
+    }
+
+    /// Integer location `loc` as a 64-bit operand.
+    fn operand(&self, loc: Loc) -> String {
+        match loc {
+            Loc::Reg(r) => r64(r).to_string(),
+            Loc::Stack(s) => self.slot(s),
+            Loc::FReg(_) => unreachable!("not an integer"),
+        }
+    }
+
+    /// The location of the high half of `i128` operand `value`.
+    fn hi(&self, value: Value) -> Loc {
+        self.alloc
+            .hi_loc(self.func.resolve(value))
+            .expect("operand in reachable code is allocated")
+    }
+
+    /// Moves an `i128` result from rax (low) and rdx (high) to its places.
+    fn pair_out(&mut self, result: Option<Value>) {
+        let Some(value) = result else { return };
+        if let Some(loc) = self.alloc.loc(value) {
+            self.emit_move(loc, Loc::Reg(S0));
+        }
+        if let Some(loc) = self.alloc.hi_loc(value) {
+            self.emit_move(loc, Loc::Reg(S2));
+        }
+    }
+
+    /// `args[0] op args[1]` on `i128`s into rdx:rax. A shift amount may be
+    /// narrower; only its low bits count.
+    fn binary_i128(&mut self, inst: Inst, op: BinaryOp, args: [Value; 2]) {
+        let [a0, a1] = self.halves(args[0]);
+        let [b0, b1] = if self.ty(args[1]) == Type::I128 {
+            self.halves(args[1])
+        } else {
+            [self.operand(self.loc(args[1])), String::new()]
+        };
+        let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
+        let pair = |this: &mut Self, lo: &str, hi: &str| {
+            this.emit(format!("mov\trax, {a0}"));
+            this.emit(format!("{lo}\trax, {b0}"));
+            this.emit(format!("mov\trdx, {a1}"));
+            this.emit(format!("{hi}\trdx, {b1}"));
+        };
+        match op {
+            BinaryOp::Iadd => pair(self, "add", "adc"),
+            BinaryOp::Isub => pair(self, "sub", "sbb"),
+            BinaryOp::And => pair(self, "and", "and"),
+            BinaryOp::Or => pair(self, "or", "or"),
+            BinaryOp::Xor => pair(self, "xor", "xor"),
+            // (a1:a0)(b1:b0) mod 2^128 = a0 b0 + 2^64 (a0 b1 + a1 b0); `mul`
+            // gives the full 128-bit a0 b0 in rdx:rax.
+            BinaryOp::Imul => {
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("mul\t{b0}"));
+                self.emit(format!("mov\trcx, {a0}"));
+                self.emit(format!("imul\trcx, {b1}"));
+                self.emit("add\trdx, rcx");
+                self.emit(format!("mov\trcx, {a1}"));
+                self.emit(format!("imul\trcx, {b0}"));
+                self.emit("add\trdx, rcx");
+            }
+            // `shld`/`shrd` shift one half while filling from the other,
+            // by the count modulo 64; at 64 or more (bit 6 of the count),
+            // the result is the other half shifted, and zeros or the sign.
+            BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+                let done = label("shifted");
+                self.emit(format!("mov\trcx, {b0}"));
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("mov\trdx, {a1}"));
+                match op {
+                    BinaryOp::Shl => {
+                        self.emit("shld\trdx, rax, cl");
+                        self.emit("shl\trax, cl");
+                        self.emit("test\tcl, 64");
+                        self.emit(format!("je\t{done}"));
+                        self.emit("mov\trdx, rax");
+                        self.emit("xor\teax, eax");
+                    }
+                    _ => {
+                        let shr = if op == BinaryOp::Sshr { "sar" } else { "shr" };
+                        self.emit("shrd\trax, rdx, cl");
+                        self.emit(format!("{shr}\trdx, cl"));
+                        self.emit("test\tcl, 64");
+                        self.emit(format!("je\t{done}"));
+                        self.emit("mov\trax, rdx");
+                        if op == BinaryOp::Sshr {
+                            self.emit("sar\trdx, 63");
+                        } else {
+                            self.emit("xor\tedx, edx");
+                        }
+                    }
+                }
+                writeln!(self.out, "{done}:").unwrap();
+            }
+            // Rotating by 64 swaps the halves; then each half rotates by the
+            // rest, filling from the other's original bits.
+            BinaryOp::Rotl | BinaryOp::Rotr => {
+                let swapped = label("swapped");
+                self.emit(format!("mov\trcx, {b0}"));
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit("test\tcl, 64");
+                self.emit(format!("je\t{swapped}"));
+                self.emit("xchg\trax, rdx");
+                writeln!(self.out, "{swapped}:").unwrap();
+                let fill = if op == BinaryOp::Rotl { "shld" } else { "shrd" };
+                self.emit("mov\tr11, rax");
+                self.emit(format!("{fill}\trax, rdx, cl"));
+                self.emit(format!("{fill}\trdx, r11, cl"));
+            }
+            // libgcc takes the pairs in rdi:rsi and rdx:rcx and returns
+            // rdx:rax. Traps first, as for narrower types.
+            BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
+                let trap = self.trap_label();
+                self.emit(format!("mov\trax, {b0}"));
+                self.emit(format!("or\trax, {b1}"));
+                self.emit(format!("je\t{trap}"));
+                if op == BinaryOp::Sdiv {
+                    // MIN / -1: the divisor's halves are both all ones and
+                    // the dividend is 2^127.
+                    let ok = label("divok");
+                    self.emit(format!("mov\trax, {b0}"));
+                    self.emit(format!("and\trax, {b1}"));
+                    self.emit("cmp\trax, -1");
+                    self.emit(format!("jne\t{ok}"));
+                    self.emit(format!("mov\trax, {a0}"));
+                    self.emit("test\trax, rax");
+                    self.emit(format!("jne\t{ok}"));
+                    self.emit("movabs\trax, 0x8000000000000000");
+                    self.emit(format!("cmp\trax, {a1}"));
+                    self.emit(format!("je\t{trap}"));
+                    writeln!(self.out, "{ok}:").unwrap();
+                }
+                let moves = [
+                    (Loc::Reg(RDI), self.loc(args[0])),
+                    (Loc::Reg(6), self.hi(args[0])),
+                    (Loc::Reg(RDX), self.loc(args[1])),
+                    (Loc::Reg(RCX), self.hi(args[1])),
+                ];
+                self.parallel_copy(&moves);
+                let function = match op {
+                    BinaryOp::Udiv => "__udivti3",
+                    BinaryOp::Sdiv => "__divti3",
+                    BinaryOp::Urem => "__umodti3",
+                    _ => "__modti3",
+                };
+                self.emit(format!("call\t{function}@PLT"));
+            }
+            _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
+        }
+    }
+
+    /// `op` on an `i128` into rdx:rax.
+    fn unary_i128(&mut self, inst: Inst, op: UnaryOp, arg: Value) {
+        let [a0, a1] = self.halves(arg);
+        let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
+        match op {
+            // -x = ~x + 1: `neg` the low half sets the carry unless it was
+            // zero, which the high half then absorbs.
+            UnaryOp::Ineg => {
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit("neg\trax");
+                self.emit("adc\trdx, 0");
+                self.emit("neg\trdx");
+            }
+            UnaryOp::Bnot => {
+                self.emit(format!("mov\trax, {a0}"));
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit("not\trax");
+                self.emit("not\trdx");
+            }
+            // The high half's count, or 64 plus the low half's (see
+            // `unary` for the `bsr` arithmetic).
+            UnaryOp::Clz => {
+                let (low, done) = (label("low"), label("counted"));
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit("test\trdx, rdx");
+                self.emit(format!("je\t{low}"));
+                self.emit("bsr\trax, rdx");
+                self.emit("xor\teax, 63");
+                self.emit(format!("jmp\t{done}"));
+                writeln!(self.out, "{low}:").unwrap();
+                self.emit(format!("mov\trdx, {a0}"));
+                self.emit("bsr\trax, rdx");
+                self.emit("mov\tecx, 127");
+                self.emit("cmove\teax, ecx");
+                self.emit("xor\teax, 63");
+                self.emit("add\teax, 64");
+                writeln!(self.out, "{done}:").unwrap();
+                self.emit("xor\tedx, edx");
+            }
+            UnaryOp::Ctz => {
+                let (high, done) = (label("high"), label("counted"));
+                self.emit(format!("mov\trdx, {a0}"));
+                self.emit("test\trdx, rdx");
+                self.emit(format!("je\t{high}"));
+                self.emit("bsf\trax, rdx");
+                self.emit(format!("jmp\t{done}"));
+                writeln!(self.out, "{high}:").unwrap();
+                self.emit(format!("mov\trdx, {a1}"));
+                self.emit("bsf\trax, rdx");
+                self.emit("mov\tecx, 64");
+                self.emit("cmove\teax, ecx");
+                self.emit("add\teax, 64");
+                writeln!(self.out, "{done}:").unwrap();
+                self.emit("xor\tedx, edx");
+            }
+            UnaryOp::Popcnt => {
+                self.emit(format!("popcnt\trax, {a0}"));
+                self.emit(format!("popcnt\trdx, {a1}"));
+                self.emit("add\trax, rdx");
+                self.emit("xor\tedx, edx");
+            }
+            UnaryOp::Bswap => {
+                self.emit(format!("mov\trax, {a1}"));
+                self.emit(format!("mov\trdx, {a0}"));
+                self.emit("bswap\trax");
+                self.emit("bswap\trdx");
+            }
+            _ => unreachable!("{op} is not an integer operation"),
         }
     }
 
@@ -842,34 +1460,86 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Moves call arguments into their registers and the bottom of the
-    /// frame, for signature `sig`; any arguments past its parameters are
-    /// variadic. `callee`, for an indirect call, moves into r10 in the same
-    /// parallel copy, since it may be in an argument register.
+    /// Moves call arguments into their registers and the stack, for
+    /// signature `sig`; any arguments past its parameters are variadic.
+    /// `callee`, for an indirect call, moves into r10 in the same parallel
+    /// copy, since it may be in an argument register. A tail call (`tail`)
+    /// puts stack arguments where this function's own came in.
     ///
-    /// Stack arguments come first: their sources are allocated locations,
-    /// and storing them only uses rax. Then one parallel copy fills the
-    /// argument registers, which may hold arguments themselves. Values
-    /// live across the call are in callee-saved registers or spill slots,
-    /// so nothing needs saving.
+    /// Stack arguments and struct copies come first: their sources are
+    /// allocated locations, and storing them only uses the scratch
+    /// registers. A struct passed in registers is loaded into staging
+    /// slots, from which the parallel copy fills the registers along with
+    /// the scalars: loading it straight into them could overwrite another
+    /// argument's source. Values live across the call are in callee-saved
+    /// registers or spill slots, so nothing needs saving.
     ///
     /// Narrow arguments marked `sext`/`uext` are extended to 32 bits in
     /// their register, which clang relies on.
-    fn move_args(&mut self, args: &[Value], sig: &keel_ir::Signature, callee: Option<Value>) {
+    ///
+    /// Returns the registers and layout of an `sret` result that comes back
+    /// in registers, for [`Self::call_result`] to store.
+    fn move_args<'s>(
+        &mut self,
+        args: &[Value],
+        sig: &'s keel_ir::Signature,
+        callee: Option<Value>,
+        tail: bool,
+    ) -> Option<(Vec<Loc>, &'s Layout)> {
         let kinds = arg_kinds(self.func, &sig.params, args);
-        let (locs, _, floats) = sysv::arg_locs(&kinds);
+        let placement = sysv::arg_locs(&kinds);
         let mut moves = Vec::new();
         let mut extend = Vec::new();
-        for (i, (&arg, loc)) in args.iter().zip(locs).enumerate() {
+        let mut staged = self.alloc.spill_slots;
+        let mut sret = None;
+        let stack_base = if tail { "rbp + 16" } else { "rsp" };
+        for (i, ((&arg, loc), kind)) in args.iter().zip(placement.locs).zip(&kinds).enumerate() {
+            let layout = match kind {
+                ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(*layout),
+                ArgKind::Value(_) => None,
+            };
             match loc {
                 ArgLoc::Value(Slot::Regs(regs)) => {
                     moves.push((regs[0], self.loc(arg)));
+                    if self.ty(arg) == Type::I128 {
+                        moves.push((regs[1], self.hi(arg)));
+                    }
                     if let (Some(param), Loc::Reg(r)) = (sig.params.get(i), regs[0]) {
                         extend.push((r, param.ty, param.ext));
                     }
                 }
-                ArgLoc::Value(Slot::Stack(offset)) => self.store_stack_arg(arg, offset),
-                _ => unreachable!("structs are rejected in `new`"),
+                ArgLoc::Value(Slot::Stack(offset)) => {
+                    let at = |o: u32| format!("[{stack_base} + {}]", offset + o);
+                    if self.ty(arg) == Type::I128 {
+                        self.store_stack_arg(self.loc(arg), &at(0));
+                        self.store_stack_arg(self.hi(arg), &at(8));
+                    } else {
+                        self.store_stack_arg(self.loc(arg), &at(0));
+                    }
+                }
+                ArgLoc::OnStack(offset) => {
+                    let p = self.use_reg(arg, S1);
+                    let size = layout.expect("a struct").size();
+                    self.copy_bytes(&format!("rsp + {offset}"), p, size);
+                }
+                ArgLoc::InRegs(regs) => {
+                    let p = self.use_reg(arg, S1);
+                    let size = layout.expect("a struct").size();
+                    for (k, r) in regs.into_iter().enumerate() {
+                        let offset = 8 * k as u64;
+                        self.load_chunk(S0, p, offset, (size - offset).min(8));
+                        self.emit(format!("mov\t{}, rax", self.slot(staged)));
+                        moves.push((r, Loc::Stack(staged)));
+                        staged += 1;
+                    }
+                }
+                ArgLoc::SretMemory => moves.push((Loc::Reg(RDI), self.loc(arg))),
+                ArgLoc::SretRegs(regs) => {
+                    let p = self.use_reg(arg, S1);
+                    let save = self.frame(self.sret_save.expect("planned"));
+                    self.emit(format!("mov\tqword ptr {save}, {}", r64(p)));
+                    sret = Some((regs, layout.expect("a struct")));
+                }
             }
         }
         if let Some(callee) = callee {
@@ -881,7 +1551,117 @@ impl<'a> FunctionCompiler<'a> {
         }
         // A variadic callee saves this many vector registers.
         if sig.variadic {
-            self.emit(format!("mov\teax, {floats}"));
+            self.emit(format!("mov\teax, {}", placement.floats));
+        }
+        sret
+    }
+
+    /// Moves a call's result, if it has one, from rax or xmm0 to its place,
+    /// and stores a struct result that came back in registers to its
+    /// `sret` address.
+    fn call_result(&mut self, result: Option<Value>, sret: Option<(Vec<Loc>, &Layout)>) {
+        if let Some(value) = result
+            && let Some(loc) = self.alloc.loc(value)
+        {
+            self.emit_move(loc, sysv::return_loc(self.func.value_type(value)));
+            if let Some(hi) = self.alloc.hi_loc(value) {
+                self.emit_move(hi, Loc::Reg(RDX));
+            }
+        }
+        if let Some((regs, layout)) = sret {
+            let save = self.frame(self.sret_save.expect("planned"));
+            self.emit(format!("mov\tr11, qword ptr {save}"));
+            for (k, r) in regs.into_iter().enumerate() {
+                let offset = 8 * k as u64;
+                let n = (layout.size() - offset).min(8);
+                match r {
+                    Loc::Reg(r) => self.store_chunk(r, S3, offset, n),
+                    _ => {
+                        let mov = if n == 4 { "movss" } else { "movsd" };
+                        let size = if n == 4 { "dword" } else { "qword" };
+                        let x = xmm(loc_reg(r));
+                        self.emit(format!("{mov}\t{size} ptr [r11 + {offset}], {x}"));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Loads the `n` bytes (1 to 8) at `[p + offset]` into register `d`,
+    /// zero-extended, without reading past them: a struct may end at the
+    /// end of a page. Odd sizes are pieced together through rdx.
+    fn load_chunk(&mut self, d: u8, p: u8, offset: u64, n: u64) {
+        let at = |o: u64| format!("[{} + {}]", r64(p), offset + o);
+        match n {
+            8 => self.emit(format!("mov\t{}, qword ptr {}", r64(d), at(0))),
+            4 => self.emit(format!("mov\t{}, dword ptr {}", r32(d), at(0))),
+            2 => self.emit(format!("movzx\t{}, word ptr {}", r32(d), at(0))),
+            1 => self.emit(format!("movzx\t{}, byte ptr {}", r32(d), at(0))),
+            _ => {
+                let low = if n > 4 { 4 } else { 2 };
+                self.load_chunk(d, p, offset, low);
+                for (piece, at_byte) in pieces(n - low).into_iter().map(|(o, k)| (k, low + o)) {
+                    self.load_chunk(S2, p, offset + at_byte, piece);
+                    self.emit(format!("shl\trdx, {}", 8 * at_byte));
+                    self.emit(format!("or\t{}, rdx", r64(d)));
+                }
+            }
+        }
+    }
+
+    /// Stores the low `n` bytes (1 to 8) of register `r` at
+    /// `[p + offset]`, without writing past them. `r` is shifted down as
+    /// pieces are written.
+    fn store_chunk(&mut self, r: u8, p: u8, offset: u64, n: u64) {
+        let mut done = 0;
+        for (o, k) in pieces(n) {
+            if o > done {
+                self.emit(format!("shr\t{}, {}", r64(r), 8 * (o - done)));
+                done = o;
+            }
+            let (size, src) = match k {
+                8 => ("qword", r64(r)),
+                4 => ("dword", r32(r)),
+                2 => ("word", r16(r)),
+                _ => ("byte", r8(r)),
+            };
+            self.emit(format!(
+                "mov\t{size} ptr [{} + {}], {src}",
+                r64(p),
+                offset + o
+            ));
+        }
+    }
+
+    /// Copies `size` bytes from `[src]` to `[to]`, 8 at a time through rax
+    /// and then the remainder exactly.
+    fn copy_bytes(&mut self, to: &str, src: u8, size: u64) {
+        let mut offset = 0;
+        while offset < size {
+            let n = (size - offset).min(8);
+            for (o, k) in pieces(n) {
+                let (ptr_kw, rax) = match k {
+                    8 => ("qword", "rax"),
+                    4 => ("dword", "eax"),
+                    2 => ("word", "ax"),
+                    _ => ("byte", "al"),
+                };
+                let at = offset + o;
+                self.emit(format!("mov\t{rax}, {ptr_kw} ptr [{} + {at}]", r64(src)));
+                self.emit(format!("mov\t{ptr_kw} ptr [{to} + {at}], {rax}"));
+            }
+            offset += n;
+        }
+    }
+
+    /// Sets `dst` to the address of memory operand `at` (`[rbp - 16]`).
+    fn address(&mut self, dst: Loc, at: &str) {
+        match dst {
+            Loc::Reg(r) => self.emit(format!("lea\t{}, {at}", r64(r))),
+            _ => {
+                self.emit(format!("lea\trax, {at}"));
+                self.emit_move(dst, Loc::Reg(S0));
+            }
         }
     }
 
@@ -897,11 +1677,10 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Stores `arg` at `[rsp + offset]`. Each stack argument has an
-    /// 8-byte slot, so all 64 bits of an integer can go.
-    fn store_stack_arg(&mut self, arg: Value, offset: u32) {
-        let at = format!("[rsp + {offset}]");
-        match self.loc(arg) {
+    /// Stores an argument from `src` at memory `at`, a stack argument's
+    /// slot. Each has 8 bytes, so all 64 bits of an integer can go.
+    fn store_stack_arg(&mut self, src: Loc, at: &str) {
+        match src {
             Loc::Reg(r) => self.emit(format!("mov\tqword ptr {at}, {}", r64(r))),
             Loc::FReg(r) => self.emit(format!("movsd\tqword ptr {at}, {}", xmm(r))),
             Loc::Stack(s) => {
@@ -925,15 +1704,6 @@ impl<'a> FunctionCompiler<'a> {
                 self.load_into(tmp, ty, src);
                 self.emit_move(dst, tmp);
             }
-        }
-    }
-
-    /// Moves a call's result, if it has one, from rax or xmm0 to its place.
-    fn call_result(&mut self, result: Option<Value>) {
-        if let Some(value) = result
-            && let Some(loc) = self.alloc.loc(value)
-        {
-            self.emit_move(loc, sysv::return_loc(self.func.value_type(value)));
         }
     }
 
@@ -1726,9 +2496,16 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Sets flags so that `ne` means `value` is non-zero, at its width.
+    /// Sets flags so that `ne` means `value` is non-zero, at its width; an
+    /// `i128` is non-zero if either half is.
     fn test_value(&mut self, value: Value) {
         let ty = self.ty(value);
+        if ty == Type::I128 {
+            let [lo, hi] = self.halves(value);
+            self.emit(format!("mov\trax, {lo}"));
+            self.emit(format!("or\trax, {hi}"));
+            return;
+        }
         let c = self.use_reg(value, S0);
         let r = reg(c, ty);
         self.emit(format!("test\t{r}, {r}"));
@@ -1745,6 +2522,9 @@ impl<'a> FunctionCompiler<'a> {
                 continue;
             };
             moves.push((dst, self.loc(arg)));
+            if let Some(hi) = self.alloc.hi_loc(param) {
+                moves.push((hi, self.hi(arg)));
+            }
         }
         self.parallel_copy(&moves);
     }

@@ -5,10 +5,10 @@
 int64_t k_sum(int64_t n, int64_t acc);
 int32_t k_even(int64_t n);
 int64_t k_indirect(void *self, int64_t n);
-int64_t k_to_c(int64_t x);
+int64_t k_to_c(int64_t x, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 int64_t k_to_c_indirect(int64_t (*f)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                                      int64_t, int64_t),
-                        int64_t x);
+                        int64_t x, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 int8_t k_narrow(int8_t x);
 
 int64_t c_sum8(int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f, int64_t g,
@@ -33,11 +33,12 @@ int main(void) {
     }
     int64_t want = 0;
     for (int i = 0; i < 8; i++) want += (i + 1) * (10 + i);
-    if (k_to_c(10) != want) {
-        printf("k_to_c(10) = %lld, want %lld\n", (long long)k_to_c(10), (long long)want);
+    if (k_to_c(10, 0, 0, 0, 0, 0, 0, 0) != want) {
+        printf("k_to_c(10) = %lld, want %lld\n", (long long)k_to_c(10, 0, 0, 0, 0, 0, 0, 0),
+               (long long)want);
         failures++;
     }
-    if (k_to_c_indirect(c_sum8, 3) != 36 * 3) {
+    if (k_to_c_indirect(c_sum8, 3, 0, 0, 0, 0, 0, 0) != 36 * 3) {
         printf("k_to_c_indirect wrong\n");
         failures++;
     }
