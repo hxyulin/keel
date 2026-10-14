@@ -1,8 +1,9 @@
 # keel
 
-An educational compiler backend: a low-level SSA IR, optimizer, code
-generators for aarch64 macOS and x86-64 Linux, an assembler and Mach-O
-linker, and a C compiler on top of it.
+An educational compiler written in Rust: a low-level SSA IR, optimizer,
+assembly generators for aarch64 macOS and x86-64 Linux, and a C frontend.
+Clang supplies preprocessing, assembly and linking; keel compiles one
+preprocessed C translation unit or textual IR module to assembly.
 
 See [docs/design.md](docs/design.md) for the design decisions.
 
@@ -29,12 +30,39 @@ cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
 
 Both commands take `--target aarch64-apple-darwin` or
 `--target x86_64-unknown-linux-gnu`; the default is the host.
+For C, preprocessing must use the same target and its headers, for example
+`clang -E --target=<triple>` with the appropriate sysroot. Passing
+`--target` to keel does not change an already preprocessed file.
+
+## Current scope
+
+- SSA IR with integer and floating-point operations, globals, thread-local
+  storage, atomics, calls, C ABIs and debug information.
+- Five optimization passes: constant folding, CFG simplification, global
+  value numbering, dead-code elimination and global code motion.
+- A C11-oriented frontend with GNU extensions including `typeof`,
+  `__auto_type`, statement expressions, computed goto and case ranges.
+  Atomic pointer prefix/postfix `++` and `--` are supported.
+- C variable-length arrays, complex arithmetic, nested functions and
+  inline assembly statements are not supported. The ARM64 IR backend
+  supports inline assembly and exceptions; the x86-64 backend does not.
+- Attribute parsing is broader than attribute semantics: many attributes
+  are ignored. Keel does not claim full GCC or Clang compatibility.
+
+See [the C frontend design](docs/design.md#c-frontend) for supported
+extensions, compatibility limits and possible next additions.
 
 ## Development
 
-- `cargo test` runs everything, on macOS arm64 or x86-64 Linux. End-to-end
-  tests need `clang`. A `; target: <triple>` line limits a codegen test
-  program to one target.
+- `cargo test --workspace` runs the workspace's unit, golden and
+  end-to-end tests on macOS arm64 or x86-64 Linux. End-to-end tests need
+  `clang`; C++ codegen drivers also need `clang++`, and ARM64 debug tests
+  need a working `lldb` session. A `; target: <triple>` line limits a
+  codegen test program to one target.
+- To check compilation and execution while excluding debugger sessions,
+  use `cargo test --workspace -- --skip debugger --skip debug_info`.
+  This does not validate debug information. Downloaded application suites
+  run separately through `cargo suite test`.
 - IR golden tests live in `crates/keel-ir/tests/golden/`; `BLESS=1 cargo test`
   rewrites the expected `.out` files.
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
@@ -47,7 +75,8 @@ Both commands take `--target aarch64-apple-darwin` or
   `; passes: a, b` line.
 - C tests live in `crates/keel-c/tests/programs/`: each `.c` program is
   built by clang and by keel (as is and with `-O`), and both must print the
-  same and exit the same.
+  same and exit the same. Separate frontend tests cover GNU inference
+  rules where Clang differs and compile selected features for both targets.
 - `cargo suite test` builds Lua, SQLite and QuickJS with keel and runs
   their test suites; `cargo suite run` builds them with clang and keel in
   every configuration and times them. Each program is a directory in

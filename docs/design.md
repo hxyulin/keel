@@ -1,8 +1,9 @@
 # Keel design decisions
 
-Keel is an educational compiler backend: a low-level IR, optimizer, aarch64
-code generator, assembler and Mach-O linker. This file records the decisions
-and why they were made.
+Keel is an educational compiler: a low-level SSA IR, optimizer, assembly
+generators for aarch64 macOS and x86-64 Linux, and a C frontend. Clang
+supplies preprocessing, assembly and linking. This file records the
+implemented design, its limitations and explicitly marked future work.
 
 ## Program shape
 
@@ -18,8 +19,8 @@ and why they were made.
   first. On aarch64 dense cases (at least 4, spanning less than 3× their
   count) become a jump table, the rest a chain of compares.
 - **Pinned vs floating instructions.** Anything with side effects or that can
-  trap (`load`, `store`, `call`, `udiv`, `.trap` variants, `assume`,
-  terminators) keeps its position. Pure instructions (`iadd`, `icmp`,
+  trap (`load`, `store`, `call`, `udiv`, terminators) keeps its position.
+  Pure instructions (`iadd`, `icmp`,
   `ptradd`, constants…) float: their position in the text has no meaning
   beyond "the definition dominates the uses". A scheduling pass places them
   before instruction selection. This gives global value numbering and
@@ -85,7 +86,7 @@ call-like or target-specific operations, written `intrinsic memcpy(v0, v1, v2)`
 (no `@`: they are not symbols). They share one `Intrinsic { id, args }` format;
 everything passes need (signature, purity) is in a per-intrinsic table in
 `intrinsic.rs`. Current ones: `memcpy`, `memmove`, `memset`, `debugtrap`,
-`va_start`, `stack_alloc`, `stack_save`, `stack_restore`.
+`va_start`, `stack_alloc`, `stack_save`, `stack_restore`, `frame_address`.
 The aarch64 backend lowers the memory ones to libc calls for now.
 
 `trap` is a terminator instruction, not an intrinsic: nothing after it runs,
@@ -128,12 +129,15 @@ resumed by a debugger, so it is an intrinsic.
 ## Undefined behaviour
 
 - Integer arithmetic wraps by default.
-- `.trap` variants are defined: they trap on overflow, and later code may
-  rely on the overflow not having happened. Overflow depends on signedness,
-  so they come in pairs (`sadd.trap`/`uadd.trap`); not implemented yet.
-- **The only source of UB is `assume`** (`assume.range`, `assume.nonnull`…).
-  Debug builds turn assumptions into trapping checks; release builds trust
-  them. UB is therefore opt-in, local and greppable.
+- **Planned:** overflow-trapping `.trap` variants would trap on overflow,
+  allowing later code to rely on it not having happened. Overflow depends
+  on signedness, so they would come in pairs (`sadd.trap`/`uadd.trap`).
+  They are not implemented; the existing overflow instructions return a
+  wrapped result and a flag.
+- **Planned:** `assume` instructions (`assume.range`, `assume.nonnull`…)
+  would make optimizer assumptions explicit, with checks in debug builds.
+  There are currently no assumption instructions or assumption checks,
+  and the C frontend does not support `__builtin_assume`.
 - Uninitialized memory reads give an arbitrary but stable value.
 - Out-of-bounds memory access cannot be defined at this level; memory safety
   is the job of a higher-level IR.
@@ -765,18 +769,57 @@ diagnostics and `-g`.
     is an error. x87's 80-bit arithmetic is not implemented, and SQLite is
     built with `-DLONGDOUBLE_TYPE=double`.
 
-Beyond ISO C11 it accepts what Apple's headers and real GNU C programs
-use: `__attribute__((..))` (`aligned`, `packed` and `returns_twice` are
-honoured), `#pragma pack`, `__asm("_name")` symbol renames, C23 enums with
-a fixed type, zero-length arrays and empty structs, block pointers (`^`,
+Beyond ISO C11 it accepts extensions used by Apple's headers and real GNU
+C programs: `__attribute__((..))`, `#pragma pack`, `__asm("_name")` symbol
+renames, C23 enums with a fixed type, zero-length arrays and empty structs,
+block pointers (`^`,
 as plain pointers), `__int128`, `typeof`, `__auto_type`, `__extension__`,
 statement expressions, `a ?: b`, case ranges (`case 'a' ... 'z':`), range
-designators (`[0 ... 9] = x`), computed `goto`, the `__builtin_`s the
-headers expand to (and `__builtin_frame_address(0)`,
-`types_compatible_p`, `choose_expr`), and `_Generic`. `_FORTIFY_SOURCE`'s
-checked calls (`__builtin___memcpy_chk`) become the plain function, since
-`__builtin_object_size` always answers "unknown". `setjmp` and friends are
-marked `returns_twice`.
+designators (`[0 ... 9] = x`), computed `goto`, selected `__builtin_`
+operations and `_Generic`. `setjmp` and friends are marked `returns_twice`.
+
+### Extension compatibility
+
+Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
+`constant_p`, variadic access, `bswap16/32/64`, `clz/ctz/popcount` and their
+`l`/`ll` forms, floating-point classification, `fabs`, `alloca` and
+`frame_address(0)`. GCC/Clang atomic builtin families are supported for
+selected scalar operations, with the limits below. A `__builtin_` name
+with a declared library equivalent can also resolve to that function;
+this is not blanket support for every builtin.
+
+Some accepted extensions have deliberately limited behavior:
+
+- `__builtin_expect` returns its first operand converted to `long`; no
+  branch-likelihood information is retained.
+- `__builtin_constant_p` recognizes integer expressions the frontend can
+  evaluate, rather than asking the optimizer whether a value is constant.
+- `__builtin_object_size` and `__builtin_dynamic_object_size` always
+  return the unknown-size value. Fortified `__builtin___*_chk` calls
+  handled by the frontend become their plain library equivalents and do
+  not retain the supplied bounds check.
+- `__builtin_unreachable` lowers to a trap, as `__builtin_trap` does;
+  it does not introduce an optimizer assumption.
+- Attribute syntax is accepted broadly, but `packed`/`aligned` affect
+  struct layout and `returns_twice` affects calls. Explicit alignment on
+  ordinary variables is not implemented. Other attributes are ignored,
+  including `cleanup`, `weak`, `alias`, `visibility`, `constructor` and
+  `vector_size`; their runtime, linkage or type behavior is not supported.
+- `inline` affects which definitions are emitted, but there is no
+  function-inlining optimization. Block-pointer declarators (`^`) are
+  parsed as pointers; block literals and the Blocks runtime are not
+  implemented.
+- Clang's `__has_builtin`, `__has_feature` and `__has_attribute` checks
+  are evaluated by Clang during preprocessing. Their answers describe
+  Clang, not keel, and can enable code that keel does not support.
+
+GNU `__auto_type` follows the single-identifier and initializer scope
+rules in [GCC's documentation](https://gcc.gnu.org/onlinedocs/gcc/Typeof.html).
+Clang accepts some additional forms and rejects some GNU shadowing cases;
+the frontend tests check those scope rules separately from the programs
+compared against Clang.
+
+### Implementation details
 
 - **Computed goto** without an indirect branch in the IR: `&&label` is
   the label's number in its function (from 1), and every `goto *p` jumps
@@ -817,18 +860,44 @@ marked `returns_twice`.
   but extended at run time: folded, it came out negative, which broke
   QuickJS's decimal arithmetic (multiplying by `17014118346046923173`).
 
-Not supported: `_Complex`, variable-length arrays, K&R definitions,
-nested functions, `_Atomic` structs and floats, the generic (non-`_n`)
-`__atomic_*` forms, and inline assembly statements
-(the backend has them; the frontend does not pass them through yet).
+### Remaining coverage
+
+Not supported: `_Complex` arithmetic, variable-length arrays, K&R
+definitions, nested functions, `_Atomic` structs and floats, the generic
+(non-`_n`) `__atomic_*` forms, vector types/intrinsics, and inline assembly
+statements. The ARM64 IR backend has inline assembly; the C frontend does
+not pass it through, and the x86-64 backend does not support it yet.
+
+Useful candidates for small follow-up patches, rather than current support:
+
+- **Overflow-checking builtins:** start with the fixed-type signed and
+  unsigned `add/sub/mul` families, using the IR's result-plus-flag
+  instructions. The generic forms permit mixed operand and destination
+  types and need more than casting the operands to the destination type.
+  See [GCC's overflow builtin semantics](https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html).
+- **Alignment and branch hints:** `__builtin_assume_aligned` and
+  `__builtin_expect_with_probability` can initially preserve their defined
+  value behavior without optimizing from the hints. Argument evaluation
+  and constant-argument constraints still need tests. See
+  [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html).
+- **Debugger entry:** Clang's `__builtin_debugtrap` can use the existing
+  resumable `debugtrap` IR intrinsic. It differs from the terminating
+  `__builtin_trap`; see [Clang's language extensions](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
+
+Linkage attributes (`weak`, `alias`, `visibility`), scope-exit `cleanup`
+and C inline assembly are useful larger additions. Attributes whose
+semantics are required by a program must be implemented or diagnosed;
+silently parsing them does not establish compatibility.
 
 **Testing.** Test programs are built by clang and by keel and must behave
 the same, so they print what they compute instead of hard-coding answers.
-The suite in `suite/` (run by `cargo suite`, see `suite/README.md`) builds
-Lua 5.4 (as `make macosx` does: POSIX, computed gotos) and runs its test
-suite, builds thread-safe SQLite and compares query results with clang's
-build, and builds QuickJS and runs its test suite. All pass, with and
-without `-O`, on both targets; together they found the bugs the small
+The suite in `suite/` (run by `cargo suite`, see
+[suite/README.md](../suite/README.md)) builds Lua 5.4.7 with POSIX extras
+and computed gotos and runs its portable test mode, builds thread-safe
+SQLite 3.46.1 and compares the checked-in query workload with Clang's
+build, and builds QuickJS 2024-01-13 with BigNum and runs the commands
+listed in its manifest. The default test configurations are keel with
+and without `-O`. These configured workloads found bugs the small
 programs missed (an array of pointers to `const` placed in read-only
 memory, a variable used in its own initializer, `#pragma pack`, the
 `__int128` constant, a function too big for conditional branches).

@@ -14,6 +14,11 @@
 //! declarations), variable-length arrays and old-style (K&R) function
 //! definitions, plus GNU extensions: those the system headers (Apple's,
 //! glibc's) use and more.
+//! `__auto_type` follows GNU's single-variable inference and initializer
+//! scope rules. Atomic pointer prefix/postfix `++` and `--` are supported.
+//! Attribute syntax is accepted more broadly than its semantics: many
+//! attributes are ignored. See `docs/design.md`'s C frontend section for
+//! extension coverage and compatibility limits.
 
 mod ast;
 mod debug;
