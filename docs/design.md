@@ -147,7 +147,9 @@ resumed by a debugger, so it is an intrinsic.
 - Stack memory is declared per function, not allocated by an instruction:
   `ss0 = stack_slot 16, align 4` (alignment a power of two up to 16), and
   `stack_addr ss0` gives its address. Sizes are fixed, so the frame layout is
-  known before codegen.
+  known before codegen. The C frontend implements object alignment above
+  16 bytes by reserving extra space in a fixed slot and rounding the
+  object address up within it.
 - Dynamic stack memory, for `alloca` and VLAs, comes from intrinsics:
   `intrinsic stack_alloc(v0)` gives `v0` bytes, 16-byte aligned, until the
   function returns; `stack_save()` and `stack_restore(mark)` free
@@ -485,7 +487,9 @@ from Apple arm64 that matter to a frontend:
   variables, each in one of its stack slots (`dvar "x" dt0 ss1`, `dparam`
   for parameters). Codegen turns them into DIEs: the subprogram's frame
   base is `x29`, which stays put even when dynamic allocations move `sp`,
-  and a variable is at a fixed `DW_OP_fbreg` offset from it. lldb then
+  and a variable is at a fixed `DW_OP_fbreg` offset from it. An
+  over-aligned local instead stores its address in a pointer-sized slot:
+  `dvar "x" dt0 ss1 indirect` adds `DW_OP_deref` to that location. lldb then
   prints, changes and passes them (`p x`, `expr x = 3`, `p f(x)`,
   `finish` showing the return value).
 - **Lexical scopes**, so that a variable is only shown in its block: a
@@ -841,11 +845,24 @@ Some accepted extensions have deliberately limited behavior:
   not retain the supplied bounds check.
 - `__builtin_unreachable` lowers to a trap, as `__builtin_trap` does;
   it does not introduce an optimizer assumption.
-- Attribute syntax is accepted broadly, but `packed`/`aligned` affect
-  struct layout and `returns_twice` affects calls. Explicit alignment on
-  ordinary variables is not implemented. Other attributes are ignored,
-  including `cleanup`, `weak`, `alias`, `visibility`, `constructor` and
-  `vector_size`; their runtime, linkage or type behavior is not supported.
+- GNU `packed` and `aligned` control aggregate and member layout.
+  GNU `aligned` and C11 `_Alignas` also control local, static, global and
+  thread-local object alignment, with power-of-two requests up to 4096.
+  `_Alignas(0)` has no effect; nonzero `_Alignas` cannot weaken natural
+  alignment. Expression `__alignof__` queries retain object/member
+  alignment without changing type compatibility. Explicit member alignment
+  overrides packing; `#pragma pack` caps member alignment.
+- Alignment-changing typedef attributes, alignment attributes on functions,
+  parameters and type names, and by-value aggregates aligned above 16 bytes
+  are diagnosed. On x86-64, by-value aggregates with unaligned fields are
+  also diagnosed because their SysV MEMORY classification cannot be
+  represented by the current IR signature. Packed bit-fields requiring
+  partial or crossing storage-container accesses, unaligned atomic members
+  and unaligned pointer relocations are diagnosed rather than emitted.
+- Attribute syntax is accepted broadly, and `returns_twice` affects calls.
+  Other attributes are ignored, including `cleanup`, `weak`, `alias`,
+  `visibility`, `constructor` and `vector_size`; their runtime, linkage or
+  type behavior is not supported.
 - `inline` affects which definitions are emitted, but there is no
   function-inlining optimization. Block-pointer declarators (`^`) are
   parsed as pointers; block literals and the Blocks runtime are not

@@ -97,7 +97,8 @@ release builds for final timings; use instrumented builds to locate costs.
   `__auto_type`, statement expressions, computed goto and case ranges.
   Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
   builtins, alignment/branch hints and resumable `__builtin_debugtrap`
-  are supported. Hints preserve values and side effects but do not
+  are supported, along with GNU member packing and GNU/C11 object
+  alignment. Hints preserve values and side effects but do not
   currently guide optimization.
 - C variable-length arrays, complex arithmetic, nested functions and
   inline assembly statements are not supported. The ARM64 IR backend

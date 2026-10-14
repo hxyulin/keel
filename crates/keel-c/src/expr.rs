@@ -418,17 +418,22 @@ impl Parser {
         match word.as_str() {
             "sizeof" | "_Alignof" | "__alignof__" | "__alignof" => {
                 self.advance();
-                let ty = if self.is("(") && self.type_follows(1) {
+                let (ty, alignment) = if self.is("(") && self.type_follows(1) {
                     self.advance();
                     let ty = self.type_name()?;
                     self.expect(")")?;
                     if self.is("{") {
-                        self.compound_literal(ty, loc)?.ty
+                        let e = self.compound_literal(ty, loc)?;
+                        let align = self.expr_alignment(&e);
+                        (e.ty, align)
                     } else {
-                        ty
+                        let align = self.align_of(&ty);
+                        (ty, align)
                     }
                 } else {
-                    self.unary()?.ty
+                    let e = self.unary()?;
+                    let align = self.expr_alignment(&e);
+                    (e.ty, align)
                 };
                 let incomplete = match &ty {
                     Ty::Func(_) | Ty::Array(_, None) => true,
@@ -441,7 +446,7 @@ impl Parser {
                 let n = if word == "sizeof" {
                     self.size_of(&ty)
                 } else {
-                    self.align_of(&ty)
+                    alignment
                 };
                 Ok(mk(ExprKind::Int(n as i64), ULONG, loc))
             }
@@ -634,6 +639,7 @@ impl Parser {
                 base: Box::new(base),
                 offset,
                 bits: m.bits,
+                align: m.align,
             },
             m.ty,
             loc,

@@ -242,6 +242,15 @@ fn check_debug_info(module: &Module) -> Vec<VerifierError> {
                     location,
                     message: format!("{} is not a stack slot of the function", var.slot),
                 });
+            } else if var.indirect
+                && func
+                    .stack_slots()
+                    .any(|(slot, data)| slot == var.slot && data.size < 8)
+            {
+                errors.push(VerifierError {
+                    location,
+                    message: "an indirect debug location needs a pointer-sized stack slot".into(),
+                });
             }
         }
     }

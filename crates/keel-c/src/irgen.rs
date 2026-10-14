@@ -205,7 +205,7 @@ impl<'p> Gen<'p> {
             Ty::Struct(_) => AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
-                purpose: Purpose::ByVal(self.types().abi_layout(ty)),
+                purpose: Purpose::ByVal(self.aggregate_layout(ty)?),
             },
             Ty::Int(k) if k.size() < 4 => AbiParam {
                 ty: ty.ir(),
@@ -220,6 +220,18 @@ impl<'p> Gen<'p> {
         })
     }
 
+    fn aggregate_layout(&self, ty: &Ty) -> Result<keel_ir::Layout, &'static str> {
+        if self.types().align(ty) > 16 {
+            return Err("aggregates aligned above 16 bytes passed by value");
+        }
+        if self.p.target == keel_ir::Target::X86_64LinuxGnu
+            && self.types().has_unaligned_fields(ty, 0)
+        {
+            return Err("aggregates with unaligned fields passed by value on x86-64");
+        }
+        Ok(self.types().abi_layout(ty))
+    }
+
     /// The keel signature of a C function type. A struct result becomes a
     /// leading `sret` parameter. `g` is the function, if known by name.
     fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
@@ -228,7 +240,10 @@ impl<'p> Gen<'p> {
             sig.params.push(AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
-                purpose: Purpose::Sret(self.types().abi_layout(&fty.ret)),
+                purpose: Purpose::Sret(
+                    self.aggregate_layout(&fty.ret)
+                        .map_err(|t| self.unsupported(g, t))?,
+                ),
             });
         } else if fty.ret != Ty::Void {
             sig.returns.push(
@@ -290,12 +305,31 @@ impl<'p> Gen<'p> {
                 Storage::Var(fg.b.declare_var(local.ty.ir()))
             } else {
                 let types = fg.g.types();
-                let size = types.size(&local.ty).max(1) as u32;
-                let align = types.align(&local.ty) as u32;
-                if align > 16 {
-                    return Err(Error::new(def.loc, "alignment above 16 is not supported"));
+                let size = types.size(&local.ty).max(1);
+                let align = local.align.max(types.align(&local.ty));
+                let reserve = size
+                    .checked_add(if align > 16 { align - 1 } else { 0 })
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| Error::new(def.loc, "aligned stack object is too large"))?;
+                let slot = fg.b.func.create_stack_slot(reserve, align.min(16) as u32);
+                if align <= 16 {
+                    Storage::Slot(slot)
+                } else {
+                    let base = fg.b.ins().stack_addr(slot);
+                    let bits = fg.b.ins().convert(ConvertOp::PtrToInt, Type::I64, base);
+                    let padding = fg.b.ins().iconst(Type::I64, (align - 1) as i64);
+                    let upper = fg.b.ins().iadd(bits, padding);
+                    let mask = fg.b.ins().iconst(Type::I64, -(align as i64));
+                    let rounded = fg.b.ins().and(upper, mask);
+                    let addr = fg.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, rounded);
+                    let debug_slot = fg.g.debug.then(|| {
+                        let pointer = fg.b.func.create_stack_slot(8, 8);
+                        let at = fg.b.ins().stack_addr(pointer);
+                        fg.b.ins().store(addr, at);
+                        pointer
+                    });
+                    Storage::Aligned { addr, debug_slot }
                 }
-                Storage::Slot(fg.b.func.create_stack_slot(size, align))
             };
             fg.locals.push(storage);
         }
@@ -321,7 +355,15 @@ impl<'p> Gen<'p> {
                 fg.scopes.push(own.or(parent));
             }
             for (id, local) in def.locals.iter().enumerate() {
-                if let Storage::Slot(slot) = fg.locals[id]
+                let location = match fg.locals[id] {
+                    Storage::Slot(slot) => Some((slot, false)),
+                    Storage::Aligned {
+                        debug_slot: Some(slot),
+                        ..
+                    } => Some((slot, true)),
+                    _ => None,
+                };
+                if let Some((slot, indirect)) = location
                     && named(&local)
                 {
                     let ty =
@@ -331,6 +373,7 @@ impl<'p> Gen<'p> {
                         name: local.name.clone(),
                         ty,
                         slot,
+                        indirect,
                         param: def.params.contains(&id),
                         scope: local.scope.and_then(|s| fg.scopes[s]),
                     });
@@ -359,6 +402,13 @@ impl<'p> Gen<'p> {
                     let addr = fg.b.ins().stack_addr(slot);
                     fg.b.ins().store(value, addr);
                 }
+                Storage::Aligned { addr, .. } => {
+                    if def.locals[id].ty.is_struct() {
+                        fg.copy(addr, value, &def.locals[id].ty);
+                    } else {
+                        fg.b.ins().store(value, addr);
+                    }
+                }
                 Storage::Addr(_) => unreachable!(),
             }
         }
@@ -383,7 +433,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
-        let align = types.align(&global.ty).max(1) as u32;
+        let align = global.align.max(types.align(&global.ty)).max(1) as u32;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
         let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
@@ -447,6 +497,12 @@ impl<'p> Gen<'p> {
         let mut items = Vec::new();
         let mut pos = 0;
         for (offset, symbol, addend) in relocs {
+            if !offset.is_multiple_of(8) {
+                return Err(Error::new(
+                    Loc::default(),
+                    "unaligned pointer relocations are not supported",
+                ));
+            }
             push_bytes(&mut items, &bytes[pos..offset]);
             let Ok(addend) = u32::try_from(addend) else {
                 return Err(Error::new(
@@ -516,6 +572,12 @@ enum Storage {
     Slot(StackSlot),
     /// A struct parameter: the address of the callee's copy.
     Addr(Value),
+    /// An object aligned within a larger fixed slot. In debug builds a
+    /// second slot holds its address for a DW_OP_deref location.
+    Aligned {
+        addr: Value,
+        debug_slot: Option<StackSlot>,
+    },
 }
 
 /// Where an assignment goes.
@@ -1397,6 +1459,7 @@ impl FnGen<'_, '_, '_> {
             base,
             offset,
             bits: Some(field),
+            ..
         } = &e.kind
         {
             let base = self.addr(base)?;
@@ -1482,7 +1545,7 @@ impl FnGen<'_, '_, '_> {
         Ok(match &e.kind {
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Slot(slot) => self.b.ins().stack_addr(slot),
-                Storage::Addr(v) => v,
+                Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
                 Storage::Var(_) => {
                     return Err(Error::new(e.loc, "internal error: address of a register"));
                 }
@@ -1510,10 +1573,11 @@ impl FnGen<'_, '_, '_> {
             }
             ExprKind::CompoundLit(id, init) => {
                 self.init_local(*id, init)?;
-                let Storage::Slot(slot) = self.locals[*id] else {
-                    unreachable!()
-                };
-                self.b.ins().stack_addr(slot)
+                match self.locals[*id] {
+                    Storage::Slot(slot) => self.b.ins().stack_addr(slot),
+                    Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
+                    Storage::Var(_) => unreachable!(),
+                }
             }
             // Struct-valued calls, assignments, conditionals: their value
             // is already an address.
@@ -1799,7 +1863,7 @@ impl FnGen<'_, '_, '_> {
         }
         let base = match self.locals[id] {
             Storage::Slot(slot) => self.b.ins().stack_addr(slot),
-            Storage::Addr(v) => v,
+            Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
             Storage::Var(_) => unreachable!(),
         };
         let whole = matches!(init.items.as_slice(), [InitItem::Expr { offset: 0, expr, bits: None }] if expr.ty == ty);

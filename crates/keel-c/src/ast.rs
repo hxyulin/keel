@@ -87,6 +87,7 @@ pub enum ExprKind {
         base: Box<Expr>,
         offset: u64,
         bits: Option<BitField>,
+        align: u64,
     },
     /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
     /// the address of the `va_list` object. `va_copy` is an assignment, of
@@ -249,6 +250,7 @@ pub struct Local {
     pub name: String,
     pub ty: Ty,
     pub sugar: Sugar,
+    pub align: u64,
     /// The block scope it is declared in, `None` for the function's
     /// outermost one.
     pub scope: Option<usize>,
@@ -282,6 +284,7 @@ pub struct Global {
     pub ty: Ty,
     /// From the last declaration.
     pub sugar: Sugar,
+    pub align: u64,
     /// `static`, or a C99 `inline` definition without `extern`.
     pub internal: bool,
     /// Defined in this file: a function body, an initializer, or a

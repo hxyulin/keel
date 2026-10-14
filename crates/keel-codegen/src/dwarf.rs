@@ -165,9 +165,17 @@ pub(crate) fn emit_debug_info(
             type_ref(out, var.ty);
             // DW_OP_fbreg and the offset.
             let offset = sleb128(frame.slots[var.slot.index()]);
-            write!(out, "\t.byte\t{}, 0x91", offset.len() + 1).unwrap();
+            write!(
+                out,
+                "\t.byte\t{}, 0x91",
+                offset.len() + 1 + usize::from(var.indirect)
+            )
+            .unwrap();
             for b in offset {
                 write!(out, ", {b:#x}").unwrap();
+            }
+            if var.indirect {
+                out.push_str(", 0x06"); // DW_OP_deref
             }
             out.push('\n');
         };

@@ -456,7 +456,15 @@ struct ParsedFunction {
     debug_return: Option<DebugType>,
     debug_loc: Option<SourceLoc>,
     /// `dvar`/`dparam` lines, with the slot by name.
-    debug_vars: Vec<(String, DebugType, String, bool, Option<DebugScope>, Loc)>,
+    debug_vars: Vec<(
+        String,
+        DebugType,
+        String,
+        bool,
+        bool,
+        Option<DebugScope>,
+        Loc,
+    )>,
     debug_scopes: Vec<Option<DebugScope>>,
     blocks: Vec<ParsedBlock>,
     names: Names,
@@ -800,13 +808,14 @@ impl Parser {
             let name = self.string("a variable name")?;
             let ty = self.debug_type_ref()?;
             let (slot, loc) = self.ident("a stack slot like `ss0`")?;
+            let indirect = self.eat(&Tok::Ident("indirect".into()));
             let scope = if self.eat(&Tok::Ident("in".into())) {
                 Some(self.debug_scope_ref()?)
             } else {
                 None
             };
             self.expect(Tok::Newline)?;
-            debug_vars.push((name, ty, slot, param, scope, loc));
+            debug_vars.push((name, ty, slot, param, indirect, scope, loc));
             self.skip_newlines();
         }
         let mut blocks = Vec::new();
@@ -1905,7 +1914,7 @@ fn build(
     func.debug_return = *debug_return;
     func.debug_loc = *debug_loc;
     func.debug_scopes = debug_scopes.clone();
-    for (var, ty, slot, param, scope, loc) in debug_vars {
+    for (var, ty, slot, param, indirect, scope, loc) in debug_vars {
         let Some(&slot) = names.slots.get(slot) else {
             return Err(error(*loc, format!("unknown stack slot `{slot}`")));
         };
@@ -1913,6 +1922,7 @@ fn build(
             name: var.clone(),
             ty: *ty,
             slot,
+            indirect: *indirect,
             param: *param,
             scope: *scope,
         });
