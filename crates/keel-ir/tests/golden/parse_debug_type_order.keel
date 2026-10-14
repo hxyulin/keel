@@ -1,0 +1,2 @@
+; Debug types are numbered in order.
+dtype dt1 = base "int" signed 4

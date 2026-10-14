@@ -370,7 +370,11 @@ impl Parser {
     pub(crate) fn new_local(&mut self, name: String, ty: Ty, volatile: bool) -> LocalId {
         let in_memory = volatile || !ty.is_scalar();
         let fs = self.fs.as_mut().unwrap();
-        fs.locals.push(Local { ty, in_memory });
+        fs.locals.push(Local {
+            name: name.clone(),
+            ty,
+            in_memory,
+        });
         let id = fs.locals.len() - 1;
         self.bind(name, Sym::Local(id));
         id
@@ -1153,8 +1157,9 @@ impl Parser {
             }
             _ => None,
         };
-        let new_struct = |p: &mut Parser| {
+        let new_struct = |p: &mut Parser, tag: Option<String>| {
             p.structs.push(StructDef {
+                tag,
                 is_union,
                 members: Vec::new(),
                 size: 0,
@@ -1173,7 +1178,7 @@ impl Parser {
                     None => Err(Error::new(loc, format!("`{tag}` is an enum"))),
                 };
             }
-            let id = new_struct(self);
+            let id = new_struct(self, Some(tag.clone()));
             self.scopes.last_mut().unwrap().tags.insert(tag, Some(id));
             return Ok(Ty::Struct(id));
         }
@@ -1183,7 +1188,7 @@ impl Parser {
             Some(t) => match self.scopes.last().unwrap().tags.get(t) {
                 Some(Some(id)) if !self.structs[*id].complete => *id,
                 _ => {
-                    let id = new_struct(self);
+                    let id = new_struct(self, Some(t.clone()));
                     self.scopes
                         .last_mut()
                         .unwrap()
@@ -1192,7 +1197,7 @@ impl Parser {
                     id
                 }
             },
-            None => new_struct(self),
+            None => new_struct(self, None),
         };
         let mut fields = Vec::new();
         while !self.eat("}") {

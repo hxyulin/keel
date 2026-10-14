@@ -5,6 +5,8 @@
 //!   places block parameters where control flow merges. Every other local
 //!   (arrays, structs, `&x`) gets a stack slot. That is what `mem2reg`
 //!   does in LLVM, decided up front because the parser has seen every use.
+//!   With debug info all named locals are in stack slots, where the
+//!   debugger finds them.
 //! - **Aggregates** are handled by address: a struct-typed expression
 //!   evaluates to a pointer to its bytes, and assignment copies them.
 //! - **Only what is used is emitted.** Exported functions and objects are
@@ -14,15 +16,16 @@
 //!   call.
 
 use crate::ast::*;
+use crate::debug::DebugTypes;
 use crate::eval::{Base, Const, eval};
 use crate::parse::Parser;
 use crate::types::*;
 use crate::{Error, Loc};
 use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
-    AbiParam, ArgExt, Block, ConvertOp, DataInit, DataItem, DataObject, FloatCC, FuncDecl,
-    Function, IntCC, Intrinsic, Module, Ordering, Purpose, Signature, SourceFile, SourceLoc,
-    StackSlot, Symbol, Type, Value,
+    AbiParam, ArgExt, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal, DebugType,
+    DebugVar, FloatCC, FuncDecl, Function, IntCC, Intrinsic, Module, Ordering, Purpose, Signature,
+    SourceFile, SourceLoc, StackSlot, Symbol, Type, Value,
 };
 use std::collections::HashMap;
 
@@ -43,6 +46,7 @@ pub struct Gen<'p> {
     unprototyped: HashMap<usize, Signature>,
     /// Data made up for local initializers: bytes to symbol.
     anon: HashMap<Vec<u8>, String>,
+    dtypes: DebugTypes,
 }
 
 impl<'p> Gen<'p> {
@@ -58,6 +62,7 @@ impl<'p> Gen<'p> {
             strings_used: vec![false; p.strings.len()],
             unprototyped: HashMap::new(),
             anon: HashMap::new(),
+            dtypes: DebugTypes::default(),
         }
     }
 
@@ -89,6 +94,15 @@ impl<'p> Gen<'p> {
                 _ if global.defined => {
                     let data = self.data(g)?;
                     self.module.data.push(data);
+                    // Made-up names (compound literals) are not identifiers.
+                    if self.debug && !global.name.contains('.') {
+                        let ty = self.debug_type(&global.ty).expect("a void object");
+                        self.module.debug_globals.push(DebugGlobal {
+                            name: global.name.clone(),
+                            ty,
+                            symbol: global.symbol.clone(),
+                        });
+                    }
                 }
                 _ => self.module.data.push(DataObject {
                     name: global.symbol.clone(),
@@ -170,6 +184,10 @@ impl<'p> Gen<'p> {
         self.p.types()
     }
 
+    fn debug_type(&mut self, ty: &Ty) -> Option<DebugType> {
+        self.dtypes.get(&mut self.module, &self.p.structs, ty)
+    }
+
     /// How a value of C type `ty` crosses a call.
     fn abi_param(&self, ty: &Ty) -> AbiParam {
         match ty {
@@ -238,9 +256,8 @@ impl<'p> Gen<'p> {
             cases: Vec::new(),
             terminated: false,
         };
-        fg.b.set_srcloc(fg.g.srcloc(def.loc));
         for local in &def.locals {
-            let storage = if !local.in_memory && local.ty.is_scalar() {
+            let storage = if !fg.g.debug && !local.in_memory && local.ty.is_scalar() {
                 Storage::Var(fg.b.declare_var(local.ty.ir()))
             } else {
                 let types = fg.g.types();
@@ -253,6 +270,22 @@ impl<'p> Gen<'p> {
             };
             fg.locals.push(storage);
         }
+        if fg.g.debug {
+            fg.b.func.debug_return = fg.g.debug_type(&def.ty.ret);
+            for (id, local) in def.locals.iter().enumerate() {
+                if let Storage::Slot(slot) = fg.locals[id]
+                    && !local.name.contains('.')
+                {
+                    let ty = fg.g.debug_type(&local.ty).expect("a void local");
+                    fg.b.func.debug_vars.push(DebugVar {
+                        name: local.name.clone(),
+                        ty,
+                        slot,
+                        param: def.params.contains(&id),
+                    });
+                }
+            }
+        }
         let mut params = params.into_iter();
         if def.ty.ret.is_struct() {
             fg.sret = params.next();
@@ -261,7 +294,16 @@ impl<'p> Gen<'p> {
             match fg.locals[id] {
                 Storage::Var(var) => fg.b.def_var(var, value),
                 // The callee owns its copy of a struct passed by value.
-                _ if def.locals[id].ty.is_struct() => fg.locals[id] = Storage::Addr(value),
+                // The debugger needs it at a fixed place in the frame, so
+                // with debug info it is copied there.
+                Storage::Slot(slot) if def.locals[id].ty.is_struct() => {
+                    if fg.g.debug {
+                        let addr = fg.b.ins().stack_addr(slot);
+                        fg.copy(addr, value, &def.locals[id].ty);
+                    } else {
+                        fg.locals[id] = Storage::Addr(value);
+                    }
+                }
                 Storage::Slot(slot) => {
                     let addr = fg.b.ins().stack_addr(slot);
                     fg.b.ins().store(value, addr);
@@ -269,6 +311,10 @@ impl<'p> Gen<'p> {
                 Storage::Addr(_) => unreachable!(),
             }
         }
+        // Storing the parameters has no location, so it is part of the
+        // prologue: a breakpoint on the function stops after it, where the
+        // debugger can read them.
+        fg.b.set_srcloc(fg.g.srcloc(def.loc));
         for stmt in &def.body {
             fg.stmt(stmt)?;
         }

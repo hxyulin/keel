@@ -1,0 +1,5 @@
+func @f() {
+    dvar "x" dt0 ss3
+block0:
+    return
+}

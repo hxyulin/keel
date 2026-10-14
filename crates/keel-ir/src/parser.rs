@@ -3,7 +3,8 @@
 //! A file is one module: `decl` lines for external functions and data,
 //! `data` definitions and `func` definitions, in any order, and `file`
 //! lines naming the source files instruction locations refer to, each
-//! before its first use. A call or a
+//! before its first use; `dtype` and `dglobal` lines describe source-level
+//! types and variables for debuggers (see `debug.rs`). A call or a
 //! `symbol_addr` may name something defined later, so functions are parsed
 //! first and built once every name is known.
 //!
@@ -17,6 +18,9 @@
 //! 2. Number the values in the order the function will create them (block
 //!    parameters and results, in text order), infer result types, and build.
 
+use crate::debug::{
+    DebugGlobal, DebugMember, DebugType, DebugTypeData, DebugVar, Encoding, MemberLocation,
+};
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InlineAsm, InstData,
@@ -62,6 +66,8 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
     let mut decls = Vec::new();
     let mut data = Vec::new();
     let mut parsed = Vec::new();
+    let mut debug_types = Vec::new();
+    let mut debug_globals = Vec::new();
     parser.skip_newlines();
     while !parser.at(&Tok::Eof) {
         let (kw, loc) = parser.ident("`func`, `data`, `decl` or `file`")?;
@@ -85,6 +91,26 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                 files.push(path);
             }
             "data" => data.push(parser.data_definition()?),
+            "dtype" => {
+                let (name, name_loc) = parser.ident("a type name like `dt0`")?;
+                let want = DebugType::new(debug_types.len()).to_string();
+                if name != want {
+                    return Err(error(
+                        name_loc,
+                        format!("debug types are numbered in order: expected `{want}`"),
+                    ));
+                }
+                parser.expect(Tok::Punct('='))?;
+                debug_types.push(parser.debug_type()?);
+                parser.expect(Tok::Newline)?;
+            }
+            "dglobal" => {
+                let name = parser.string("a variable name")?;
+                let ty = parser.debug_type_ref()?;
+                let symbol = parser.global("a data name like `@count`")?;
+                parser.expect(Tok::Newline)?;
+                debug_globals.push(DebugGlobal { name, ty, symbol });
+            }
             "decl" if parser.eat(&Tok::Ident("data".into())) => {
                 let thread_local = parser.eat(&Tok::Ident("thread_local".into()));
                 let name = parser.global("a data name like `@environ`")?;
@@ -137,6 +163,8 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         data,
         functions,
         files,
+        debug_types,
+        debug_globals,
     })
 }
 
@@ -415,6 +443,9 @@ struct ParsedFunction {
     local: bool,
     personality: Option<String>,
     slots: Vec<StackSlotData>,
+    debug_return: Option<DebugType>,
+    /// `dvar`/`dparam` lines, with the slot by name.
+    debug_vars: Vec<(String, DebugType, String, bool, Loc)>,
     blocks: Vec<ParsedBlock>,
     names: Names,
 }
@@ -716,6 +747,23 @@ impl Parser {
             slots.push(self.stack_slot(&mut names)?);
             self.skip_newlines();
         }
+        let mut debug_return = None;
+        if self.at(&Tok::Ident("dreturn".into())) {
+            self.next();
+            debug_return = Some(self.debug_type_ref()?);
+            self.expect(Tok::Newline)?;
+            self.skip_newlines();
+        }
+        let mut debug_vars = Vec::new();
+        while self.at(&Tok::Ident("dvar".into())) || self.at(&Tok::Ident("dparam".into())) {
+            let param = self.next().0 == Tok::Ident("dparam".into());
+            let name = self.string("a variable name")?;
+            let ty = self.debug_type_ref()?;
+            let (slot, loc) = self.ident("a stack slot like `ss0`")?;
+            self.expect(Tok::Newline)?;
+            debug_vars.push((name, ty, slot, param, loc));
+            self.skip_newlines();
+        }
         let mut blocks = Vec::new();
         while !self.eat(&Tok::Punct('}')) {
             if self.at(&Tok::Eof) {
@@ -730,8 +778,114 @@ impl Parser {
             local,
             personality,
             slots,
+            debug_return,
+            debug_vars,
             blocks,
             names,
+        })
+    }
+
+    /// `dt3`
+    fn debug_type_ref(&mut self) -> Result<DebugType, ParseError> {
+        let (name, loc) = self.ident("a debug type like `dt0`")?;
+        name.strip_prefix("dt")
+            .and_then(|n| n.parse::<usize>().ok())
+            .map(DebugType::new)
+            .ok_or_else(|| {
+                error(
+                    loc,
+                    format!("expected a debug type like `dt0`, found `{name}`"),
+                )
+            })
+    }
+
+    /// A debug type, or `void`.
+    fn opt_debug_type(&mut self) -> Result<Option<DebugType>, ParseError> {
+        if self.eat(&Tok::Ident("void".into())) {
+            return Ok(None);
+        }
+        self.debug_type_ref().map(Some)
+    }
+
+    /// What follows `dtype dtN =`.
+    fn debug_type(&mut self) -> Result<DebugTypeData, ParseError> {
+        let (kind, loc) = self.ident("a debug type kind")?;
+        Ok(match kind.as_str() {
+            "base" => {
+                let name = self.string("a type name")?;
+                let (enc, enc_loc) = self.ident("an encoding like `signed`")?;
+                let encoding = Encoding::from_name(&enc)
+                    .ok_or_else(|| error(enc_loc, format!("unknown encoding `{enc}`")))?;
+                let size = self.u32("a size in bytes")?;
+                DebugTypeData::Base {
+                    name,
+                    encoding,
+                    size,
+                }
+            }
+            "pointer" => DebugTypeData::Pointer(self.opt_debug_type()?),
+            "struct" | "union" => {
+                let name = match self.peek() {
+                    Tok::Str(_) => Some(self.string("a struct name")?),
+                    _ => None,
+                };
+                if self.eat(&Tok::Ident("declared".into())) {
+                    return Ok(DebugTypeData::Struct {
+                        name,
+                        union: kind == "union",
+                        size: None,
+                        members: Vec::new(),
+                    });
+                }
+                let size = self.int("a size in bytes")? as u64;
+                self.expect(Tok::Punct('{'))?;
+                let mut members = Vec::new();
+                self.skip_newlines();
+                while !self.eat(&Tok::Punct('}')) {
+                    let name = if self.eat(&Tok::Ident("_".into())) {
+                        None
+                    } else {
+                        Some(self.string("a member name, or `_`")?)
+                    };
+                    let ty = self.debug_type_ref()?;
+                    let location = if self.eat(&Tok::Ident("bits".into())) {
+                        let offset = self.int("a bit offset")? as u64;
+                        let size = self.u32("a width in bits")?;
+                        MemberLocation::Bits { offset, size }
+                    } else {
+                        MemberLocation::Byte(self.int("a byte offset")? as u64)
+                    };
+                    members.push(DebugMember { name, ty, location });
+                    self.skip_newlines();
+                    if !self.eat(&Tok::Punct(',')) {
+                        self.skip_newlines();
+                        self.expect(Tok::Punct('}'))?;
+                        break;
+                    }
+                    self.skip_newlines();
+                }
+                DebugTypeData::Struct {
+                    name,
+                    union: kind == "union",
+                    size: Some(size),
+                    members,
+                }
+            }
+            "array" => {
+                let elem = self.debug_type_ref()?;
+                let count = match self.peek() {
+                    Tok::Int(_) => Some(self.int("a length")? as u64),
+                    _ => None,
+                };
+                DebugTypeData::Array { elem, count }
+            }
+            "typedef" => {
+                let name = self.string("a typedef name")?;
+                let ty = self.opt_debug_type()?;
+                DebugTypeData::Typedef { name, ty }
+            }
+            "function" => DebugTypeData::Function,
+            _ => return Err(error(loc, format!("unknown debug type kind `{kind}`"))),
         })
     }
 
@@ -1517,6 +1671,8 @@ fn build(
         local,
         personality,
         slots,
+        debug_return,
+        debug_vars,
         blocks,
         names,
     } = parsed;
@@ -1658,6 +1814,18 @@ fn build(
     // creation order.
     for slot in slots {
         func.create_stack_slot(slot.size, slot.align);
+    }
+    func.debug_return = *debug_return;
+    for (var, ty, slot, param, loc) in debug_vars {
+        let Some(&slot) = names.slots.get(slot) else {
+            return Err(error(*loc, format!("unknown stack slot `{slot}`")));
+        };
+        func.debug_vars.push(DebugVar {
+            name: var.clone(),
+            ty: *ty,
+            slot,
+            param: *param,
+        });
     }
     for (callee, sig) in callee_sigs {
         func.import_function(callee, sig);

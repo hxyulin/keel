@@ -4,6 +4,7 @@
 pub mod asm;
 pub mod builder;
 pub mod data;
+pub mod debug;
 pub mod dominators;
 pub mod entity;
 pub mod function;
@@ -19,6 +20,9 @@ pub mod verifier;
 pub use asm::{AsmClobber, AsmOperand, InlineAsm, PhysReg};
 pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
+pub use debug::{
+    DebugGlobal, DebugMember, DebugType, DebugTypeData, DebugVar, Encoding, MemberLocation,
+};
 pub use entity::{Arena, EntityRef};
 pub use function::{
     AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Purpose, Signature, SourceLoc,

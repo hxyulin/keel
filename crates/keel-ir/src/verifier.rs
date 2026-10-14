@@ -12,7 +12,7 @@ use crate::{
     Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type, UnaryOp, Value,
     ValueDef,
 };
-use crate::{DataInit, DataItem, Module};
+use crate::{DataInit, DataItem, DebugType, Module};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -79,6 +79,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             }
         }
     }
+    errors.extend(check_debug_info(module));
     for func in &module.functions {
         if let Some(personality) = &func.personality
             && module.signature(personality).is_none()
@@ -137,6 +138,64 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     } else {
         Err(errors)
     }
+}
+
+/// Debug types refer only to types in the table, variables live in slots
+/// of their function, and globals name data objects.
+fn check_debug_info(module: &Module) -> Vec<VerifierError> {
+    let mut errors = Vec::new();
+    let known = |ty: DebugType| ty.index() < module.debug_types.len();
+    for (i, data) in module.debug_types.iter().enumerate() {
+        for ty in data.refs() {
+            if !known(ty) {
+                errors.push(VerifierError {
+                    location: DebugType::new(i).to_string(),
+                    message: format!("refers to {ty}, which is not defined"),
+                });
+            }
+        }
+    }
+    for global in &module.debug_globals {
+        let location = format!("dglobal {:?}", global.name);
+        if !known(global.ty) {
+            errors.push(VerifierError {
+                location: location.clone(),
+                message: format!("has type {}, which is not defined", global.ty),
+            });
+        }
+        if module.data_object(&global.symbol).is_none() {
+            errors.push(VerifierError {
+                location,
+                message: format!("@{} is not a data object", global.symbol),
+            });
+        }
+    }
+    for func in &module.functions {
+        if let Some(ty) = func.debug_return
+            && !known(ty)
+        {
+            errors.push(VerifierError {
+                location: format!("@{}", func.name),
+                message: format!("returns {ty}, which is not defined"),
+            });
+        }
+        for var in &func.debug_vars {
+            let location = format!("@{} {var}", func.name);
+            if !known(var.ty) {
+                errors.push(VerifierError {
+                    location: location.clone(),
+                    message: format!("has type {}, which is not defined", var.ty),
+                });
+            }
+            if var.slot.index() >= func.num_stack_slots() {
+                errors.push(VerifierError {
+                    location,
+                    message: format!("{} is not a stack slot of the function", var.slot),
+                });
+            }
+        }
+    }
+    errors
 }
 
 /// The largest alignment a data object may ask for: a page, which is as

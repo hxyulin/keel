@@ -1,0 +1,7 @@
+verifier errors:
+  dt1: refers to dt7, which is not defined
+  dglobal "f": @f is not a data object
+  dglobal "nowhere": has type dt9, which is not defined
+  dglobal "nowhere": @nowhere is not a data object
+  @f: returns dt5, which is not defined
+  @f dvar "m" dt3 ss0: has type dt3, which is not defined

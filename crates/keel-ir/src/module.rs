@@ -1,6 +1,7 @@
 //! The root module: one source file's external declarations, data and
 //! functions.
 
+use crate::debug::{DebugGlobal, DebugTypeData, DebugTypeLine};
 use crate::{DataObject, EntityRef, FuncDecl, Function, Signature, SourceFile};
 use std::fmt;
 
@@ -14,6 +15,10 @@ pub struct Module {
     /// The source files instruction locations refer to, indexed by
     /// [`SourceFile`]. Code generation emits debug info if there are any.
     pub files: Vec<String>,
+    /// Source-level types for debuggers, indexed by [`crate::DebugType`].
+    pub debug_types: Vec<DebugTypeData>,
+    /// Source-level variables with static storage.
+    pub debug_globals: Vec<DebugGlobal>,
 }
 
 impl Module {
@@ -63,13 +68,22 @@ impl fmt::Display for Module {
             crate::data::write_quoted(f, path.as_bytes())?;
             f.write_str("\n")?;
         }
+        for (i, ty) in self.debug_types.iter().enumerate() {
+            writeln!(f, "{}", DebugTypeLine(i, ty))?;
+        }
+        for global in &self.debug_globals {
+            writeln!(f, "{global}")?;
+        }
         for decl in &self.decls {
             writeln!(f, "decl @{}{}", decl.name, decl.sig)?;
         }
         for data in &self.data {
             writeln!(f, "{data}")?;
         }
-        let header = !self.files.is_empty() || !self.decls.is_empty() || !self.data.is_empty();
+        let header = !self.files.is_empty()
+            || !self.decls.is_empty()
+            || !self.data.is_empty()
+            || !self.debug_types.is_empty();
         for (i, func) in self.functions.iter().enumerate() {
             if i > 0 || header {
                 f.write_str("\n")?;

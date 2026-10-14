@@ -257,6 +257,11 @@ pub struct Function {
     /// Visible only within its module, like C's `static`: not exported to
     /// the linker, so other modules may use the name for their own.
     pub local: bool,
+    /// The source-level return type, `dreturn dt0`, for debuggers; none
+    /// for `void` or if unknown.
+    pub debug_return: Option<crate::DebugType>,
+    /// Source-level variables, for debuggers; see [`crate::debug`].
+    pub debug_vars: Vec<crate::DebugVar>,
 }
 
 impl Function {
@@ -274,6 +279,8 @@ impl Function {
             layout: Vec::new(),
             personality: None,
             local: false,
+            debug_return: None,
+            debug_vars: Vec::new(),
         }
     }
 
@@ -641,6 +648,12 @@ impl fmt::Display for Function {
                 "    {ss} = stack_slot {}, align {}",
                 data.size, data.align
             )?;
+        }
+        if let Some(ty) = self.debug_return {
+            writeln!(f, "    dreturn {ty}")?;
+        }
+        for var in &self.debug_vars {
+            writeln!(f, "    {var}")?;
         }
 
         for block in self.blocks() {

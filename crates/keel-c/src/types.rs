@@ -101,6 +101,7 @@ pub struct FuncTy {
 
 #[derive(Clone, Debug)]
 pub struct StructDef {
+    pub tag: Option<String>,
     pub is_union: bool,
     pub members: Vec<Member>,
     pub size: u64,

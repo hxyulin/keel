@@ -1,0 +1,14 @@
+; Debug info referring to what does not exist.
+dtype dt0 = base "int" signed 4
+dtype dt1 = pointer dt7
+dglobal "f" dt0 @f
+dglobal "nowhere" dt9 @nowhere
+
+func @f(i32) -> i32 {
+    ss0 = stack_slot 4, align 4
+    dreturn dt5
+    dparam "n" dt0 ss0
+    dvar "m" dt3 ss0
+block0(v0: i32):
+    return v0
+}

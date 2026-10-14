@@ -196,6 +196,9 @@ pub enum Stmt {
 
 #[derive(Clone, Debug)]
 pub struct Local {
+    /// The source name; made-up ones, which are not identifiers, have a
+    /// `.` (`compound literal.3`).
+    pub name: String,
     pub ty: Ty,
     /// Its address is taken (or it is an aggregate, or `volatile`), so it
     /// lives in memory rather than in an SSA variable.

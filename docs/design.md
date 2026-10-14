@@ -427,8 +427,31 @@ Limits: at most one return value (return structs through `sret`); at most
   locations: C++ exceptions and debuggers unwind through keel frames with
   it. The assembler turns it into compact unwind info when the saved
   registers follow Apple's pairing, and into `__eh_frame` otherwise.
-- Not yet: variable locations (`p x` in a debugger), types, inlined call
-  sites.
+- **Variables and types.** The module has a table of source-level types
+  (`dtype dt0 = base "int" signed 4`, pointers, structs and unions with
+  byte or bit-field members, arrays, typedefs, function types) and
+  globals (`dglobal "count" dt0 @count`); a function has its return type
+  (`dreturn dt0`) and variables, each in one of its stack slots (`dvar
+  "x" dt0 ss1`, `dparam` for parameters). Codegen turns them into DIEs:
+  the subprogram's frame base is `x29`, which stays put even when dynamic
+  allocations move `sp`, and a variable is at a fixed `DW_OP_fbreg`
+  offset from it. lldb then prints, changes and passes them (`p x`,
+  `expr x = 3`, `p f(x)`, `finish` showing the return value).
+- **Why variables only live in stack slots.** A value in a register has a
+  location only between its definition and last use, and after
+  allocation; describing that takes location lists, built from the
+  allocator's intervals, and a variable whose value is never computed
+  (its uses folded away) has none at all. A slot is valid for the whole
+  function, and a store in the debugger is seen by the code that loads it
+  next. So a frontend asked for debug info keeps variables in memory,
+  like C compilers at -O0, and pays for it in speed: `keel cc -g` runs
+  at clang -O0's speed rather than keel's. Passes do not touch stack
+  slots, so `-g -O` stays correct.
+- Not yet: lexical scopes (a variable is visible in the whole function,
+  so `i` shows a stale value before its loop, and shadowing names appear
+  twice), locations of values in registers, the source language (lldb
+  reads expressions as C++, so a null pointer prints as `nullptr`),
+  thread-local variables, inlined call sites.
 
 ## Register allocation
 
@@ -616,7 +639,14 @@ diagnostics and `-g`.
   making Lua's `fib` benchmark 2.2× slower. That is LLVM's `mem2reg`, decided while parsing, which has
   seen every `&x` before IR generation starts. Loops seal their header
   after the back edge; labels (`goto`) are sealed at the end of the
-  function.
+  function. With `-g` every named local is in a stack slot instead, so a
+  debugger can see it (see Debug info), and a struct parameter is copied
+  from the caller's memory into its own.
+- **Debug types** come from the parser's types (`debug.rs`), so what
+  those do not keep a debugger does not see: typedef names (`size_t`
+  shows as `unsigned long`), enums (their integer type) and qualifiers
+  (`const char *` shows as `char *`). `static` locals are globals at file
+  scope.
 - **Aggregates** are addresses: a struct-typed expression evaluates to a
   pointer to its bytes, assignment copies (with loads and stores up to 64
   bytes, `memcpy` beyond), and calls pass them `byval` and return them

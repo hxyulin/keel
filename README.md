@@ -22,7 +22,7 @@ file to one assembly file:
 ```sh
 clang -E -std=c11 hello.c -o hello.i
 cargo run -p keel -- cc -O hello.i -o hello.s         # -g for debug info
-clang -o hello hello.s && ./hello
+clang -o hello hello.s && ./hello                     # clang -g with -g, then lldb
 cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
 ```
 

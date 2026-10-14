@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 fn run(cmd: &mut Command) -> Output {
     let out = cmd.output().expect("running a command");
@@ -19,9 +20,13 @@ fn run(cmd: &mut Command) -> Output {
 
 /// Compiles preprocessed C at `i_path` to an executable at `exe`.
 fn build_with_keel(i_path: &Path, exe: &Path, optimize: bool) -> Result<(), String> {
+    build(i_path, exe, optimize, keel_c::Options::default())
+}
+
+fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Result<(), String> {
     let src = std::fs::read_to_string(i_path).unwrap();
-    let mut module = keel_c::compile(&src, i_path.to_str().unwrap(), keel_c::Options::default())
-        .map_err(|e| e.to_string())?;
+    let mut module =
+        keel_c::compile(&src, i_path.to_str().unwrap(), opts).map_err(|e| e.to_string())?;
     keel_ir::verify_module(&module).map_err(|e| format!("invalid IR: {e:?}"))?;
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
@@ -30,12 +35,14 @@ fn build_with_keel(i_path: &Path, exe: &Path, optimize: bool) -> Result<(), Stri
     let asm_path = exe.with_extension("s");
     std::fs::write(&asm_path, asm).unwrap();
     let out = Command::new("clang")
+        .args(opts.debug_info.then_some("-g"))
         .arg("-o")
         .arg(exe)
         .arg(&asm_path)
         .output()
         .unwrap();
-    if !out.status.success() {
+    // dsymutil warns, rather than fails, on debug info it cannot read.
+    if !out.status.success() || String::from_utf8_lossy(&out.stderr).contains("warning") {
         return Err(format!("clang: {}", String::from_utf8_lossy(&out.stderr)));
     }
     Ok(())
@@ -87,6 +94,103 @@ fn programs() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
+}
+
+/// With `-g`, lldb sees every variable, parameter and global of
+/// `tests/debug/vars.c` with its type, can change them, and can call
+/// functions, as with clang -O0. With and without -O, which leaves the
+/// stack slots alone.
+#[test]
+fn debugger() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/debug/vars.c");
+    let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-debug");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let i_path = out_dir.join("vars.i");
+    run(Command::new("clang")
+        .args(["-E", "-std=c11", "-o"])
+        .arg(&i_path)
+        .arg(&path));
+    let commands = [
+        "b stop",
+        "b area",
+        "b sum",
+        "run",
+        "up",
+        "frame variable",
+        "p *a.next",
+        "p arr[1] + *ptr",
+        "p counter + scale",
+        "expr d = 10.5",
+        "continue",
+        "frame variable",
+        "expr total = 100",
+        "finish",
+        "continue",
+        "frame variable p k",
+        "p sum(4)",
+        "continue",
+    ];
+    let want = [
+        "(point) p = (x = 3, y = 4)",
+        "(flags) fl = (a = 5, b = 17, c = -3)",
+        "(wrap) w = {",
+        "d = 0.25",
+        "(int[4]) arr = ([0] = 1, [1] = 2, [2] = 3, [3] = 4)",
+        "(char[8]) name = \"keel\"",
+        "(double) d = 3.25",
+        "(int *) ptr = 0x",
+        "(node) {\n  value = 2\n  next = ",
+        "(int) 5\n",
+        "(double) 6.5\n",
+        "sum(n=7) at vars.c:18",
+        "(int) n = 7\n(int) total = ",
+        // `total` is set before the line that initializes it runs: the
+        // function still returns 0 + 1 + .. + 6.
+        "Return value: (int) $",
+        " = 21\n",
+        "(int) k = 2",
+        "(int) 6\n",
+        // 21 + 24 + 10 + 5, with `d` as changed in the debugger.
+        "exited with status = 60",
+    ];
+    for optimize in [false, true] {
+        let exe = out_dir.join(if optimize { "vars-opt" } else { "vars" });
+        let opts = keel_c::Options { debug_info: true };
+        if let Err(e) = build(&i_path, &exe, optimize, opts) {
+            panic!("building vars.c: {e}");
+        }
+        let mut lldb = Command::new("lldb");
+        lldb.arg("--batch");
+        for command in commands {
+            lldb.arg("-o").arg(command);
+        }
+        let out = run_with_timeout(lldb.arg(&exe));
+        let missing: Vec<_> = want.iter().filter(|w| !out.contains(*w)).collect();
+        assert!(
+            missing.is_empty(),
+            "lldb output (optimize: {optimize}) lacks {missing:?}:\n{out}"
+        );
+    }
+}
+
+/// Runs `cmd` for at most a minute, giving its stdout and stderr.
+fn run_with_timeout(cmd: &mut Command) -> String {
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("running lldb");
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > Duration::from_secs(60) {
+            child.kill().unwrap();
+            panic!("{cmd:?} still running after a minute");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr)
 }
 
 fn compile(src: &str) -> Result<keel_ir::Module, String> {

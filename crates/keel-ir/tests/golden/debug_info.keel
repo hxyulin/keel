@@ -1,0 +1,33 @@
+; Debug types, global and local variables, as a C frontend writes them
+; with -g. A struct may point back to itself.
+dtype dt0 = base "int" signed 4
+dtype dt1 = struct "node" 16 { "value" dt0 0, "next" dt2 8 }
+dtype dt2 = pointer dt1
+dtype dt3 = struct "flags" 4 { "a" dt4 bits 0 3, "b" dt4 bits 3 5, _ dt5 2 }
+dtype dt4 = base "unsigned int" unsigned 4
+dtype dt5 = union 2 { "h" dt6 0 }
+dtype dt6 = base "short" signed 2
+dtype dt7 = array dt0 4
+dtype dt8 = array dt0
+dtype dt9 = typedef "count_t" dt0
+dtype dt10 = typedef "nothing" void
+dtype dt11 = pointer void
+dtype dt12 = struct "opaque" declared
+dtype dt13 = function
+dtype dt14 = pointer dt13
+dtype dt15 = base "char \"quoted\"" signed_char 1
+dglobal "head" dt1 @head
+
+data @head = align 8 { i32 1, zero 12 }
+
+func @f(i32) -> i32 {
+    ss0 = stack_slot 4, align 4
+    ss1 = stack_slot 16, align 4
+    dreturn dt0
+    dparam "n" dt0 ss0
+    dvar "a" dt7 ss1
+block0(v0: i32):
+    v1 = stack_addr ss0
+    store v0, v1
+    return v0
+}

@@ -12,6 +12,7 @@
 //! the GNU extensions Apple's headers use.
 
 mod ast;
+mod debug;
 mod eval;
 mod expr;
 mod init;
@@ -69,7 +70,10 @@ impl std::error::Error for Diagnostic {}
 
 #[derive(Clone, Copy, Default)]
 pub struct Options {
-    /// Give instructions source locations, for debug info.
+    /// Debug info: source locations for instructions, and types and
+    /// variables. Named locals then live in memory, as without
+    /// optimization in C compilers, so a debugger can show and change
+    /// every one of them anywhere in the function.
     pub debug_info: bool,
 }
 

@@ -13,7 +13,8 @@
 //! lines); `-g` gives an input without them its own lines instead, for
 //! stepping through the IR in a debugger.
 //! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
-//! with `--emit-ir`, to keel IR; `-g` gives it debug info.
+//! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
+//! local in memory where a debugger can see it (link with `clang -g`).
 //! Output goes to stdout without `-o`.
 
 use keel_ir::Module;
