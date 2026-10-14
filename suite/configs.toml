@@ -97,3 +97,8 @@ flags = ["-p", "simplify-cfg,sccp,simplify-cfg,dce"]
 name = "keel-O-sccp"
 compiler = "keel"
 flags = ["-p", "simplify-cfg,sccp,simplify-cfg,gvn,dce,gcm"]
+
+[[config]]
+name = "keel-O-combine"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm"]

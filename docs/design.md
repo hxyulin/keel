@@ -689,6 +689,7 @@ analyses they need; there is no analysis cache yet.
 |---|---|
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
+| `instcombine` | fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
@@ -696,6 +697,17 @@ analyses they need; there is no analysis cache yet.
 
 The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
 dce, gcm`.
+
+Instruction combining uses a consumer worklist, so substitutions expose
+further folds even when block layout differs from definition order. Integer
+rules follow wrapping arithmetic; division identities require a known nonzero
+divisor, and floating-point identities are excluded. The power-of-two rules
+are exhaustively checked for i8 and at wide integer boundaries, with a
+64-subset pass matrix and native spill/selector checks. The first paired
+application measurement (Apple M5 Max) gives runtime ratio 0.973 and compiler
+ratio 1.011 versus the historical Full pipeline; 38/44 translation units
+change assembly. Raw samples and intervals are in
+[`instcombine-aarch64-2026-10-15.json`](../suite/reports/instcombine-aarch64-2026-10-15.json).
 
 Forwarding composes the incoming argument tuple with the outgoing jump,
 including permutations and repeated arguments. A forwarding block whose

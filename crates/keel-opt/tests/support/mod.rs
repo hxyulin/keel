@@ -1,4 +1,6 @@
-use keel_ir::{BinaryOp, EntityRef, Function, InstData, IntCC, OverflowOp, Type, Value};
+use keel_ir::{
+    BinaryOp, ConvertOp, EntityRef, Function, InstData, IntCC, OverflowOp, Type, UnaryOp, Value,
+};
 
 /// Independent execution model for the integer/control-flow subset below.
 /// In particular, block arguments are copied simultaneously on each edge.
@@ -36,8 +38,42 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
                 InstData::Iconst { imm, .. } => Some(*imm as u64),
                 InstData::Binary { op, args } => Some(match op {
                     BinaryOp::Iadd => read(args[0]).wrapping_add(read(args[1])),
+                    BinaryOp::Isub => read(args[0]).wrapping_sub(read(args[1])),
                     BinaryOp::Imul => read(args[0]).wrapping_mul(read(args[1])),
+                    BinaryOp::And => read(args[0]) & read(args[1]),
+                    BinaryOp::Or => read(args[0]) | read(args[1]),
                     BinaryOp::Xor => read(args[0]) ^ read(args[1]),
+                    BinaryOp::Udiv => read(args[0]) / read(args[1]),
+                    BinaryOp::Urem => read(args[0]) % read(args[1]),
+                    BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+                        let width = func.value_type(args[0]).bytes().unwrap() * 8;
+                        let shift = read(args[1]) % u64::from(width);
+                        match op {
+                            BinaryOp::Shl => read(args[0]) << shift,
+                            BinaryOp::Ushr => read(args[0]) >> shift,
+                            BinaryOp::Sshr => {
+                                (((read(args[0]) << (64 - width)) as i64 >> (64 - width)) >> shift)
+                                    as u64
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    _ => panic!("unsupported {op:?}"),
+                }),
+                InstData::Unary {
+                    op: UnaryOp::Ineg,
+                    arg,
+                } => Some(read(*arg).wrapping_neg()),
+                InstData::Unary {
+                    op: UnaryOp::Bnot,
+                    arg,
+                } => Some(!read(*arg)),
+                InstData::Convert { op, ty: _, arg } => Some(match op {
+                    ConvertOp::Uext | ConvertOp::Trunc => read(*arg),
+                    ConvertOp::Sext => {
+                        let shift = 64 - func.value_type(*arg).bytes().unwrap() * 8;
+                        ((read(*arg) << shift) as i64 >> shift) as u64
+                    }
                     _ => panic!("unsupported {op:?}"),
                 }),
                 InstData::Icmp { cond, args } => Some(u64::from(match cond {

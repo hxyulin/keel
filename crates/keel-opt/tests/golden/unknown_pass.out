@@ -1,1 +1,1 @@
-error: unknown pass `licm`; passes are: const-fold, simplify-cfg, gvn, dce, gcm, sccp
+error: unknown pass `licm`; passes are: const-fold, simplify-cfg, gvn, dce, gcm, sccp, instcombine

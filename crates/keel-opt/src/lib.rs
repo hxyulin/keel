@@ -17,6 +17,7 @@ mod const_fold;
 mod dce;
 mod gcm;
 mod gvn;
+mod instcombine;
 mod sccp;
 mod simplify_cfg;
 
@@ -64,6 +65,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "propagate constants through executable edges and block parameters, then evaluate instructions",
         run: sccp::run,
     },
+    BuiltinPass {
+        name: "instcombine",
+        description: "combine integer identities, fold constants, and reduce power-of-two arithmetic",
+        run: instcombine::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -85,6 +91,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[3],
     &BUILTINS[4],
     &BUILTINS[5],
+    &BUILTINS[6],
 ];
 
 /// Independent optimizer effort; Full preserves the historical pipeline.
