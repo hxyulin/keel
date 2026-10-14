@@ -367,6 +367,23 @@ Apple arm64's C convention, as implemented:
 Limits: at most one return value (return structs through `sret`); at most
 4080 bytes of stack arguments per call.
 
+System V x86-64's C convention (`keel-codegen/src/sysv.rs`, whose module
+docs list the rules) is placed by the same IR signatures. The differences
+from Apple arm64 that matter to a frontend:
+
+- Every stack argument takes its own 8-byte slot, and variadic arguments
+  use registers like named ones. The caller sets `al` to the number of
+  vector registers used.
+- Structs up to 16 bytes are split into eightbytes, classed INTEGER or
+  SSE, each going to the next register of its class (`{double, long}` in
+  xmm0 and rdi). Bigger structs are copied onto the stack, not passed by
+  address.
+- A `va_list` is 24 bytes, `struct { u32 gp_offset, fp_offset; ptr
+  overflow_arg_area, reg_save_area; }`. A variadic function saves the
+  argument registers into a 176-byte area that `va_arg` reads from
+  before moving to the stack. In C it is an array of one such struct,
+  so a `va_list` parameter is a pointer.
+
 ## Exceptions
 
 - Modeled on LLVM's landing pads, which is what the platform's unwinder
@@ -401,9 +418,31 @@ Limits: at most one return value (return structs through `sret`); at most
 
 ## Target
 
-- First and only target until everything works end to end: **aarch64-apple**
-  (Mach-O). Executables must carry an ad-hoc code signature
+- Two targets, chosen with `--target <triple>` (default: the host):
+  **aarch64-apple-darwin** (Mach-O) and **x86_64-unknown-linux-gnu**
+  (System V, ELF, glibc). `keel_ir::Target` names them, so the C frontend
+  (type sizes, `va_list`, symbol prefixes) and codegen agree.
+- On Apple, executables must carry an ad-hoc code signature
   (`LC_CODE_SIGNATURE`) or the kernel refuses to run them.
+- **x86-64** (`keel-codegen/src/x86_64.rs`, whose module docs give the
+  register roles and frame) differs from arm64 mostly where the ISA does:
+  - With 16 general registers, never allocating argument registers would
+    leave five. So rsi, rdi, r8 and r9 are allocatable, and a call's
+    arguments move into place as one parallel copy (`f(b, a)` with `a` in
+    rdi and `b` in rsi is a swap, broken with r11).
+  - Instructions are two-address (`add d, b` overwrites `d`), and many
+    use fixed registers (`div` in rdx:rax, shift counts in cl). rax, rcx
+    and rdx are therefore never allocated and serve as scratch.
+  - The fixed frame is addressed from rbp, and only outgoing arguments
+    from rsp. A dynamic allocation that moves rsp then leaves every
+    slot's address alone.
+  - Code is position independent (PIE, Linux's default). Defined symbols
+    are `rip`-relative, and others go through the GOT (`@GOTPCREL`) and
+    the PLT for calls. Thread-locals use local-exec (`fs:` + `@tpoff`)
+    when defined in the module, and initial-exec (`@gottpoff`) otherwise.
+  - The baseline is x86-64-v2 (`roundsd`, `popcnt`). Traps are `ud2`.
+  - Not yet on x86-64: exceptions, inline assembly, i128↔float
+    conversions, i128 overflow multiply and `mulhi`, `switch` on i128.
 - Conditional branches reach ±1 MiB. A function whose code may be bigger
   (interpreter loops get there: QuickJS's is about 4 MB from keel) has each
   rewritten as the opposite branch over a `b`, which reaches ±128 MiB.
@@ -466,6 +505,16 @@ Limits: at most one return value (return structs through `sret`); at most
   like C compilers at -O0, and pays for it in speed: `keel cc -g` runs
   at clang -O0's speed rather than keel's. Passes do not touch stack
   slots, so `-g -O` stays correct.
+- On ELF the same DWARF is emitted, with differences:
+  - Linux debuggers read it straight from the executable, with no debug
+    map. Section offsets are therefore labels the linker relocates
+    (`.long .Ldebug_abbrev`), where Mach-O has 0.
+  - The frame base is rbp.
+  - Thread-local globals are located with `DW_OP_const8u sym@dtpoff;
+    DW_OP_GNU_push_tls_address`.
+
+  gdb sets breakpoints past the prologue and prints arguments and
+  locals.
 - Not yet: locations of values in registers, `DW_AT_decl_line` on
   variables, macros, inlined call sites.
 
@@ -698,9 +747,16 @@ diagnostics and `-g`.
   always emitted and everything else only when something emitted refers to
   it. A C99 `inline` definition with no `extern` declaration becomes a
   local copy.
-- **Target facts** are Apple arm64's: LP64, signed `char`, `long double`
-  is `double`, `va_list` is a `char *` (so `va_copy` is an assignment, and
-  `va_arg` works on a passed `va_list`).
+- **Target facts** come from `Options::target`. Both targets are LP64 with
+  signed `char`.
+  - Apple arm64: `long double` is `double`. `va_list` is a `char *`, so
+    `va_copy` is an assignment and `va_arg` works on a passed `va_list`.
+  - x86-64 Linux: `va_list` is SysV's one-element array of
+    `__va_list_tag`, so `va_copy` copies the struct. `long double`, like
+    glibc's `__float128` and `_Complex`, is an opaque type: it has its
+    size, so headers that declare it parse, but a variable or value of it
+    is an error. x87's 80-bit arithmetic is not implemented, and SQLite is
+    built with `-DLONGDOUBLE_TYPE=double`.
 
 Beyond ISO C11 it accepts what Apple's headers and real GNU C programs
 use: `__attribute__((..))` (`aligned`, `packed` and `returns_twice` are

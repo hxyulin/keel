@@ -1,7 +1,8 @@
 # keel
 
-An educational compiler backend: a low-level SSA IR, optimizer, aarch64 code
-generator, assembler and Mach-O linker, and a C compiler on top of it.
+An educational compiler backend: a low-level SSA IR, optimizer, code
+generators for aarch64 macOS and x86-64 Linux, an assembler and Mach-O
+linker, and a C compiler on top of it.
 
 See [docs/design.md](docs/design.md) for the design decisions.
 
@@ -26,9 +27,14 @@ clang -o hello hello.s && ./hello                     # clang -g with -g, then l
 cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
 ```
 
+Both commands take `--target aarch64-apple-darwin` or
+`--target x86_64-unknown-linux-gnu`; the default is the host.
+
 ## Development
 
-- `cargo test` runs everything. End-to-end tests need `clang`.
+- `cargo test` runs everything, on macOS arm64 or x86-64 Linux. End-to-end
+  tests need `clang`. A `; target: <triple>` line limits a codegen test
+  program to one target.
 - IR golden tests live in `crates/keel-ir/tests/golden/`; `BLESS=1 cargo test`
   rewrites the expected `.out` files.
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
