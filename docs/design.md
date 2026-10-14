@@ -690,7 +690,7 @@ analyses they need; there is no analysis cache yet.
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
-| `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
+| `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 

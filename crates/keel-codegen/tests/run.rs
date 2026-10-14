@@ -254,7 +254,7 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 
 #[test]
 fn optimized_regressions_spills() {
-    for program in ["constant_loop", "cfg_forwarding"] {
+    for program in ["constant_loop", "cfg_forwarding", "gvn_compare"] {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
         for (selection, selection_name) in [

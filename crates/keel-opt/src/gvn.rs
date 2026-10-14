@@ -1,4 +1,4 @@
-//! Global value numbering: a pure instruction identical to one that
+//! Global value numbering: a pure instruction equivalent to one that
 //! dominates it is replaced by that one.
 //!
 //! Blocks are walked in dominator-tree preorder with a scoped hash table
@@ -72,7 +72,8 @@ pub fn run(func: &mut Function) -> bool {
 }
 
 /// `data` with operands resolved, and operands of commutative operations
-/// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key.
+/// sorted, so `iadd v1, v2` and `iadd v2, v1` get the same key. Integer
+/// comparisons reverse their predicate when their operands are swapped.
 fn canonical(func: &Function, data: &InstData) -> InstData {
     let mut key = data.clone();
     key.for_each_operand_mut(|v| *v = func.resolve(*v));
@@ -81,13 +82,28 @@ fn canonical(func: &Function, data: &InstData) -> InstData {
         InstData::Overflow { op, args } if is_commutative_overflow(*op) => {
             args.sort_by_key(|v| v.index())
         }
-        InstData::Icmp {
-            cond: IntCC::Eq | IntCC::Ne,
-            args,
-        } => args.sort_by_key(|v| v.index()),
+        InstData::Icmp { cond, args } if args[0].index() > args[1].index() => {
+            args.swap(0, 1);
+            *cond = reverse(*cond);
+        }
         _ => {}
     }
     key
+}
+
+/// Swap the operands without negating the predicate. Signedness is retained.
+fn reverse(cond: IntCC) -> IntCC {
+    match cond {
+        IntCC::Eq | IntCC::Ne => cond,
+        IntCC::Slt => IntCC::Sgt,
+        IntCC::Sle => IntCC::Sge,
+        IntCC::Sgt => IntCC::Slt,
+        IntCC::Sge => IntCC::Sle,
+        IntCC::Ult => IntCC::Ugt,
+        IntCC::Ule => IntCC::Uge,
+        IntCC::Ugt => IntCC::Ult,
+        IntCC::Uge => IntCC::Ule,
+    }
 }
 
 fn is_commutative(op: BinaryOp) -> bool {

@@ -46,7 +46,7 @@ const BUILTINS: &[BuiltinPass] = &[
     },
     BuiltinPass {
         name: "gvn",
-        description: "replace pure instructions with an identical one that dominates them",
+        description: "replace equivalent pure instructions with a dominating computation",
         run: gvn::run,
     },
     BuiltinPass {

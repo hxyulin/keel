@@ -24,9 +24,24 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
                     _ => panic!("unsupported {op:?}"),
                 }),
                 InstData::Icmp { cond, args } => Some(u64::from(match cond {
+                    IntCC::Ne => read(args[0]) != read(args[1]),
                     IntCC::Ult => read(args[0]) < read(args[1]),
+                    IntCC::Ule => read(args[0]) <= read(args[1]),
+                    IntCC::Ugt => read(args[0]) > read(args[1]),
+                    IntCC::Uge => read(args[0]) >= read(args[1]),
                     IntCC::Eq => read(args[0]) == read(args[1]),
-                    _ => panic!("unsupported {cond:?}"),
+                    IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge => {
+                        let shift = 64 - func.value_type(args[0]).bytes().unwrap() * 8;
+                        let a = (read(args[0]) << shift) as i64 >> shift;
+                        let b = (read(args[1]) << shift) as i64 >> shift;
+                        match cond {
+                            IntCC::Slt => a < b,
+                            IntCC::Sle => a <= b,
+                            IntCC::Sgt => a > b,
+                            IntCC::Sge => a >= b,
+                            _ => unreachable!(),
+                        }
+                    }
                 })),
                 InstData::Select { args } => {
                     Some(read(args[if read(args[0]) != 0 { 1 } else { 2 }]))
