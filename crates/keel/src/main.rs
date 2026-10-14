@@ -4,6 +4,7 @@
 //! keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel asm <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -15,7 +16,8 @@
 //! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
 //! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
-//! Output goes to stdout without `-o`. `--target` picks the machine,
+//! Text output goes to stdout without `-o`; `asm` requires `-o` and always
+//! writes an Apple arm64 Mach-O object. `--target` picks the machine for codegen,
 //! `aarch64-apple-darwin` or `x86_64-unknown-linux-gnu`; the default is
 //! the one keel runs on.
 
@@ -27,6 +29,7 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]
   keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel asm <input.s> -o <output.o>
   keel passes";
 
 fn main() -> ExitCode {
@@ -96,6 +99,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
         return Err(USAGE.into());
     };
     match cmd.as_str() {
+        "asm" => {
+            let opts = parse_options(rest, &["-o"])?;
+            let input = opts.input.as_ref().ok_or(USAGE)?;
+            let output = opts
+                .output
+                .as_ref()
+                .ok_or("`asm` requires `-o <output.o>`")?;
+            let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
+            let object = keel_asm::assemble_object(&src).map_err(|e| format!("{input}: {e}"))?;
+            std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
+        }
         "compile" => {
             let opts = parse_options(rest, &["-o", "-O", "-g", "--target"])?;
             let (input, mut module) = load(&opts)?;

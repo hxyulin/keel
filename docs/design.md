@@ -901,3 +901,211 @@ and without `-O`. These configured workloads found bugs the small
 programs missed (an array of pointers to `const` placed in read-only
 memory, a variable used in its own initializer, `#pragma pack`, the
 `__int128` constant, a function too big for conditional branches).
+
+## Assembler
+
+The first assembler target is A64 for Apple arm64 macOS. `keel-asm` separates
+instruction encoding, assembly syntax, and the Mach-O object container. The
+library can return encoded text and symbols or a complete relocatable object;
+`keel asm input.s -o output.o` writes that object. Apple’s linker remains the
+linker for now.
+
+**Generated encoding tables.** `crates/keel-asm/isa/a64.json` contains selected
+instruction names, conditions, and encoding records copied from Arm’s
+BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
+archive SHA-256, upstream metadata, and license notice are retained. The
+subset currently has 364 instruction forms. Generated requirements retain
+Arm’s `FEAT_FP` and `FEAT_AdvSIMD` availability checks; the fixed
+Apple arm64 target enables those features. Encoding conditions are distinct
+from feature requirements: for example, byte register-offset forms exclude
+`option == 0b011`, which has a separate instruction form. The generator
+handles these predicates and conjunctions explicitly and rejects unknown
+features or conditions instead of discarding them.
+
+The generator extracts fixed bits, masks, and variable field layouts from
+these records; the assembler does not duplicate opcode constants. Partially
+variable fields retain their fixed-bit constraints. Operand interpretation
+remains handwritten: register roles, immediate ranges, shifts, aliases, and
+PC-relative displacements need rules beyond the bit layout.
+
+Normal Cargo builds use the checked-in Rust tables and need no network,
+Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
+
+```sh
+python3 crates/keel-asm/tools/generate.py
+python3 crates/keel-asm/tools/generate.py --check
+```
+
+To reproduce the subset from the original archive:
+
+```sh
+curl -L --fail -o /tmp/aarchmrs.tar.gz \
+  https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-OS-Machine-Readable-Data/AARCHMRS_BSD/AARCHMRS_OPENSOURCE_A_profile_FAT-2025-12.tar.gz
+python3 crates/keel-asm/tools/generate.py --archive /tmp/aarchmrs.tar.gz --check
+```
+
+The importer verifies SHA-256
+`4dc5da62a5c856d7b1086b895075f54807f821ea21a333049cb0f40f9479cecc`
+before reading the archive. Arm-derived data and tables carry BSD-3-Clause
+terms; retain `crates/keel-asm/isa/LICENSE-ARM` with distributions.
+
+**Integer arithmetic and control flow.** `movz`, `movk`, `movn`; `add`, `sub`, `adds`, `subs` with
+immediates or shifted registers; `cmp`, `cmn`; register `mov` (including SP)
+and single-instruction immediate `mov`; `b`, `bl`, `ret`, and `nop`. Both 32-bit
+and 64-bit forms are supported where applicable. Move-wide instructions
+accept `lsl` in 16-bit steps; add/sub immediates accept `lsl #0` or `lsl #12`;
+shifted registers accept `lsl`, `lsr`, and `asr` within the register width.
+Add/sub also supports extended-register forms, including SP arithmetic,
+with `uxtb/uxth/uxtw/uxtx` and `sxtb/sxth/sxtw/sxtx` and shifts 0..4.
+
+Logical operations include `and`, `ands`, `orr`, `eor`, `bic`, `bics`, `orn`,
+and `eon` with shifted registers (`lsl/lsr/asr/ror`). `and/ands/orr/eor`
+also accept A64 logical bitmask immediates: repeated, rotated runs of ones,
+excluding zero and all ones. Signed immediates and hexadecimal bit patterns
+are range-checked against W/X width. `mov #imm` chooses `movz`, `movn`, or
+`orr` as a single instruction; arbitrary multi-instruction constants must
+still be written as `movz`/`movk` sequences.
+
+Other integer operations are `adc/adcs/sbc/sbcs`; `mul/mneg/madd/msub`,
+`smulh/umulh`, `smull/umull/smaddl/umaddl`; `sdiv/udiv`; register and
+immediate `lsl/lsr/asr/ror`; `clz/cls/rbit/rev/rev16`, and X-only `rev32`.
+Bitfield forms include `sbfm/ubfm/bfm/extr`, `bfi/bfxil/ubfx/sbfx`,
+`sxtb/sxth/sxtw`, and W-only `uxtb/uxth`. `neg/negs/mvn/tst` aliases are
+supported. Shift and bitfield bounds are checked before encoding.
+
+Conditional operations include `csel/csinc/csinv/csneg`,
+`cset/csetm/cinc/cinv/cneg`, and `ccmp/ccmn` (register or 5-bit immediate,
+with 4-bit NZCV). Conditions accept the usual names and `hs/cs`, `lo/cc`
+synonyms. Inverting aliases reject `al/nv`; canonical forms accept them.
+Branches include `b.<condition>`, `cbz/cbnz`, and `tbz/tbnz`, with checked
+signed byte-displacement ranges of ±1 MiB and ±32 KiB respectively. Test
+branches allow X names for low bits, but W names require bit indices <32.
+Out-of-range branches are errors; the assembler does not relax them.
+`br/blr` require X registers; `brk` takes a 16-bit immediate.
+
+**Floating-point and population count.** Scalar S/D forms include
+`fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
+`fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
+(register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
+and `fcvtzs/fcvtzu` convert W/X ↔ S/D. Fixed-point and half-precision forms
+remain unsupported. `fmov` also supports S/W and D/X bitwise transfers and
+all 256 scalar FP immediate encodings (zero needs a register transfer).
+
+Keel’s scalar popcount lowering uses the supported SIMD `cnt` (8B/16B)
+and `addv` reductions (8B/16B, 4H/8H, 4S). General vector arithmetic remains
+unsupported. FP and SIMD operand widths and register numbers are checked.
+
+`x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
+against their operand roles. `fp` and `lr` name x29 and x30.
+
+**Load/store syntax.** Single transfers include `ldr`/`str` for W/X and
+scalar B/H/S/D/Q registers; `ldrb`/`strb`, `ldrh`/`strh` for W registers;
+`ldrsb`/`ldrsh` for W/X destinations; and `ldrsw` for X destinations. Each
+has its explicit unscaled counterpart (`ldur`, `stur`, `ldurb`, `sturb`,
+`ldurh`, `sturh`, `ldursb`, `ldursh`, `ldursw`). FP/SIMD register numbers run
+from 0 to 31; general register 31 still requires `sp` or `zr` explicitly.
+
+Memory bases are X registers or SP. Bracket-aware operand splitting keeps
+commas inside addresses separate from instruction operands. Supported forms:
+
+- `[base]` or `[base, #offset]`: unsigned 12-bit offsets scaled by access
+  size. Like clang, the ordinary mnemonic selects the unscaled encoding
+  for small negative or unaligned offsets. Explicit unscaled mnemonics
+  always use a signed 9-bit byte offset (-256..255).
+- `[base, #offset]!` and `[base], #offset`: pre-index and post-index
+  writeback with signed 9-bit byte offsets, without scaling. Explicit
+  unscaled mnemonics do not support writeback.
+- `[base, Xm]`, `[base, Xm, lsl #shift]`, `[base, Xm, sxtx {#shift}]`,
+  or `[base, Wm, uxtw/sxtw {#shift}]`: register offsets. The shift is
+  zero or log2(access size); an explicit byte-transfer `#0` preserves
+  Arm’s distinct S-bit encoding. Register offsets do not support writeback.
+
+`ldp`/`stp` transfer matching W, X, S, D, or Q register pairs using offset,
+pre-index, or post-index addresses. Their signed 7-bit offsets are scaled by
+one register’s size (-64..63 elements). Repeated load-pair destinations
+and integer writeback-base overlaps are rejected because their behavior
+is architecturally constrained unpredictable. FP registers and general
+registers with the same number are distinct and do not overlap.
+
+`ldar`/`stlr` support W/X registers, with `ldarb`/`stlrb` and `ldarh`/`stlrh`
+for byte/halfword W transfers. These accept only `[base]` or `[base, #0]`,
+without writeback. Other atomic operations, exclusive accesses,
+non-temporal pairs, unprivileged accesses, and literal loads remain
+unsupported. Symbolic page-offset memory operands are supported below.
+
+Named labels are case-sensitive; mnemonics and register names accept either
+case. Branches resolve forward or backward within text, or accept a numeric
+byte displacement from the instruction address. Signed range and four-byte
+alignment are checked. Numeric local labels and general symbolic
+expressions are not supported; symbol-plus-integer expressions are covered
+below. Semicolons and `//` begin comments.
+
+Directives are `.text`, `.section __TEXT,__text` (optionally with
+`,regular,pure_instructions`), `.globl`/`.global`, and `.p2align N` for
+0 <= N <= 16. Alignment pads text with NOPs and raises the object section’s
+alignment. `.globl`/`.global` and `.extern` may also declare undefined
+external symbols, which are retained for the linker.
+
+**Symbol addressing and relocations.** `adr` accepts a defined text label
+with an optional integer addend, resolved as a signed 21-bit byte displacement
+from the instruction. Numeric `adrp` takes a 4-KiB-aligned byte displacement,
+encoded as a signed 21-bit page count. Both require X destinations (including
+XZR) and check their range.
+
+Symbolic `adrp` uses `symbol@PAGE`, `symbol@GOTPAGE`, or `symbol@TLVPPAGE`.
+`add Rd, Rn, symbol@PAGEOFF` and scaled single load/store addresses
+`[base, symbol@PAGEOFF]` supply the offset within that symbol’s page.
+GOT/TLVP page-offset operands require `ldr Xt, [base, symbol@GOTPAGEOFF]`
+or `@TLVPPAGEOFF`; they load a symbol's address from the GOT or a thread-variable
+descriptor's address. Symbolic memory operands do not support writeback or unscaled
+forms. The linker determines page-offset scaling from the instruction.
+
+Expressions accept one symbol and integer addends: `symbol+8`,
+`symbol@PAGE+8`, and `symbol+8@PAGE` (and their negative forms). Addends must
+fit signed 24 bits. Nonzero ordinary PAGE/PAGEOFF and external branch
+addends use `ARM64_RELOC_ADDEND` immediately before the matching relocation,
+with the signed payload masked to 24 bits. GOT/TLVP addends are rejected.
+Branch addends must be four-byte aligned.
+
+Defined text branches resolve locally while the text section is kept intact.
+Undefined non-local `b`/`bl` targets produce `ARM64_RELOC_BRANCH26` entries.
+Page references produce PAGE21/PAGEOFF12, GOT_LOAD_PAGE21/PAGEOFF12, or
+TLVP_LOAD_PAGE21/PAGEOFF12 entries. These always refer to symbol-table
+indices; instruction immediate fields stay zero until linking. Undefined
+references are retained as external symbols. Names beginning with `L` are
+local by convention and require definitions unless explicitly declared
+external. `adr` and conditional/test branches require definitions in this
+file because Mach-O has no applicable external instruction relocation.
+
+**Objects and limits.** The writer emits little-endian arm64 `MH_OBJECT`, one
+`__TEXT,__text` section, local and external defined symbols, undefined
+symbols, instruction relocation records, and a macOS 11.0 build-version
+command. Relocations are ordered by descending offset, preserving addend
+pairs, and symbol indices follow local definitions, external definitions,
+then undefined symbols. The writer checks missing/duplicate symbols,
+relocation bounds, duplicate relocation offsets, and addend constraints.
+
+Subsection splitting remains rejected because local ADR and conditional
+branches still rely on text staying together. Other instructions, sections,
+and directives produce source diagnostics. Literal loads, data sections,
+absolute-pointer and symbol-difference relocations, `.cfi_*`, and debug
+directives remain to be added before this can assemble arbitrary Keel
+compiler output. The assembler writes objects; Apple’s linker still links
+them into executables.
+
+Tests compare every supported encoding form and operand boundaries against
+clang’s arm64 Mach-O output, inspect our objects with an independent object
+reader, check invalid operands and branch limits, and on Apple Silicon link
+and execute the examples and C drivers checking memory, arithmetic,
+conditions, indirect calls, and FP conversions. Logical-immediate tests cover
+all 1,302 W and 5,334 X bitmasks, and FP-immediate tests cover all 256 values.
+Instruction-only integration tests compile small integer, FP, and popcount
+functions with Keel, explicitly remove the still-unsupported CFI/subsection
+directives in the test, assemble, link, and run them. This is not a production
+workaround for missing directives. Native execution tests have a ten-second
+timeout and reap a timed-out process. Symbol tests compare instruction bytes
+and normalized relocation records against clang and run cross-object calls,
+page-offset integer/SIMD accesses, imported libc functions, GOT and TLVP
+references, and signed addends. Negative addends are also checked with an
+independent object reader and linked programs; some installed Apple clang
+versions emit malformed flags for negative ADDEND records.
