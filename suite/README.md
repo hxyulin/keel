@@ -98,3 +98,49 @@ results file or a target triple, meaning that target's latest run. Runs on
 one target are compared by time. Runs on two targets are compared by each
 configuration's ratio to its own baseline, since the machines differ. To
 compare with another machine, copy its `results/<target>` directory over.
+
+## Paired pass measurements
+
+`measure_passes.py` compares explicit optimizer pipelines on Lua, QuickJS and
+SQLite, keeping selection and allocation at their defaults. Run the suite
+correctness tests first to prepare the preprocessed files, build release
+compilers, and copy the binaries before changing their source. The compiler
+copies stay fixed for the whole measurement. For example:
+
+```sh
+cargo suite test -c keel-O-combine --release
+cp target/release/keel /tmp/keel-pass-candidate
+python3 suite/measure_passes.py \
+  --compiler /tmp/keel-pass-candidate \
+  --baseline-passes simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm \
+  --variant no-gcm=simplify-cfg,instcombine,simplify-cfg,gvn,dce \
+  --variant sccp=simplify-cfg,sccp,instcombine,simplify-cfg,gvn,dce,gcm \
+  --output /tmp/keel-pass-comparison.json
+```
+
+Use `--baseline-compiler` to compare against a different immutable binary.
+Repeat `--variant NAME=passes` to sweep alternatives. Every build finishes
+before timing begins. Runtime samples alternate baseline/candidate order and
+shuffle variant order in each round; every workload's stdout must match.
+Compiler samples compile the same files serially, excluding assembly and
+linking. Code size reports the executable's text section. The JSON records
+raw samples, paired median ratios and bootstrap intervals, compiler/source
+hashes, pipelines, host, and the measurement script's hash. Runtime geometric
+means weight each of the eight workloads equally; compiler means weight each
+of the three applications equally. A ratio below one is an improvement.
+
+Defaults are seven runtime pairs after two warmups and five compiler pairs
+after one warmup. Keep the host idle during timing. These short application
+workloads measure this backend and machine; a neutral median or an interval
+crossing one does not establish a speedup. Benchmark stdout checks complement
+the full correctness suites and semantic pass matrices.
+
+The checked-in [pass ablations](reports/pass-ablations-aarch64-2026-10-15.json)
+use five pairs after one warmup on Apple M5 Max. Removing GCM costs 4.2% in
+runtime geometric mean. Removing GVN has mixed runtime effects and grows
+aggregate text by 5.1%; Full keeps it, while Basic omits it. Late phi cleanup
+avoids the earlier 2.2× Lua regression, but has no established runtime gain
+and adds 2.8% compiler cost. Adding SCCP is near-neutral for runtime with
+5.6% compiler overhead. Both additions remain opt-in. CFG and DCE also stay
+in the default pipelines. These choices concern this measured pipeline;
+individual pass profitability can change with the selector or allocator.
