@@ -20,6 +20,9 @@
 //! `select`s sinking to the end of a function keeps every condition alive
 //! across everything in between). An instruction that changes block goes
 //! just before its first use there, or before the terminator.
+//! Fixed object addresses with constant field offsets stay at the late
+//! placement: recomputing them is cheap, while keeping hundreds of them
+//! live across an interpreter loop makes the allocator spill them.
 //!
 //! Instructions without operands (constants, symbol and stack addresses)
 //! are *rematerialized* instead: each block that uses one gets its own copy
@@ -36,7 +39,7 @@
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::loops::LoopDepth;
-use keel_ir::{Block, EntityRef, Function, InsertPoint, Inst, ValueDef};
+use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -122,9 +125,13 @@ pub fn run(func: &mut Function) -> bool {
 
         let mut best = late;
         let mut block = late;
+        let cheap_address = fixed_address(func, func.first_result(inst));
         while block != early {
             block = domtree.idom(block).expect("early dominates late");
-            if loops.depth(block) < loops.depth(best) {
+            // An address of a fixed object plus a constant is cheap to
+            // recompute. Hoisting it keeps a separate pointer live across
+            // the loop (and calls), often costing more spills than it saves.
+            if !cheap_address && loops.depth(block) < loops.depth(best) {
                 best = block;
             }
         }
@@ -140,6 +147,28 @@ pub fn run(func: &mut Function) -> bool {
         changed = true;
     }
     changed
+}
+
+/// Fixed object addresses, including constant field offsets. Keep these
+/// near their users; ordinary pointer arithmetic still gets loop motion.
+fn fixed_address(func: &Function, value: Value) -> bool {
+    let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
+        return false;
+    };
+    match func.inst_data(inst) {
+        InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => true,
+        InstData::Binary {
+            op: BinaryOp::Ptradd,
+            args,
+        } => {
+            let ValueDef::Result(offset, _) = func.value_def(func.resolve(args[1])) else {
+                return false;
+            };
+            matches!(func.inst_data(offset), InstData::Iconst { .. })
+                && fixed_address(func, args[0])
+        }
+        _ => false,
+    }
 }
 
 /// Gives each block using operand-free `inst` its own copy, just before the

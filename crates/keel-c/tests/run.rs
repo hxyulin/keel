@@ -312,6 +312,38 @@ fn atomic_pointer_updates_are_seq_cst_rmw() {
     }
 }
 
+/// Dispatch sites must share both the jump table and the SSA merge for
+/// locals changed by different handlers, including backward jumps.
+#[test]
+fn computed_gotos_share_dispatch() {
+    let src = "int run(int n) {\n\
+        static void *table[] = { &&add, &&sub, &&done };\n\
+        int value = 0;\n\
+        goto *table[n % 3];\n\
+        add: value += n; n--; goto *table[n % 3];\n\
+        sub: value -= n; n--; goto *table[n % 3];\n\
+        done: return value; }";
+    for debug_info in [false, true] {
+        for target in [
+            keel_ir::Target::Aarch64AppleDarwin,
+            keel_ir::Target::X86_64LinuxGnu,
+        ] {
+            let module =
+                keel_c::compile(src, "dispatch.c", keel_c::Options { debug_info, target }).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            for optimize in [false, true] {
+                let mut module = module.clone();
+                if optimize {
+                    keel_opt::optimize(&mut module).unwrap();
+                }
+                let text = module.to_string();
+                assert_eq!(text.matches("switch ").count(), 1, "{text}");
+                keel_codegen::compile(&module, target).unwrap();
+            }
+        }
+    }
+}
+
 /// Locals live in SSA values unless their address is taken; arrays and
 /// address-taken scalars get stack slots.
 #[test]

@@ -1,0 +1,27 @@
+data @object = align 8 { zero 32 }
+
+func @addresses(ptr, i64) -> i64 cc(c) {
+    ss0 = stack_slot 32, align 8
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 0
+    v17 = iconst.i64 8
+    v11 = ptradd v0, v17
+    jump block1(v2)
+block1(v3: i64):
+    v4 = stack_addr ss0
+    v5 = iconst.i64 8
+    v6 = ptradd v4, v5
+    v7 = ptradd v6, v5
+    store v3, v7
+    v8 = symbol_addr @object
+    v9 = ptradd v8, v5
+    v10 = load.i64 v9
+    v12 = load.i64 v11
+    v14 = iconst.i64 1
+    v15 = iadd v3, v14
+    v16 = icmp.ult v15, v1
+    brif v16, block1(v15), block2
+block2:
+    v13 = iadd v10, v12
+    return v13
+}

@@ -663,7 +663,7 @@ dce, gcm`.
 block defining an operand) and its *late* block (the common dominator of its
 uses), choosing the block in the fewest loops and, among those, the latest.
 That hoists invariants out of loops and sinks code into the branch that needs
-it. Two choices made after measuring the end-to-end programs:
+it. Three choices made after measuring the end-to-end programs:
 
 - An instruction that stays in its block keeps its place. Moving everything to
   just before its first use made one program's spills go from 11 to 75: a
@@ -675,8 +675,15 @@ it. Two choices made after measuring the end-to-end programs:
   to its last use (33 → 47 spills in the register-pressure test). A register
   allocator that rematerializes when it runs out of registers would do this
   better.
+- Addresses of fixed stack or global objects with constant offsets stay
+  at the late placement instead of being hoisted out of loops. QuickJS's
+  interpreter has hundreds of temporary aggregate objects: hoisting their
+  field addresses kept hundreds of pointers live across dispatch and calls,
+  forcing spills. Keeping these cheap computations near their uses removed
+  most of its `-O` slowdown. Pointer arithmetic on incoming pointers still
+  gets ordinary loop-invariant code motion.
 
-With both, `-O` output is never larger than the unoptimized output on the
+With these choices, `-O` output is never larger than the unoptimized output on the
 test programs, and programs whose checks are all constants fold away
 entirely, which checks constant folding against results from the hardware.
 
@@ -772,10 +779,14 @@ checked calls (`__builtin___memcpy_chk`) become the plain function, since
 marked `returns_twice`.
 
 - **Computed goto** without an indirect branch in the IR: `&&label` is
-  the label's number in its function (from 1), and `goto *p` a `switch`
-  on it over the labels whose address is taken, which codegen makes a
-  jump table. Each `goto *` gets its own, so dispatch is predicted per
-  site as with real indirect branches. GNU only defines jumping to a
+  the label's number in its function (from 1), and every `goto *p` jumps
+  to one shared dispatch block, passing that number as a block argument.
+  Its `switch` over the labels whose address is taken becomes one jump
+  table. Locals merge through SSA parameters at dispatch. Sharing avoids
+  duplicating the table and its edge copies at every site: QuickJS and Lua
+  otherwise spend far more code on dispatch than on their handlers. The
+  dispatch block is emitted after the body, before sealing all blocks, so
+  every dispatch edge and label is known. GNU only defines jumping to a
   label of the same function, where a number is as good as an address;
   and being constants, the numbers can fill static dispatch tables, and
   `&&a - &&b` offsets work. An indirect branch in the IR would need edge

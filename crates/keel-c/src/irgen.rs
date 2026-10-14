@@ -278,6 +278,7 @@ impl<'p> Gen<'p> {
             breaks: Vec::new(),
             continues: Vec::new(),
             labels: HashMap::new(),
+            dispatch: None,
             cases: Vec::new(),
             terminated: false,
             scopes: Vec::new(),
@@ -371,6 +372,7 @@ impl<'p> Gen<'p> {
         if !fg.terminated {
             fg.return_default();
         }
+        fg.emit_dispatch();
         fg.b.seal_all_blocks();
         fg.b.finalize();
         Ok(func)
@@ -538,6 +540,9 @@ struct FnGen<'g, 'p, 'f> {
     breaks: Vec<Block>,
     continues: Vec<Block>,
     labels: HashMap<String, Block>,
+    /// All computed gotos share one switch, with the label number as its
+    /// first parameter. Leave it unsealed until every dispatch edge exists.
+    dispatch: Option<Block>,
     /// The case blocks of the switches being built.
     cases: Vec<Vec<Block>>,
     /// The current block ends in a terminator; code that follows goes in a
@@ -838,25 +843,20 @@ impl FnGen<'_, '_, '_> {
                 self.jump_to(block);
             }
             Stmt::GotoIndirect(target) => {
-                // A switch on the label's number: a jump table for each
-                // `goto *`, as an indirect branch would be.
                 self.ensure_block();
                 self.set_loc(target.loc);
                 let p = self.val(target)?;
                 let n = self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, p);
-                let call = |block| keel_ir::BlockCall {
-                    block,
-                    args: Vec::new(),
+                let dispatch = match self.dispatch {
+                    Some(block) => block,
+                    None => {
+                        let block = self.new_block();
+                        self.b.func.append_block_param(block, Type::I64);
+                        self.dispatch = Some(block);
+                        block
+                    }
                 };
-                let table = (self.def.label_addrs.iter().enumerate())
-                    .map(|(i, label)| (i as i64 + 1, call(self.label_block(label))))
-                    .collect();
-                // Anywhere else is undefined.
-                let nowhere = self.new_block();
-                self.b.ins().switch(n, call(nowhere), table);
-                self.b.seal_block(nowhere);
-                self.switch_to(nowhere);
-                self.b.ins().trap();
+                self.b.ins().jump(dispatch, &[n]);
                 self.terminated = true;
             }
             Stmt::Label(label) => {
@@ -866,6 +866,33 @@ impl FnGen<'_, '_, '_> {
             }
         }
         Ok(())
+    }
+
+    fn emit_dispatch(&mut self) {
+        let Some(dispatch) = self.dispatch else {
+            return;
+        };
+        self.switch_to(dispatch);
+        self.b.set_srcloc(None);
+        let n = self.b.func.block_params(dispatch)[0];
+        let call = |block| keel_ir::BlockCall {
+            block,
+            args: Vec::new(),
+        };
+        let table = self
+            .def
+            .label_addrs
+            .iter()
+            .enumerate()
+            .map(|(i, label)| (i as i64 + 1, call(self.label_block(label))))
+            .collect();
+        // A value other than an address-taken label is undefined.
+        let nowhere = self.new_block();
+        self.b.ins().switch(n, call(nowhere), table);
+        self.b.seal_block(nowhere);
+        self.switch_to(nowhere);
+        self.b.ins().trap();
+        self.terminated = true;
     }
 
     fn loop_body(&mut self, body: &Stmt, block: Block, exit: Block, cont: Block) -> R<()> {
