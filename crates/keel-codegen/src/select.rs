@@ -5,12 +5,12 @@ use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, Type, Va
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Target {
+pub enum Target {
     Aarch64,
     X86,
 }
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum Machine {
+pub enum Machine {
     Madd,
     Msub,
     ShiftAdd,
@@ -30,13 +30,13 @@ struct Rule {
 include!(concat!(env!("OUT_DIR"), "/patterns.rs"));
 
 #[derive(Clone, Debug)]
-pub(crate) struct Match {
+pub struct Match {
     pub machine: Machine,
     pub args: Vec<Value>,
     pub shift: u8,
 }
 #[derive(Default)]
-pub(crate) struct Selection {
+pub struct Selection {
     pub matches: HashMap<Inst, Match>,
     covered: HashSet<Inst>,
     allocation_operands: HashMap<Inst, Vec<Value>>,
@@ -44,6 +44,17 @@ pub(crate) struct Selection {
     pub hints: HashMap<Value, Vec<Value>>,
 }
 impl Selection {
+    /// Suppress an instruction subsumed by a selected root. Custom selectors
+    /// must preserve all side effects and every use of its results.
+    pub fn cover(&mut self, inst: Inst) {
+        self.covered.insert(inst);
+    }
+    /// Override allocation operands after encoding values in a target operand.
+    /// Values must be resolved and include every value read by the emitter.
+    pub fn set_operands(&mut self, inst: Inst, operands: Vec<Value>) {
+        self.allocation_operands.insert(inst, operands);
+    }
+
     pub fn covered(&self, inst: Inst) -> bool {
         self.covered.contains(&inst)
     }

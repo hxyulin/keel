@@ -1,9 +1,9 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
-//! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel compile [-O] [-g] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--emit-ir] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -24,9 +24,9 @@ use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
-  keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel compile [-O] [-g] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
+  keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
 fn main() -> ExitCode {
@@ -47,7 +47,8 @@ fn main() -> ExitCode {
 struct Options {
     input: Option<String>,
     output: Option<String>,
-    optimize: bool,
+    optimization: keel_opt::OptimizationTier,
+    allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
     ir_lines: bool,
     emit_ir: bool,
@@ -73,7 +74,31 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
-            "-O" => opts.optimize = true,
+            "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
+            "--opt-tier" => {
+                opts.optimization = match args.next().map(String::as_str) {
+                    Some("none") => keel_opt::OptimizationTier::None,
+                    Some("basic") => keel_opt::OptimizationTier::Basic,
+                    Some("full") => keel_opt::OptimizationTier::Full,
+                    _ => return Err("`--opt-tier` needs none, basic, or full".into()),
+                };
+            }
+            "--regalloc" => {
+                opts.allocation = match args.next().map(String::as_str) {
+                    Some("fast") => keel_codegen::regalloc::AllocationTier::Fast,
+                    Some("full") => keel_codegen::regalloc::AllocationTier::Full,
+                    _ => return Err("`--regalloc` needs fast or full".into()),
+                };
+            }
+            "--isel-tier" => {
+                let tier = match args.next().map(String::as_str) {
+                    Some("baseline") => keel_codegen::SelectionTier::Baseline,
+                    Some("trees") => keel_codegen::SelectionTier::Trees,
+                    Some("full") => keel_codegen::SelectionTier::Full,
+                    _ => return Err("`--isel-tier` needs baseline, trees, or full".into()),
+                };
+                opts.selection = tier.options();
+            }
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
             "--isel" => {
@@ -123,17 +148,48 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "compile" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g", "--target", "--isel"])?;
+            let opts = parse_options(
+                rest,
+                &[
+                    "-o",
+                    "-O",
+                    "-g",
+                    "--target",
+                    "--isel",
+                    "--opt-tier",
+                    "--regalloc",
+                    "--isel-tier",
+                ],
+            )?;
             let (input, mut module) = load(&opts)?;
-            if opts.optimize {
-                keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
-            }
-            let asm = keel_codegen::compile_with_options(&module, opts.target()?, opts.selection)
+            keel_opt::optimize_with_tier(&mut module, opts.optimization)
                 .map_err(|e| format!("{input}: {e}"))?;
+            let asm = keel_codegen::compile_with_pipeline(
+                &module,
+                opts.target()?,
+                &keel_codegen::CodegenPipeline {
+                    selector: &keel_codegen::OptionsSelector(opts.selection),
+                    allocator: &opts.allocation,
+                },
+            )
+            .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }
         "cc" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir", "--target", "--isel"])?;
+            let opts = parse_options(
+                rest,
+                &[
+                    "-o",
+                    "-O",
+                    "-g",
+                    "--emit-ir",
+                    "--target",
+                    "--isel",
+                    "--opt-tier",
+                    "--regalloc",
+                    "--isel-tier",
+                ],
+            )?;
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
@@ -152,23 +208,32 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     lines.join("\n")
                 ));
             }
-            if opts.optimize {
-                keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
-            }
+            keel_opt::optimize_with_tier(&mut module, opts.optimization)
+                .map_err(|e| format!("{input}: {e}"))?;
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }
-            let asm = keel_codegen::compile_with_options(&module, opts.target()?, opts.selection)
-                .map_err(|e| format!("{input}: {e}"))?;
+            let asm = keel_codegen::compile_with_pipeline(
+                &module,
+                opts.target()?,
+                &keel_codegen::CodegenPipeline {
+                    selector: &keel_codegen::OptionsSelector(opts.selection),
+                    allocator: &opts.allocation,
+                },
+            )
+            .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }
         "opt" => {
-            let opts = parse_options(rest, &["-o", "-p"])?;
+            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O"])?;
             let (input, mut module) = load(&opts)?;
             let result = match &opts.passes {
                 Some(names) => {
                     let names: Vec<&str> = names.iter().map(String::as_str).collect();
                     keel_opt::run_passes(&mut module, &names)
+                }
+                None if rest.iter().any(|arg| arg == "--opt-tier" || arg == "-O") => {
+                    keel_opt::optimize_with_tier(&mut module, opts.optimization)
                 }
                 None => keel_opt::optimize(&mut module),
             };
@@ -177,7 +242,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "passes" => {
             for pass in keel_opt::PASSES {
-                println!("{:14} {}", pass.name, pass.description);
+                println!("{:14} {}", pass.name(), pass.description());
             }
             println!(
                 "\ndefault pipeline (-O): {}",
@@ -213,6 +278,65 @@ fn write_output(opts: &Options, text: &str) -> Result<(), String> {
         None => {
             print!("{text}");
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn options(args: &[&str]) -> Result<Options, String> {
+        parse_options(
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            &["-O", "--opt-tier", "--isel-tier", "--isel", "--regalloc"],
+        )
+    }
+
+    #[test]
+    fn stage_flags_are_independent_and_last_flag_wins() {
+        let opts = options(&[
+            "-O",
+            "--opt-tier",
+            "basic",
+            "--isel-tier",
+            "full",
+            "--regalloc",
+            "fast",
+        ])
+        .unwrap();
+        assert_eq!(opts.optimization, keel_opt::OptimizationTier::Basic);
+        assert_eq!(opts.selection, keel_codegen::SelectionOptions::ALL);
+        assert_eq!(
+            opts.allocation,
+            keel_codegen::regalloc::AllocationTier::Fast
+        );
+        let opts = options(&[
+            "--opt-tier",
+            "none",
+            "-O",
+            "--isel-tier",
+            "full",
+            "--isel",
+            "trees",
+        ])
+        .unwrap();
+        assert_eq!(opts.optimization, keel_opt::OptimizationTier::Full);
+        assert_eq!(opts.selection, keel_codegen::SelectionTier::Trees.options());
+    }
+
+    #[test]
+    fn default_tiers_and_invalid_values() {
+        let opts = options(&[]).unwrap();
+        assert_eq!(opts.optimization, keel_opt::OptimizationTier::None);
+        assert_eq!(opts.selection, keel_codegen::SelectionOptions::default());
+        assert_eq!(
+            opts.allocation,
+            keel_codegen::regalloc::AllocationTier::Full
+        );
+        for flag in ["--opt-tier", "--isel-tier", "--regalloc"] {
+            assert!(options(&[flag]).is_err());
+            assert!(options(&[flag, "invalid"]).is_err());
         }
     }
 }

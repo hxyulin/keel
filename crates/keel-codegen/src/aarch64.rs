@@ -159,6 +159,23 @@ pub fn compile_with_options(
     pools: &Pools,
     options: crate::SelectionOptions,
 ) -> Result<String, CodegenError> {
+    let selector = crate::OptionsSelector(options);
+    compile_with_pipeline(
+        module,
+        pools,
+        &crate::CodegenPipeline {
+            selector: &selector,
+            allocator: &regalloc::AllocationTier::Full,
+        },
+    )
+}
+
+/// Compile using independently replaceable selection and allocation stages.
+pub fn compile_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<String, CodegenError> {
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)
@@ -176,7 +193,7 @@ pub fn compile_with_options(
     }
     let mut frames = Vec::new();
     for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools, options)?;
+        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -463,7 +480,7 @@ impl<'a> FunctionCompiler<'a> {
         func: &'a Function,
         module: &'a Module,
         pools: &Pools,
-        options: crate::SelectionOptions,
+        pipeline: &crate::CodegenPipeline<'_>,
     ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -665,21 +682,16 @@ impl<'a> FunctionCompiler<'a> {
             float_callee_saved: &float_callee_saved,
             ..*pools
         };
-        let mut selection = crate::select::Selection::compute_with_options(
-            func,
-            crate::select::Target::Aarch64,
-            options,
-        );
-        if options.folded_operands {
-            selection.fold_operands(func, |data| {
+        let selection = pipeline
+            .selector
+            .select(func, crate::select::Target::Aarch64, &|data| {
                 folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
             });
-        }
-        let mut alloc = regalloc::allocate_selected(
+        let mut alloc = pipeline.allocator.allocate(
             func,
             &pools,
-            |data| is_call(func, data),
-            |data| returns_twice(func, data),
+            &|data| is_call(func, data),
+            &|data| returns_twice(func, data),
             &selection,
         );
         if moves_sp {

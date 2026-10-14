@@ -15,11 +15,11 @@
 //!
 //! `debug_info` checks the debug info in lldb.
 
-use keel_codegen::Pools;
 #[cfg(target_arch = "aarch64")]
-use keel_codegen::aarch64::{REGISTERS, compile_with_options};
+use keel_codegen::aarch64::{REGISTERS, compile_with_pipeline};
 #[cfg(target_arch = "x86_64")]
-use keel_codegen::x86_64::{REGISTERS, compile_with_options};
+use keel_codegen::x86_64::{REGISTERS, compile_with_pipeline};
+use keel_codegen::{Pools, regalloc::AllocationTier};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -48,7 +48,13 @@ const TINY: Pools = Pools {
 
 /// Register sets to compile with, whether to optimize first, and a suffix
 /// for the output files.
-const CONFIGS: [(Pools, bool, &str, keel_codegen::SelectionOptions); 6] = [
+const CONFIGS: [(
+    Pools,
+    bool,
+    &str,
+    keel_codegen::SelectionOptions,
+    AllocationTier,
+); 8] = [
     (
         REGISTERS,
         false,
@@ -58,6 +64,7 @@ const CONFIGS: [(Pools, bool, &str, keel_codegen::SelectionOptions); 6] = [
             folded_operands: false,
             register_hints: false,
         },
+        AllocationTier::Full,
     ),
     (
         TINY,
@@ -68,6 +75,7 @@ const CONFIGS: [(Pools, bool, &str, keel_codegen::SelectionOptions); 6] = [
             folded_operands: false,
             register_hints: false,
         },
+        AllocationTier::Full,
     ),
     (
         REGISTERS,
@@ -78,24 +86,46 @@ const CONFIGS: [(Pools, bool, &str, keel_codegen::SelectionOptions); 6] = [
             folded_operands: false,
             register_hints: false,
         },
+        AllocationTier::Full,
     ),
     (
         REGISTERS,
         false,
         "-select",
         keel_codegen::SelectionOptions::ALL,
+        AllocationTier::Full,
     ),
     (
         TINY,
         false,
         "-select-tiny",
         keel_codegen::SelectionOptions::ALL,
+        AllocationTier::Full,
     ),
     (
         REGISTERS,
         true,
         "-select-opt",
         keel_codegen::SelectionOptions::ALL,
+        AllocationTier::Full,
+    ),
+    (
+        REGISTERS,
+        false,
+        "-fast",
+        keel_codegen::SelectionOptions {
+            trees: false,
+            folded_operands: false,
+            register_hints: false,
+        },
+        AllocationTier::Fast,
+    ),
+    (
+        TINY,
+        true,
+        "-fast-select-tiny",
+        keel_codegen::SelectionOptions::ALL,
+        AllocationTier::Fast,
     ),
 ];
 
@@ -105,6 +135,7 @@ fn run_program(
     optimize: bool,
     suffix: &str,
     selection: keel_codegen::SelectionOptions,
+    allocation: AllocationTier,
 ) -> Result<(), String> {
     let src = std::fs::read_to_string(path).unwrap();
     let expect = src
@@ -128,7 +159,15 @@ fn run_program(
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = compile_with_options(&module, pools, selection).map_err(|e| e.to_string())?;
+    let asm = compile_with_pipeline(
+        &module,
+        pools,
+        &keel_codegen::CodegenPipeline {
+            selector: &keel_codegen::OptionsSelector(selection),
+            allocator: &allocation,
+        },
+    )
+    .map_err(|e| e.to_string())?;
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
@@ -221,12 +260,12 @@ fn programs() {
         .flat_map(|p| {
             CONFIGS
                 .iter()
-                .map(move |(pools, optimize, suffix, selection)| {
-                    (p, pools, *optimize, suffix, *selection)
+                .map(move |(pools, optimize, suffix, selection, allocation)| {
+                    (p, pools, *optimize, suffix, *selection, *allocation)
                 })
         })
-        .filter_map(|(p, pools, optimize, suffix, selection)| {
-            run_program(p, pools, optimize, suffix, selection)
+        .filter_map(|(p, pools, optimize, suffix, selection, allocation)| {
+            run_program(p, pools, optimize, suffix, selection, allocation)
                 .err()
                 .map(|e| {
                     let name = p.file_name().unwrap().to_string_lossy();

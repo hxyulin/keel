@@ -1,7 +1,7 @@
 //! Optimization passes over keel IR.
 //!
-//! A pass is a function `fn(&mut Function) -> bool` that returns whether it
-//! changed anything. Passes work on one function at a time, so functions
+//! A [`Pass`] returns whether it changed anything. Passes work on one
+//! function at a time, so functions
 //! could be optimized in parallel, and compute the analyses they need
 //! (CFG, dominators) themselves; there is no analysis cache until one is
 //! needed.
@@ -19,39 +19,88 @@ mod gcm;
 mod gvn;
 mod simplify_cfg;
 
-pub struct Pass {
+/// A replaceable optimization pass over one function.
+pub trait Pass: Sync {
+    fn name(&self) -> &'static str;
+    fn description(&self) -> &'static str;
+    fn run(&self, func: &mut Function) -> bool;
+}
+
+struct BuiltinPass {
     pub name: &'static str,
     pub description: &'static str,
     pub run: fn(&mut Function) -> bool,
 }
 
-pub const PASSES: &[Pass] = &[
-    Pass {
+const BUILTINS: &[BuiltinPass] = &[
+    BuiltinPass {
         name: "const-fold",
         description: "evaluate instructions whose operands are constants",
         run: const_fold::run,
     },
-    Pass {
+    BuiltinPass {
         name: "simplify-cfg",
         description: "fold constant branches, skip empty blocks, merge straight-line blocks, remove unreachable blocks",
         run: simplify_cfg::run,
     },
-    Pass {
+    BuiltinPass {
         name: "gvn",
         description: "replace pure instructions with an identical one that dominates them",
         run: gvn::run,
     },
-    Pass {
+    BuiltinPass {
         name: "dce",
         description: "remove unused pure instructions and block parameters",
         run: dce::run,
     },
-    Pass {
+    BuiltinPass {
         name: "gcm",
         description: "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
         run: gcm::run,
     },
 ];
+
+impl Pass for BuiltinPass {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+    fn description(&self) -> &'static str {
+        self.description
+    }
+    fn run(&self, func: &mut Function) -> bool {
+        (self.run)(func)
+    }
+}
+
+pub const PASSES: &[&dyn Pass] = &[
+    &BUILTINS[0],
+    &BUILTINS[1],
+    &BUILTINS[2],
+    &BUILTINS[3],
+    &BUILTINS[4],
+];
+
+/// Independent optimizer effort; Full preserves the historical pipeline.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OptimizationTier {
+    #[default]
+    None,
+    Basic,
+    Full,
+}
+impl OptimizationTier {
+    pub fn pipeline(self) -> &'static [&'static str] {
+        match self {
+            Self::None => &[],
+            Self::Basic => &["simplify-cfg", "const-fold", "simplify-cfg", "dce"],
+            Self::Full => DEFAULT_PIPELINE,
+        }
+    }
+}
+
+pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result<(), OptError> {
+    run_passes(module, tier.pipeline())
+}
 
 /// The passes `keel compile -O` runs, in order.
 pub const DEFAULT_PIPELINE: &[&str] = &[
@@ -63,8 +112,8 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "gcm",
 ];
 
-pub fn find_pass(name: &str) -> Option<&'static Pass> {
-    PASSES.iter().find(|p| p.name == name)
+pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {
+    PASSES.iter().copied().find(|p| p.name() == name)
 }
 
 #[derive(Debug)]
@@ -82,7 +131,7 @@ impl fmt::Display for OptError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OptError::UnknownPass(name) => {
-                let names: Vec<&str> = PASSES.iter().map(|p| p.name).collect();
+                let names: Vec<&str> = PASSES.iter().map(|p| p.name()).collect();
                 write!(f, "unknown pass `{name}`; passes are: {}", names.join(", "))
             }
             OptError::Verifier { pass, func, errors } => {
@@ -98,17 +147,22 @@ impl fmt::Display for OptError {
 
 /// Runs the named passes, in order, on every function in `module`.
 pub fn run_passes(module: &mut Module, names: &[&str]) -> Result<(), OptError> {
-    profiling::scope!("optimization");
     let passes = names
         .iter()
         .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
+    run_pipeline(module, &passes)
+}
+
+/// Runs custom or built-in passes, verifying the IR after each pass.
+pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), OptError> {
+    profiling::scope!("optimization");
     for func in &mut module.functions {
-        for pass in &passes {
-            profiling::scope!("pass", pass.name);
-            (pass.run)(func);
+        for pass in passes {
+            profiling::scope!("pass", pass.name());
+            pass.run(func);
             verify(func).map_err(|errors| OptError::Verifier {
-                pass: pass.name,
+                pass: pass.name(),
                 func: func.name.clone(),
                 errors,
             })?;
