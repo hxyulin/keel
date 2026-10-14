@@ -1,0 +1,15 @@
+decl @g(i64) -> i32
+decl @h(i8) -> i8 sext
+
+func @f(i8 sext, ptr) -> i8 uext cc(c) {
+block0(v0: i8, v1: ptr):
+    brif v0, block1, block2
+block1:
+    return_call @g(v0)
+block2:
+    brif v0, block3, block4
+block3:
+    return_call @h(v0)
+block4:
+    return_call_indirect v0(v0) : (i8) -> i8 uext cc(c)
+}

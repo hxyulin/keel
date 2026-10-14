@@ -1,0 +1,5 @@
+verifier errors:
+  @f inst1 `return_call @g(v0)`: @g takes (i64), got (i8)
+  @f inst1 `return_call @g(v0)`: a tail call to a function returning (i32) from one returning (i8 uext)
+  @f inst3 `return_call @h(v0)`: a tail call to a function returning (i8 sext) from one returning (i8 uext)
+  @f inst4 `return_call_indirect v0(v0) : (i8) -> i8 uext cc(c)`: return_call_indirect callee must be ptr, got i8

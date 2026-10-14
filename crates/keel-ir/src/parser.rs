@@ -995,7 +995,7 @@ impl Parser {
                         bits: self.float_bits(ty)?,
                     }
                 }
-                "call" => {
+                "call" | "return_call" => {
                     no_suffix()?;
                     let (name, loc) = match self.next() {
                         (Tok::Global(name), loc) => (name, loc),
@@ -1005,9 +1005,23 @@ impl Parser {
                         }
                     };
                     let func = names.callee(&name, loc);
-                    InstData::Call {
-                        func,
-                        args: self.arg_list(names)?,
+                    let args = self.arg_list(names)?;
+                    if base == "call" {
+                        InstData::Call { func, args }
+                    } else {
+                        InstData::ReturnCall { func, args }
+                    }
+                }
+                "return_call_indirect" => {
+                    no_suffix()?;
+                    let callee = self.value(names)?;
+                    let args = self.arg_list(names)?;
+                    self.expect(Tok::Punct(':'))?;
+                    let sig = self.signature()?;
+                    InstData::ReturnCallIndirect {
+                        sig: names.signature(sig),
+                        callee,
+                        args,
                     }
                 }
                 "call_indirect" => {
@@ -1242,6 +1256,8 @@ impl Parser {
             | InstData::Brif { .. }
             | InstData::Switch { .. }
             | InstData::Return { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. }
             | InstData::Trap => Some(0),
             _ => Some(1),
         };

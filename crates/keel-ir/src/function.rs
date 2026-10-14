@@ -378,6 +378,8 @@ impl Function {
             | InstData::Brif { .. }
             | InstData::Switch { .. }
             | InstData::Return { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. }
             | InstData::Trap => vec![],
         };
         let inst = self.create_inst(data, &result_tys);
@@ -671,6 +673,16 @@ impl Function {
             }
             InstData::SymbolAddr { symbol } => {
                 write!(f, "symbol_addr @{}", self.symbol_name(*symbol))
+            }
+            InstData::ReturnCall { func, args } => {
+                write!(f, "return_call @{}(", self.callees[*func].name)?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                f.write_str(")")
+            }
+            InstData::ReturnCallIndirect { sig, callee, args } => {
+                write!(f, "return_call_indirect {}(", v(*callee))?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                write!(f, ") : {}", self.signatures[*sig])
             }
             InstData::CallIndirect { sig, callee, args } => {
                 write!(f, "call_indirect {}(", v(*callee))?;

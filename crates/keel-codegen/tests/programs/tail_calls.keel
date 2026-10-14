@@ -1,0 +1,103 @@
+; Guaranteed tail calls: recursion ten million deep in constant stack,
+; mutual recursion, an indirect tail call, a tail call to C with
+; arguments in callee-saved registers and spilled.
+; expect: exit 0
+
+decl @c_sum8(i64, i64, i64, i64, i64, i64, i64, i64) -> i64
+decl @clobber()
+
+; Sums 1..n: k_sum(n, acc) = k_sum(n - 1, acc + n). Without tail calls,
+; n = 10^7 would need 160 MB of stack.
+func @k_sum(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = iconst.i64 0
+    v3 = icmp.eq v0, v2
+    brif v3, block1, block2
+block1:
+    return v1
+block2:
+    v4 = iadd v1, v0
+    v5 = iconst.i64 1
+    v6 = isub v0, v5
+    return_call @k_sum(v6, v4)
+}
+
+; Mutual recursion: k_even(n) is 1 if n is even.
+func @k_even(i64) -> i32 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = icmp.eq v0, v1
+    brif v2, block1, block2
+block1:
+    v3 = iconst.i32 1
+    return v3
+block2:
+    v4 = iconst.i64 1
+    v5 = isub v0, v4
+    return_call @k_odd(v5)
+}
+
+func @k_odd(i64) -> i32 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = icmp.eq v0, v1
+    brif v2, block1, block2
+block1:
+    v3 = iconst.i32 0
+    return v3
+block2:
+    v4 = iconst.i64 1
+    v5 = isub v0, v4
+    return_call @k_even(v5)
+}
+
+; Calls through the pointer v0, n times deep.
+func @k_indirect(ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 0
+    v3 = icmp.eq v1, v2
+    brif v3, block1, block2
+block1:
+    v4 = iconst.i64 77
+    return v4
+block2:
+    v5 = iconst.i64 1
+    v6 = isub v1, v5
+    return_call_indirect v0(v0, v6) : (ptr, i64) -> i64 cc(c)
+}
+
+; The arguments are computed before a call, so they live in callee-saved
+; registers (or spill slots, with few registers), which the epilogue
+; restores before the jump: the moves must come first.
+func @k_to_c(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 1
+    v2 = iadd v0, v1
+    v3 = iadd v2, v1
+    v4 = iadd v3, v1
+    v5 = iadd v4, v1
+    v6 = iadd v5, v1
+    v7 = iadd v6, v1
+    v8 = iadd v7, v1
+    call @clobber()
+    return_call @c_sum8(v0, v2, v3, v4, v5, v6, v7, v8)
+}
+
+; The target pointer too lives in a callee-saved register.
+func @k_to_c_indirect(ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+    call @clobber()
+    return_call_indirect v0(v1, v1, v1, v1, v1, v1, v1, v1) : (i64, i64, i64, i64, i64, i64, i64, i64) -> i64 cc(c)
+}
+
+; Narrow results are extended by whoever returns them: here the callee.
+func @k_narrow(i8 sext) -> i8 sext cc(c) {
+block0(v0: i8):
+    return_call @k_negate(v0)
+}
+
+func @k_negate(i8 sext) -> i8 sext cc(c) {
+block0(v0: i8):
+    v1 = ineg v0
+    return v1
+}

@@ -270,3 +270,50 @@ fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) 
     let out = run_with_timeout(lldb.arg(&exe_path)).unwrap();
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
+
+/// Valid IR the aarch64 backend refuses, with the reason it gives.
+#[test]
+fn rejected() {
+    let cases = [
+        (
+            "decl @f(i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64
+             func @g(i64) -> i64 cc(c) {
+             block0(v0: i64):
+                 return_call @f(v0, v0, v0, v0, v0, v0, v0, v0, v0)
+             }",
+            "needs stack or struct arguments, which tail calls do not support",
+        ),
+        (
+            "decl @f(ptr sret {i64, i64})
+             func @g(ptr sret {i64, i64}) cc(c) {
+             block0(v0: ptr):
+                 return_call @f(v0)
+             }",
+            "needs stack or struct arguments",
+        ),
+        (
+            "decl @f()
+             func @g(ptr sret {i64}) cc(c) {
+             block0(v0: ptr):
+                 return_call @f()
+             }",
+            "a function returning a struct cannot make tail calls",
+        ),
+        (
+            "func @g(i128) -> i128 cc(c) {
+             block0(v0: i128):
+                 v1, v2 = umul_overflow v0, v0
+                 return v1
+             }",
+            "umul_overflow on i128 is not supported yet",
+        ),
+    ];
+    for (src, want) in cases {
+        let module = keel_ir::parse(src).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let err = keel_codegen::aarch64::compile(&module)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(want), "expected `{want}`, got `{err}`");
+    }
+}

@@ -1,0 +1,10 @@
+decl @g(i64) -> i64
+
+func @f(i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: ptr):
+    brif v0, block1, block2
+block1:
+    return_call @g(v0)
+block2:
+    return_call_indirect v1(v0) : (i64) -> i64 cc(c)
+}

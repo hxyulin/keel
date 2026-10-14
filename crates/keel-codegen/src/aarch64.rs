@@ -307,6 +307,39 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
 
+        // A tail call's arguments must all go in registers: the caller's
+        // frame, where stack arguments would go, is gone by the jump.
+        for (_, inst) in func.layout_insts() {
+            let (args, sig) = match func.inst_data(inst) {
+                InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
+                InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
+                _ => continue,
+            };
+            let kinds = arg_kinds(func, &sig.params, args);
+            let (locs, stack) = abi::arg_locs(&kinds, sig.params.len());
+            let in_regs = locs
+                .iter()
+                .all(|loc| matches!(loc, ArgLoc::Value(Slot::Reg(_))));
+            if stack > 0 || !in_regs {
+                return Err(err(format!(
+                    "`{}` needs stack or struct arguments, which tail calls do not support",
+                    func.display_inst(inst)
+                )));
+            }
+            // An sret result may have to be loaded into registers on return,
+            // which the callee would not do.
+            if func
+                .sig
+                .params
+                .iter()
+                .any(|p| matches!(p.purpose, Purpose::Sret(_)))
+            {
+                return Err(err(
+                    "a function returning a struct cannot make tail calls".into()
+                ));
+            }
+        }
+
         // The bottom of the frame holds what calls need: their stack
         // arguments, copies of big structs passed by value, and a slot for
         // an `sret` address.
@@ -613,6 +646,23 @@ impl<'a> FunctionCompiler<'a> {
                 let sret = self.move_args(&args, &decl.sig.params);
                 self.emit(format!("bl\t_{}", decl.name));
                 self.call_result(result, sret);
+            }
+            // Arguments into registers, then this function's epilogue, then
+            // a jump: the callee returns straight to our caller.
+            InstData::ReturnCall { func: callee, args } => {
+                let decl = func.callee(callee);
+                self.move_args(&args, &decl.sig.params);
+                self.epilogue();
+                self.emit(format!("b\t_{}", decl.name));
+            }
+            InstData::ReturnCallIndirect { sig, callee, args } => {
+                self.move_args(&args, &func.signature(sig).params);
+                // The epilogue restores callee-saved registers, which may
+                // hold the target, so it moves to x16 first.
+                let target = self.use_reg(callee, S0);
+                self.emit(format!("mov\tx{S0}, x{target}"));
+                self.epilogue();
+                self.emit(format!("br\tx{S0}"));
             }
             InstData::CallIndirect { sig, callee, args } => {
                 let sret = self.move_args(&args, &func.signature(sig).params);

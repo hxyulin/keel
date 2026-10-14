@@ -147,6 +147,19 @@ pub enum InstData {
     Return {
         args: Vec<Value>,
     },
+    /// Calls a function and returns what it returns, in place of this
+    /// function's frame: a guaranteed tail call. Its signature returns what
+    /// this function's does.
+    ReturnCall {
+        func: FuncRef,
+        args: Vec<Value>,
+    },
+    /// [`InstData::ReturnCall`] through a pointer.
+    ReturnCallIndirect {
+        sig: SigRef,
+        callee: Value,
+        args: Vec<Value>,
+    },
     /// Stops the program. A terminator, since nothing after it runs.
     Trap,
 }
@@ -410,7 +423,9 @@ impl InstData {
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Switch { .. }
-            | InstData::Return { .. } => true,
+            | InstData::Return { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. } => true,
         }
     }
 
@@ -421,6 +436,8 @@ impl InstData {
                 | InstData::Brif { .. }
                 | InstData::Switch { .. }
                 | InstData::Return { .. }
+                | InstData::ReturnCall { .. }
+                | InstData::ReturnCallIndirect { .. }
                 | InstData::Trap
         )
     }
@@ -463,7 +480,8 @@ impl InstData {
                 f(*value);
                 f(*addr);
             }
-            InstData::CallIndirect { callee, args, .. } => {
+            InstData::CallIndirect { callee, args, .. }
+            | InstData::ReturnCallIndirect { callee, args, .. } => {
                 f(*callee);
                 args.iter().copied().for_each(f);
             }
@@ -487,6 +505,7 @@ impl InstData {
             }
             InstData::Return { args }
             | InstData::Call { args, .. }
+            | InstData::ReturnCall { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter().copied().for_each(f),
         }
     }
@@ -510,7 +529,8 @@ impl InstData {
                 f(value);
                 f(addr);
             }
-            InstData::CallIndirect { callee, args, .. } => {
+            InstData::CallIndirect { callee, args, .. }
+            | InstData::ReturnCallIndirect { callee, args, .. } => {
                 f(callee);
                 args.iter_mut().for_each(f);
             }
@@ -534,6 +554,7 @@ impl InstData {
             }
             InstData::Return { args }
             | InstData::Call { args, .. }
+            | InstData::ReturnCall { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter_mut().for_each(f),
         }
     }

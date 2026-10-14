@@ -190,6 +190,16 @@ resumed by a debugger, so it is an intrinsic.
   pointer. The signature is written at the call, because a pointer has no
   type; functions keep these in a table without duplicates (`SigRef`), so
   instructions stay small and hashable.
+- **Tail calls** are guaranteed, not an optimization hint: `return_call
+  @f(v0)` and `return_call_indirect v1(v0) : sig` are terminators that
+  call and return the callee's results, replacing the caller's frame, so
+  recursion through them runs in constant stack (functional languages,
+  state machines, interpreters). The callee must return exactly what the
+  caller returns, extensions included, and arguments must not point into
+  the caller's frame, which is gone. On aarch64 the arguments go into
+  registers, then the epilogue runs and `b`/`br` jumps; arguments that
+  would go on the stack, structs, and callers returning a struct are
+  rejected for now.
 
 ## Data
 

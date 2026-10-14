@@ -338,6 +338,25 @@ impl Verifier<'_> {
         }
     }
 
+    /// A tail call returns the callee's results as this function's, so
+    /// they must be the same, extensions included.
+    fn check_tail_returns(&mut self, inst: Inst, callee: &Signature) {
+        if callee.returns != self.func.sig.returns {
+            let list = |sig: &Signature| {
+                let returns: Vec<String> = sig.returns.iter().map(|r| r.to_string()).collect();
+                returns.join(", ")
+            };
+            self.inst_error(
+                inst,
+                format!(
+                    "a tail call to a function returning ({}) from one returning ({})",
+                    list(callee),
+                    list(&self.func.sig)
+                ),
+            );
+        }
+    }
+
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
@@ -621,6 +640,46 @@ impl Verifier<'_> {
                         format!("brif condition must be an integer, got {}", ty(*cond)),
                     );
                 }
+            }
+            InstData::ReturnCall { func: callee, args } => {
+                let decl = func.callee(*callee);
+                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
+                if !args_match(&decl.sig, &got) {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "@{} takes ({}), got ({})",
+                            decl.name,
+                            param_list(&decl.sig),
+                            type_list(&got)
+                        ),
+                    );
+                }
+                self.check_tail_returns(inst, &decl.sig);
+            }
+            InstData::ReturnCallIndirect { sig, callee, args } => {
+                let sig = func.signature(*sig);
+                if ty(*callee) != Type::Ptr {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "return_call_indirect callee must be ptr, got {}",
+                            ty(*callee)
+                        ),
+                    );
+                }
+                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
+                if !args_match(sig, &got) {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "the signature takes ({}), got ({})",
+                            param_list(sig),
+                            type_list(&got)
+                        ),
+                    );
+                }
+                self.check_tail_returns(inst, sig);
             }
             InstData::Return { args } => {
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
