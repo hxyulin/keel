@@ -1,0 +1,13 @@
+verifier errors:
+  @f inst0 `v1 = invoke @may_throw(v0), block1(v0), block2`: invoke destinations take no arguments
+  @f inst0 `v1 = invoke @may_throw(v0), block1(v0), block2`: invoke in a function without a personality
+  @f inst1 `v3 = invoke @may_throw(v2), block3, block1(v2)`: invoke destinations take no arguments
+  @f inst1 `v3 = invoke @may_throw(v2), block3, block1(v2)`: unwind destination block1 does not start with landingpad
+  @f inst1 `v3 = invoke @may_throw(v2), block3, block1(v2)`: invoke in a function without a personality
+  @f inst2 `v4, v5 = landingpad cleanup, catch null`: block3 branches to a landing pad other than by unwinding
+  @f inst2 `v4, v5 = landingpad cleanup, catch null`: cleanup must be the last clause
+  @f inst3 `return v1`: use of v1 is not dominated by its definition
+  @f inst4 `v6 = eh_typeid @_ZTIl`: @_ZTIl is not caught by any landing pad in this function
+  @f inst5 `v7, v8 = landingpad catch @_ZTIi`: landingpad must be the first instruction of its block
+  @f inst5 `v7, v8 = landingpad catch @_ZTIi`: block1 branches to a landing pad other than by unwinding
+  @g: personality @undeclared is not a declared function

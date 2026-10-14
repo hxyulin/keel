@@ -1,0 +1,24 @@
+decl @may_throw(i32) -> i32
+decl data @_ZTIi
+decl data @_ZTIl
+
+; No personality; destinations with arguments; an unwind destination
+; without a landing pad; an invoke result used in the landing pad.
+func @f(i32) -> i32 cc(c) {
+block0(v0: i32):
+    v1 = invoke @may_throw(v0), block1(v0), block2
+block1(v2: i32):
+    v3 = invoke @may_throw(v2), block3, block1(v2)
+block2:
+    v4, v5 = landingpad cleanup, catch null
+    return v1
+block3:
+    v6 = eh_typeid @_ZTIl
+    v7, v8 = landingpad catch @_ZTIi
+    jump block2
+}
+
+func @g() cc(c) personality @undeclared {
+block0:
+    return
+}

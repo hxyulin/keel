@@ -1,0 +1,21 @@
+; passes: simplify-cfg, gcm
+; block1 only forwards to block3 with an argument, but an invoke's
+; destinations take none, so the invoke is not pointed at block3; block3
+; is merged into block1 instead. GCM sinks v4 and v5 into the landing
+; pad, after its landingpad.
+decl @may_throw(i32) -> i32
+decl @__gxx_personality_v0()
+
+func @f(i32) -> i32 personality @__gxx_personality_v0 {
+block0(v0: i32):
+    v4 = iconst.i32 9
+    v5 = iadd v0, v4
+    v1 = invoke @may_throw(v0), block1, block2
+block1:
+    jump block3(v1)
+block2:
+    v2, v3 = landingpad cleanup
+    return v5
+block3(v6: i32):
+    return v6
+}

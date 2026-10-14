@@ -10,7 +10,7 @@
 //! the middle of a block is linear in its size; fine for now, and the
 //! methods hide the representation if it needs to change.
 
-use crate::inst::{BlockCall, InstData, Symbol};
+use crate::inst::{BlockCall, Clause, InstData, Symbol};
 use crate::layout::Layout;
 use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value};
 use std::fmt;
@@ -241,6 +241,10 @@ pub struct Function {
     signatures: Arena<SigRef, Signature>,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
+    /// The function that interprets this function's landing pads while
+    /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
+    /// for `invoke`.
+    pub personality: Option<String>,
 }
 
 impl Function {
@@ -256,6 +260,7 @@ impl Function {
             data_symbols: Arena::new(),
             signatures: Arena::new(),
             layout: Vec::new(),
+            personality: None,
         }
     }
 
@@ -368,7 +373,11 @@ impl Function {
             InstData::Overflow { args, .. } => vec![self.value_type(args[0]), Type::I8],
             InstData::Fma { args } => vec![self.value_type(args[0])],
             InstData::Icmp { .. } | InstData::Fcmp { .. } => vec![Type::I8],
-            InstData::Call { func, .. } => self.callees[*func].sig.return_types(),
+            InstData::Call { func, .. } | InstData::Invoke { func, .. } => {
+                self.callees[*func].sig.return_types()
+            }
+            InstData::LandingPad { .. } => vec![Type::Ptr, Type::I32],
+            InstData::EhTypeid { .. } => vec![Type::I32],
             InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
             InstData::Store { .. }
@@ -604,7 +613,11 @@ impl Function {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "func @{}{} {{", self.name, self.sig)?;
+        write!(f, "func @{}{}", self.name, self.sig)?;
+        if let Some(personality) = &self.personality {
+            write!(f, " personality @{personality}")?;
+        }
+        f.write_str(" {\n")?;
         for (ss, data) in self.stack_slots() {
             writeln!(
                 f,
@@ -673,6 +686,31 @@ impl Function {
             }
             InstData::SymbolAddr { symbol } => {
                 write!(f, "symbol_addr @{}", self.symbol_name(*symbol))
+            }
+            InstData::Invoke { func, args, dests } => {
+                write!(f, "invoke @{}(", self.callees[*func].name)?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                f.write_str("), ")?;
+                self.write_block_call(f, &dests[0])?;
+                f.write_str(", ")?;
+                self.write_block_call(f, &dests[1])
+            }
+            InstData::LandingPad { clauses } => {
+                f.write_str("landingpad")?;
+                for (i, clause) in clauses.iter().enumerate() {
+                    f.write_str(if i == 0 { " " } else { ", " })?;
+                    match clause {
+                        Clause::Catch(Some(typeinfo)) => {
+                            write!(f, "catch @{}", self.data_symbols[*typeinfo])?
+                        }
+                        Clause::Catch(None) => f.write_str("catch null")?,
+                        Clause::Cleanup => f.write_str("cleanup")?,
+                    }
+                }
+                Ok(())
+            }
+            InstData::EhTypeid { typeinfo } => {
+                write!(f, "eh_typeid @{}", self.data_symbols[*typeinfo])
             }
             InstData::ReturnCall { func, args } => {
                 write!(f, "return_call @{}(", self.callees[*func].name)?;

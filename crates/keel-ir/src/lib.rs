@@ -23,8 +23,8 @@ pub use function::{
     StackSlotData, ValueData, ValueDef,
 };
 pub use inst::{
-    BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, Ordering, OverflowOp, RmwOp, Symbol,
-    UnaryOp,
+    BinaryOp, BlockCall, Clause, ConvertOp, FloatCC, InstData, IntCC, Ordering, OverflowOp, RmwOp,
+    Symbol, UnaryOp,
 };
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use layout::Layout;

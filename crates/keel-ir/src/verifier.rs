@@ -8,7 +8,7 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
+    ArgExt, BinaryOp, BlockCall, Clause, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
     Ordering, Purpose, RmwOp, Signature, Type, UnaryOp, Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
@@ -73,6 +73,14 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for func in &module.functions {
+        if let Some(personality) = &func.personality
+            && module.signature(personality).is_none()
+        {
+            errors.push(VerifierError {
+                location: format!("@{}", func.name),
+                message: format!("personality @{personality} is not a declared function"),
+            });
+        }
         for (_, inst) in func.layout_insts() {
             if let Some(loc) = func.inst_loc(inst)
                 && loc.file.index() >= module.files.len()
@@ -641,6 +649,92 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::Invoke {
+                func: callee,
+                args,
+                dests,
+            } => {
+                let decl = func.callee(*callee);
+                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
+                if !args_match(&decl.sig, &got) {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "@{} takes ({}), got ({})",
+                            decl.name,
+                            param_list(&decl.sig),
+                            type_list(&got)
+                        ),
+                    );
+                }
+                // Arguments would be copied after the call returns, so
+                // the call could clobber them.
+                if dests.iter().any(|d| !d.args.is_empty()) {
+                    self.inst_error(inst, "invoke destinations take no arguments".into());
+                }
+                if dests[0].block == dests[1].block {
+                    self.inst_error(
+                        inst,
+                        "invoke needs different normal and unwind destinations".into(),
+                    );
+                }
+                let pad = func.block_insts(dests[1].block).first();
+                if !pad.is_some_and(|&p| matches!(func.inst_data(p), InstData::LandingPad { .. })) {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "unwind destination {} does not start with landingpad",
+                            dests[1].block
+                        ),
+                    );
+                }
+                if func.personality.is_none() {
+                    self.inst_error(inst, "invoke in a function without a personality".into());
+                }
+            }
+            InstData::LandingPad { clauses } => {
+                let block = func.inst_block(inst);
+                if func.block_insts(block).first() != Some(&inst) {
+                    self.inst_error(
+                        inst,
+                        "landingpad must be the first instruction of its block".into(),
+                    );
+                }
+                // Only unwind edges lead here: the exception arrives in
+                // registers that nothing else sets.
+                for pred in self.cfg.preds(block).to_vec() {
+                    let term = *func.block_insts(pred).last().expect("a terminator");
+                    let unwind = matches!(func.inst_data(term), InstData::Invoke { dests, .. } if dests[1].block == block && dests[0].block != block);
+                    if !unwind {
+                        self.inst_error(
+                            inst,
+                            format!("{pred} branches to a landing pad other than by unwinding"),
+                        );
+                    }
+                }
+                if let Some(i) = clauses.iter().position(|c| *c == Clause::Cleanup)
+                    && i + 1 != clauses.len()
+                {
+                    self.inst_error(inst, "cleanup must be the last clause".into());
+                }
+            }
+            InstData::EhTypeid { typeinfo } => {
+                let caught = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
+                    InstData::LandingPad { clauses } => {
+                        clauses.contains(&Clause::Catch(Some(*typeinfo)))
+                    }
+                    _ => false,
+                });
+                if !caught {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "@{} is not caught by any landing pad in this function",
+                            func.symbol_name(crate::Symbol::Data(*typeinfo))
+                        ),
+                    );
+                }
+            }
             InstData::ReturnCall { func: callee, args } => {
                 let decl = func.callee(*callee);
                 let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
@@ -736,6 +830,13 @@ impl Verifier<'_> {
         let use_block = func.inst_block(inst);
         let ok = match func.value_def(value) {
             ValueDef::Param(def_block, _) => self.domtree.dominates(def_block, use_block),
+            // An invoke's results exist only once it returns normally.
+            ValueDef::Result(def_inst, _)
+                if let InstData::Invoke { dests, .. } = func.inst_data(def_inst) =>
+            {
+                self.domtree.dominates(dests[0].block, use_block)
+                    && func.inst_block(def_inst) != use_block
+            }
             ValueDef::Result(def_inst, _) => {
                 let def_block = func.inst_block(def_inst);
                 if def_block == use_block {

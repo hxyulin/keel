@@ -99,9 +99,10 @@ use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
-    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
-    DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module,
-    Ordering, OverflowOp, Purpose, RmwOp, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
+    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
+    DataObject, DataRef, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout,
+    Module, Ordering, OverflowOp, Purpose, RmwOp, Signature, SourceFile, SourceLoc, Type, UnaryOp,
+    Value,
 };
 use std::fmt::Write;
 
@@ -174,7 +175,7 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
 /// compiler-rt.
 fn is_call(func: &Function, data: &InstData) -> bool {
     match data {
-        InstData::Call { .. } | InstData::CallIndirect { .. } => true,
+        InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => true,
         InstData::Binary { op, args } => {
             op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
         }
@@ -234,6 +235,8 @@ struct FunctionCompiler<'a> {
     next_block: Option<Block>,
     out: String,
     uses_trap: bool,
+    /// Exception handling, for a function with a personality.
+    eh: ExceptionTable,
     /// Whether to emit `.loc` directives.
     debug: bool,
     /// The location of the last `.loc`.
@@ -306,6 +309,8 @@ impl<'a> FunctionCompiler<'a> {
                 return Err(err(format!("{op} on i128 is not supported yet")));
             }
         }
+
+        let eh = ExceptionTable::new(func).map_err(err)?;
 
         // A tail call's arguments must all go in registers: the caller's
         // frame, where stack arguments would go, is gone by the jump.
@@ -444,6 +449,7 @@ impl<'a> FunctionCompiler<'a> {
             next_block: None,
             out: String::new(),
             uses_trap: false,
+            eh,
             debug: false,
             srcloc: None,
             prologue_end: false,
@@ -470,6 +476,12 @@ impl<'a> FunctionCompiler<'a> {
             self.prologue_end = true;
         }
         self.emit(".cfi_startproc");
+        // 155 is an indirect, pc-relative 4-byte pointer (through the GOT,
+        // as the personality may be in a dylib), 16 a pc-relative one.
+        if let Some(personality) = &func.personality {
+            self.emit(format!(".cfi_personality 155, _{personality}"));
+            self.emit(format!(".cfi_lsda 16, L{name}_lsda"));
+        }
         self.emit("stp\tx29, x30, [sp, #-16]!");
         self.emit("mov\tx29, sp");
         self.emit(".cfi_def_cfa x29, 16");
@@ -575,6 +587,9 @@ impl<'a> FunctionCompiler<'a> {
         }
         writeln!(self.out, "L{name}_end:").unwrap();
         self.emit(".cfi_endproc");
+        if func.personality.is_some() {
+            self.eh.emit(&mut self.out, name);
+        }
         out.push_str(&self.out);
     }
 
@@ -646,6 +661,42 @@ impl<'a> FunctionCompiler<'a> {
                 let sret = self.move_args(&args, &decl.sig.params);
                 self.emit(format!("bl\t_{}", decl.name));
                 self.call_result(result, sret);
+            }
+            // Only the call itself can throw, so the call-site entry
+            // covers just the `bl`.
+            InstData::Invoke {
+                func: callee,
+                args,
+                dests,
+            } => {
+                let decl = func.callee(callee);
+                let sret = self.move_args(&args, &decl.sig.params);
+                let site = format!("L{}_{inst}", func.name);
+                writeln!(self.out, "{site}_begin:").unwrap();
+                self.emit(format!("bl\t_{}", decl.name));
+                writeln!(self.out, "{site}_end:").unwrap();
+                let pad = self.label(dests[1].block);
+                self.eh.sites.push((site, pad, dests[1].block));
+                self.call_result(result, sret);
+                self.branch_unless_next(dests[0].block);
+            }
+            // The unwinder enters with the exception in x0 and the selector
+            // in x1, and the callee-saved registers restored.
+            InstData::LandingPad { .. } => {
+                let results = func.inst_results(inst);
+                let (exception, selector) = (results[0], results[1]);
+                if let Some(loc) = self.alloc.loc(exception) {
+                    self.emit_move(loc, Loc::Reg(0));
+                }
+                if let Some(loc) = self.alloc.loc(selector) {
+                    self.emit_move(loc, Loc::Reg(1));
+                }
+            }
+            InstData::EhTypeid { typeinfo } => {
+                let d = self.def_reg(result);
+                let index = self.eh.type_index(Some(typeinfo));
+                self.materialize(d, index, false);
+                self.def_done(result, d);
             }
             // Arguments into registers, then this function's epilogue, then
             // a jump: the callee returns straight to our caller.
@@ -2367,6 +2418,165 @@ impl<'a> FunctionCompiler<'a> {
 
     fn emit(&mut self, line: impl AsRef<str>) {
         writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    }
+}
+
+/// A function's language-specific data area (LSDA), the table its
+/// personality reads while unwinding, in the format of GCC's
+/// `__gcc_except_tab`:
+///
+/// - a **call-site table**: for every range of code that can throw, the
+///   landing pad to enter and the first action. It must cover every call,
+///   so the gaps between invokes are listed with no landing pad, meaning
+///   "keep unwinding" (a call missing from the table terminates).
+/// - an **action table**: per landing pad, a chain of records (filter,
+///   offset to the next). A filter `n > 0` catches the type in entry `n`
+///   of the type table, and 0 is a cleanup. The personality enters the
+///   pad with the first matching filter as the selector.
+/// - a **type table** of typeinfo pointers, indexed backwards from its
+///   end; a null entry catches everything.
+struct ExceptionTable {
+    /// Typeinfos in the type table, in order of first appearance; `None`
+    /// catches any exception.
+    types: Vec<Option<DataRef>>,
+    /// Typeinfo names, for the type table.
+    type_names: Vec<String>,
+    /// The action table, as single-byte filter and next fields.
+    actions: Vec<i8>,
+    /// Each landing pad's first action, 1-based (0: cleanup only).
+    pad_actions: Vec<(Block, u32)>,
+    /// Each invoke's call: its label prefix, its landing pad's label and
+    /// block, in code order.
+    sites: Vec<(String, String, Block)>,
+}
+
+impl ExceptionTable {
+    fn new(func: &Function) -> Result<Self, String> {
+        let mut table = ExceptionTable {
+            types: Vec::new(),
+            type_names: Vec::new(),
+            actions: Vec::new(),
+            pad_actions: Vec::new(),
+            sites: Vec::new(),
+        };
+        for (block, inst) in func.layout_insts() {
+            let InstData::LandingPad { clauses } = func.inst_data(inst) else {
+                continue;
+            };
+            if clauses == &[Clause::Cleanup] {
+                table.pad_actions.push((block, 0));
+                continue;
+            }
+            table
+                .pad_actions
+                .push((block, table.actions.len() as u32 + 1));
+            for (i, clause) in clauses.iter().enumerate() {
+                let filter = match *clause {
+                    Clause::Catch(typeinfo) => {
+                        if !table.types.contains(&typeinfo) {
+                            table.types.push(typeinfo);
+                            let name = typeinfo.map_or(String::new(), |t| {
+                                func.symbol_name(keel_ir::Symbol::Data(t)).to_string()
+                            });
+                            table.type_names.push(name);
+                        }
+                        table.type_index(typeinfo)
+                    }
+                    Clause::Cleanup => 0,
+                };
+                // Both fields are SLEB128, one byte while they are below
+                // 64; the next record follows directly, one byte on.
+                if filter >= 64 {
+                    return Err("more than 63 caught types in one function".into());
+                }
+                table.actions.push(filter as i8);
+                table
+                    .actions
+                    .push(if i + 1 < clauses.len() { 1 } else { 0 });
+            }
+        }
+        Ok(table)
+    }
+
+    /// The selector for `typeinfo`: its 1-based type table index.
+    fn type_index(&self, typeinfo: Option<DataRef>) -> u64 {
+        let i = self.types.iter().position(|&t| t == typeinfo);
+        i.expect("a caught type") as u64 + 1
+    }
+
+    /// Emits the LSDA after the function `name`, and returns to `__text`.
+    fn emit(&self, out: &mut String, name: &str) {
+        let l = |what: &str| format!("L{name}_{what}");
+        let begin = l("begin");
+        out.push_str("\t.section\t__TEXT,__gcc_except_tab\n\t.p2align\t2\n");
+        // A non-temporary label (no `L`) starts a new atom: with
+        // `.subsections_via_symbols` the linker splits sections at symbols,
+        // and without one every function's LSDA would resolve to the start
+        // of a single atom holding them all.
+        writeln!(out, "GCC_except_table_{name}:\n{}:", l("lsda")).unwrap();
+        // No landing pad base: offsets are from the function's start.
+        out.push_str("\t.byte\t255\n");
+        if self.types.is_empty() {
+            out.push_str("\t.byte\t255\n");
+        } else {
+            // Type table entries: indirect, pc-relative 4-byte pointers.
+            writeln!(
+                out,
+                "\t.byte\t155\n\t.uleb128\t{}-{}",
+                l("ttbase"),
+                l("ttref")
+            )
+            .unwrap();
+            writeln!(out, "{}:", l("ttref")).unwrap();
+        }
+        // Call-site fields are ULEB128.
+        writeln!(
+            out,
+            "\t.byte\t1\n\t.uleb128\t{}-{}",
+            l("cst_end"),
+            l("cst_begin")
+        )
+        .unwrap();
+        writeln!(out, "{}:", l("cst_begin")).unwrap();
+        let entry = |out: &mut String, from: &str, to: &str, pad: Option<(&str, u32)>| {
+            writeln!(out, "\t.uleb128\t{from}-{begin}\n\t.uleb128\t{to}-{from}").unwrap();
+            match pad {
+                Some((pad, action)) => {
+                    writeln!(out, "\t.uleb128\t{pad}-{begin}\n\t.uleb128\t{action}").unwrap()
+                }
+                None => out.push_str("\t.byte\t0\n\t.byte\t0\n"),
+            }
+        };
+        let mut covered = begin.clone();
+        for (site, pad, block) in &self.sites {
+            let (from, to) = (format!("{site}_begin"), format!("{site}_end"));
+            entry(out, &covered, &from, None);
+            let action = self
+                .pad_actions
+                .iter()
+                .find(|(b, _)| b == block)
+                .map_or(0, |&(_, a)| a);
+            entry(out, &from, &to, Some((pad, action)));
+            covered = to;
+        }
+        entry(out, &covered, &l("end"), None);
+        writeln!(out, "{}:", l("cst_end")).unwrap();
+        for &byte in &self.actions {
+            writeln!(out, "\t.byte\t{}", byte as u8).unwrap();
+        }
+        if !self.types.is_empty() {
+            out.push_str("\t.p2align\t2\n");
+            for (i, name) in self.type_names.iter().enumerate().rev() {
+                if name.is_empty() {
+                    out.push_str("\t.long\t0\n");
+                } else {
+                    let here = l(&format!("tt{i}"));
+                    writeln!(out, "{here}:\n\t.long\t_{name}@GOT-{here}").unwrap();
+                }
+            }
+            writeln!(out, "{}:", l("ttbase")).unwrap();
+        }
+        out.push_str("\t.section\t__TEXT,__text,regular,pure_instructions\n");
     }
 }
 

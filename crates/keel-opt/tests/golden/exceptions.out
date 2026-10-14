@@ -1,0 +1,14 @@
+decl @may_throw(i32) -> i32 cc(c)
+decl @__gxx_personality_v0() cc(c)
+
+func @f(i32) -> i32 cc(c) personality @__gxx_personality_v0 {
+block0(v0: i32):
+    v3 = invoke @may_throw(v0), block1, block2
+block1:
+    return v3
+block2:
+    v4, v5 = landingpad cleanup
+    v1 = iconst.i32 9
+    v2 = iadd v0, v1
+    return v2
+}

@@ -18,7 +18,7 @@
 //!    parameters and results, in text order), infer result types, and build.
 
 use crate::{
-    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
+    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
     Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose, RmwOp, SigRef, Signature, SourceFile,
     SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
@@ -411,6 +411,7 @@ struct ParsedInst {
 struct ParsedFunction {
     name: String,
     sig: Signature,
+    personality: Option<String>,
     slots: Vec<StackSlotData>,
     blocks: Vec<ParsedBlock>,
     names: Names,
@@ -693,6 +694,11 @@ impl Parser {
     fn function(&mut self) -> Result<ParsedFunction, ParseError> {
         let name = self.global("a function name like `@main`")?;
         let sig = self.signature()?;
+        let personality = if self.eat(&Tok::Ident("personality".into())) {
+            Some(self.global("a personality function like `@__gxx_personality_v0`")?)
+        } else {
+            None
+        };
         self.expect(Tok::Punct('{'))?;
         self.expect(Tok::Newline)?;
 
@@ -715,6 +721,7 @@ impl Parser {
         Ok(ParsedFunction {
             name,
             sig,
+            personality,
             slots,
             blocks,
             names,
@@ -1012,6 +1019,65 @@ impl Parser {
                         InstData::ReturnCall { func, args }
                     }
                 }
+                "invoke" => {
+                    no_suffix()?;
+                    let (name, loc) = match self.next() {
+                        (Tok::Global(name), loc) => (name, loc),
+                        _ => {
+                            self.pos -= 1;
+                            return Err(self.unexpected("a function name like `@may_throw`"));
+                        }
+                    };
+                    let func = names.callee(&name, loc);
+                    let args = self.arg_list(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let normal = self.block_call(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let unwind = self.block_call(names)?;
+                    InstData::Invoke {
+                        func,
+                        args,
+                        dests: [normal, unwind],
+                    }
+                }
+                "landingpad" => {
+                    no_suffix()?;
+                    let mut clauses = Vec::new();
+                    loop {
+                        let (kw, kw_loc) = self.ident("`catch` or `cleanup`")?;
+                        clauses.push(match kw.as_str() {
+                            "cleanup" => Clause::Cleanup,
+                            "catch" if self.eat(&Tok::Ident("null".into())) => Clause::Catch(None),
+                            "catch" => {
+                                let loc = self.loc();
+                                let name = self.global("a typeinfo like `@_ZTIi`, or `null`")?;
+                                let Symbol::Data(temp) = names.symbol(&name, loc) else {
+                                    unreachable!("the parser stores symbols as temporary DataRefs")
+                                };
+                                Clause::Catch(Some(temp))
+                            }
+                            _ => {
+                                return Err(error(
+                                    kw_loc,
+                                    format!("expected `catch` or `cleanup`, found `{kw}`"),
+                                ));
+                            }
+                        });
+                        if !self.eat(&Tok::Punct(',')) {
+                            break;
+                        }
+                    }
+                    InstData::LandingPad { clauses }
+                }
+                "eh_typeid" => {
+                    no_suffix()?;
+                    let loc = self.loc();
+                    let name = self.global("a typeinfo like `@_ZTIi`")?;
+                    let Symbol::Data(typeinfo) = names.symbol(&name, loc) else {
+                        unreachable!("the parser stores symbols as temporary DataRefs")
+                    };
+                    InstData::EhTypeid { typeinfo }
+                }
                 "return_call_indirect" => {
                     no_suffix()?;
                     let callee = self.value(names)?;
@@ -1246,7 +1312,8 @@ impl Parser {
         // A call's result count depends on the callee's signature, which is
         // checked when building; every other instruction has 0 or 1 results.
         let expected = match &data {
-            InstData::Call { .. } | InstData::CallIndirect { .. } => None,
+            InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => None,
+            InstData::LandingPad { .. } => Some(2),
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Overflow { .. } => Some(2),
             InstData::Store { .. }
@@ -1377,6 +1444,7 @@ fn build(
     let ParsedFunction {
         name,
         sig,
+        personality,
         slots,
         blocks,
         names,
@@ -1439,7 +1507,13 @@ fn build(
                 types[v.index()] = Some(ty);
             }
         }
-        if let InstData::Call { func, .. } = &inst.data {
+        if let InstData::LandingPad { .. } = &inst.data
+            && let [exception, selector] = inst.results[..]
+        {
+            types[exception.index()] = Some(Type::Ptr);
+            types[selector.index()] = Some(Type::I32);
+        }
+        if let InstData::Call { func, .. } | InstData::Invoke { func, .. } = &inst.data {
             let (callee, sig) = &callee_sigs[func.index()];
             if sig.returns.len() != inst.results.len() {
                 return Err(error(
@@ -1488,6 +1562,7 @@ fn build(
                 InstData::Binary { args, .. } => types[args[0].index()],
                 InstData::Select { args } => types[args[1].index()],
                 InstData::Fma { args } => types[args[0].index()],
+                InstData::EhTypeid { .. } => Some(Type::I32),
                 _ => None,
             };
             if ty.is_some() {
@@ -1501,6 +1576,7 @@ fn build(
     }
 
     let mut func = Function::new(name.clone(), sig.clone());
+    func.personality = personality.clone();
     // Slots and callees were numbered in declaration order, which is
     // creation order.
     for slot in slots {
@@ -1541,6 +1617,28 @@ fn build(
                     unreachable!("the parser stores symbols as temporary DataRefs")
                 };
                 *symbol = symbols[temp.index()];
+            }
+            // Typeinfos are data objects.
+            let typeinfo = |temp: DataRef| match symbols[temp.index()] {
+                Symbol::Data(data) => Ok(data),
+                Symbol::Func(_) => {
+                    let (name, loc) = &names.symbol_first_use[temp.index()];
+                    Err(error(
+                        *loc,
+                        format!("typeinfo `@{name}` must be data, not a function"),
+                    ))
+                }
+            };
+            match &mut data {
+                InstData::LandingPad { clauses } => {
+                    for clause in clauses {
+                        if let Clause::Catch(Some(temp)) = clause {
+                            *temp = typeinfo(*temp)?;
+                        }
+                    }
+                }
+                InstData::EhTypeid { typeinfo: temp } => *temp = typeinfo(*temp)?,
+                _ => {}
             }
             let result_tys = inst
                 .results

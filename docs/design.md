@@ -304,6 +304,38 @@ Apple arm64's C convention, as implemented:
 Limits: at most one return value (return structs through `sret`); at most
 4080 bytes of stack arguments per call.
 
+## Exceptions
+
+- Modeled on LLVM's landing pads, which is what the platform's unwinder
+  and C++'s personality expect. A function that catches names its
+  **personality** (`func @f() personality @__gxx_personality_v0 {`), the
+  routine that reads its tables while an exception unwinds.
+- `v1 = invoke @f(v0), block1, block2` is a call terminator: if `@f`
+  returns, control goes to `block1` with `v1` defined; if it throws, to
+  the landing pad `block2`. Results may only be used where `block1`
+  dominates. Neither destination takes arguments, since the copies would
+  happen after the call and the call clobbers caller-saved registers;
+  values reach the landing pad through dominance, in callee-saved
+  registers or spill slots, which the unwinder restores.
+- A landing pad block starts with `v2, v3 = landingpad catch @_ZTIi, catch
+  null, cleanup`, which gives the exception object and the selector, and
+  can only be reached by unwinding. The personality tries the clauses in
+  order: `catch @typeinfo` matches a type, `catch null` anything, and a
+  final `cleanup` lands anyway (selector 0) to run destructors.
+  `eh_typeid @_ZTIi` is the selector for a type, to compare against.
+- Rethrowing and resuming are ordinary calls (`__cxa_rethrow`,
+  `_Unwind_Resume`) followed by `trap`: no special instruction needed.
+- On aarch64 the call-site range covers just the `bl`. Each function with
+  a personality gets an LSDA in `__gcc_except_tab` (call sites, action
+  chains, a type table through the GOT) and `.cfi_personality`/`.cfi_lsda`.
+  Every call must be in the call-site table, so the gaps between invokes
+  get entries with no landing pad. Each LSDA starts with a non-temporary
+  label: with `.subsections_via_symbols`, the linker splits sections into
+  atoms at symbols, and without one it resolved every function's LSDA to
+  the same address.
+- Not yet: `invoke` through a pointer, filters (`throw()` specs), and more
+  than 63 caught types per function.
+
 ## Target
 
 - First and only target until everything works end to end: **aarch64-apple**

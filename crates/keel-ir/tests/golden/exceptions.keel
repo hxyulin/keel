@@ -1,0 +1,21 @@
+; Exception handling: a personality on the function, invoke with normal
+; and unwind destinations, landing pads with catch and cleanup clauses.
+decl @may_throw(i32) -> i32
+decl @__gxx_personality_v0()
+decl data @_ZTIi
+
+func @f(i32) -> i32 cc(c) personality @__gxx_personality_v0 {
+block0(v0: i32):
+    v1 = invoke @may_throw(v0), block1, block2
+block1:
+    return v1
+block2:
+    v2, v3 = landingpad catch @_ZTIi, catch null, cleanup
+    v4 = eh_typeid @_ZTIi
+    v5 = icmp.eq v3, v4
+    brif v5, block3, block4
+block3:
+    return v4
+block4:
+    trap
+}

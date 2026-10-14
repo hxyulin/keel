@@ -99,7 +99,11 @@ fn skip_forwarding_blocks(func: &mut Function) -> bool {
             if dest == block {
                 continue;
             }
-            if let Some(target) = forwarding_target(func, dest) {
+            // An invoke's destinations take no arguments.
+            let invoke = matches!(func.inst_data(term), InstData::Invoke { .. });
+            if let Some(target) = forwarding_target(func, dest)
+                && !(invoke && !target.args.is_empty())
+            {
                 func.inst_data_mut(term).branch_dests_mut()[i] = target;
                 changed = true;
             }

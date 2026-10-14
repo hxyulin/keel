@@ -154,6 +154,26 @@ pub enum InstData {
         func: FuncRef,
         args: Vec<Value>,
     },
+    /// Calls a function that may throw: on return, continues to `dests[0]`
+    /// with the results defined; on an exception, to the landing pad
+    /// `dests[1]`. Neither destination takes arguments. Needs a function
+    /// with a personality.
+    Invoke {
+        func: FuncRef,
+        args: Vec<Value>,
+        dests: [BlockCall; 2],
+    },
+    /// The first instruction of a block an `invoke` unwinds to: gives the
+    /// exception object (`ptr`) and the selector (`i32`), which says which
+    /// clause matched: a catch clause's `eh_typeid`, or 0 for `cleanup`.
+    LandingPad {
+        clauses: Vec<Clause>,
+    },
+    /// The selector a landing pad gives when `typeinfo`'s catch clause
+    /// matches.
+    EhTypeid {
+        typeinfo: DataRef,
+    },
     /// [`InstData::ReturnCall`] through a pointer.
     ReturnCallIndirect {
         sig: SigRef,
@@ -238,6 +258,17 @@ pub enum BinaryOp {
     Fmax,
     /// The magnitude of `args[0]` with the sign of `args[1]`.
     Fcopysign,
+}
+
+/// A landing pad clause: what kind of exception it lands for. The
+/// personality tries them in order.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Clause {
+    /// Exceptions matching a type, by its typeinfo object; `None` matches
+    /// any exception.
+    Catch(Option<DataRef>),
+    /// Any exception, to run cleanups and resume unwinding. Only last.
+    Cleanup,
 }
 
 /// The memory ordering of an atomic operation, as in C11.
@@ -408,6 +439,7 @@ impl InstData {
             | InstData::Icmp { .. }
             | InstData::Fcmp { .. }
             | InstData::StackAddr { .. }
+            | InstData::EhTypeid { .. }
             | InstData::SymbolAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
@@ -425,7 +457,9 @@ impl InstData {
             | InstData::Switch { .. }
             | InstData::Return { .. }
             | InstData::ReturnCall { .. }
-            | InstData::ReturnCallIndirect { .. } => true,
+            | InstData::ReturnCallIndirect { .. }
+            | InstData::Invoke { .. }
+            | InstData::LandingPad { .. } => true,
         }
     }
 
@@ -438,6 +472,7 @@ impl InstData {
                 | InstData::Return { .. }
                 | InstData::ReturnCall { .. }
                 | InstData::ReturnCallIndirect { .. }
+                | InstData::Invoke { .. }
                 | InstData::Trap
         )
     }
@@ -447,6 +482,7 @@ impl InstData {
             InstData::Jump { dest } => std::slice::from_ref(dest),
             InstData::Brif { dests, .. } => dests,
             InstData::Switch { dests, .. } => dests,
+            InstData::Invoke { dests, .. } => dests,
             _ => &[],
         }
     }
@@ -456,6 +492,7 @@ impl InstData {
             InstData::Jump { dest } => std::slice::from_mut(dest),
             InstData::Brif { dests, .. } => dests,
             InstData::Switch { dests, .. } => dests,
+            InstData::Invoke { dests, .. } => dests,
             _ => &mut [],
         }
     }
@@ -468,7 +505,13 @@ impl InstData {
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Fence { .. }
+            | InstData::LandingPad { .. }
+            | InstData::EhTypeid { .. }
             | InstData::Trap => {}
+            InstData::Invoke { args, dests, .. } => {
+                args.iter().copied().for_each(&mut f);
+                dests.iter().flat_map(|d| &d.args).copied().for_each(f);
+            }
             InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
             | InstData::AtomicRmw { args, .. }
@@ -517,7 +560,13 @@ impl InstData {
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
             | InstData::Fence { .. }
+            | InstData::LandingPad { .. }
+            | InstData::EhTypeid { .. }
             | InstData::Trap => {}
+            InstData::Invoke { args, dests, .. } => {
+                args.iter_mut().for_each(&mut f);
+                dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
+            }
             InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
             | InstData::AtomicRmw { args, .. }
