@@ -40,6 +40,7 @@
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::loops::LoopDepth;
 use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
+use std::collections::HashMap;
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -65,7 +66,9 @@ pub fn run(func: &mut Function) -> bool {
         for &inst in func.block_insts(block) {
             func.inst_data(inst).for_each_operand(|v| {
                 let users = &mut users[func.resolve(v).index()];
-                if !users.contains(&inst) {
+                // All operands of one instruction are visited together;
+                // repeated operands therefore only repeat the last user.
+                if users.last() != Some(&inst) {
                     users.push(inst);
                 }
             });
@@ -94,12 +97,16 @@ pub fn run(func: &mut Function) -> bool {
 
     // Late placement and the final choice, users first.
     let mut changed = false;
+    // Generation markers avoid allocating or clearing a membership set for
+    // every instruction. Each producer is its own unique generation.
+    let mut membership = vec![None; func.num_insts()];
     for &inst in floating.iter().rev() {
         // The users of all its results (`*_overflow` has two).
         let mut inst_users: Vec<Inst> = Vec::new();
         for &result in func.inst_results(inst) {
             for &user in &users[result.index()] {
-                if !inst_users.contains(&user) {
+                if membership[user.index()] != Some(inst) {
+                    membership[user.index()] = Some(inst);
                     inst_users.push(user);
                 }
             }
@@ -119,7 +126,7 @@ pub fn run(func: &mut Function) -> bool {
         let mut operands = 0;
         func.inst_data(inst).for_each_operand(|_| operands += 1);
         if operands == 0 {
-            changed |= rematerialize(func, inst, &inst_users);
+            changed |= rematerialize(func, inst, &inst_users, &membership);
             continue;
         }
 
@@ -139,7 +146,7 @@ pub fn run(func: &mut Function) -> bool {
         if best == func.inst_block(inst) {
             continue;
         }
-        let at = match first_user_in(func, best, &inst_users) {
+        let at = match first_user_in(func, best, inst, &membership) {
             Some(user) => InsertPoint::Before(user),
             None => InsertPoint::Before(*func.block_insts(best).last().unwrap()),
         };
@@ -174,37 +181,55 @@ fn fixed_address(func: &Function, value: Value) -> bool {
 /// Gives each block using operand-free `inst` its own copy, just before the
 /// first use in that block. `inst` itself serves its own block if it has
 /// users there, or else the first user block.
-fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst]) -> bool {
+fn rematerialize(
+    func: &mut Function,
+    inst: Inst,
+    users: &[Inst],
+    membership: &[Option<Inst>],
+) -> bool {
     let result = func.first_result(inst);
+    let home = func.inst_block(inst);
+    let first_block = func.inst_block(users[0]);
+    // A single user block needs no grouping or copies. This is the common
+    // case; preserve its existing position when that block is already home.
+    if users
+        .iter()
+        .all(|&user| func.inst_block(user) == first_block)
+    {
+        if first_block == home {
+            return false;
+        }
+        let first =
+            first_user_in(func, first_block, inst, membership).expect("a user in its block");
+        func.move_inst(inst, InsertPoint::Before(first));
+        return true;
+    }
     let mut blocks: Vec<Block> = Vec::new();
+    let mut local_users: HashMap<Block, Vec<Inst>> = HashMap::new();
     for &user in users {
         let b = func.inst_block(user);
-        if !blocks.contains(&b) {
+        let local = local_users.entry(b).or_default();
+        if local.is_empty() {
             blocks.push(b);
         }
+        local.push(user);
     }
-    let home = func.inst_block(inst);
     if let Some(i) = blocks.iter().position(|&b| b == home) {
         // Keep its place in its own block.
         blocks.remove(i);
     } else {
         let first = blocks.remove(0);
-        let user = first_user_in(func, first, users).expect("a user in its block");
+        let user = first_user_in(func, first, inst, membership).expect("a user in its block");
         func.move_inst(inst, InsertPoint::Before(user));
     }
     let changed = !blocks.is_empty() || func.inst_block(inst) != home;
     let data = func.inst_data(inst).clone();
     for block in blocks {
-        let first = first_user_in(func, block, users).expect("a user in its block");
+        let first = first_user_in(func, block, inst, membership).expect("a user in its block");
         let copy = func.insert_inst(InsertPoint::Before(first), data.clone());
         func.set_inst_loc(copy, func.inst_loc(inst));
         let copy = func.first_result(copy);
-        let local: Vec<Inst> = users
-            .iter()
-            .copied()
-            .filter(|&u| func.inst_block(u) == block)
-            .collect();
-        for user in local {
+        for &user in &local_users[&block] {
             let mut data = func.inst_data(user).clone();
             data.for_each_operand_mut(|v| {
                 if func.resolve(*v) == result {
@@ -218,9 +243,16 @@ fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst]) -> bool {
 }
 
 /// The first instruction in `block`, in layout order, among `users`.
-fn first_user_in(func: &Function, block: Block, users: &[Inst]) -> Option<Inst> {
+fn first_user_in(
+    func: &Function,
+    block: Block,
+    producer: Inst,
+    membership: &[Option<Inst>],
+) -> Option<Inst> {
     func.block_insts(block)
         .iter()
         .copied()
-        .find(|inst| users.contains(inst))
+        // Rematerialization creates new instructions after the membership
+        // array was built; they cannot be users of an original instruction.
+        .find(|inst| membership.get(inst.index()) == Some(&Some(producer)))
 }

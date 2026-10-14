@@ -1,4 +1,4 @@
-use keel_ir::{BinaryOp, EntityRef, Function, InstData, IntCC, Type, Value};
+use keel_ir::{BinaryOp, EntityRef, Function, InstData, IntCC, OverflowOp, Type, Value};
 
 /// Independent execution model for the integer/control-flow subset below.
 /// In particular, block arguments are copied simultaneously on each edge.
@@ -15,6 +15,23 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
         let mut next = None;
         for &inst in func.block_insts(block) {
             let read = |v: Value| values[func.resolve(v).index()];
+            if let InstData::Overflow {
+                op: OverflowOp::Sadd,
+                args,
+            } = func.inst_data(inst)
+            {
+                let width = func.value_type(args[0]).bytes().unwrap() * 8;
+                let shift = 64 - width;
+                let a = (read(args[0]) << shift) as i64 >> shift;
+                let b = (read(args[1]) << shift) as i64 >> shift;
+                let exact = i128::from(a) + i128::from(b);
+                let low = -(1i128 << (width - 1));
+                let high = (1i128 << (width - 1)) - 1;
+                let results = func.inst_results(inst);
+                values[results[0].index()] = exact as u64 & mask(func.value_type(results[0]));
+                values[results[1].index()] = u64::from(exact < low || exact > high);
+                continue;
+            }
             let result = match func.inst_data(inst) {
                 InstData::Iconst { imm, .. } => Some(*imm as u64),
                 InstData::Binary { op, args } => Some(match op {

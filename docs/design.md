@@ -742,6 +742,12 @@ it. Three choices made after measuring the end-to-end programs:
   to its last use (33 → 47 spills in the register-pressure test). A register
   allocator that rematerializes when it runs out of registers would do this
   better.
+
+GCM deduplicates consecutive uses while scanning each instruction, uses
+producer IDs as generation markers for user membership, and groups constant
+users by block. This avoids repeated scans of high-fanout use lists without
+changing placement decisions or within-block order. A constant used in one
+block needs no grouping or copies.
 - Addresses of fixed stack or global objects with constant offsets stay
   at the late placement instead of being hoisted out of loops. QuickJS's
   interpreter has hundreds of temporary aggregate objects: hoisting their
