@@ -1605,6 +1605,11 @@ impl FnGen<'_, '_, '_> {
         Ok(Some(match op {
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
+            Builtin::Overflow(op) => {
+                let (value, overflow) = ins.overflow(op, vals[0], vals[1]);
+                self.b.ins().store(value, vals[2]);
+                overflow
+            }
             Builtin::Signbit => {
                 let (int, bits) = match args[0].ty {
                     Ty::Float => (Type::I32, 31),

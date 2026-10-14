@@ -7,8 +7,8 @@ use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
 use crate::{Error, Loc};
-use keel_ir::RmwOp;
 use keel_ir::Target;
+use keel_ir::{OverflowOp, RmwOp};
 use std::rc::Rc;
 
 pub(crate) fn mk(kind: ExprKind, ty: Ty, loc: Loc) -> Expr {
@@ -830,6 +830,38 @@ impl Parser {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr> {
         let base = &name["__builtin_".len()..];
+        if let Some((op, ty)) = typed_overflow(base) {
+            let args = self.builtin_args(3, loc)?;
+            if !args[0].ty.is_arith() || !args[1].ty.is_arith() {
+                return Err(Error::new(
+                    loc,
+                    "overflow operands must be arithmetic values",
+                ));
+            }
+            if !args[2].ty.is_ptr() && !is_null(&args[2]) {
+                return Err(Error::new(loc, "overflow result must be a pointer"));
+            }
+            if let Some(result_ty) = args[2].ty.pointee()
+                && *result_ty != ty
+                && *result_ty != Ty::Void
+            {
+                return Err(Error::new(
+                    loc,
+                    "overflow result pointer has an incompatible type",
+                ));
+            }
+            let params = [ty.clone(), ty.clone(), Ty::ptr_to(ty)];
+            let args = args
+                .into_iter()
+                .zip(&params)
+                .map(|(arg, ty)| self.convert_for_assign(arg, ty))
+                .collect::<R<Vec<_>>>()?;
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::Overflow(op), args),
+                Ty::Int(IntKind::Bool),
+                loc,
+            ));
+        }
         match base {
             "va_start" | "va_arg" | "va_end" | "va_copy" => {
                 self.expect("(")?;
@@ -1492,6 +1524,33 @@ impl Parser {
         }
         Ok(self.cast(e, ty.clone()))
     }
+}
+
+/// Fixed-type GCC overflow families: int, long and long long, signed or
+/// unsigned. Generic mixed-type overflow builtins have different semantics.
+fn typed_overflow(name: &str) -> Option<(OverflowOp, Ty)> {
+    let stem = name.strip_suffix("_overflow")?;
+    let (op, suffix) = [
+        ("sadd", OverflowOp::Sadd),
+        ("uadd", OverflowOp::Uadd),
+        ("ssub", OverflowOp::Ssub),
+        ("usub", OverflowOp::Usub),
+        ("smul", OverflowOp::Smul),
+        ("umul", OverflowOp::Umul),
+    ]
+    .into_iter()
+    .find_map(|(prefix, op)| stem.strip_prefix(prefix).map(|s| (op, s)))?;
+    let signed = matches!(op, OverflowOp::Sadd | OverflowOp::Ssub | OverflowOp::Smul);
+    let kind = match (suffix, signed) {
+        ("", true) => IntKind::Int,
+        ("", false) => IntKind::UInt,
+        ("l", true) => IntKind::Long,
+        ("l", false) => IntKind::ULong,
+        ("ll", true) => IntKind::LLong,
+        ("ll", false) => IntKind::ULLong,
+        _ => return None,
+    };
+    Some((op, Ty::Int(kind)))
 }
 
 fn offset_member_follows(p: &mut Parser, first: bool) -> bool {

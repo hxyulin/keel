@@ -436,6 +436,55 @@ fn unused_internal_definitions_are_dropped() {
     assert_eq!(decls, ["puts"]);
 }
 
+/// All fixed-type overflow families preserve the result store on both
+/// backends, even when optimization runs.
+#[test]
+fn overflow_builtins_compile_on_both_targets() {
+    let mut src = String::new();
+    for (prefix, signed) in [("s", true), ("u", false)] {
+        for (suffix, width) in [("", "int"), ("l", "long"), ("ll", "long long")] {
+            let ty = if signed {
+                width.to_string()
+            } else {
+                format!("unsigned {width}")
+            };
+            for operation in ["add", "sub", "mul"] {
+                src.push_str(&format!(
+                    "_Bool {prefix}{operation}{suffix}({ty} a, {ty} b, {ty} *r) {{ \
+                     return __builtin_{prefix}{operation}{suffix}_overflow(a, b, r); }}\n"
+                ));
+            }
+        }
+    }
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            &src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+            let text = module.to_string();
+            for operation in ["sadd", "uadd", "ssub", "usub", "smul", "umul"] {
+                assert_eq!(
+                    text.matches(&format!("{operation}_overflow")).count(),
+                    3,
+                    "{text}"
+                );
+            }
+            assert_eq!(text.matches("store ").count(), 18, "{text}");
+        }
+    }
+}
+
 /// Programs keel-c does not compile get an error at the right place.
 #[test]
 fn rejected() {
@@ -531,6 +580,18 @@ fn rejected() {
         (
             "void f(void) { unsigned __auto_type x = 1; }",
             "error: invalid combination of type specifiers",
+        ),
+        (
+            "int f(void) { return __builtin_sadd_overflow(1, 2, 3); }",
+            "error: overflow result must be a pointer",
+        ),
+        (
+            "int f(double *r) { return __builtin_sadd_overflow(1, 2, r); }",
+            "error: overflow result pointer has an incompatible type",
+        ),
+        (
+            "int f(int *a, int *r) { return __builtin_sadd_overflow(a, 2, r); }",
+            "error: overflow operands must be arithmetic values",
         ),
     ];
     let mut failures = Vec::new();

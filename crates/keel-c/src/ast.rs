@@ -6,7 +6,7 @@
 
 use crate::Loc;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
-use keel_ir::RmwOp;
+use keel_ir::{OverflowOp, RmwOp};
 use std::rc::Rc;
 
 pub type LocalId = usize;
@@ -145,6 +145,8 @@ pub enum Builtin {
     Clz,
     Ctz,
     Popcount,
+    /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
+    Overflow(OverflowOp),
     Alloca,
     Trap,
     /// `__builtin_frame_address(0)`.

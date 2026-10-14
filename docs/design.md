@@ -821,6 +821,13 @@ compared against Clang.
 
 ### Implementation details
 
+- **Checked arithmetic.** The fixed-type `__builtin_sadd/ssub/smul_*` and
+  `__builtin_uadd/usub/umul_*` overflow families are supported for `int`,
+  `long` and `long long` (the `l` and `ll` suffixes). Operands are converted
+  as for the builtin's prototype; the wrapped result is stored through
+  the third argument and the overflow flag is returned as `_Bool`. Every
+  operand is evaluated once, and the store remains even when the flag is
+  unused. Generic mixed-type and `_overflow_p` forms are not implemented.
 - **Computed goto** without an indirect branch in the IR: `&&label` is
   the label's number in its function (from 1), and every `goto *p` jumps
   to one shared dispatch block, passing that number as a block argument.
@@ -870,10 +877,9 @@ not pass it through, and the x86-64 backend does not support it yet.
 
 Useful candidates for small follow-up patches, rather than current support:
 
-- **Overflow-checking builtins:** start with the fixed-type signed and
-  unsigned `add/sub/mul` families, using the IR's result-plus-flag
-  instructions. The generic forms permit mixed operand and destination
-  types and need more than casting the operands to the destination type.
+- **Generic overflow-checking builtins:** the generic forms permit mixed
+  operand and destination types and need more than casting the operands
+  to the destination type. The fixed-type forms are implemented above.
   See [GCC's overflow builtin semantics](https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html).
 - **Alignment and branch hints:** `__builtin_assume_aligned` and
   `__builtin_expect_with_probability` can initially preserve their defined
