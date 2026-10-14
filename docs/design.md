@@ -788,7 +788,10 @@ marked `returns_twice`.
   builtins, GCC's `__atomic_*` and `__sync_*` and clang's `__c11_atomic_*`
   (which `<stdatomic.h>` expands to), are put in one shape and become the
   IR's atomic instructions; `compare_exchange` is a `cas` whose old value
-  is stored back to `*expected`.
+  is stored back to `*expected`. Atomic pointer `++` and `--` scale by the
+  pointee's size and use an integer RMW on the 64-bit address, converting
+  the old (postfix) or new (prefix) address back to a pointer. Pointer
+  compound assignments (`+=` and `-=`) are not supported yet.
 - **Constants** are `i64`s, sign extended to wider types, so an unsigned
   64-bit constant above `i64::MAX` converted to `__int128` is not folded
   but extended at run time: folded, it came out negative, which broke

@@ -542,22 +542,25 @@ impl Parser {
         self.check_lvalue(&e)?;
         if let Ty::Atomic(ty) = &e.ty {
             let ty = ty.as_ref().clone();
-            if !ty.is_integer() {
-                return Err(Error::new(
-                    loc,
-                    "`++`/`--` on an `_Atomic` pointer is not supported",
-                ));
-            }
-            let one = mk(ExprKind::Int(1), INT, loc);
-            let one = self.cast(one, ty.clone());
+            // Pointer RMWs operate on the address bits, with a byte step
+            // scaled by the pointee's size. Both targets have 64-bit
+            // pointers; the IR's add/sub RMWs take integers, not pointers.
+            let (step, rmw_ty) = if ty.is_ptr() {
+                (self.elem_size(&ty, loc)? as i64, LONG)
+            } else {
+                (1, ty.clone())
+            };
+            let step = mk(ExprKind::Int(step), LONG, loc);
+            let step = self.cast(step, rmw_ty.clone());
             let op = if inc { RmwOp::Add } else { RmwOp::Sub };
             let args = vec![
                 self.address_of_atomic(e),
-                one,
+                step,
                 mk(ExprKind::Int(5), INT, loc),
             ];
             let builtin = Builtin::AtomicRmw { op, new: prefix };
-            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc));
+            let result = mk(ExprKind::Builtin(builtin, args), rmw_ty, loc);
+            return Ok(self.cast(result, ty));
         }
         if !e.ty.is_scalar() {
             return Err(Error::new(loc, "`++`/`--` needs a scalar"));

@@ -279,6 +279,39 @@ fn compile(src: &str) -> Result<keel_ir::Module, String> {
     keel_c::compile(src, "test.c", keel_c::Options::default()).map_err(|e| e.to_string())
 }
 
+/// Pointer updates remain one seq_cst RMW on both targets, with and
+/// without optimization, rather than a separate load and store.
+#[test]
+fn atomic_pointer_updates_are_seq_cst_rmw() {
+    let src = "int *post_inc(_Atomic(int *) *p) { return (*p)++; }\n\
+               int *pre_inc(_Atomic(int *) *p) { return ++*p; }\n\
+               int *post_dec(_Atomic(int *) *p) { return (*p)--; }\n\
+               int *pre_dec(_Atomic(int *) *p) { return --*p; }\n";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            let text = module.to_string();
+            assert_eq!(text.matches("atomic_rmw.add seq_cst").count(), 2, "{text}");
+            assert_eq!(text.matches("atomic_rmw.sub seq_cst").count(), 2, "{text}");
+            assert!(!text.contains("atomic_load"), "{text}");
+            assert!(!text.contains("atomic_store"), "{text}");
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}
+
 /// Locals live in SSA values unless their address is taken; arrays and
 /// address-taken scalars get stack slots.
 #[test]
@@ -378,6 +411,14 @@ fn rejected() {
         (
             "struct s { _Atomic double d; };",
             "1:12: error: `_Atomic` is only supported on integers and pointers",
+        ),
+        (
+            "struct s; void f(_Atomic(struct s *) *p) { (*p)++; }",
+            "error: arithmetic on a pointer to an incomplete type",
+        ),
+        (
+            "void f(_Atomic(int (*)(void)) *p) { --*p; }",
+            "error: arithmetic on a function pointer",
         ),
     ];
     let mut failures = Vec::new();
