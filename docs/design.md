@@ -574,8 +574,23 @@ registers, so it does not depend on the size of the rest of the frame.
 Known gaps: no interval splitting (a value spilled anywhere is spilled
 everywhere; the next step would be Wimmer & Franz's splitting, which
 needs code generation to follow a value between locations), no hints to place values in x0–x7 or to coalesce copies,
-blocks are laid out in reverse postorder only, and constants are
-re-materialized into registers rather than folded into immediates.
+and blocks are laid out in reverse postorder only.
+
+**Folding into instructions.** Instruction selection is one instruction at
+a time, with three peepholes that make `-O0` code close to clang's
+`-O0`, where every variable lives in a stack slot:
+
+- a `stack_addr` used only as the address of loads and stores is not
+  computed: they address the slot as `[sp, #off]` (or `[x29, #off]`)
+  directly, when the offset fits the scaled 12-bit immediate;
+- an `iconst` used only as an `add`/`sub`/`cmp` immediate (0..4095), a
+  shift amount, or a stored zero (`str wzr`) is not materialized;
+- an `icmp`/`fcmp` used only by the `brif` right after it branches on its
+  flags, `cmp` + `b.cond`, instead of `cset`, `tst` and `b.eq`.
+
+An instruction whose value is folded into every use emits no code; one
+with any other use is computed as usual. A breakpoint on a folded
+constant's line therefore stops at the instruction using it.
 
 ## Optimizer
 

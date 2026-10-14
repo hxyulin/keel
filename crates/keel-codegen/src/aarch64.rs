@@ -107,6 +107,7 @@ use keel_ir::{
     Layout, MemberLocation, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 /// The registers values are allocated to.
@@ -259,6 +260,138 @@ fn invert_cond(cond: &str) -> &'static str {
     }
 }
 
+/// The offset of the stack slot whose address `addr` is, if an access of
+/// type `ty` can address it directly: `ldr`/`str`'s immediate is 12 bits
+/// unsigned, scaled by the access size.
+fn folded_offset(func: &Function, offsets: &[usize], addr: Value, ty: Type) -> Option<usize> {
+    let ValueDef::Result(inst, _) = func.value_def(func.resolve(addr)) else {
+        return None;
+    };
+    let InstData::StackAddr { slot } = *func.inst_data(inst) else {
+        return None;
+    };
+    let offset = offsets[slot.index()];
+    let size = ty.bytes()? as usize;
+    (size <= 8 && offset.is_multiple_of(size) && offset / size < 4096).then_some(offset)
+}
+
+/// The value of `v` if an `iconst` defines it.
+fn iconst(func: &Function, v: Value) -> Option<i64> {
+    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
+        return None;
+    };
+    match *func.inst_data(inst) {
+        InstData::Iconst { ty, imm } if ty != Type::I128 => Some(imm),
+        _ => None,
+    }
+}
+
+/// The operand of `data` that is a constant encoded in the instruction
+/// itself, and that immediate: an `add`/`sub`/`cmp` immediate is 12 bits
+/// unsigned, a shift amount is taken modulo the width, and a stored zero
+/// is the zero register.
+fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
+    let fits = |v| iconst(func, v).filter(|k| (0..4096).contains(k));
+    match *data {
+        InstData::Binary { op, args } if func.value_type(func.resolve(args[0])) != Type::I128 => {
+            let ty = func.value_type(func.resolve(args[0]));
+            match op {
+                BinaryOp::Iadd | BinaryOp::Ptradd | BinaryOp::Isub => {
+                    fits(args[1]).map(|k| (args[1], k))
+                }
+                BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+                    let bits = 8 * ty.bytes()? as i64;
+                    iconst(func, args[1]).map(|k| (args[1], k & (bits - 1)))
+                }
+                _ => None,
+            }
+        }
+        // A narrow operand is extended before the compare, so the constant
+        // must read the same zero- or sign-extended.
+        InstData::Icmp { args, .. } => {
+            let ty = func.value_type(func.resolve(args[0]));
+            let k = fits(args[1])?;
+            let narrow = narrow_bits(ty).is_some_and(|bits| k >= 1 << (bits - 1));
+            (ty != Type::I128 && !narrow).then_some((args[1], k))
+        }
+        InstData::Store { value, .. } => (iconst(func, value) == Some(0)
+            && !func.value_type(func.resolve(value)).is_float())
+        .then_some((value, 0)),
+        _ => None,
+    }
+}
+
+/// The `stack_addr` and `iconst` results every use of which is folded
+/// into the instruction using it: the address of a load or store that
+/// [`folded_offset`] addresses directly, or a [`folded_imm`]. Those need
+/// no code of their own.
+fn folded_values(func: &Function, offsets: &[usize]) -> HashSet<Value> {
+    let mut values = HashSet::new();
+    let mut unfolded = HashSet::new();
+    for (_, inst) in func.layout_insts() {
+        let data = func.inst_data(inst);
+        if let InstData::StackAddr { .. } | InstData::Iconst { .. } = data {
+            values.extend(func.inst_results(inst).iter().copied());
+        }
+        let addr = match *data {
+            InstData::Load { ty, addr } => Some((addr, ty)),
+            InstData::Store { value, addr } => Some((addr, func.value_type(func.resolve(value)))),
+            _ => None,
+        }
+        .filter(|&(addr, ty)| folded_offset(func, offsets, addr, ty).is_some())
+        .map(|(addr, _)| addr);
+        let mut folds: Vec<Value> = addr
+            .into_iter()
+            .chain(folded_imm(func, data).map(|(v, _)| v))
+            .map(|v| func.resolve(v))
+            .collect();
+        data.for_each_operand(|v| {
+            let v = func.resolve(v);
+            match folds.iter().position(|&f| f == v) {
+                Some(i) => {
+                    folds.swap_remove(i);
+                }
+                None => {
+                    unfolded.insert(v);
+                }
+            }
+        });
+    }
+    values.retain(|v| !unfolded.contains(v));
+    values
+}
+
+/// The `icmp` and `fcmp` results only used as the condition of the
+/// `brif` right after them: the branch tests the flags of the compare
+/// itself, `cmp` + `b.cond`, with no 0/1 value in between.
+fn fused_compares(func: &Function) -> HashSet<Value> {
+    let mut uses: HashMap<Value, usize> = HashMap::new();
+    let mut candidates = HashSet::new();
+    for block in func.blocks() {
+        let insts = func.block_insts(block);
+        for (i, &inst) in insts.iter().enumerate() {
+            let data = func.inst_data(inst);
+            data.for_each_operand(|v| *uses.entry(func.resolve(v)).or_default() += 1);
+            let compare = match *data {
+                InstData::Icmp { args, .. } => func.value_type(func.resolve(args[0])) != Type::I128,
+                InstData::Fcmp { .. } => true,
+                _ => false,
+            };
+            let Some(&next) = insts.get(i + 1) else {
+                continue;
+            };
+            if let (true, InstData::Brif { cond, .. }) = (compare, func.inst_data(next)) {
+                let result = func.inst_results(inst)[0];
+                if func.resolve(*cond) == result {
+                    candidates.insert(result);
+                }
+            }
+        }
+    }
+    candidates.retain(|v| uses.get(v) == Some(&1));
+    candidates
+}
+
 /// What the debug info needs to know of a compiled function.
 struct FrameDebug {
     /// Where each stack slot is, from `x29`.
@@ -329,6 +462,11 @@ struct FunctionCompiler<'a> {
     alloc: Allocation,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
+    /// `stack_addr` results only used as the address of loads and stores
+    /// that address the slot directly (`[sp, #offset]`): the address
+    /// itself is never computed.
+    folded_values: HashSet<Value>,
+    fused_compares: HashSet<Value>,
     /// Offset from `sp` of the area where calls put copies of big structs
     /// passed by value.
     copy_base: usize,
@@ -624,6 +762,8 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
+            folded_values: folded_values(func, &stack_slot_offsets),
+            fused_compares: fused_compares(func),
             stack_slot_offsets,
             copy_base,
             sret_save,
@@ -843,6 +983,10 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::StackAddr { .. } | InstData::Iconst { .. }
+                if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
+            InstData::Icmp { .. } | InstData::Fcmp { .. }
+                if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
             InstData::Iconst { imm, .. } => {
                 let d = self.def_reg(result);
                 self.materialize(d, imm as u64, true);
@@ -1098,25 +1242,10 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
-            InstData::Icmp { cond, args } => {
+            InstData::Icmp { .. } | InstData::Fcmp { .. } => {
                 let d = self.def_reg(result);
-                let ty = self.ty(args[0]);
-                let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
-                let a = self.use_reg(args[0], S0);
-                let a = self.extend(S0, a, ty, signed);
-                let b = self.use_reg(args[1], S1);
-                let b = self.extend(S1, b, ty, signed);
-                self.emit(format!("cmp\t{}, {}", reg(a, ty), reg(b, ty)));
-                self.emit(format!("cset\tw{d}, {}", cond_code(cond)));
-                self.def_done(result, d);
-            }
-            InstData::Fcmp { cond, args } => {
-                let ty = self.ty(args[0]);
-                let d = self.def_reg(result);
-                let a = self.use_freg(args[0], FS0);
-                let b = self.use_freg(args[1], FS1);
-                self.emit(format!("fcmp\t{}, {}", freg(a, ty), freg(b, ty)));
-                self.emit(format!("cset\tw{d}, {}", float_cond_code(cond)));
+                let cc = self.compare(inst);
+                self.emit(format!("cset\tw{d}, {cc}"));
                 self.def_done(result, d);
             }
             // Load the pointer, store it advanced by a slot, then read the
@@ -1138,37 +1267,41 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Load { ty, addr } if ty.is_float() => {
                 let d = self.def_freg(result);
-                let a = self.use_reg(addr, S0);
-                self.emit(format!("ldr\t{}, [x{a}]", freg(d, ty)));
+                let a = self.mem(addr, S0, ty);
+                self.emit(format!("ldr\t{}, {a}", freg(d, ty)));
                 self.def_done(result, d);
             }
             InstData::Load { ty, addr } => {
                 let d = self.def_reg(result);
-                let a = self.use_reg(addr, S0);
+                let a = self.mem(addr, S0, ty);
                 let op = match ty {
                     Type::I8 => "ldrb",
                     Type::I16 => "ldrh",
                     _ => "ldr",
                 };
-                self.emit(format!("{op}\t{}, [x{a}]", reg(d, ty)));
+                self.emit(format!("{op}\t{}, {a}", reg(d, ty)));
                 self.def_done(result, d);
             }
             InstData::Store { value, addr } if self.ty(value).is_float() => {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
-                let a = self.use_reg(addr, S1);
-                self.emit(format!("str\t{}, [x{a}]", freg(v, ty)));
+                let a = self.mem(addr, S1, ty);
+                self.emit(format!("str\t{}, {a}", freg(v, ty)));
             }
             InstData::Store { value, addr } => {
                 let ty = self.ty(value);
-                let v = self.use_reg(value, S0);
-                let a = self.use_reg(addr, S1);
+                let v = match folded_imm(func, func.inst_data(inst)) {
+                    Some(_) if ty == Type::I64 => "xzr".to_string(),
+                    Some(_) => "wzr".to_string(),
+                    None => reg(self.use_reg(value, S0), ty),
+                };
+                let a = self.mem(addr, S1, ty);
                 let op = match ty {
                     Type::I8 => "strb",
                     Type::I16 => "strh",
                     _ => "str",
                 };
-                self.emit(format!("{op}\t{}, [x{a}]", reg(v, ty)));
+                self.emit(format!("{op}\t{v}, {a}"));
             }
             InstData::AtomicLoad { ty, ordering, addr } => {
                 let d = self.def_reg(result);
@@ -1269,17 +1402,29 @@ impl<'a> FunctionCompiler<'a> {
                 cond,
                 dests: [then_dest, else_dest],
             } => {
-                self.test_value(cond);
+                // `b.eq` to the else-branch when the condition is zero, or
+                // when a fused compare's condition does not hold.
+                let not = match func.value_def(func.resolve(cond)) {
+                    ValueDef::Result(compare, _)
+                        if self.fused_compares.contains(&func.resolve(cond)) =>
+                    {
+                        invert_cond(self.compare(compare))
+                    }
+                    _ => {
+                        self.test_value(cond);
+                        "eq"
+                    }
+                };
                 // Block arguments are copied on the edge, so a branch with
                 // else-arguments needs its own landing pad. The copies only
                 // move data, so the flags survive them.
                 if else_dest.args.is_empty() {
-                    self.emit(format!("b.eq\t{}", self.label(else_dest.block)));
+                    self.emit(format!("b.{not}\t{}", self.label(else_dest.block)));
                     self.block_args(&then_dest);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!("L{}_{inst}_else", func.name);
-                    self.emit(format!("b.eq\t{pad}"));
+                    self.emit(format!("b.{not}\t{pad}"));
                     self.block_args(&then_dest);
                     self.emit(format!("b\t{}", self.label(then_dest.block)));
                     writeln!(self.out, "{pad}:").unwrap();
@@ -2159,6 +2304,24 @@ impl<'a> FunctionCompiler<'a> {
     fn binary(&mut self, op: BinaryOp, args: [Value; 2], d: u8) {
         let ty = self.ty(args[0]);
         let a = self.use_reg(args[0], S0);
+        let data = InstData::Binary { op, args };
+        if let Some((_, k)) = folded_imm(self.func, &data) {
+            let rd = reg(d, ty);
+            let mnemonic = match op {
+                BinaryOp::Iadd | BinaryOp::Ptradd => "add",
+                BinaryOp::Isub => "sub",
+                BinaryOp::Shl => "lsl",
+                BinaryOp::Ushr => "lsr",
+                _ => "asr",
+            };
+            let a = match op {
+                BinaryOp::Ushr => self.extend(S0, a, ty, false),
+                BinaryOp::Sshr => self.extend(S0, a, ty, true),
+                _ => a,
+            };
+            self.emit(format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)));
+            return;
+        }
         let b = self.use_reg(args[1], S1);
         let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
         let simple = match op {
@@ -2409,6 +2572,36 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    /// Emits the compare of `icmp`/`fcmp` `inst`, returning the condition
+    /// code that holds when its condition does.
+    fn compare(&mut self, inst: Inst) -> &'static str {
+        match *self.func.inst_data(inst) {
+            InstData::Icmp { cond, args } => {
+                let ty = self.ty(args[0]);
+                let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
+                let a = self.use_reg(args[0], S0);
+                let a = self.extend(S0, a, ty, signed);
+                let b = match folded_imm(self.func, self.func.inst_data(inst)) {
+                    Some((_, k)) => format!("#{k}"),
+                    None => {
+                        let b = self.use_reg(args[1], S1);
+                        reg(self.extend(S1, b, ty, signed), ty)
+                    }
+                };
+                self.emit(format!("cmp\t{}, {b}", reg(a, ty)));
+                cond_code(cond)
+            }
+            InstData::Fcmp { cond, args } => {
+                let ty = self.ty(args[0]);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                self.emit(format!("fcmp\t{}, {}", freg(a, ty), freg(b, ty)));
+                float_cond_code(cond)
+            }
+            _ => unreachable!("not a compare"),
+        }
+    }
+
     /// `value` as the second operand of `cmp`/`sub`: an immediate if it fits
     /// in 12 bits, else materialized in `scratch`.
     fn operand(&mut self, scratch: u8, value: u64, is64: bool) -> String {
@@ -2543,6 +2736,16 @@ impl<'a> FunctionCompiler<'a> {
 
     /// The register holding operand `value`: its own, or `scratch` after
     /// reloading it from its spill slot.
+    /// The memory operand for an access of type `ty` at `addr`: the stack
+    /// slot itself if `addr` is one's address and the offset is encodable,
+    /// else the address in a register.
+    fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> String {
+        if let Some(offset) = folded_offset(self.func, &self.stack_slot_offsets, addr, ty) {
+            return format!("[{}, #{offset}]", self.base);
+        }
+        format!("[x{}]", self.use_reg(addr, scratch))
+    }
+
     fn use_reg(&mut self, value: Value, scratch: u8) -> u8 {
         match self.loc(value) {
             Loc::Reg(r) => r,

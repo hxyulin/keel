@@ -196,7 +196,7 @@ fn debug_info() {
     for want in [
         "`calc at calc.rs:2:13",
         "`main at main.c:5",
-        "`calc at calc.rs:3:16",
+        "`calc at calc.rs:3:14",
         "`nocol + ",
         "`nocol at calc.rs:6\n",
     ] {
