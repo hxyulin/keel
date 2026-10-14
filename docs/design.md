@@ -690,14 +690,22 @@ analyses they need; there is no analysis cache yet.
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `instcombine` | fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
-| `phi-simplify` | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
+| `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 
-The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
-dce, gcm`.
+The default pipeline (`-O`) is `simplify-cfg, instcombine, simplify-cfg, gvn,
+dce, gcm`. Basic uses `simplify-cfg, instcombine, simplify-cfg, dce`.
+`const-fold` stays available for isolated numeric folding and historical
+comparisons; the defaults use the broader combining pass once. The paired
+[pass ablation matrix](../suite/reports/pass-ablations-aarch64-2026-10-15.json)
+supports retaining CFG cleanup, GVN, DCE and GCM. Removing GCM regresses runtime
+by 4.2% overall; removing GVN grows aggregate text by 5.1%, with mixed runtime
+effects. Late phi cleanup avoids the early regression but adds compiler cost
+without an established runtime gain. SCCP also adds compiler cost for neutral
+runtime in these applications, so both remain opt-in.
 
 Instruction combining uses a consumer worklist, so substitutions expose
 further folds even when block layout differs from definition order. Integer
@@ -709,6 +717,15 @@ application measurement (Apple M5 Max) gives runtime ratio 0.973 and compiler
 ratio 1.011 versus the historical Full pipeline; 38/44 translation units
 change assembly. Raw samples and intervals are in
 [`instcombine-aarch64-2026-10-15.json`](../suite/reports/instcombine-aarch64-2026-10-15.json).
+
+The final default-pipeline confirmation reproduces the runtime improvement
+(2.7% geometric mean), with 1.5% extra compiler cost and 25,052 bytes less
+aggregate text (0.85%). The `-O` and explicit combining-preset assembly match
+in all 44 application files. Workspace/native tests, six application suite
+configurations, Clippy, and the Tracy feature build pass. Debugger/debug-info
+integration tests were excluded from the workspace run. Raw samples,
+compiler/source hashes and commands are in
+[`default-pipeline-aarch64-2026-10-15.json`](../suite/reports/default-pipeline-aarch64-2026-10-15.json).
 
 Trivial-phi elimination checks every incoming edge, ignoring a parameter's
 own backedge value only when another incoming value anchors it. Replacement
@@ -742,8 +759,8 @@ in their own block so they dominate uses even with untaken predecessors.
 `simplify-cfg` and `dce` retain responsibility for CFG and parameter cleanup.
 `sccp` remains opt-in: the initial paired Lua, QuickJS and SQLite measurements
 showed roughly neutral application runtime and extra compiler cost. The
-`keel-basic-sccp` and `keel-O-sccp` suite configurations replace `const-fold`
-with `sccp` while preserving the other stages. `keel compile -p ...` and
+`keel-basic-sccp` and `keel-O-sccp` suite configurations add `sccp` before
+`instcombine` while preserving the other stages. `keel compile -p ...` and
 `keel cc -p ...` select explicit pipelines, overriding optimization tiers.
 The numeric folding kernel is shared with `const-fold` and `instcombine`.
 All three also fold both results of signed/unsigned checked add, subtract
@@ -776,12 +793,6 @@ it. Three choices made after measuring the end-to-end programs:
   to its last use (33 → 47 spills in the register-pressure test). A register
   allocator that rematerializes when it runs out of registers would do this
   better.
-
-GCM deduplicates consecutive uses while scanning each instruction, uses
-producer IDs as generation markers for user membership, and groups constant
-users by block. This avoids repeated scans of high-fanout use lists without
-changing placement decisions or within-block order. A constant used in one
-block needs no grouping or copies.
 - Addresses of fixed stack or global objects with constant offsets stay
   at the late placement instead of being hoisted out of loops. QuickJS's
   interpreter has hundreds of temporary aggregate objects: hoisting their
@@ -789,6 +800,12 @@ block needs no grouping or copies.
   forcing spills. Keeping these cheap computations near their uses removed
   most of its `-O` slowdown. Pointer arithmetic on incoming pointers still
   gets ordinary loop-invariant code motion.
+
+GCM deduplicates consecutive uses while scanning each instruction, uses
+producer IDs as generation markers for user membership, and groups constant
+users by block. This avoids repeated scans of high-fanout use lists without
+changing placement decisions or within-block order. A constant used in one
+block needs no grouping or copies.
 
 With these choices, `-O` output is never larger than the unoptimized output on the
 test programs, and programs whose checks are all constants fold away

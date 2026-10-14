@@ -86,17 +86,17 @@ name = "keel-full"
 compiler = "keel"
 flags = ["--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
 
-# SCCP replaces direct constant folding for controlled pass comparisons.
+# SCCP adds propagation before instruction combining.
 # Opt-in until measurements justify changing the default pipelines.
 [[config]]
 name = "keel-basic-sccp"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,sccp,simplify-cfg,dce"]
+flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,dce"]
 
 [[config]]
 name = "keel-O-sccp"
 compiler = "keel"
-flags = ["-p", "simplify-cfg,sccp,simplify-cfg,gvn,dce,gcm"]
+flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,gvn,dce,gcm"]
 
 [[config]]
 name = "keel-O-combine"
@@ -107,3 +107,15 @@ flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm"]
 name = "keel-O-phi"
 compiler = "keel"
 flags = ["-p", "simplify-cfg,instcombine,phi-simplify,simplify-cfg,gvn,phi-simplify,dce,gcm"]
+
+# Historical numeric-fold-only Full pipeline, retained for comparisons.
+[[config]]
+name = "keel-O-legacy"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,const-fold,simplify-cfg,gvn,dce,gcm"]
+
+# Cleanup after code motion avoids the early phi/GVN/GCM runtime regression.
+[[config]]
+name = "keel-O-phi-late"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm,phi-simplify"]

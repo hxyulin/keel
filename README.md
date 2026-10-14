@@ -54,7 +54,8 @@ For C, preprocessing must use the same target and its headers, for example
 The stages can be tuned independently:
 
 - `--opt-tier none|basic|full`: no IR passes; CFG simplification, constant
-  folding and DCE; or the existing full pipeline including GVN and GCM.
+  folding, instruction combining and DCE; or the full pipeline including
+  GVN and GCM.
   `-O` remains an alias for `full`; the default is `none`.
 - `--isel-tier baseline|trees|full`: existing per-instruction lowering;
   generated tree selection; or trees plus folded operand liveness and
@@ -74,9 +75,12 @@ cargo suite run -c keel-basic,keel-basic-sccp,keel-O,keel-O-sccp
 `keel compile -p pass,pass,...` and `keel cc -p pass,pass,...` select an
 explicit IR pipeline, overriding `-O` and `--opt-tier` regardless of flag
 order. The opt-in `sccp` pass propagates constants through executable edges
-and block parameters. Its suite presets replace `const-fold` with `sccp`;
-the default pipelines retain direct constant folding pending performance
-evidence.
+and block parameters. Basic and Full use `instcombine` for numeric folding,
+integer identities and power-of-two strength reduction. SCCP suite presets
+add propagation before combining. `phi-simplify` also remains opt-in: use
+`keel-O-phi-late` to try cleanup after code motion. Early phi cleanup caused
+large application regressions. Pipeline choices and raw measurements are in
+[suite/README.md](suite/README.md#paired-pass-measurements).
 
 Library users can implement `keel_opt::Pass` and use `run_pipeline` (which
 verifies after every pass), or provide an `InstructionSelector` and

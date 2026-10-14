@@ -101,7 +101,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[7],
 ];
 
-/// Independent optimizer effort; Full preserves the historical pipeline.
+/// Independent optimizer effort; Full adds value numbering and code motion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
@@ -113,7 +113,7 @@ impl OptimizationTier {
     pub fn pipeline(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
-            Self::Basic => &["simplify-cfg", "const-fold", "simplify-cfg", "dce"],
+            Self::Basic => &["simplify-cfg", "instcombine", "simplify-cfg", "dce"],
             Self::Full => DEFAULT_PIPELINE,
         }
     }
@@ -126,7 +126,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 /// The passes `keel compile -O` runs, in order.
 pub const DEFAULT_PIPELINE: &[&str] = &[
     "simplify-cfg",
-    "const-fold",
+    "instcombine",
     "simplify-cfg",
     "gvn",
     "dce",

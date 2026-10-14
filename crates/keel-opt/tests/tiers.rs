@@ -1,3 +1,4 @@
+mod support;
 use keel_opt::{OptimizationTier, Pass};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -10,7 +11,7 @@ block0:
 }";
 
 #[test]
-fn optimizer_tiers_and_legacy_full_pipeline() {
+fn optimizer_tiers_and_full_pipeline() {
     let original = keel_ir::parse(SOURCE).unwrap();
     let mut none = original.clone();
     keel_opt::optimize_with_tier(&mut none, OptimizationTier::None).unwrap();
@@ -74,4 +75,30 @@ fn custom_pass_failures_identify_the_pass() {
         error,
         keel_opt::OptError::Verifier { pass: "broken", .. }
     ));
+}
+
+#[test]
+fn basic_and_full_combine_variable_identities() {
+    let original = keel_ir::parse(
+        "func @f(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 1
+    v2 = iconst.i64 0
+    v3 = imul v0, v1
+    v4 = iadd v3, v2
+    return v4
+}",
+    )
+    .unwrap();
+    for tier in [OptimizationTier::Basic, OptimizationTier::Full] {
+        let mut module = original.clone();
+        keel_opt::optimize_with_tier(&mut module, tier).unwrap();
+        assert_eq!(module.functions[0].layout_insts().count(), 1);
+        for input in [0, 1, u64::MAX, 1 << 63] {
+            assert_eq!(
+                support::execute(&module.functions[0], &[input]),
+                support::execute(&original.functions[0], &[input])
+            );
+        }
+    }
 }
