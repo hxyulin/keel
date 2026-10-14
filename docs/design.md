@@ -62,7 +62,18 @@ and why they were made.
 - Bit counting: `clz ctz popcnt` are defined at 0 (`clz 0` and `ctz 0` give
   the bit width). `bswap` needs at least `i16`.
 - `select c, a, b` picks without branching; `icmp` gives `i8` 0/1.
-- `i128` has all of these but `umulhi smulhi`. On aarch64 it lives in a
+- Overflow: `v2, v3 = uadd_overflow v0, v1` (and `sadd usub ssub umul
+  smul`) gives the wrapped result and an `i8` flag, 1 if the exact result
+  does not fit the type taken unsigned or signed. This is Rust's
+  `overflowing_*` and the building block for checked arithmetic and
+  bignums. One instruction with two results, rather than LLVM's struct
+  result, keeps both as plain values; GVN and GCM treat the results
+  together. On aarch64 the flag comes from the condition flags (`adds` +
+  `cset hs/vs`), from the high half of the product for 64-bit
+  multiplication, and from a range check for `i8`/`i16`, computed in 32
+  bits where it cannot overflow.
+- `i128` has all of these but `umulhi smulhi umul_overflow
+  smul_overflow`. On aarch64 it lives in a
   pair of registers (or two spill slots), and its division calls
   compiler-rt (`__udivti3` and friends) after the same trap checks.
 
@@ -93,6 +104,10 @@ resumed by a debugger, so it is an intrinsic.
   which is what aarch64's `fmin`/`fmax` do.
 - Rounding to an integral float: `fceil ffloor ftrunc fnearest` (ties to
   even).
+- `fma a, b, c` is `a * b + c` rounded once (`fmadd`). `fcopysign a, b` is
+  `a` with `b`'s sign; like `fneg` it only moves the sign bit, NaN payloads
+  included. aarch64 has no scalar instruction for it, so it splices the bit
+  in general registers (`bfxil`).
 - `fcmp.<cond>` gives `i8` 0/1 for `eq ne lt le gt ge ord uno`. Every
   condition except `ne` and `uno` is false when an operand is NaN; `ne` is
   C's `!=`.
@@ -106,7 +121,8 @@ resumed by a debugger, so it is an intrinsic.
   WebAssembly). This lets the optimizer fold float operations on the host
   and treat `fadd`/`fmul` as commutative: only a NaN's payload could tell.
   Folding produces the canonical quiet NaN, so output does not depend on
-  the host. `fneg` and `fabs` are exact: they only change the sign bit.
+  the host. `fneg`, `fabs` and `fcopysign` are exact: they only change the
+  sign bit.
 
 ## Undefined behaviour
 

@@ -22,7 +22,9 @@ pub use function::{
     AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Purpose, Signature, SourceLoc,
     StackSlotData, ValueData, ValueDef,
 };
-pub use inst::{BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, Symbol, UnaryOp};
+pub use inst::{
+    BinaryOp, BlockCall, ConvertOp, FloatCC, InstData, IntCC, OverflowOp, Symbol, UnaryOp,
+};
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use layout::Layout;
 pub use module::Module;

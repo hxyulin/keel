@@ -47,6 +47,14 @@ macro_rules! at_width {
 }
 
 pub(crate) fn binary(op: BinaryOp, a: Float, b: Float) -> Float {
+    if op == BinaryOp::Fcopysign {
+        // Only the sign bit moves, NaN or not, as for `fneg`.
+        let sign = sign_bit(a.ty);
+        return Float {
+            bits: (a.bits & !sign) | (b.bits & sign),
+            ..a
+        };
+    }
     at_width!(a.ty, |a, b| match op {
         BinaryOp::Fadd => a + b,
         BinaryOp::Fsub => a - b,
@@ -73,13 +81,22 @@ pub(crate) fn binary(op: BinaryOp, a: Float, b: Float) -> Float {
     })
 }
 
+/// `a * b + c`, rounded once.
+pub(crate) fn fma(a: Float, b: Float, c: Float) -> Float {
+    at_width!(a.ty, |a, b, c| a.mul_add(b, c))
+}
+
+fn sign_bit(ty: Type) -> u64 {
+    match ty {
+        Type::F32 => 1 << 31,
+        _ => 1 << 63,
+    }
+}
+
 pub(crate) fn unary(op: UnaryOp, a: Float) -> Float {
     // `fneg` and `fabs` only touch the sign bit, NaN or not, on the
     // hardware and in IEEE 754, so they are exact bit operations here too.
-    let sign = match a.ty {
-        Type::F32 => 1 << 31,
-        _ => 1 << 63,
-    };
+    let sign = sign_bit(a.ty);
     match op {
         UnaryOp::Fneg => {
             return Float {

@@ -94,7 +94,7 @@ use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module,
-    Purpose, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
+    OverflowOp, Purpose, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -274,6 +274,14 @@ impl<'a> FunctionCompiler<'a> {
         for (_, inst) in func.layout_insts() {
             if let InstData::Binary {
                 op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
+                args,
+            } = func.inst_data(inst)
+                && func.value_type(func.resolve(args[0])) == Type::I128
+            {
+                return Err(err(format!("{op} on i128 is not supported yet")));
+            }
+            if let InstData::Overflow {
+                op: op @ (OverflowOp::Umul | OverflowOp::Smul),
                 args,
             } = func.inst_data(inst)
                 && func.value_type(func.resolve(args[0])) == Type::I128
@@ -619,6 +627,38 @@ impl<'a> FunctionCompiler<'a> {
                 self.unary(op, arg, d);
                 self.def_done(result, d);
             }
+            InstData::Binary {
+                op: BinaryOp::Fcopysign,
+                args,
+            } => {
+                // The sign bit of `args[1]` with the rest of `args[0]`,
+                // spliced in general registers.
+                let ty = self.ty(args[0]);
+                let d = self.def_freg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                let (bits, ra, rb) = if ty == Type::F32 {
+                    (31, format!("w{S0}"), format!("w{S1}"))
+                } else {
+                    (63, format!("x{S0}"), format!("x{S1}"))
+                };
+                self.emit(format!("fmov\t{ra}, {}", freg(a, ty)));
+                self.emit(format!("fmov\t{rb}, {}", freg(b, ty)));
+                self.emit(format!("bfxil\t{rb}, {ra}, #0, #{bits}"));
+                self.emit(format!("fmov\t{}, {rb}", freg(d, ty)));
+                self.def_done(result, d);
+            }
+            InstData::Fma { args } => {
+                let ty = self.ty(args[0]);
+                let d = self.def_freg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                let c = self.use_freg(args[2], FS2);
+                let [fa, fb, fc, fd] = [a, b, c, d].map(|r| freg(r, ty));
+                self.emit(format!("fmadd\t{fd}, {fa}, {fb}, {fc}"));
+                self.def_done(result, d);
+            }
+            InstData::Overflow { op, args } => self.overflow(inst, op, args),
             InstData::Binary { op, args } if op.is_float() => {
                 let ty = self.ty(args[0]);
                 let d = self.def_freg(result);
@@ -1105,6 +1145,27 @@ impl<'a> FunctionCompiler<'a> {
                 self.operands(&[value, addr]);
                 self.emit("stp\tx0, x1, [x2]");
             }
+            // Multiplication is rejected in `new`. The carry or borrow of
+            // the low halves feeds the high; the flags then describe the
+            // whole 128 bits.
+            InstData::Overflow { op, args } if wide(self, args[0]) => {
+                self.operands(&args);
+                let (lo, hi, code) = match op {
+                    OverflowOp::Uadd => ("adds", "adcs", "hs"),
+                    OverflowOp::Sadd => ("adds", "adcs", "vs"),
+                    OverflowOp::Usub => ("subs", "sbcs", "lo"),
+                    OverflowOp::Ssub => ("subs", "sbcs", "vs"),
+                    OverflowOp::Umul | OverflowOp::Smul => unreachable!("rejected"),
+                };
+                self.emit(format!("{lo}\tx4, x0, x2"));
+                self.emit(format!("{hi}\tx5, x1, x3"));
+                self.emit(format!("cset\tw6, {code}"));
+                self.pair_out(result, 4, 5);
+                let flag = self.func.inst_results(inst)[1];
+                if let Some(loc) = self.alloc.loc(flag) {
+                    self.emit_move(loc, Loc::Reg(6));
+                }
+            }
             _ => return false,
         }
         true
@@ -1475,6 +1536,83 @@ impl<'a> FunctionCompiler<'a> {
             };
             self.emit(format!("{mnemonic}\t{}, {}", reg(d, to), freg(a, from)));
             self.def_done(result, d);
+        }
+    }
+
+    /// Lowers `*_overflow` on up to 64 bits: the result into x16, the flag
+    /// into x8, both moved out at the end. `i8` and `i16` compute in 32
+    /// bits from extended operands, which cannot overflow there, and check
+    /// that the result fits.
+    fn overflow(&mut self, inst: Inst, op: OverflowOp, args: [Value; 2]) {
+        let ty = self.ty(args[0]);
+        let signed = matches!(op, OverflowOp::Sadd | OverflowOp::Ssub | OverflowOp::Smul);
+        let a = self.use_reg(args[0], S0);
+        let a = self.extend(S0, a, ty, signed);
+        let b = self.use_reg(args[1], S1);
+        let b = self.extend(S1, b, ty, signed);
+        match narrow_bits(ty) {
+            Some(bits) => {
+                let mnemonic = match op {
+                    OverflowOp::Uadd | OverflowOp::Sadd => "add",
+                    OverflowOp::Usub | OverflowOp::Ssub => "sub",
+                    OverflowOp::Umul | OverflowOp::Smul => "mul",
+                };
+                self.emit(format!("{mnemonic}\tw{S0}, w{a}, w{b}"));
+                if signed {
+                    let ext = if bits == 8 { "sxtb" } else { "sxth" };
+                    self.emit(format!("cmp\tw{S0}, w{S0}, {ext}"));
+                } else {
+                    let high = !((1u32 << bits) - 1);
+                    self.emit(format!("tst\tw{S0}, #{high:#x}"));
+                }
+                self.emit(format!("cset\tw{S2}, ne"));
+            }
+            None => {
+                let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(S0, ty));
+                match (op, ty) {
+                    (OverflowOp::Uadd | OverflowOp::Sadd, _) => {
+                        self.emit(format!("adds\t{rd}, {ra}, {rb}"))
+                    }
+                    (OverflowOp::Usub | OverflowOp::Ssub, _) => {
+                        self.emit(format!("subs\t{rd}, {ra}, {rb}"))
+                    }
+                    // The full product's high half must be zero, or the
+                    // sign extension of the low half.
+                    (OverflowOp::Umul, Type::I64) => {
+                        self.emit(format!("umulh\tx{S2}, x{a}, x{b}"));
+                        self.emit(format!("mul\tx{S0}, x{a}, x{b}"));
+                        self.emit(format!("cmp\tx{S2}, #0"));
+                    }
+                    (OverflowOp::Smul, Type::I64) => {
+                        self.emit(format!("smulh\tx{S2}, x{a}, x{b}"));
+                        self.emit(format!("mul\tx{S0}, x{a}, x{b}"));
+                        self.emit(format!("cmp\tx{S2}, x{S0}, asr #63"));
+                    }
+                    (OverflowOp::Umul, _) => {
+                        self.emit(format!("umull\tx{S0}, w{a}, w{b}"));
+                        self.emit(format!("cmp\txzr, x{S0}, lsr #32"));
+                    }
+                    (OverflowOp::Smul, _) => {
+                        self.emit(format!("smull\tx{S0}, w{a}, w{b}"));
+                        self.emit(format!("cmp\tx{S0}, w{S0}, sxtw"));
+                    }
+                }
+                let code = match op {
+                    OverflowOp::Uadd => "hs",
+                    OverflowOp::Usub => "lo",
+                    OverflowOp::Sadd | OverflowOp::Ssub => "vs",
+                    OverflowOp::Umul | OverflowOp::Smul => "ne",
+                };
+                self.emit(format!("cset\tw{S2}, {code}"));
+            }
+        }
+        let results = self.func.inst_results(inst);
+        let (value, flag) = (results[0], results[1]);
+        if let Some(loc) = self.alloc.loc(value) {
+            self.emit_move(loc, Loc::Reg(S0));
+        }
+        if let Some(loc) = self.alloc.loc(flag) {
+            self.emit_move(loc, Loc::Reg(S2));
         }
     }
 

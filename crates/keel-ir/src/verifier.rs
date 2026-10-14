@@ -376,6 +376,24 @@ impl Verifier<'_> {
                     self.inst_error(inst, "bswap needs at least i16".into());
                 }
             }
+            InstData::Overflow { op, args } => {
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if !a.is_int() || a != b {
+                    self.inst_error(
+                        inst,
+                        format!("{op} takes two integers of the same type, got ({a}, {b})"),
+                    );
+                }
+            }
+            InstData::Fma { args } => {
+                let (a, b, c) = (ty(args[0]), ty(args[1]), ty(args[2]));
+                if !a.is_float() || a != b || a != c {
+                    self.inst_error(
+                        inst,
+                        format!("fma takes three floats of the same type, got ({a}, {b}, {c})"),
+                    );
+                }
+            }
             InstData::Select { args } => {
                 let (c, a, b) = (ty(args[0]), ty(args[1]), ty(args[2]));
                 if !c.is_int() {

@@ -1,0 +1,20 @@
+; passes: gvn, gcm, dce
+; GVN merges the two identical uadd_overflow, both results at once. GCM
+; places the survivor by the users of either result: its flag is used in
+; block0, so it stays there although its value is only used in block1.
+func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2, v3 = uadd_overflow v0, v1
+    v4, v5 = uadd_overflow v1, v0
+    brif v5, block1, block2
+block1:
+    v6 = iadd v2, v4
+    return v6
+block2:
+    v7, v8 = umul_overflow v0, v1
+    brif v3, block3, block4
+block3:
+    return v7
+block4:
+    return v0
+}

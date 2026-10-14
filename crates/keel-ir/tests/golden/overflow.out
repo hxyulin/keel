@@ -1,0 +1,16 @@
+func @f(i32, i32, f64, f64) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: f64, v3: f64):
+    v4, v5 = uadd_overflow v0, v1
+    v6, v7 = sadd_overflow v4, v1
+    v8, v9 = usub_overflow v6, v0
+    v10, v11 = ssub_overflow v8, v0
+    v12, v13 = umul_overflow v10, v1
+    v14, v15 = smul_overflow v12, v1
+    v16 = fma v2, v3, v2
+    v17 = fcopysign v16, v3
+    brif v15, block1, block2
+block1:
+    return v14
+block2:
+    return v4
+}

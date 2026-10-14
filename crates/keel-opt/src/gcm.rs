@@ -92,9 +92,17 @@ pub fn run(func: &mut Function) -> bool {
     // Late placement and the final choice, users first.
     let mut changed = false;
     for &inst in floating.iter().rev() {
-        let result = func.first_result(inst);
+        // The users of all its results (`*_overflow` has two).
+        let mut inst_users: Vec<Inst> = Vec::new();
+        for &result in func.inst_results(inst) {
+            for &user in &users[result.index()] {
+                if !inst_users.contains(&user) {
+                    inst_users.push(user);
+                }
+            }
+        }
         let mut late: Option<Block> = None;
-        for &user in &users[result.index()] {
+        for &user in &inst_users {
             let b = func.inst_block(user);
             late = Some(match late {
                 None => b,
@@ -108,7 +116,7 @@ pub fn run(func: &mut Function) -> bool {
         let mut operands = 0;
         func.inst_data(inst).for_each_operand(|_| operands += 1);
         if operands == 0 {
-            changed |= rematerialize(func, inst, &users[result.index()]);
+            changed |= rematerialize(func, inst, &inst_users);
             continue;
         }
 
@@ -124,7 +132,7 @@ pub fn run(func: &mut Function) -> bool {
         if best == func.inst_block(inst) {
             continue;
         }
-        let at = match first_user_in(func, best, &users[result.index()]) {
+        let at = match first_user_in(func, best, &inst_users) {
             Some(user) => InsertPoint::Before(user),
             None => InsertPoint::Before(*func.block_insts(best).last().unwrap()),
         };

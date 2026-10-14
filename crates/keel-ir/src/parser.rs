@@ -20,8 +20,8 @@
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
-    Intrinsic, Layout, Module, Purpose, SigRef, Signature, SourceFile, SourceLoc, StackSlot,
-    StackSlotData, Symbol, Type, UnaryOp, Value,
+    Intrinsic, Layout, Module, OverflowOp, Purpose, SigRef, Signature, SourceFile, SourceLoc,
+    StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -944,6 +944,14 @@ impl Parser {
                 op,
                 args: [a, self.value(names)?],
             }
+        } else if let Some(op) = parse_overflow_op(base) {
+            no_suffix()?;
+            let a = self.value(names)?;
+            self.expect(Tok::Punct(','))?;
+            InstData::Overflow {
+                op,
+                args: [a, self.value(names)?],
+            }
         } else if let Some(op) = parse_convert_op(base) {
             InstData::Convert {
                 op,
@@ -956,6 +964,16 @@ impl Parser {
                     let ty = suffix_type("type")?;
                     let imm = self.int("an integer")?;
                     InstData::Iconst { ty, imm }
+                }
+                "fma" => {
+                    no_suffix()?;
+                    let a = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let b = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::Fma {
+                        args: [a, b, self.value(names)?],
+                    }
                 }
                 "fconst" => {
                     let ty = suffix_type("type")?;
@@ -1156,6 +1174,7 @@ impl Parser {
         let expected = match &data {
             InstData::Call { .. } | InstData::CallIndirect { .. } => None,
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
+            InstData::Overflow { .. } => Some(2),
             InstData::Store { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
@@ -1178,6 +1197,12 @@ impl Parser {
                 ));
             }
             (Some(1), n) if n > 1 => return Err(error(op_loc, format!("`{base}` has one result"))),
+            (Some(2), n) if n != 2 => {
+                return Err(error(
+                    op_loc,
+                    format!("`{base}` has two results; write `vN, vM = {base} ...`"),
+                ));
+            }
             _ => {}
         }
         let results = results
@@ -1337,6 +1362,15 @@ fn build(
     loop {
         let mut changed = false;
         for inst in blocks.iter().flat_map(|b| &b.insts) {
+            if let (InstData::Overflow { args, .. }, [value, flag]) =
+                (&inst.data, &inst.results[..])
+                && types[value.index()].is_none()
+                && types[args[0].index()].is_some()
+            {
+                types[value.index()] = types[args[0].index()];
+                types[flag.index()] = Some(Type::I8);
+                changed = true;
+            }
             let [result] = inst.results[..] else { continue };
             if types[result.index()].is_some() {
                 continue;
@@ -1352,6 +1386,7 @@ fn build(
                 InstData::Unary { arg, .. } => types[arg.index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
                 InstData::Select { args } => types[args[1].index()],
+                InstData::Fma { args } => types[args[0].index()],
                 _ => None,
             };
             if ty.is_some() {
@@ -1476,6 +1511,7 @@ fn parse_binary_op(s: &str) -> Option<BinaryOp> {
         "fdiv" => BinaryOp::Fdiv,
         "fmin" => BinaryOp::Fmin,
         "fmax" => BinaryOp::Fmax,
+        "fcopysign" => BinaryOp::Fcopysign,
         _ => return None,
     })
 }
@@ -1495,6 +1531,18 @@ fn parse_unary_op(s: &str) -> Option<UnaryOp> {
         "ffloor" => UnaryOp::Ffloor,
         "ftrunc" => UnaryOp::Ftrunc,
         "fnearest" => UnaryOp::Fnearest,
+        _ => return None,
+    })
+}
+
+fn parse_overflow_op(s: &str) -> Option<OverflowOp> {
+    Some(match s {
+        "uadd_overflow" => OverflowOp::Uadd,
+        "sadd_overflow" => OverflowOp::Sadd,
+        "usub_overflow" => OverflowOp::Usub,
+        "ssub_overflow" => OverflowOp::Ssub,
+        "umul_overflow" => OverflowOp::Umul,
+        "smul_overflow" => OverflowOp::Smul,
         _ => return None,
     })
 }

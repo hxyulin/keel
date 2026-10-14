@@ -1,0 +1,57 @@
+; fma and fcopysign against libm in fma.c. The k_const_* functions take
+; constant operands, so the optimized build checks constant folding too.
+; expect: exit 0
+
+func @k_fma_f64(f64, f64, f64) -> f64 cc(c) {
+block0(v0: f64, v1: f64, v2: f64):
+    v3 = fma v0, v1, v2
+    return v3
+}
+
+func @k_fma_f32(f32, f32, f32) -> f32 cc(c) {
+block0(v0: f32, v1: f32, v2: f32):
+    v3 = fma v0, v1, v2
+    return v3
+}
+
+func @k_copysign_f64(f64, f64) -> f64 cc(c) {
+block0(v0: f64, v1: f64):
+    v2 = fcopysign v0, v1
+    return v2
+}
+
+func @k_copysign_f32(f32, f32) -> f32 cc(c) {
+block0(v0: f32, v1: f32):
+    v2 = fcopysign v0, v1
+    return v2
+}
+
+; 0.1 * 10 - 1 rounded once is 2^-54 (0.1 is slightly above 1/10);
+; rounding the product first would give 0.
+func @k_const_fma() -> f64 cc(c) {
+block0:
+    v0 = fconst.f64 0.1
+    v1 = fconst.f64 10.0
+    v2 = fconst.f64 -1.0
+    v3 = fma v0, v1, v2
+    return v3
+}
+
+; A NaN keeps its payload: only the sign changes.
+func @k_const_copysign() -> i64 cc(c) {
+block0:
+    v0 = fconst.f64 0x7ff8000000000123
+    v1 = fconst.f64 -2.0
+    v2 = fcopysign v0, v1
+    v3 = bitcast.i64 v2
+    return v3
+}
+
+func @k_const_copysign_f32() -> i32 cc(c) {
+block0:
+    v0 = fconst.f32 0xffc00042
+    v1 = fconst.f32 0.0
+    v2 = fcopysign v0, v1
+    v3 = bitcast.i32 v2
+    return v3
+}

@@ -362,6 +362,8 @@ impl Function {
             InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
             InstData::Select { args } => vec![self.value_type(args[1])],
+            InstData::Overflow { args, .. } => vec![self.value_type(args[0]), Type::I8],
+            InstData::Fma { args } => vec![self.value_type(args[0])],
             InstData::Icmp { .. } | InstData::Fcmp { .. } => vec![Type::I8],
             InstData::Call { func, .. } => self.callees[*func].sig.return_types(),
             InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
@@ -678,6 +680,10 @@ impl Function {
             InstData::Trap => f.write_str("trap"),
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
+            InstData::Overflow { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
+            InstData::Fma { args } => {
+                write!(f, "fma {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            }
             InstData::Select { args } => {
                 write!(f, "select {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
             }

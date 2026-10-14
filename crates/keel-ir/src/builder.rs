@@ -9,7 +9,7 @@
 use crate::function::InsertPoint;
 use crate::{
     BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, Inst, InstData, IntCC,
-    Intrinsic, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp, Value,
+    Intrinsic, OverflowOp, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp, Value,
 };
 
 pub struct InstBuilder<'f> {
@@ -89,6 +89,20 @@ impl InstBuilder<'_> {
         shl => Shl, ushr => Ushr, sshr => Sshr, rotl => Rotl, rotr => Rotr,
         umulhi => Umulhi, smulhi => Smulhi, ptradd => Ptradd,
         fadd => Fadd, fsub => Fsub, fmul => Fmul, fdiv => Fdiv, fmin => Fmin, fmax => Fmax,
+        fcopysign => Fcopysign,
+    }
+
+    /// The wrapped result and the `i8` overflow flag.
+    pub fn overflow(self, op: OverflowOp, a: Value, b: Value) -> (Value, Value) {
+        let func = self.func;
+        let inst = func.insert_inst(self.at, InstData::Overflow { op, args: [a, b] });
+        func.set_inst_loc(inst, self.loc);
+        let results = func.inst_results(inst);
+        (results[0], results[1])
+    }
+
+    pub fn fma(self, a: Value, b: Value, c: Value) -> Value {
+        self.value(InstData::Fma { args: [a, b, c] })
     }
 
     unary! {

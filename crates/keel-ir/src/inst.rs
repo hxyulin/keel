@@ -29,6 +29,17 @@ pub enum InstData {
         op: BinaryOp,
         args: [Value; 2],
     },
+    /// Integer arithmetic that also reports overflow: the wrapped result,
+    /// and an `i8` that is 1 if the exact result does not fit the type
+    /// (taken as unsigned or signed, by the operation).
+    Overflow {
+        op: OverflowOp,
+        args: [Value; 2],
+    },
+    /// `args[0] * args[1] + args[2]` with a single rounding.
+    Fma {
+        args: [Value; 3],
+    },
     /// `args[1]` if `args[0]` is non-zero, else `args[2]`. Does not branch.
     Select {
         args: [Value; 3],
@@ -184,6 +195,18 @@ pub enum BinaryOp {
     /// -0 is less than +0.
     Fmin,
     Fmax,
+    /// The magnitude of `args[0]` with the sign of `args[1]`.
+    Fcopysign,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum OverflowOp {
+    Uadd,
+    Sadd,
+    Usub,
+    Ssub,
+    Umul,
+    Smul,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -273,6 +296,7 @@ impl BinaryOp {
                 | BinaryOp::Fdiv
                 | BinaryOp::Fmin
                 | BinaryOp::Fmax
+                | BinaryOp::Fcopysign
         )
     }
 
@@ -310,6 +334,8 @@ impl InstData {
             InstData::Iconst { .. }
             | InstData::Fconst { .. }
             | InstData::Unary { .. }
+            | InstData::Overflow { .. }
+            | InstData::Fma { .. }
             | InstData::Select { .. }
             | InstData::Convert { .. }
             | InstData::Icmp { .. }
@@ -367,13 +393,14 @@ impl InstData {
             | InstData::SymbolAddr { .. }
             | InstData::Trap => {}
             InstData::Binary { args, .. }
+            | InstData::Overflow { args, .. }
             | InstData::Icmp { args, .. }
             | InstData::Fcmp { args, .. } => args.iter().copied().for_each(f),
             InstData::CallIndirect { callee, args, .. } => {
                 f(*callee);
                 args.iter().copied().for_each(f);
             }
-            InstData::Select { args } => args.iter().copied().for_each(f),
+            InstData::Select { args } | InstData::Fma { args } => args.iter().copied().for_each(f),
             InstData::Unary { arg, .. } => f(*arg),
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
@@ -405,13 +432,14 @@ impl InstData {
             | InstData::SymbolAddr { .. }
             | InstData::Trap => {}
             InstData::Binary { args, .. }
+            | InstData::Overflow { args, .. }
             | InstData::Icmp { args, .. }
             | InstData::Fcmp { args, .. } => args.iter_mut().for_each(f),
             InstData::CallIndirect { callee, args, .. } => {
                 f(callee);
                 args.iter_mut().for_each(f);
             }
-            InstData::Select { args } => args.iter_mut().for_each(f),
+            InstData::Select { args } | InstData::Fma { args } => args.iter_mut().for_each(f),
             InstData::Unary { arg, .. } => f(arg),
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
@@ -463,6 +491,20 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Fdiv => "fdiv",
             BinaryOp::Fmin => "fmin",
             BinaryOp::Fmax => "fmax",
+            BinaryOp::Fcopysign => "fcopysign",
+        })
+    }
+}
+
+impl fmt::Display for OverflowOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            OverflowOp::Uadd => "uadd_overflow",
+            OverflowOp::Sadd => "sadd_overflow",
+            OverflowOp::Usub => "usub_overflow",
+            OverflowOp::Ssub => "ssub_overflow",
+            OverflowOp::Umul => "umul_overflow",
+            OverflowOp::Smul => "smul_overflow",
         })
     }
 }

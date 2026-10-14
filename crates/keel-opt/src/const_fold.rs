@@ -55,6 +55,9 @@ fn fold(func: &Function, data: &InstData) -> Option<InstData> {
             Folded::Float(fp::binary(op, float(args[0])?, float(args[1])?))
         }
         InstData::Binary { op, args } => Folded::Int(binary(op, int(args[0])?, int(args[1])?)?),
+        InstData::Fma { args } => {
+            Folded::Float(fp::fma(float(args[0])?, float(args[1])?, float(args[2])?))
+        }
         InstData::Unary { op, arg } if op.is_float() => Folded::Float(fp::unary(op, float(arg)?)),
         InstData::Unary { op, arg } => Folded::Int(unary(op, int(arg)?)?),
         InstData::Convert { op, ty, arg } => match op {

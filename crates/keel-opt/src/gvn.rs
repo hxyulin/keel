@@ -13,7 +13,7 @@
 //! may see different memory.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-use keel_ir::{BinaryOp, EntityRef, Function, InstData, IntCC, Value};
+use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp};
 use std::collections::HashMap;
 
 pub fn run(func: &mut Function) -> bool {
@@ -24,7 +24,7 @@ pub fn run(func: &mut Function) -> bool {
     };
     let children = domtree.children();
 
-    let mut table: HashMap<InstData, Value> = HashMap::new();
+    let mut table: HashMap<InstData, Inst> = HashMap::new();
     // Keys added, in order, so a scope can be popped.
     let mut added: Vec<InstData> = Vec::new();
     // (block, scope start in `added`, whether its instructions were visited)
@@ -44,15 +44,22 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             let key = canonical(func, data);
-            let result = func.first_result(inst);
             match table.get(&key) {
                 Some(&existing) => {
-                    func.replace_all_uses(result, existing);
+                    let pairs: Vec<_> = func
+                        .inst_results(inst)
+                        .iter()
+                        .copied()
+                        .zip(func.inst_results(existing).to_vec())
+                        .collect();
+                    for (result, existing) in pairs {
+                        func.replace_all_uses(result, existing);
+                    }
                     func.remove_inst(inst);
                     changed = true;
                 }
                 None => {
-                    table.insert(key.clone(), result);
+                    table.insert(key.clone(), inst);
                     added.push(key);
                 }
             }
@@ -71,6 +78,9 @@ fn canonical(func: &Function, data: &InstData) -> InstData {
     key.for_each_operand_mut(|v| *v = func.resolve(*v));
     match &mut key {
         InstData::Binary { op, args } if is_commutative(*op) => args.sort_by_key(|v| v.index()),
+        InstData::Overflow { op, args } if is_commutative_overflow(*op) => {
+            args.sort_by_key(|v| v.index())
+        }
         InstData::Icmp {
             cond: IntCC::Eq | IntCC::Ne,
             args,
@@ -94,5 +104,12 @@ fn is_commutative(op: BinaryOp) -> bool {
             // order, and the IR leaves that unspecified.
             | BinaryOp::Fadd
             | BinaryOp::Fmul
+    )
+}
+
+fn is_commutative_overflow(op: OverflowOp) -> bool {
+    matches!(
+        op,
+        OverflowOp::Uadd | OverflowOp::Sadd | OverflowOp::Umul | OverflowOp::Smul
     )
 }

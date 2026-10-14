@@ -1,0 +1,214 @@
+; Every *_overflow operation at every width, checked against clang's
+; __builtin_*_overflow in overflow.c. Each k_<op>_<type> returns the
+; wrapped result and stores the flag through its third argument.
+; k_live keeps both results alive across a call.
+; expect: exit 0
+
+func @k_uadd_i8(i8 uext, i8 uext, ptr) -> i8 uext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = uadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_sadd_i8(i8 sext, i8 sext, ptr) -> i8 sext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = sadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_usub_i8(i8 uext, i8 uext, ptr) -> i8 uext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = usub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_ssub_i8(i8 sext, i8 sext, ptr) -> i8 sext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = ssub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_umul_i8(i8 uext, i8 uext, ptr) -> i8 uext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = umul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_smul_i8(i8 sext, i8 sext, ptr) -> i8 sext cc(c) {
+block0(v0: i8, v1: i8, v2: ptr):
+    v3, v4 = smul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_uadd_i16(i16 uext, i16 uext, ptr) -> i16 uext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = uadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_sadd_i16(i16 sext, i16 sext, ptr) -> i16 sext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = sadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_usub_i16(i16 uext, i16 uext, ptr) -> i16 uext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = usub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_ssub_i16(i16 sext, i16 sext, ptr) -> i16 sext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = ssub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_umul_i16(i16 uext, i16 uext, ptr) -> i16 uext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = umul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_smul_i16(i16 sext, i16 sext, ptr) -> i16 sext cc(c) {
+block0(v0: i16, v1: i16, v2: ptr):
+    v3, v4 = smul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_uadd_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = uadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_sadd_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = sadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_usub_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = usub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_ssub_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = ssub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_umul_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = umul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_smul_i32(i32, i32, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: i32, v2: ptr):
+    v3, v4 = smul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_uadd_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = uadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_sadd_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = sadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_usub_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = usub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_ssub_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = ssub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_umul_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = umul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_smul_i64(i64, i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = smul_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_uadd_i128(i128, i128, ptr) -> i128 cc(c) {
+block0(v0: i128, v1: i128, v2: ptr):
+    v3, v4 = uadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_sadd_i128(i128, i128, ptr) -> i128 cc(c) {
+block0(v0: i128, v1: i128, v2: ptr):
+    v3, v4 = sadd_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_usub_i128(i128, i128, ptr) -> i128 cc(c) {
+block0(v0: i128, v1: i128, v2: ptr):
+    v3, v4 = usub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+func @k_ssub_i128(i128, i128, ptr) -> i128 cc(c) {
+block0(v0: i128, v1: i128, v2: ptr):
+    v3, v4 = ssub_overflow v0, v1
+    store v4, v2
+    return v3
+}
+
+decl @clobber()
+
+; Returns 2 * (a + b) + overflow flag, with both results live across a call.
+func @k_live(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2, v3 = uadd_overflow v0, v1
+    call @clobber()
+    v4 = uext.i64 v3
+    v5 = iadd v2, v2
+    v6 = iadd v5, v4
+    return v6
+}
