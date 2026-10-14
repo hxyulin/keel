@@ -69,15 +69,16 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
+use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDI, RDX, Slot};
 use crate::{CodegenError, Format, data, loc_reg, pieces};
 use keel_ir::{
-    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, EntityRef, FloatCC,
-    Function, Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose,
-    RmwOp, Type, UnaryOp, Value, ValueDef,
+    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DebugScope, EntityRef,
+    FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp,
+    Purpose, RmwOp, SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -99,6 +100,9 @@ const S2: u8 = RDX;
 const S3: u8 = 11;
 /// Holds the target of an indirect call while the arguments move.
 const R10: u8 = 10;
+
+/// DWARF's number for rbp, the frame base debuggers find variables from.
+const DWARF_RBP: u8 = 6;
 
 /// Vector scratch registers.
 const FS0: u8 = 13;
@@ -123,13 +127,27 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
         "register pools must be subsets of REGISTERS"
     );
     let mut out = String::from("\t.intel_syntax noprefix\n");
+    let debug = !module.files.is_empty() && !module.functions.is_empty();
+    if debug {
+        for (i, path) in module.files.iter().enumerate() {
+            writeln!(out, "\t.file\t{} {}", i + 1, data::asm_string(path)).unwrap();
+        }
+    }
+    let mut frames = Vec::new();
     for func in &module.functions {
-        FunctionCompiler::new(func, module, pools)?.compile(&mut out);
+        let mut compiler = FunctionCompiler::new(func, module, pools)?;
+        compiler.debug = debug;
+        let slots = compiler.slot_frame_offsets();
+        let scope_marks = compiler.compile(&mut out);
+        frames.push(FrameDebug { slots, scope_marks });
     }
     for data in &module.data {
         if let Some(init) = &data.init {
             data::emit_data(&mut out, Format::Elf, data, init);
         }
+    }
+    if debug {
+        dwarf::emit_debug_info(&mut out, Format::Elf, DWARF_RBP, module, &frames);
     }
     // No executable stack.
     out.push_str("\t.section\t.note.GNU-stack,\"\",@progbits\n");
@@ -304,9 +322,28 @@ struct FunctionCompiler<'a> {
     next_block: Option<Block>,
     out: String,
     uses_trap: bool,
+    /// Whether to emit `.loc` directives.
+    debug: bool,
+    /// The location of the last `.loc`.
+    srcloc: Option<SourceLoc>,
+    /// Whether the next `.loc` ends the prologue.
+    prologue_end: bool,
+    /// The lexical scope of the code being emitted, and where it changed.
+    scope: Option<DebugScope>,
+    scope_marks: Vec<(String, Option<DebugScope>)>,
 }
 
 impl<'a> FunctionCompiler<'a> {
+    /// The offset of each stack slot from rbp, where debuggers find the
+    /// variables in them: rbp stays put while `rsp` may move.
+    fn slot_frame_offsets(&self) -> Vec<i64> {
+        let top = (self.frame_size + 8 * self.saved.len()) as i64;
+        self.stack_slot_offsets
+            .iter()
+            .map(|&offset| offset as i64 - top)
+            .collect()
+    }
+
     fn new(func: &'a Function, module: &'a Module, pools: &Pools) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -466,11 +503,17 @@ impl<'a> FunctionCompiler<'a> {
             next_block: None,
             out: String::new(),
             uses_trap: false,
+            debug: false,
+            srcloc: None,
+            prologue_end: false,
+            scope: None,
+            scope_marks: Vec::new(),
         })
     }
 
-    /// Appends the function's assembly to `out`.
-    fn compile(mut self, out: &mut String) {
+    /// Appends the function's assembly to `out`; gives where its lexical
+    /// scopes begin and end.
+    fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
         let func = self.func;
         let name = &func.name;
         out.push_str("\t.text\n");
@@ -482,6 +525,22 @@ impl<'a> FunctionCompiler<'a> {
             "\t.p2align\t4\n\t.type\t{name},@function\n{name}:\n.L{name}_begin:"
         )
         .unwrap();
+        // The prologue takes the function's location, or else that of its
+        // first located instruction, with column 0; the first located
+        // instruction after it ends the prologue.
+        if self.debug {
+            let first = func.debug_loc.or_else(|| {
+                func.layout_insts()
+                    .find_map(|(_, inst)| func.inst_loc(inst))
+            });
+            self.set_srcloc(Some(SourceLoc {
+                file: first.map_or(SourceFile::new(0), |loc| loc.file),
+                line: first.map_or(0, |loc| loc.line),
+                col: 0,
+                scope: None,
+            }));
+            self.prologue_end = true;
+        }
         self.emit(".cfi_startproc");
         self.emit("push\trbp");
         self.emit(".cfi_def_cfa_offset 16");
@@ -505,6 +564,9 @@ impl<'a> FunctionCompiler<'a> {
             writeln!(self.out, "{}:", self.label(block)).unwrap();
             for &inst in func.block_insts(block) {
                 writeln!(self.out, "\t# {}", func.display_inst(inst)).unwrap();
+                if self.debug {
+                    self.set_srcloc(func.inst_loc(inst));
+                }
                 self.inst(inst);
             }
         }
@@ -516,6 +578,38 @@ impl<'a> FunctionCompiler<'a> {
         self.emit(".cfi_endproc");
         writeln!(self.out, "\t.size\t{name}, .-{name}").unwrap();
         out.push_str(&self.out);
+        self.scope_marks
+    }
+
+    /// Emits a `.loc` for the code that follows, unless it would repeat
+    /// the last one. `None` keeps the last one. A change of lexical scope
+    /// is marked with a label.
+    fn set_srcloc(&mut self, loc: Option<SourceLoc>) {
+        let Some(loc) = loc else { return };
+        if loc.scope != self.scope {
+            let label = format!(".L{}_ds{}", self.func.name, self.scope_marks.len());
+            writeln!(self.out, "{label}:").unwrap();
+            self.scope_marks.push((label, loc.scope));
+            self.scope = loc.scope;
+        }
+        if self
+            .srcloc
+            .is_some_and(|l| (l.file, l.line, l.col) == (loc.file, loc.line, loc.col))
+            && !self.prologue_end
+        {
+            return;
+        }
+        let SourceLoc {
+            file, line, col, ..
+        } = loc;
+        let flag = if self.prologue_end {
+            " prologue_end"
+        } else {
+            ""
+        };
+        self.emit(format!(".loc\t{} {line} {col}{flag}", file.index() + 1));
+        self.srcloc = Some(loc);
+        self.prologue_end = false;
     }
 
     /// Moves the parameters to their places. Arguments arrive in

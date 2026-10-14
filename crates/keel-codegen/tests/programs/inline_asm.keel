@@ -1,3 +1,4 @@
+; target: aarch64-apple-darwin
 ; Inline assembly: register operands of each class and width, with and
 ; without modifiers, memory and constant operands, a tied operand, fixed
 ; registers (a raw getpid system call), several outputs, and clobbers of

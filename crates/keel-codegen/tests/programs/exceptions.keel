@@ -1,3 +1,4 @@
+; target: aarch64-apple-darwin
 ; Catching C++ exceptions in keel, with __gxx_personality_v0: catch
 ; clauses for int and anything, a cleanup that resumes unwinding, and a
 ; plain call between invokes whose exception must propagate. The driver,

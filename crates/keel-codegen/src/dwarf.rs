@@ -35,7 +35,11 @@ pub(crate) fn emit_debug_info(
     frames: &[FrameDebug],
 ) {
     let l = format.local();
+    let elf = format == Format::Elf;
     writeln!(out, "\t.section\t{}", format.debug_section("abbrev")).unwrap();
+    if elf {
+        writeln!(out, "{l}debug_abbrev:").unwrap();
+    }
     for (code, (tag, children, attrs)) in ABBREVS.iter().enumerate() {
         writeln!(
             out,
@@ -60,9 +64,18 @@ pub(crate) fn emit_debug_info(
     writeln!(out, "{l}debug_cu:").unwrap();
     writeln!(out, "\t.long\t{l}debug_info_end-{l}debug_info_start").unwrap();
     writeln!(out, "{l}debug_info_start:").unwrap();
-    // DWARF 4, abbreviations at offset 0, 8-byte addresses; then the
-    // compile unit.
-    out.push_str("\t.short\t4\n\t.long\t0\n\t.byte\t8\n");
+    // DWARF 4, the abbreviations' offset in their section, 8-byte
+    // addresses; then the compile unit. Mach-O debug info stays in the
+    // object files, where each section starts at 0. An ELF linker
+    // concatenates each `.debug_*` section of every object, so offsets
+    // into them are labels, which it relocates.
+    out.push_str("\t.short\t4\n");
+    if elf {
+        writeln!(out, "\t.long\t{l}debug_abbrev").unwrap();
+    } else {
+        out.push_str("\t.long\t0\n");
+    }
+    out.push_str("\t.byte\t8\n");
     let abbrev = match module.debug_language {
         Some(_) => Abbrev::CompileUnitLanguage,
         None => Abbrev::CompileUnit,
@@ -85,8 +98,13 @@ pub(crate) fn emit_debug_info(
     )
     .unwrap();
     writeln!(out, "\t.asciz\t{}", crate::data::asm_string(&comp_dir)).unwrap();
-    // The assembler's line table is all of `__debug_line`.
-    out.push_str("\t.long\t0\n");
+    // The assembler's line table is all of `__debug_line`; on ELF it
+    // starts at a label in `.debug_line`, added below.
+    if elf {
+        writeln!(out, "\t.long\t{l}debug_line").unwrap();
+    } else {
+        out.push_str("\t.long\t0\n");
+    }
     // The unit's size spans several functions, which `.subsections_via_
     // symbols` makes separate atoms: written directly, the difference
     // becomes a relocation pair dsymutil does not support ("unsupported
@@ -188,7 +206,11 @@ pub(crate) fn emit_debug_info(
                 _ => {
                     die(out, Abbrev::LexicalBlockRanges);
                     let list = format!("{l}debug_ranges{}", range_lists.len());
-                    writeln!(out, "\t.long\t{list}-{l}debug_ranges").unwrap();
+                    if elf {
+                        writeln!(out, "\t.long\t{list}").unwrap();
+                    } else {
+                        writeln!(out, "\t.long\t{list}-{l}debug_ranges").unwrap();
+                    }
                     range_lists.push((format!("{l}{name}_begin"), scope_ranges.clone()));
                 }
             }
@@ -214,7 +236,17 @@ pub(crate) fn emit_debug_info(
         );
         string(out, &global.name);
         type_ref(out, global.ty);
-        if data.thread_local {
+        if data.thread_local && elf {
+            // The variable's offset in its module's TLS block
+            // (DW_OP_const8u), which DW_OP_GNU_push_tls_address turns into
+            // this thread's copy, as GCC writes it.
+            writeln!(
+                out,
+                "\t.byte\t10, 0x0e\n\t.quad\t{}@dtpoff\n\t.byte\t0xe0",
+                global.symbol
+            )
+            .unwrap();
+        } else if data.thread_local {
             // The address of the thread-local's descriptor
             // (DW_OP_const8u), which DW_OP_form_tls_address turns into
             // this thread's copy, as clang writes it.
@@ -408,6 +440,14 @@ pub(crate) fn emit_debug_info(
             }
             out.push_str("\t.quad\t0\n\t.quad\t0\n");
         }
+    }
+    if elf {
+        writeln!(
+            out,
+            "\t.section\t{}\n{l}debug_line:",
+            format.debug_section("line")
+        )
+        .unwrap();
     }
 }
 
