@@ -687,7 +687,7 @@ analyses they need; there is no analysis cache yet.
 
 | Pass | What it does |
 |---|---|
-| `simplify-cfg` | constant `brif` → `jump`, skip forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
+| `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
@@ -696,6 +696,13 @@ analyses they need; there is no analysis cache yet.
 
 The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
 dce, gcm`.
+
+Forwarding composes the incoming argument tuple with the outgoing jump,
+including permutations and repeated arguments. A forwarding block whose
+parameter is used outside its own jump stays: bypassing it would lose the
+definition dominating that external use. One forwarding step per cleanup
+round also lets closed forwarding cycles collapse to self-loops without
+changing nontermination.
 
 **SCCP** uses the monotone value lattice from
 [Wegman and Zadeck](https://cs.brown.edu/research/pubs/techreports/reports/CS-89-36.html):

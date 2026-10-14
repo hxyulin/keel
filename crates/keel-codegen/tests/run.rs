@@ -253,18 +253,21 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 }
 
 #[test]
-fn constant_loop_optimized_spills() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/constant_loop.keel");
-    for (selection, selection_name) in [
-        (keel_codegen::SelectionOptions::default(), "baseline"),
-        (keel_codegen::SelectionOptions::ALL, "all"),
-    ] {
-        for (allocation, allocation_name) in [
-            (AllocationTier::Fast, "fast"),
-            (AllocationTier::Full, "full"),
+fn optimized_regressions_spills() {
+    for program in ["constant_loop", "cfg_forwarding"] {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
+        for (selection, selection_name) in [
+            (keel_codegen::SelectionOptions::default(), "baseline"),
+            (keel_codegen::SelectionOptions::ALL, "all"),
         ] {
-            let suffix = format!("-sccp-tiny-{selection_name}-{allocation_name}");
-            run_program(&path, &TINY, true, &suffix, selection, allocation).unwrap();
+            for (allocation, allocation_name) in [
+                (AllocationTier::Fast, "fast"),
+                (AllocationTier::Full, "full"),
+            ] {
+                let suffix = format!("-opt-regression-tiny-{selection_name}-{allocation_name}");
+                run_program(&path, &TINY, true, &suffix, selection, allocation).unwrap();
+            }
         }
     }
 }
