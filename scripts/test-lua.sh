@@ -25,7 +25,7 @@ tests_sha=8a4898ffe4c7613c8009327a0722db7a41ef861d526c77c5b46114e59ebf811e
 
 # shasum on macOS, sha256sum on Linux.
 check_sha256() {
-  if command -v sha256sum > /dev/null; then sha256sum -c --quiet; else shasum -a 256 -c --quiet; fi
+  if [ "$(uname)" = Darwin ]; then shasum -a 256 -c --quiet; else sha256sum -c --quiet; fi
 }
 case $(uname) in
   Darwin) platform=(-DLUA_USE_MACOSX) libs=(-lm) ;;

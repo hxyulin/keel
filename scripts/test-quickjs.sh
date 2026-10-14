@@ -25,7 +25,7 @@ libs=(-lm -lpthread)
 [ "$(uname)" = Darwin ] || libs+=(-ldl)
 # shasum on macOS, sha256sum on Linux.
 check_sha256() {
-  if command -v sha256sum > /dev/null; then sha256sum -c --quiet; else shasum -a 256 -c --quiet; fi
+  if [ "$(uname)" = Darwin ]; then shasum -a 256 -c --quiet; else sha256sum -c --quiet; fi
 }
 
 mkdir -p "$work"
