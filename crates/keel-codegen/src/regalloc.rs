@@ -139,18 +139,35 @@ impl Allocation {
 /// Allocates every value in `func`. `is_call` says which instructions
 /// clobber the caller-saved registers, `returns_twice` which calls may
 /// return again later.
+#[cfg(test)]
 pub fn allocate(
     func: &Function,
     pools: &Pools,
     is_call: impl Fn(&InstData) -> bool,
     returns_twice: impl Fn(&InstData) -> bool,
 ) -> Allocation {
+    allocate_selected(
+        func,
+        pools,
+        is_call,
+        returns_twice,
+        &crate::select::Selection::default(),
+    )
+}
+
+pub(crate) fn allocate_selected(
+    func: &Function,
+    pools: &Pools,
+    is_call: impl Fn(&InstData) -> bool,
+    returns_twice: impl Fn(&InstData) -> bool,
+    selection: &crate::select::Selection,
+) -> Allocation {
     let cfg = ControlFlowGraph::compute(func);
     let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
-    let intervals = build_intervals(func, &cfg, &order, &is_call, &returns_twice);
+    let intervals = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
 
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
-    let mut spilled = linear_scan(&intervals, pools, &mut locs);
+    let mut spilled = linear_scan(&intervals, pools, &mut locs, &selection.hints);
     let spill_slots = assign_spill_slots(&mut spilled, &mut locs);
 
     let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
@@ -252,7 +269,12 @@ struct Liveness {
 /// block arguments need no special case (phi nodes would). Visiting blocks
 /// in postorder makes most information flow in one pass; loops need a
 /// second to carry live-ins back round the back edge.
-fn liveness(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Liveness {
+fn liveness(
+    func: &Function,
+    cfg: &ControlFlowGraph,
+    order: &[Block],
+    selection: &crate::select::Selection,
+) -> Liveness {
     let n = func.num_blocks();
     let mut uses = vec![BTreeSet::new(); n];
     let mut defs = vec![BTreeSet::new(); n];
@@ -260,8 +282,10 @@ fn liveness(func: &Function, cfg: &ControlFlowGraph, order: &[Block]) -> Livenes
         let mut block_uses = BTreeSet::new();
         let mut block_defs: BTreeSet<Value> = func.block_params(block).iter().copied().collect();
         for &inst in func.block_insts(block) {
-            func.inst_data(inst).for_each_operand(|v| {
-                let v = func.resolve(v);
+            if selection.covered(inst) {
+                continue;
+            }
+            selection.for_each_operand(func, inst, |v| {
                 if !block_defs.contains(&v) {
                     block_uses.insert(v);
                 }
@@ -306,8 +330,9 @@ fn build_intervals(
     order: &[Block],
     is_call: &dyn Fn(&InstData) -> bool,
     returns_twice: &dyn Fn(&InstData) -> bool,
+    selection: &crate::select::Selection,
 ) -> Vec<Interval> {
-    let live = liveness(func, cfg, order);
+    let live = liveness(func, cfg, order, selection);
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
     // Each value's ranges, built block by block: `open` is the range in
@@ -348,7 +373,10 @@ fn build_intervals(
             let (read, write) = (2 * slot, 2 * slot + 1);
             slot += 1;
             let data = func.inst_data(inst);
-            data.for_each_operand(|v| extend(&mut open, func.resolve(v), read, &mut touched));
+            if selection.covered(inst) {
+                continue;
+            }
+            selection.for_each_operand(func, inst, |v| extend(&mut open, v, read, &mut touched));
             for &result in func.inst_results(inst) {
                 // An alias's instruction is dead; its result goes nowhere.
                 if !is_alias(result) {
@@ -421,6 +449,7 @@ fn linear_scan(
     intervals: &[Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
+    hints: &std::collections::HashMap<Value, Vec<Value>>,
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
     sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
@@ -484,10 +513,18 @@ fn linear_scan(
                 .iter()
                 .any(|&(iv, r)| r == reg && iv.intersects(cur))
         };
-        let free = allowed
-            .iter()
-            .copied()
-            .find(|&r| active.iter().all(|&(_, used)| used != r) && !blocked_by_inactive(r));
+        let available = |r: Loc| {
+            allowed.contains(&r)
+                && active.iter().all(|&(_, used)| used != r)
+                && !blocked_by_inactive(r)
+        };
+        let preferred = hints
+            .get(&cur.value)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| locs[cur.half][v.index()])
+            .find(|&r| available(r));
+        let free = preferred.or_else(|| allowed.iter().copied().find(|&r| available(r)));
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
             active.push((cur, reg));
@@ -557,6 +594,7 @@ mod tests {
             &order,
             &|d| matches!(d, InstData::Call { .. }),
             &|_| false,
+            &crate::select::Selection::default(),
         )
     }
 
@@ -585,7 +623,7 @@ mod tests {
         let func = function(LOOP);
         let cfg = ControlFlowGraph::compute(&func);
         let order = DominatorTree::compute(&func, &cfg).rpo().to_vec();
-        let live = liveness(&func, &cfg, &order);
+        let live = liveness(&func, &cfg, &order, &crate::select::Selection::default());
         let set = |vs: &[usize]| vs.iter().map(|&i| Value::new(i)).collect::<BTreeSet<_>>();
         // v0 and v1 come round the back edge; v3 is a parameter, so it is
         // defined in block1, not live into it.
@@ -693,43 +731,47 @@ mod tests {
             }
             let module = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
             for func in &module.functions {
-                let alloc = allocate(func, &pools, is_call, |_| false);
-                let cfg = ControlFlowGraph::compute(func);
-                let ivs = build_intervals(func, &cfg, &alloc.order, &is_call, &|_| false);
-                for (i, a) in ivs.iter().enumerate() {
-                    let loc =
-                        alloc.locs[a.half][a.value.index()].expect("every interval is allocated");
-                    assert!(
-                        match loc {
-                            Loc::Reg(_) => !a.float,
-                            Loc::FReg(_) => a.float,
-                            Loc::Stack(_) => true,
-                        },
-                        "{}: {} is in the wrong register class: {loc:?}",
-                        func.name,
-                        a.value
-                    );
-                    if a.crosses_call {
+                for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
+                    let selection = crate::select::Selection::compute(func, target);
+                    let alloc = allocate_selected(func, &pools, is_call, |_| false, &selection);
+                    let cfg = ControlFlowGraph::compute(func);
+                    let ivs =
+                        build_intervals(func, &cfg, &alloc.order, &is_call, &|_| false, &selection);
+                    for (i, a) in ivs.iter().enumerate() {
+                        let loc = alloc.locs[a.half][a.value.index()]
+                            .expect("every interval is allocated");
                         assert!(
-                            !matches!(loc, Loc::Reg(r) if pools.caller_saved.contains(&r))
-                                && !matches!(loc, Loc::FReg(r) if pools.float_caller_saved.contains(&r)),
-                            "{}: {} crosses a call in {loc:?}",
+                            match loc {
+                                Loc::Reg(_) => !a.float,
+                                Loc::FReg(_) => a.float,
+                                Loc::Stack(_) => true,
+                            },
+                            "{}: {} is in the wrong register class: {loc:?}",
                             func.name,
                             a.value
                         );
+                        if a.crosses_call {
+                            assert!(
+                                !matches!(loc, Loc::Reg(r) if pools.caller_saved.contains(&r))
+                                    && !matches!(loc, Loc::FReg(r) if pools.float_caller_saved.contains(&r)),
+                                "{}: {} crosses a call in {loc:?}",
+                                func.name,
+                                a.value
+                            );
+                        }
+                        for b in &ivs[i + 1..] {
+                            let overlap = a.intersects(b);
+                            assert!(
+                                !overlap || alloc.locs[b.half][b.value.index()] != Some(loc),
+                                "{}: {} and {} overlap but share {loc:?}",
+                                func.name,
+                                a.value,
+                                b.value
+                            );
+                        }
                     }
-                    for b in &ivs[i + 1..] {
-                        let overlap = a.intersects(b);
-                        assert!(
-                            !overlap || alloc.locs[b.half][b.value.index()] != Some(loc),
-                            "{}: {} and {} overlap but share {loc:?}",
-                            func.name,
-                            a.value,
-                            b.value
-                        );
-                    }
+                    checked += 1;
                 }
-                checked += 1;
             }
         }
         assert!(checked > 0);

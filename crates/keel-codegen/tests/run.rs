@@ -6,7 +6,8 @@
 //! line. A `; target: <triple>` line runs the program only on that target,
 //! for what the IR leaves to the ABI.
 //!
-//! Every program is compiled three times: with the real register set; with
+//! Every program is compiled with selection disabled and enabled, each
+//! with the real register set; with
 //! two registers of each kind (and class), which spills most values (running the spill
 //! code and register/stack mixes in parallel copies on every program); and
 //! after the default optimization pipeline, which must not change what the
@@ -16,9 +17,9 @@
 
 use keel_codegen::Pools;
 #[cfg(target_arch = "aarch64")]
-use keel_codegen::aarch64::{REGISTERS, compile_with};
+use keel_codegen::aarch64::{REGISTERS, compile_with_options};
 #[cfg(target_arch = "x86_64")]
-use keel_codegen::x86_64::{REGISTERS, compile_with};
+use keel_codegen::x86_64::{REGISTERS, compile_with_options};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -47,13 +48,64 @@ const TINY: Pools = Pools {
 
 /// Register sets to compile with, whether to optimize first, and a suffix
 /// for the output files.
-const CONFIGS: [(Pools, bool, &str); 3] = [
-    (REGISTERS, false, ""),
-    (TINY, false, "-tiny"),
-    (REGISTERS, true, "-opt"),
+const CONFIGS: [(Pools, bool, &str, keel_codegen::SelectionOptions); 6] = [
+    (
+        REGISTERS,
+        false,
+        "",
+        keel_codegen::SelectionOptions {
+            trees: false,
+            folded_operands: false,
+            register_hints: false,
+        },
+    ),
+    (
+        TINY,
+        false,
+        "-tiny",
+        keel_codegen::SelectionOptions {
+            trees: false,
+            folded_operands: false,
+            register_hints: false,
+        },
+    ),
+    (
+        REGISTERS,
+        true,
+        "-opt",
+        keel_codegen::SelectionOptions {
+            trees: false,
+            folded_operands: false,
+            register_hints: false,
+        },
+    ),
+    (
+        REGISTERS,
+        false,
+        "-select",
+        keel_codegen::SelectionOptions::ALL,
+    ),
+    (
+        TINY,
+        false,
+        "-select-tiny",
+        keel_codegen::SelectionOptions::ALL,
+    ),
+    (
+        REGISTERS,
+        true,
+        "-select-opt",
+        keel_codegen::SelectionOptions::ALL,
+    ),
 ];
 
-fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Result<(), String> {
+fn run_program(
+    path: &Path,
+    pools: &Pools,
+    optimize: bool,
+    suffix: &str,
+    selection: keel_codegen::SelectionOptions,
+) -> Result<(), String> {
     let src = std::fs::read_to_string(path).unwrap();
     let expect = src
         .lines()
@@ -76,7 +128,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = compile_with(&module, pools).map_err(|e| e.to_string())?;
+    let asm = compile_with_options(&module, pools, selection).map_err(|e| e.to_string())?;
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
@@ -169,13 +221,17 @@ fn programs() {
         .flat_map(|p| {
             CONFIGS
                 .iter()
-                .map(move |(pools, optimize, suffix)| (p, pools, *optimize, suffix))
+                .map(move |(pools, optimize, suffix, selection)| {
+                    (p, pools, *optimize, suffix, *selection)
+                })
         })
-        .filter_map(|(p, pools, optimize, suffix)| {
-            run_program(p, pools, optimize, suffix).err().map(|e| {
-                let name = p.file_name().unwrap().to_string_lossy();
-                format!("{name} (config{suffix}): {e}")
-            })
+        .filter_map(|(p, pools, optimize, suffix, selection)| {
+            run_program(p, pools, optimize, suffix, selection)
+                .err()
+                .map(|e| {
+                    let name = p.file_name().unwrap().to_string_lossy();
+                    format!("{name} (config{suffix}): {e}")
+                })
         })
         .collect();
     assert!(

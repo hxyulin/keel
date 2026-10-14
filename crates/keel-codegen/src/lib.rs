@@ -8,6 +8,7 @@ mod dwarf;
 mod fold;
 mod parallel_copy;
 mod regalloc;
+mod select;
 mod sysv;
 pub mod x86_64;
 
@@ -18,11 +19,41 @@ use regalloc::Loc;
 use keel_ir::Module;
 pub use keel_ir::Target;
 
+/// Optional target instruction-selection passes. They preserve IR semantics,
+/// but may trade instruction count against register pressure and scheduling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelectionOptions {
+    /// Fuse eligible single-use binary trees into target instructions.
+    pub trees: bool,
+    /// Omit operands already encoded as immediates/addresses from liveness.
+    pub folded_operands: bool,
+    /// Prefer generated operand affinities among free permitted registers.
+    pub register_hints: bool,
+}
+impl SelectionOptions {
+    pub const ALL: Self = Self {
+        trees: true,
+        folded_operands: true,
+        register_hints: true,
+    };
+}
+
 /// Compiles a module into one assembly file for `target`.
 pub fn compile(module: &Module, target: Target) -> Result<String, CodegenError> {
+    compile_with_options(module, target, SelectionOptions::default())
+}
+
+/// Compile with explicit optional instruction-selection passes.
+pub fn compile_with_options(
+    module: &Module,
+    target: Target,
+    options: SelectionOptions,
+) -> Result<String, CodegenError> {
     match target {
-        Target::Aarch64AppleDarwin => aarch64::compile(module),
-        Target::X86_64LinuxGnu => x86_64::compile(module),
+        Target::Aarch64AppleDarwin => {
+            aarch64::compile_with_options(module, &aarch64::REGISTERS, options)
+        }
+        Target::X86_64LinuxGnu => x86_64::compile_with_options(module, &x86_64::REGISTERS, options),
     }
 }
 

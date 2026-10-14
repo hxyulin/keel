@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel compile [-O] [-g] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--emit-ir] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
@@ -24,8 +24,8 @@ use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]
+  keel compile [-O] [-g] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
@@ -45,6 +45,7 @@ struct Options {
     input: Option<String>,
     output: Option<String>,
     optimize: bool,
+    selection: keel_codegen::SelectionOptions,
     ir_lines: bool,
     emit_ir: bool,
     passes: Option<Vec<String>>,
@@ -72,6 +73,28 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-O" => opts.optimize = true,
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
+            "--isel" => {
+                let passes = args
+                    .next()
+                    .ok_or("`--isel` needs none, all, or trees,folds,hints")?;
+                opts.selection = keel_codegen::SelectionOptions::default();
+                for pass in passes.split(',') {
+                    match pass {
+                        "none" if passes == "none" => {}
+                        "all" if passes == "all" => {
+                            opts.selection = keel_codegen::SelectionOptions::ALL
+                        }
+                        "trees" => opts.selection.trees = true,
+                        "folds" => opts.selection.folded_operands = true,
+                        "hints" => opts.selection.register_hints = true,
+                        _ => {
+                            return Err(format!(
+                                "unknown selection pass `{pass}`; expected none, all, or trees,folds,hints"
+                            ));
+                        }
+                    }
+                }
+            }
             "--target" => {
                 let triple = args.next().ok_or("`--target` needs a target triple")?;
                 let target = Target::from_triple(triple).ok_or_else(|| {
@@ -97,17 +120,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "compile" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g", "--target"])?;
+            let opts = parse_options(rest, &["-o", "-O", "-g", "--target", "--isel"])?;
             let (input, mut module) = load(&opts)?;
             if opts.optimize {
                 keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
             }
-            let asm = keel_codegen::compile(&module, opts.target()?)
+            let asm = keel_codegen::compile_with_options(&module, opts.target()?, opts.selection)
                 .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }
         "cc" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir", "--target"])?;
+            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir", "--target", "--isel"])?;
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
@@ -129,7 +152,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }
-            let asm = keel_codegen::compile(&module, opts.target()?)
+            let asm = keel_codegen::compile_with_options(&module, opts.target()?, opts.selection)
                 .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }

@@ -30,6 +30,21 @@ cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
 
 Both commands take `--target aarch64-apple-darwin` or
 `--target x86_64-unknown-linux-gnu`; the default is the host.
+
+Target instruction selection is an optional codegen pass, independent of
+`-O`. `--isel all` enables generated tree patterns, allocation of folded
+operands, and register hints. `--isel trees,folds,hints` selects individual
+passes; `--isel none` (the default) keeps the existing selection. `folds`
+removes already folded operands from allocation; ordinary immediate and
+address folding remain active in every mode. For example:
+
+```sh
+cargo run -p keel -- cc -O --isel all hello.i -o hello.s
+cargo suite run -c keel-O,keel-O-select
+```
+
+Fewer instructions can still cost more registers or change scheduling, so
+selection remains opt-in while its profitability rules are developed.
 For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
@@ -71,8 +86,9 @@ extensions, compatibility limits and possible next additions.
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
   file has an `; expect: exit N` or `; expect: trap` line and may have a
   same-named `.c` driver that it is linked with. Each program is compiled
-  three times: with the full register set, with a tiny one that forces
-  spills, and after the default optimization pipeline. A program that runs
+  with the full register set, with a tiny one that forces spills, and
+  after the default optimization pipeline, both with optional selection
+  disabled and with every selection pass enabled (six builds). A program that runs
   for more than 10 seconds fails.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.

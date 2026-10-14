@@ -626,24 +626,49 @@ registers, so it does not depend on the size of the rest of the frame.
 
 Known gaps: no interval splitting (a value spilled anywhere is spilled
 everywhere; the next step would be Wimmer & Franz's splitting, which
-needs code generation to follow a value between locations), no hints to place values in x0–x7 or to coalesce copies,
+needs code generation to follow a value between locations), no hints to place values in x0–x7,
 and blocks are laid out in reverse postorder only.
 
-**Folding into instructions.** Instruction selection is one instruction at
-a time, with three peepholes that make `-O0` code close to clang's
-`-O0`, where every variable lives in a stack slot:
+**Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
+binary root/child patterns and register affinities; `build.rs` generates
+the rule table and affinity matcher. These target codegen passes are
+opt-in: `--isel all` enables them, `--isel trees,folds,hints` chooses passes
+independently, and `--isel none` is the default. They run after any IR
+optimization and before allocation,
+visiting consumers first. A rule consumes a pure, single-use child in the
+same block, preserving distinct source lines when debug locations exist.
+Shared DAG nodes stay materialized, and unmatched instructions
+use the existing target lowerings. The initial patterns cover 32/64-bit
+multiply/add and multiply/subtract and shifted arithmetic/logic on aarch64,
+and add/ptradd with a scaled shift (`lea`) on x86. Narrow integer and float
+patterns retain their original semantics; floating multiply/add is never
+implicitly fused because that changes rounding.
+
+Allocation sees the selected instruction's leaf operands at the root,
+rather than the intermediate result. This both removes the consumed
+result's interval and keeps its inputs live until the fused instruction,
+including across intervening calls. Register hints are preferences among
+free, permitted registers: they never override interference, register
+classes, or call preservation. Generated hints prefer the destructive
+input of x86 binary instructions and the source of integer bit-preserving
+conversions on both targets.
+
+Immediate and address folding remain target-specific:
 
 - a `stack_addr` used only as the address of loads and stores is not
-  computed: they address the slot as `[sp, #off]` (or `[x29, #off]`)
-  directly, when the offset fits the scaled 12-bit immediate;
-- an `iconst` used only as an `add`/`sub`/`cmp` immediate (0..4095), a
-  shift amount, or a stored zero (`str wzr`) is not materialized;
+  computed when the target can address the slot directly;
+- constants encodable as immediates, shift amounts, or stored zeroes are
+  not materialized if every selected use folds them;
 - an `icmp`/`fcmp` used only by the `brif` right after it branches on its
-  flags, `cmp` + `b.cond`, instead of `cset`, `tst` and `b.eq`.
+  flags, instead of materializing and testing a boolean.
 
-An instruction whose value is folded into every use emits no code; one
-with any other use is computed as usual. A breakpoint on a folded
-constant's line therefore stops at the instruction using it.
+With the `folds` pass, immediate operands are omitted from the allocation
+graph. x86 stack addresses are omitted too; aarch64 stack offsets depend on the spill frame,
+so address folding is finalized after allocation. A constant formerly
+folded into a consumed multiply must be materialized if the fused
+multiply/add reads it in a register. A breakpoint on a folded constant's
+line stops at the instruction using it. Compare/branch fusion retains its
+existing flag lowering.
 
 ## Optimizer
 

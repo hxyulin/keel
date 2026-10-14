@@ -118,6 +118,15 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
+    compile_with_options(module, pools, crate::SelectionOptions::default())
+}
+
+/// Like [`compile_with`], with optional target selection passes enabled.
+pub fn compile_with_options(
+    module: &Module,
+    pools: &Pools,
+    options: crate::SelectionOptions,
+) -> Result<String, CodegenError> {
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)
@@ -135,7 +144,7 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     }
     let mut frames = Vec::new();
     for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools)?;
+        let mut compiler = FunctionCompiler::new(func, module, pools, options)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -286,6 +295,7 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    selection: crate::select::Selection,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
     /// `stack_addr` and `iconst` results folded into every use, which
@@ -344,7 +354,12 @@ impl<'a> FunctionCompiler<'a> {
             .collect()
     }
 
-    fn new(func: &'a Function, module: &'a Module, pools: &Pools) -> Result<Self, CodegenError> {
+    fn new(
+        func: &'a Function,
+        module: &'a Module,
+        pools: &Pools,
+        options: crate::SelectionOptions,
+    ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -463,11 +478,20 @@ impl<'a> FunctionCompiler<'a> {
             offset - 176
         });
 
-        let alloc = regalloc::allocate(
+        let mut selection = crate::select::Selection::compute_with_options(
+            func,
+            crate::select::Target::X86,
+            options,
+        );
+        if options.folded_operands {
+            selection.fold_operands(func, |data| folds(func, data));
+        }
+        let alloc = regalloc::allocate_selected(
             func,
             pools,
             |data| is_call(func, data),
             |data| returns_twice(func, data),
+            &selection,
         );
         let spill_base = offset.next_multiple_of(8);
         let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
@@ -488,8 +512,9 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
-            folded_values: fold::folded_values(func, |data| folds(func, data)),
+            folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
             fused_compares: fold::fused_compares(func),
+            selection,
             stack_slot_offsets,
             outgoing,
             spill_base,
@@ -711,9 +736,31 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
+        let ty = self.ty(matched.args[0]);
+        let a = self.use_reg(matched.args[0], S0);
+        let b = self.use_reg(matched.args[1], S1);
+        let d = self.def_reg(result);
+        self.emit(format!(
+            "lea\t{}, [{} + {} * {}]",
+            wide(d, ty),
+            r64(a),
+            r64(b),
+            1u8 << matched.shift
+        ));
+        self.def_done(result, d);
+    }
+
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
+        if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(matched) = self.selection.matches.get(&inst).cloned() {
+            self.selected(result, matched);
+            return;
+        }
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }

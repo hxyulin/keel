@@ -150,6 +150,15 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
+    compile_with_options(module, pools, crate::SelectionOptions::default())
+}
+
+/// Like [`compile_with`], with optional target selection passes enabled.
+pub fn compile_with_options(
+    module: &Module,
+    pools: &Pools,
+    options: crate::SelectionOptions,
+) -> Result<String, CodegenError> {
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)
@@ -167,7 +176,7 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     }
     let mut frames = Vec::new();
     for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools)?;
+        let mut compiler = FunctionCompiler::new(func, module, pools, options)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -387,6 +396,7 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    selection: crate::select::Selection,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
     /// `stack_addr` results only used as the address of loads and stores
@@ -449,7 +459,12 @@ impl<'a> FunctionCompiler<'a> {
             .collect()
     }
 
-    fn new(func: &'a Function, module: &'a Module, pools: &Pools) -> Result<Self, CodegenError> {
+    fn new(
+        func: &'a Function,
+        module: &'a Module,
+        pools: &Pools,
+        options: crate::SelectionOptions,
+    ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -650,11 +665,22 @@ impl<'a> FunctionCompiler<'a> {
             float_callee_saved: &float_callee_saved,
             ..*pools
         };
-        let mut alloc = regalloc::allocate(
+        let mut selection = crate::select::Selection::compute_with_options(
+            func,
+            crate::select::Target::Aarch64,
+            options,
+        );
+        if options.folded_operands {
+            selection.fold_operands(func, |data| {
+                folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
+            });
+        }
+        let mut alloc = regalloc::allocate_selected(
             func,
             &pools,
             |data| is_call(func, data),
             |data| returns_twice(func, data),
+            &selection,
         );
         if moves_sp {
             asm_saved.push(BASE);
@@ -689,8 +715,11 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
-            folded_values: fold::folded_values(func, |data| folds(func, &stack_slot_offsets, data)),
+            folded_values: fold::folded_values(func, &selection, |data| {
+                folds(func, &stack_slot_offsets, data)
+            }),
             fused_compares: fold::fused_compares(func),
+            selection,
             stack_slot_offsets,
             copy_base,
             sret_save,
@@ -903,9 +932,49 @@ impl<'a> FunctionCompiler<'a> {
         writeln!(self.out, "{line}").unwrap();
     }
 
+    fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
+        use crate::select::Machine;
+        let ty = self.ty(matched.args[0]);
+        let a = self.use_reg(matched.args[0], S0);
+        let b = self.use_reg(matched.args[1], S1);
+        let d = self.def_reg(result);
+        let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
+        match matched.machine {
+            Machine::Madd | Machine::Msub => {
+                let c = self.use_reg(matched.args[2], S2);
+                let rc = reg(c, ty);
+                let op = if matches!(matched.machine, Machine::Madd) {
+                    "madd"
+                } else {
+                    "msub"
+                };
+                self.emit(format!("{op}\t{rd}, {rb}, {rc}, {ra}"));
+            }
+            machine => {
+                let op = match machine {
+                    Machine::ShiftAdd => "add",
+                    Machine::ShiftSub => "sub",
+                    Machine::ShiftAnd => "and",
+                    Machine::ShiftOr => "orr",
+                    Machine::ShiftXor => "eor",
+                    _ => unreachable!(),
+                };
+                self.emit(format!("{op}\t{rd}, {ra}, {rb}, lsl #{}", matched.shift));
+            }
+        }
+        self.def_done(result, d);
+    }
+
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
+        if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(matched) = self.selection.matches.get(&inst).cloned() {
+            self.selected(result, matched);
+            return;
+        }
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }

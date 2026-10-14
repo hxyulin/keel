@@ -6,7 +6,7 @@ code is. Each directory here with a `suite.toml` is one program; the
 
 ```sh
 cargo suite list                    # suites, benchmarks, configurations
-cargo suite test                    # build with keel and keel -O, run the tests
+cargo suite test                    # test keel and keel -O, with selection off and on
 cargo suite test sqlite -c keel-g   # one suite, another configuration
 cargo suite run                     # build every configuration, time everything
 cargo suite run lua/fib -n 10 -c clang-O0,keel
@@ -27,6 +27,12 @@ them: a name, a `compiler` (`clang`: `clang -c` on the preprocessed file;
 `keel`: `keel cc`, then clang assembles), and its `flags`. `baseline` is
 what benchmark ratios are against; `test` is what `cargo suite test` builds
 unless given `-c`.
+
+`keel-select` and `keel-O-select` enable `--isel all`; ordinary `keel` and
+`keel-O` leave optional target selection off. `keel-O-trees`,
+`keel-O-folds`, and `keel-O-hints` enable one selection pass at a time for
+ablation measurements. The default test configurations include both modes.
+
 
 ## A suite
 
