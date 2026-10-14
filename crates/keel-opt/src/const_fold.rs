@@ -6,10 +6,8 @@
 //! operation that would trap (division by zero, `sdiv MIN, -1`) is left
 //! alone, so it still traps at run time.
 //!
-//! Blocks are visited in reverse postorder and definitions dominate their
-//! uses, so a chain `v1 = iadd v0, v0; v2 = imul v1, v1` folds in one pass.
-//! A `select` with a constant condition is replaced by the chosen arm,
-//! constant or not.
+//! The direct pass visits definitions before uses in reverse postorder.
+//! `sccp` also uses this numerical kernel with a data-flow constant lookup.
 //!
 //! Floats fold with the host's IEEE 754 arithmetic, which rounds like the
 //! target's. Which NaN an operation produces is unspecified in the IR, so
@@ -37,7 +35,23 @@ pub fn run(func: &mut Function) -> bool {
                 }
                 continue;
             }
-            if let Some(folded) = fold(func, func.inst_data(inst)) {
+            if matches!(
+                func.inst_data(inst),
+                InstData::Iconst { .. } | InstData::Fconst { .. }
+            ) {
+                continue;
+            }
+            if let Some(folded) = fold(func.inst_data(inst), |v| {
+                let ValueDef::Result(def, _) = func.value_def(func.resolve(v)) else {
+                    return None;
+                };
+                match func.inst_data(def) {
+                    data @ (InstData::Iconst { .. } | InstData::Fconst { .. }) => {
+                        Some(data.clone())
+                    }
+                    _ => None,
+                }
+            }) {
                 *func.inst_data_mut(inst) = folded;
                 changed = true;
             }
@@ -46,11 +60,24 @@ pub fn run(func: &mut Function) -> bool {
     changed
 }
 
-/// The constant instruction `data` computes, if its operands are constants.
-fn fold(func: &Function, data: &InstData) -> Option<InstData> {
-    let int = |v: Value| constant(func, v);
-    let float = |v: Value| fp::constant(func, v);
+/// Evaluate using constants supplied by the data-flow solver. The numerical
+/// kernel is shared with the direct constant queries used by CFG cleanup.
+pub(crate) fn fold(
+    data: &InstData,
+    lookup: impl Fn(Value) -> Option<InstData>,
+) -> Option<InstData> {
+    let int = |v: Value| match lookup(v)? {
+        InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
+            Some(Const::new(ty, imm as u64))
+        }
+        _ => None,
+    };
+    let float = |v: Value| match lookup(v)? {
+        InstData::Fconst { ty, bits } => Some(Float { ty, bits }),
+        _ => None,
+    };
     let folded = match *data {
+        InstData::Iconst { .. } | InstData::Fconst { .. } => return Some(data.clone()),
         InstData::Binary { op, args } if op.is_float() => {
             Folded::Float(fp::binary(op, float(args[0])?, float(args[1])?))
         }
@@ -64,10 +91,10 @@ fn fold(func: &Function, data: &InstData) -> Option<InstData> {
         InstData::Convert { ty: Type::I128, .. } => return None,
         InstData::Convert { op, ty, arg } => match op {
             ConvertOp::Fpext | ConvertOp::Fptrunc => Folded::Float(fp::convert(ty, float(arg)?)),
-            ConvertOp::Fptosi | ConvertOp::Fptoui => {
-                let n = fp::to_int(float(arg)?, op == ConvertOp::Fptosi, ty);
-                Folded::Int(Const::new(ty, n))
-            }
+            ConvertOp::Fptosi | ConvertOp::Fptoui => Folded::Int(Const::new(
+                ty,
+                fp::to_int(float(arg)?, op == ConvertOp::Fptosi, ty),
+            )),
             ConvertOp::Sitofp => Folded::Float(fp::from_int(int(arg)?.signed().into(), ty)),
             ConvertOp::Uitofp => Folded::Float(fp::from_int(int(arg)?.bits.into(), ty)),
             ConvertOp::Bitcast if ty.is_float() => Folded::Float(Float {

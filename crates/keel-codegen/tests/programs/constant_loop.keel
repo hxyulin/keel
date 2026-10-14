@@ -1,0 +1,22 @@
+; expect: exit 0
+; opt-passes: simplify-cfg, sccp, simplify-cfg, gvn, dce, gcm
+; An invariant parameter is initialized on entry and passed unchanged on
+; the backedge. SCCP proves it constant while retaining the induction and
+; accumulator parameters. The C driver can also time a larger iteration count.
+func @constant_loop(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = iconst.i64 7
+    jump block1(v1, v1, v2)
+block1(v3: i64, v4: i64, v5: i64):
+    v6 = icmp.ult v3, v0
+    brif v6, block2, block3(v4)
+block2:
+    v7 = imul v5, v5
+    v8 = iadd v4, v7
+    v9 = iconst.i64 1
+    v10 = iadd v3, v9
+    jump block1(v10, v8, v5)
+block3(v11: i64):
+    return v11
+}

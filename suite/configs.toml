@@ -85,3 +85,15 @@ flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
 name = "keel-full"
 compiler = "keel"
 flags = ["--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
+
+# SCCP replaces direct constant folding for controlled pass comparisons.
+# Opt-in until measurements justify changing the default pipelines.
+[[config]]
+name = "keel-basic-sccp"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,sccp,simplify-cfg,dce"]
+
+[[config]]
+name = "keel-O-sccp"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,sccp,simplify-cfg,gvn,dce,gcm"]

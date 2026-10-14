@@ -689,12 +689,35 @@ analyses they need; there is no analysis cache yet.
 |---|---|
 | `simplify-cfg` | constant `brif` → `jump`, skip forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
+| `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
 | `dce` | mark from pinned instructions; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 
 The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
 dce, gcm`.
+
+**SCCP** uses the monotone value lattice from
+[Wegman and Zadeck](https://cs.brown.edu/research/pubs/techreports/reports/CS-89-36.html):
+unknown, a typed bit-exact constant, or overdefined. A worklist revisits
+users when values change and activates branch edges as conditions become
+known. Block parameters meet arguments from executable edges; two arms
+from the same predecessor remain distinct. Backedges can invalidate an
+initial constant, while unchanged loop arguments remain constant. Unknown
+values remaining in executable code are conservatively made overdefined.
+Analysis converges before rewriting; parameter constants are materialized
+in their own block so they dominate uses even with untaken predecessors.
+`simplify-cfg` and `dce` retain responsibility for CFG and parameter cleanup.
+`sccp` remains opt-in: the initial paired Lua, QuickJS and SQLite measurements
+showed roughly neutral application runtime and extra compiler cost. The
+`keel-basic-sccp` and `keel-O-sccp` suite configurations replace `const-fold`
+with `sccp` while preserving the other stages. `keel compile -p ...` and
+`keel cc -p ...` select explicit pipelines, overriding optimization tiers.
+The numeric folding kernel is shared with `const-fold`. Regression tests
+compare SCCP followed by all 32 subsets of the original five passes against
+an independent execution model, and
+native codegen tests exercise constant loop parameters with ordinary and
+restricted register pools. Tracy has separate analysis and rewrite scopes.
 
 **GCM** places each pure instruction between its *early* block (the deepest
 block defining an operand) and its *late* block (the common dominator of its

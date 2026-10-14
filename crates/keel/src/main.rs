@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
@@ -24,8 +24,8 @@ use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
+  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
@@ -57,6 +57,17 @@ struct Options {
 }
 
 impl Options {
+    /// Explicit pipelines override tier presets, independently of flag order.
+    fn optimize(&self, module: &mut Module) -> Result<(), keel_opt::OptError> {
+        match &self.passes {
+            Some(names) => {
+                let names: Vec<_> = names.iter().map(String::as_str).collect();
+                keel_opt::run_passes(module, &names)
+            }
+            None => keel_opt::optimize_with_tier(module, self.optimization),
+        }
+    }
+
     fn target(&self) -> Result<Target, String> {
         self.target
             .or_else(Target::host)
@@ -153,6 +164,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 &[
                     "-o",
                     "-O",
+                    "-p",
                     "-g",
                     "--target",
                     "--isel",
@@ -162,7 +174,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
-            keel_opt::optimize_with_tier(&mut module, opts.optimization)
+            opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             let asm = keel_codegen::compile_with_pipeline(
                 &module,
@@ -181,6 +193,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 &[
                     "-o",
                     "-O",
+                    "-p",
                     "-g",
                     "--emit-ir",
                     "--target",
@@ -208,7 +221,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     lines.join("\n")
                 ));
             }
-            keel_opt::optimize_with_tier(&mut module, opts.optimization)
+            opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
@@ -289,7 +302,14 @@ mod tests {
     fn options(args: &[&str]) -> Result<Options, String> {
         parse_options(
             &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
-            &["-O", "--opt-tier", "--isel-tier", "--isel", "--regalloc"],
+            &[
+                "-O",
+                "-p",
+                "--opt-tier",
+                "--isel-tier",
+                "--isel",
+                "--regalloc",
+            ],
         )
     }
 
@@ -338,5 +358,26 @@ mod tests {
             assert!(options(&[flag]).is_err());
             assert!(options(&[flag, "invalid"]).is_err());
         }
+    }
+
+    #[test]
+    fn explicit_pipeline_overrides_tiers_in_either_order() {
+        let source = "func @f() -> i64 {\nblock0:\n    v0 = iconst.i64 20\n    v1 = iconst.i64 22\n    v2 = iadd v0, v1\n    return v2\n}";
+        for args in [["-p", "dce", "-O"], ["-O", "-p", "dce"]] {
+            let opts = options(&args).unwrap();
+            let mut module = keel_ir::parse(source).unwrap();
+            opts.optimize(&mut module).unwrap();
+            assert!(
+                module.to_string().contains("iadd"),
+                "only dce should run; Full would fold the sum"
+            );
+        }
+        let opts = options(&["-p", "missing"]).unwrap();
+        let mut module = keel_ir::parse(source).unwrap();
+        assert!(matches!(
+            opts.optimize(&mut module),
+            Err(keel_opt::OptError::UnknownPass(_))
+        ));
+        assert!(options(&["-p"]).is_err());
     }
 }

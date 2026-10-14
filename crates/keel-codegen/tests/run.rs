@@ -157,7 +157,15 @@ fn run_program(
     let mut module = keel_ir::parse(&src).map_err(|e| format!("parse error: {e}"))?;
     keel_ir::verify_module(&module).map_err(|e| format!("verifier: {e:?}"))?;
     if optimize {
-        keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
+        if let Some(names) = src
+            .lines()
+            .find_map(|line| line.strip_prefix("; opt-passes:"))
+        {
+            let names: Vec<_> = names.split(',').map(str::trim).collect();
+            keel_opt::run_passes(&mut module, &names).map_err(|e| e.to_string())?;
+        } else {
+            keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
+        }
     }
     let asm = compile_with_pipeline(
         &module,
@@ -242,6 +250,23 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
     }
     // The programs print little, so the pipes cannot fill up and block them.
     Ok(child.wait_with_output().unwrap())
+}
+
+#[test]
+fn constant_loop_optimized_spills() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/constant_loop.keel");
+    for (selection, selection_name) in [
+        (keel_codegen::SelectionOptions::default(), "baseline"),
+        (keel_codegen::SelectionOptions::ALL, "all"),
+    ] {
+        for (allocation, allocation_name) in [
+            (AllocationTier::Fast, "fast"),
+            (AllocationTier::Full, "full"),
+        ] {
+            let suffix = format!("-sccp-tiny-{selection_name}-{allocation_name}");
+            run_program(&path, &TINY, true, &suffix, selection, allocation).unwrap();
+        }
+    }
 }
 
 #[test]

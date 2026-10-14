@@ -17,6 +17,7 @@ mod const_fold;
 mod dce;
 mod gcm;
 mod gvn;
+mod sccp;
 mod simplify_cfg;
 
 /// A replaceable optimization pass over one function.
@@ -58,6 +59,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "move pure instructions out of loops and into the branches that need them; copy constants to each block using them",
         run: gcm::run,
     },
+    BuiltinPass {
+        name: "sccp",
+        description: "propagate constants through executable edges and block parameters, then evaluate instructions",
+        run: sccp::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -78,6 +84,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[2],
     &BUILTINS[3],
     &BUILTINS[4],
+    &BUILTINS[5],
 ];
 
 /// Independent optimizer effort; Full preserves the historical pipeline.

@@ -68,7 +68,15 @@ The stages can be tuned independently:
 ```sh
 cargo run -p keel -- compile --opt-tier basic --isel-tier trees --regalloc fast input.keel -o out.s
 cargo suite run -c keel-basic,keel-fast,keel-full
+cargo suite run -c keel-basic,keel-basic-sccp,keel-O,keel-O-sccp
 ```
+
+`keel compile -p pass,pass,...` and `keel cc -p pass,pass,...` select an
+explicit IR pipeline, overriding `-O` and `--opt-tier` regardless of flag
+order. The opt-in `sccp` pass propagates constants through executable edges
+and block parameters. Its suite presets replace `const-fold` with `sccp`;
+the default pipelines retain direct constant folding pending performance
+evidence.
 
 Library users can implement `keel_opt::Pass` and use `run_pipeline` (which
 verifies after every pass), or provide an `InstructionSelector` and
@@ -91,8 +99,9 @@ release builds for final timings; use instrumented builds to locate costs.
 
 - SSA IR with integer and floating-point operations, globals, thread-local
   storage, atomics, calls, C ABIs and debug information.
-- Five optimization passes: constant folding, CFG simplification, global
-  value numbering, dead-code elimination and global code motion.
+- Six optimization passes: constant folding, CFG simplification, global
+  value numbering, dead-code elimination, global code motion and opt-in
+  sparse conditional constant propagation (`sccp`).
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
   Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
@@ -123,7 +132,8 @@ extensions, compatibility limits and possible next additions.
   rewrites the expected `.out` files.
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
   file has an `; expect: exit N` or `; expect: trap` line and may have a
-  same-named `.c` driver that it is linked with. Each program is compiled
+  same-named `.c` driver that it is linked with. A `; opt-passes: a, b`
+  line selects the pipeline for its optimized configurations. Each program is compiled
   with the full register set, with a tiny one that forces spills, and
   after the default optimization pipeline, both with optional selection
   disabled and with every selection pass enabled, plus the fast allocator
