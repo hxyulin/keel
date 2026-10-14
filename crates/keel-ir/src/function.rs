@@ -547,7 +547,9 @@ impl Function {
     pub fn remove_block_param(&mut self, block: Block, index: usize) -> Value {
         let value = self.blocks[block].params.remove(index);
         for (n, &param) in self.blocks[block].params.iter().enumerate().skip(index) {
-            self.values[param].def = ValueDef::Param(block, n as u16);
+            if matches!(self.values[param].def, ValueDef::Param(..)) {
+                self.values[param].def = ValueDef::Param(block, n as u16);
+            }
         }
         value
     }
@@ -1004,6 +1006,18 @@ mod tests {
         assert_eq!(func.value_def(acc), ValueDef::Param(header, 0));
         assert!(!func.is_value_defined(i));
         assert!(func.is_value_defined(acc));
+    }
+
+    #[test]
+    fn removing_an_earlier_parameter_preserves_later_aliases() {
+        let mut func = build_sum();
+        let header = Block::new(1);
+        let acc = Value::new(4);
+        let zero = Value::new(2);
+        func.replace_all_uses(acc, zero);
+        func.remove_block_param(header, 0);
+        assert_eq!(func.resolve(acc), zero);
+        assert_eq!(func.value_def(acc), ValueDef::Alias(zero));
     }
 
     #[test]

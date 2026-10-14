@@ -259,6 +259,7 @@ fn optimized_regressions_spills() {
         "cfg_forwarding",
         "gvn_compare",
         "strength_reduce",
+        "phi_loop",
     ] {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));

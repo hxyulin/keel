@@ -18,6 +18,7 @@ mod dce;
 mod gcm;
 mod gvn;
 mod instcombine;
+mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
 
@@ -70,6 +71,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "combine integer identities, fold constants, and reduce power-of-two arithmetic",
         run: instcombine::run,
     },
+    BuiltinPass {
+        name: "phi-simplify",
+        description: "replace trivial block parameters with their dominating incoming value",
+        run: phi_simplify::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -92,6 +98,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[4],
     &BUILTINS[5],
     &BUILTINS[6],
+    &BUILTINS[7],
 ];
 
 /// Independent optimizer effort; Full preserves the historical pipeline.

@@ -99,10 +99,11 @@ release builds for final timings; use instrumented builds to locate costs.
 
 - SSA IR with integer and floating-point operations, globals, thread-local
   storage, atomics, calls, C ABIs and debug information.
-- Seven optimization passes: constant folding, CFG simplification, global
+- Eight optimization passes: constant folding, CFG simplification, global
   value numbering, dead-code elimination, global code motion and opt-in
   sparse conditional constant propagation (`sccp`), plus instruction combining
-  and integer strength reduction (`instcombine`).
+  and integer strength reduction (`instcombine`) and trivial block-parameter
+  elimination (`phi-simplify`).
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
   Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
