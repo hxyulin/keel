@@ -1,0 +1,6 @@
+file f0 = "a.c"
+
+func @f() cc(c) {
+block0:
+    return !f1:1:1
+}

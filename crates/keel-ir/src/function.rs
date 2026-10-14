@@ -12,7 +12,7 @@
 
 use crate::inst::{BlockCall, InstData, Symbol};
 use crate::layout::Layout;
-use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, StackSlot, Type, Value};
+use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -182,6 +182,22 @@ pub struct StackSlotData {
     pub align: u32,
 }
 
+/// Where an instruction came from: a line and column in one of the module's
+/// source files, counted from 1. 0 means unknown, as in DWARF.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct SourceLoc {
+    pub file: SourceFile,
+    pub line: u32,
+    pub col: u32,
+}
+
+impl fmt::Display for SourceLoc {
+    /// `f0:12:5`
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}:{}", self.file, self.line, self.col)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct BlockData {
     params: Vec<Value>,
@@ -194,6 +210,7 @@ struct InstNode {
     results: Vec<Value>,
     /// `None` once removed.
     block: Option<Block>,
+    loc: Option<SourceLoc>,
 }
 
 /// Where a new or moved instruction goes.
@@ -380,6 +397,7 @@ impl Function {
             data,
             results: Vec::new(),
             block: None,
+            loc: None,
         });
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
@@ -440,6 +458,15 @@ impl Function {
     /// types** (e.g. folding an `iadd` to an `iconst`).
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
         &mut self.insts[inst].data
+    }
+
+    /// The source location `inst` was compiled from, if known.
+    pub fn inst_loc(&self, inst: Inst) -> Option<SourceLoc> {
+        self.insts[inst].loc
+    }
+
+    pub fn set_inst_loc(&mut self, inst: Inst, loc: Option<SourceLoc>) {
+        self.insts[inst].loc = loc;
     }
 
     /// Takes `block` and its instructions out of the layout. Nothing may
@@ -594,6 +621,9 @@ impl fmt::Display for Function {
             for &inst in self.block_insts(block) {
                 f.write_str("    ")?;
                 self.write_inst(f, inst)?;
+                if let Some(loc) = self.inst_loc(inst) {
+                    write!(f, " !{loc}")?;
+                }
                 f.write_str("\n")?;
             }
         }

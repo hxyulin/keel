@@ -69,6 +69,23 @@
 //! Symbols defined in another image (libc, a dylib) are only known at load
 //! time, so their addresses come from the global offset table (GOT), a table
 //! of pointers the loader fills in: `adrp` + `ldr` reads the GOT entry.
+//!
+//! # Debug info
+//!
+//! Every function has call frame information (`.cfi_*`), which unwinders
+//! and debuggers need to walk through its frame. The frame is addressed
+//! from x29, so the CFA is `x29 + 16` from the end of `mov x29, sp` on,
+//! and the saved registers sit at fixed offsets from it.
+//!
+//! If the module names source files, instructions with a location get a
+//! `.loc` directive, from which the assembler builds the DWARF line table.
+//! The prologue takes the first location in the function with column 0,
+//! and the first located instruction is marked `prologue_end`, where a
+//! debugger stops for a breakpoint on the function. An instruction
+//! without a location continues the previous one's. A minimal
+//! `__debug_info` (a compile unit and a subprogram per function) makes
+//! the linker record the object in the executable's debug map, which is
+//! how lldb finds the line table.
 
 use crate::CodegenError;
 use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
@@ -77,7 +94,7 @@ use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module,
-    Purpose, Signature, Type, UnaryOp, Value,
+    Purpose, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -119,13 +136,24 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
         "register pools must be subsets of REGISTERS"
     );
     let mut out = String::from("\t.section\t__TEXT,__text,regular,pure_instructions\n");
+    let debug = !module.files.is_empty() && !module.functions.is_empty();
+    if debug {
+        for (i, path) in module.files.iter().enumerate() {
+            writeln!(out, "\t.file\t{} {}", i + 1, asm_string(path)).unwrap();
+        }
+    }
     for func in &module.functions {
-        FunctionCompiler::new(func, module, pools)?.compile(&mut out);
+        let mut compiler = FunctionCompiler::new(func, module, pools)?;
+        compiler.debug = debug;
+        compiler.compile(&mut out);
     }
     for data in &module.data {
         if let Some(init) = &data.init {
             emit_data(&mut out, data, init);
         }
+    }
+    if debug {
+        emit_debug_info(&mut out, module);
     }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
@@ -189,6 +217,12 @@ struct FunctionCompiler<'a> {
     next_block: Option<Block>,
     out: String,
     uses_trap: bool,
+    /// Whether to emit `.loc` directives.
+    debug: bool,
+    /// The location of the last `.loc`.
+    srcloc: Option<SourceLoc>,
+    /// Whether the next `.loc` ends the prologue.
+    prologue_end: bool,
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -332,30 +366,56 @@ impl<'a> FunctionCompiler<'a> {
             next_block: None,
             out: String::new(),
             uses_trap: false,
+            debug: false,
+            srcloc: None,
+            prologue_end: false,
         })
     }
 
     fn compile(mut self, out: &mut String) {
         let func = self.func;
         let name = &func.name;
-        writeln!(out, "\t.globl\t_{name}\n\t.p2align\t2\n_{name}:").unwrap();
+        writeln!(
+            out,
+            "\t.globl\t_{name}\n\t.p2align\t2\n_{name}:\nL{name}_begin:"
+        )
+        .unwrap();
         self.allocation_comment();
 
+        if self.debug {
+            let first = func
+                .layout_insts()
+                .find_map(|(_, inst)| func.inst_loc(inst));
+            let file = first.map_or(SourceFile::new(0), |loc| loc.file);
+            let line = first.map_or(0, |loc| loc.line);
+            self.set_srcloc(Some(SourceLoc { file, line, col: 0 }));
+            self.prologue_end = true;
+        }
+        self.emit(".cfi_startproc");
         self.emit("stp\tx29, x30, [sp, #-16]!");
         self.emit("mov\tx29, sp");
+        self.emit(".cfi_def_cfa x29, 16");
+        self.emit(".cfi_offset x30, -8");
+        self.emit(".cfi_offset x29, -16");
         // Push the callee-saved registers in pairs, keeping `sp` 16-byte
-        // aligned; an odd one out still takes 16 bytes.
-        for pair in self.alloc.callee_saved_used.clone().chunks(2) {
+        // aligned; an odd one out still takes 16 bytes. Pair `k` is at
+        // `x29 - 16 * (k + 1)`, which is 16 bytes further from the CFA.
+        let pairs = self.alloc.callee_saved_used.clone();
+        let float_pairs = self.alloc.float_callee_saved_used.clone();
+        let saves =
+            (pairs.chunks(2).map(|p| (p, 'x'))).chain(float_pairs.chunks(2).map(|p| (p, 'd')));
+        for (k, (pair, class)) in saves.enumerate() {
+            let offset = 32 + 16 * k;
             match pair {
-                [a, b] => self.emit(format!("stp\tx{a}, x{b}, [sp, #-16]!")),
-                [a] => self.emit(format!("str\tx{a}, [sp, #-16]!")),
-                _ => unreachable!(),
-            }
-        }
-        for pair in self.alloc.float_callee_saved_used.clone().chunks(2) {
-            match pair {
-                [a, b] => self.emit(format!("stp\td{a}, d{b}, [sp, #-16]!")),
-                [a] => self.emit(format!("str\td{a}, [sp, #-16]!")),
+                [a, b] => {
+                    self.emit(format!("stp\t{class}{a}, {class}{b}, [sp, #-16]!"));
+                    self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
+                    self.emit(format!(".cfi_offset {class}{b}, -{}", offset - 8));
+                }
+                [a] => {
+                    self.emit(format!("str\t{class}{a}, [sp, #-16]!"));
+                    self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
+                }
                 _ => unreachable!(),
             }
         }
@@ -422,6 +482,9 @@ impl<'a> FunctionCompiler<'a> {
             writeln!(self.out, "{}:", self.label(block)).unwrap();
             for &inst in func.block_insts(block) {
                 writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+                if self.debug {
+                    self.set_srcloc(func.inst_loc(inst));
+                }
                 self.inst(inst);
             }
         }
@@ -429,7 +492,27 @@ impl<'a> FunctionCompiler<'a> {
             writeln!(self.out, "L{name}_trap:").unwrap();
             self.emit("brk\t#1");
         }
+        writeln!(self.out, "L{name}_end:").unwrap();
+        self.emit(".cfi_endproc");
         out.push_str(&self.out);
+    }
+
+    /// Emits a `.loc` for the code that follows, unless it would repeat
+    /// the last one. `None` keeps the last one.
+    fn set_srcloc(&mut self, loc: Option<SourceLoc>) {
+        let Some(loc) = loc else { return };
+        if self.srcloc == Some(loc) && !self.prologue_end {
+            return;
+        }
+        let SourceLoc { file, line, col } = loc;
+        let flag = if self.prologue_end {
+            " prologue_end"
+        } else {
+            ""
+        };
+        self.emit(format!(".loc\t{} {line} {col}{flag}", file.index() + 1));
+        self.srcloc = Some(loc);
+        self.prologue_end = false;
     }
 
     /// A comment listing where each value lives, to make the output
@@ -1951,6 +2034,79 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
         ));
     }
     Ok(())
+}
+
+/// Emits the DWARF 4 compile unit: one subprogram per function and the
+/// line table the assembler builds from the `.loc` directives. Relative
+/// file names are taken relative to the directory of the compilation,
+/// which, as for C compilers, is the current directory.
+fn emit_debug_info(out: &mut String, module: &Module) {
+    // Abbreviation 1 is the compile unit, 2 a subprogram: a tag, whether
+    // it has children, then (attribute, form) pairs ending in (0, 0).
+    out.push_str(concat!(
+        "\t.section\t__DWARF,__debug_abbrev,regular,debug\n",
+        "\t.byte\t1, 0x11, 1\t; DW_TAG_compile_unit, children\n",
+        "\t.byte\t0x25, 0x08\t; DW_AT_producer, DW_FORM_string\n",
+        "\t.byte\t0x03, 0x08\t; DW_AT_name, DW_FORM_string\n",
+        "\t.byte\t0x1b, 0x08\t; DW_AT_comp_dir, DW_FORM_string\n",
+        "\t.byte\t0x10, 0x17\t; DW_AT_stmt_list, DW_FORM_sec_offset\n",
+        "\t.byte\t0x11, 0x01\t; DW_AT_low_pc, DW_FORM_addr\n",
+        "\t.byte\t0x12, 0x06\t; DW_AT_high_pc, DW_FORM_data4\n",
+        "\t.byte\t0, 0\n",
+        "\t.byte\t2, 0x2e, 0\t; DW_TAG_subprogram, no children\n",
+        "\t.byte\t0x03, 0x08\t; DW_AT_name, DW_FORM_string\n",
+        "\t.byte\t0x11, 0x01\t; DW_AT_low_pc, DW_FORM_addr\n",
+        "\t.byte\t0x12, 0x06\t; DW_AT_high_pc, DW_FORM_data4\n",
+        "\t.byte\t0x3f, 0x19\t; DW_AT_external, DW_FORM_flag_present\n",
+        "\t.byte\t0, 0\n",
+        "\t.byte\t0\n",
+    ));
+
+    let comp_dir = std::env::current_dir().map_or(String::new(), |d| d.display().to_string());
+    let first = &module.functions[0].name;
+    let last = &module.functions[module.functions.len() - 1].name;
+    out.push_str("\t.section\t__DWARF,__debug_info,regular,debug\n");
+    out.push_str("\t.long\tLdebug_info_end-Ldebug_info_start\n");
+    out.push_str("Ldebug_info_start:\n");
+    // DWARF 4, abbreviations at offset 0, 8-byte addresses; then the
+    // compile unit (abbreviation 1).
+    out.push_str("\t.short\t4\n\t.long\t0\n\t.byte\t8\n");
+    out.push_str("\t.byte\t1\n");
+    writeln!(out, "\t.asciz\t{}", asm_string("keel")).unwrap();
+    writeln!(out, "\t.asciz\t{}", asm_string(&module.files[0])).unwrap();
+    writeln!(out, "\t.asciz\t{}", asm_string(&comp_dir)).unwrap();
+    // The assembler's line table is all of `__debug_line`.
+    out.push_str("\t.long\t0\n");
+    writeln!(
+        out,
+        "\t.quad\tL{first}_begin\n\t.long\tL{last}_end-L{first}_begin"
+    )
+    .unwrap();
+    for func in &module.functions {
+        let name = &func.name;
+        writeln!(out, "\t.byte\t2\n\t.asciz\t{}", asm_string(name)).unwrap();
+        writeln!(
+            out,
+            "\t.quad\tL{name}_begin\n\t.long\tL{name}_end-L{name}_begin"
+        )
+        .unwrap();
+    }
+    out.push_str("\t.byte\t0\n");
+    out.push_str("Ldebug_info_end:\n");
+}
+
+/// `s` as a quoted assembler string.
+fn asm_string(s: &str) -> String {
+    let mut quoted = String::from("\"");
+    for b in s.bytes() {
+        match b {
+            b'"' | b'\\' => write!(quoted, "\\{}", b as char).unwrap(),
+            b' '..=b'~' => quoted.push(b as char),
+            _ => write!(quoted, "\\{b:03o}").unwrap(),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Emits a data object into the section its contents call for:

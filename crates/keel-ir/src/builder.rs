@@ -3,23 +3,29 @@
 //!
 //! An `InstBuilder` inserts one instruction and is consumed by it; methods
 //! for instructions with one result return that `Value`, the others return
-//! the `Inst`.
+//! the `Inst`. `func.ins(at).loc(loc)` gives the instruction a source
+//! location.
 
 use crate::function::InsertPoint;
 use crate::{
     BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, Inst, InstData, IntCC,
-    Intrinsic, SigRef, StackSlot, Symbol, Type, UnaryOp, Value,
+    Intrinsic, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp, Value,
 };
 
 pub struct InstBuilder<'f> {
     func: &'f mut Function,
     at: InsertPoint,
+    loc: Option<SourceLoc>,
 }
 
 impl Function {
     /// A builder that inserts one instruction at `at`.
     pub fn ins(&mut self, at: InsertPoint) -> InstBuilder<'_> {
-        InstBuilder { func: self, at }
+        InstBuilder {
+            func: self,
+            at,
+            loc: None,
+        }
     }
 }
 
@@ -44,14 +50,23 @@ macro_rules! unary {
 }
 
 impl InstBuilder<'_> {
+    /// Gives the instruction a source location.
+    pub fn loc(mut self, loc: Option<SourceLoc>) -> Self {
+        self.loc = loc;
+        self
+    }
+
     /// Inserts any instruction.
     pub fn build(self, data: InstData) -> Inst {
-        self.func.insert_inst(self.at, data)
+        let inst = self.func.insert_inst(self.at, data);
+        self.func.set_inst_loc(inst, self.loc);
+        inst
     }
 
     fn value(self, data: InstData) -> Value {
         let func = self.func;
         let inst = func.insert_inst(self.at, data);
+        func.set_inst_loc(inst, self.loc);
         func.first_result(inst)
     }
 

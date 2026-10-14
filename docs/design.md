@@ -135,8 +135,8 @@ resumed by a debugger, so it is an intrinsic.
 ## Modules and calls
 
 - A file is one module: `decl @putchar(i32) -> i32` lines for external
-  functions and `func` definitions, in any order. There is no linking of
-  several keel modules yet.
+  functions and `func` definitions, in any order, and `file` lines for debug
+  info (see Debug info). There is no linking of several keel modules yet.
 - `v1 = call @f(v0)` calls a declared or defined function; a call's results
   follow the callee's signature and must all be named. Calls are pinned.
 - Each function keeps a table of the functions it calls with their
@@ -246,6 +246,31 @@ Limits: at most one return value (return structs through `sret`); at most
 - First and only target until everything works end to end: **aarch64-apple**
   (Mach-O). Executables must carry an ad-hoc code signature
   (`LC_CODE_SIGNATURE`) or the kernel refuses to run them.
+
+## Debug info
+
+- **Source locations** are an optional `SourceLoc` (file, line, column; 0
+  is unknown, as in DWARF) on each instruction, written after it as
+  `v2 = iadd v0, v1 !f0:12:5`. The module lists the files: `file f0 =
+  "src/main.c"`, declared before use. Frontends set a location on the
+  instruction builder (`func.ins(at).loc(..)`, or `set_srcloc` on the SSA
+  builder for everything built after). Passes keep an instruction's
+  location when they move or rewrite it; gcm gives its copies the
+  original's.
+- `keel compile -g` gives an input that names no files its own lines, so a
+  debugger steps through the IR, with the `.keel` file as the source.
+- **Line tables come from the assembler.** Codegen emits `.file` and `.loc`
+  directives and the assembler encodes `__debug_line`, so keel never
+  writes line-number programs itself. It does emit a small `__debug_info`
+  (a DWARF 4 compile unit with a subprogram per function): the linker only
+  records an object in the executable's debug map if it has a compile unit,
+  and lldb finds the line table through that map.
+- **Call frame information** is emitted for every function, with or without
+  locations: C++ exceptions and debuggers unwind through keel frames with
+  it. The assembler turns it into compact unwind info when the saved
+  registers follow Apple's pairing, and into `__eh_frame` otherwise.
+- Not yet: variable locations (`p x` in a debugger), types, inlined call
+  sites.
 
 ## Register allocation
 

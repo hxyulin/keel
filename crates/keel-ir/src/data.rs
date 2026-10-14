@@ -104,24 +104,30 @@ impl fmt::Display for DataObject {
     }
 }
 
+/// Writes `bytes` as a quoted string with the escapes the parser reads.
+pub(crate) fn write_quoted(f: &mut fmt::Formatter<'_>, bytes: &[u8]) -> fmt::Result {
+    f.write_str("\"")?;
+    for &b in bytes {
+        match b {
+            b'\n' => f.write_str("\\n")?,
+            b'\t' => f.write_str("\\t")?,
+            b'\r' => f.write_str("\\r")?,
+            0 => f.write_str("\\0")?,
+            b'\\' => f.write_str("\\\\")?,
+            b'"' => f.write_str("\\\"")?,
+            b' '..=b'~' => write!(f, "{}", b as char)?,
+            _ => write!(f, "\\x{b:02x}")?,
+        }
+    }
+    f.write_str("\"")
+}
+
 impl fmt::Display for DataItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DataItem::Bytes(bytes) => {
-                f.write_str("b\"")?;
-                for &b in bytes {
-                    match b {
-                        b'\n' => f.write_str("\\n")?,
-                        b'\t' => f.write_str("\\t")?,
-                        b'\r' => f.write_str("\\r")?,
-                        0 => f.write_str("\\0")?,
-                        b'\\' => f.write_str("\\\\")?,
-                        b'"' => f.write_str("\\\"")?,
-                        b' '..=b'~' => write!(f, "{}", b as char)?,
-                        _ => write!(f, "\\x{b:02x}")?,
-                    }
-                }
-                f.write_str("\"")
+                f.write_str("b")?;
+                write_quoted(f, bytes)
             }
             DataItem::Int { ty, value } => write!(f, "{ty} {value}"),
             DataItem::Zero(n) => write!(f, "zero {n}"),

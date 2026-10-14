@@ -1,7 +1,7 @@
 //! The root module: one source file's external declarations, data and
 //! functions.
 
-use crate::{DataObject, FuncDecl, Function, Signature};
+use crate::{DataObject, EntityRef, FuncDecl, Function, Signature, SourceFile};
 use std::fmt;
 
 #[derive(Clone, Debug, Default)]
@@ -11,6 +11,9 @@ pub struct Module {
     /// Data objects, defined here or declared (`decl data`).
     pub data: Vec<DataObject>,
     pub functions: Vec<Function>,
+    /// The source files instruction locations refer to, indexed by
+    /// [`SourceFile`]. Code generation emits debug info if there are any.
+    pub files: Vec<String>,
 }
 
 impl Module {
@@ -41,6 +44,12 @@ impl Module {
             || self.data_object(name).is_some_and(|d| d.init.is_some())
     }
 
+    /// Adds a source file for instruction locations to refer to.
+    pub fn add_file(&mut self, path: impl Into<String>) -> SourceFile {
+        self.files.push(path.into());
+        SourceFile::new(self.files.len() - 1)
+    }
+
     /// Whether `name` is any function or data object, here or elsewhere.
     pub fn has_symbol(&self, name: &str) -> bool {
         self.signature(name).is_some() || self.data_object(name).is_some()
@@ -49,13 +58,18 @@ impl Module {
 
 impl fmt::Display for Module {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, path) in self.files.iter().enumerate() {
+            write!(f, "file {} = ", SourceFile::new(i))?;
+            crate::data::write_quoted(f, path.as_bytes())?;
+            f.write_str("\n")?;
+        }
         for decl in &self.decls {
             writeln!(f, "decl @{}{}", decl.name, decl.sig)?;
         }
         for data in &self.data {
             writeln!(f, "{data}")?;
         }
-        let header = !self.decls.is_empty() || !self.data.is_empty();
+        let header = !self.files.is_empty() || !self.decls.is_empty() || !self.data.is_empty();
         for (i, func) in self.functions.iter().enumerate() {
             if i > 0 || header {
                 f.write_str("\n")?;

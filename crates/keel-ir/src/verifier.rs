@@ -28,8 +28,9 @@ impl fmt::Display for VerifierError {
     }
 }
 
-/// Verifies every function and data object, that names are unique, and that
-/// each function's callees and data match the module's declarations.
+/// Verifies every function and data object, that names are unique, that
+/// each function's callees and data match the module's declarations, and
+/// that instruction locations name the module's source files.
 pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
     let mut seen = HashSet::new();
@@ -66,6 +67,19 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for func in &module.functions {
+        for (_, inst) in func.layout_insts() {
+            if let Some(loc) = func.inst_loc(inst)
+                && loc.file.index() >= module.files.len()
+            {
+                errors.push(VerifierError {
+                    location: format!("@{} {inst}", func.name),
+                    message: format!(
+                        "has location {loc}, but the module has no file {}",
+                        loc.file
+                    ),
+                });
+            }
+        }
         for (_, name) in func.data_symbols() {
             if module.data_object(name).is_none() {
                 errors.push(VerifierError {

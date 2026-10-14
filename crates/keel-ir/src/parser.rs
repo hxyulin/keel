@@ -1,7 +1,9 @@
 //! Parser for the text format produced by `Module`'s `Display` impl.
 //!
 //! A file is one module: `decl` lines for external functions and data,
-//! `data` definitions and `func` definitions, in any order. A call or a
+//! `data` definitions and `func` definitions, in any order, and `file`
+//! lines naming the source files instruction locations refer to, each
+//! before its first use. A call or a
 //! `symbol_addr` may name something defined later, so functions are parsed
 //! first and built once every name is known.
 //!
@@ -18,8 +20,8 @@
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
-    Intrinsic, Layout, Module, Purpose, SigRef, Signature, StackSlot, StackSlotData, Symbol, Type,
-    UnaryOp, Value,
+    Intrinsic, Layout, Module, Purpose, SigRef, Signature, SourceFile, SourceLoc, StackSlot,
+    StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -39,16 +41,49 @@ impl fmt::Display for ParseError {
 
 /// Parses a module: declarations, data and functions.
 pub fn parse(src: &str) -> Result<Module, ParseError> {
+    parse_module(src, None)
+}
+
+/// Like [`parse`], but if the module names no source files, every
+/// instruction gets its own place in `src` as its location, with `path` as
+/// the file: debug info for stepping through the IR itself.
+pub fn parse_with_ir_lines(src: &str, path: &str) -> Result<Module, ParseError> {
+    parse_module(src, Some(path))
+}
+
+fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> {
     let tokens = lex(src)?;
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        files: HashMap::new(),
+    };
+    let mut files = Vec::new();
     let mut decls = Vec::new();
     let mut data = Vec::new();
     let mut parsed = Vec::new();
     parser.skip_newlines();
     while !parser.at(&Tok::Eof) {
-        let (kw, loc) = parser.ident("`func`, `data` or `decl`")?;
+        let (kw, loc) = parser.ident("`func`, `data`, `decl` or `file`")?;
         match kw.as_str() {
             "func" => parsed.push(parser.function()?),
+            "file" => {
+                let (name, name_loc) = parser.ident("a file name like `f0`")?;
+                parser.expect(Tok::Punct('='))?;
+                let path = match parser.next() {
+                    (Tok::Str(path), _) => path,
+                    _ => {
+                        parser.pos -= 1;
+                        return Err(parser.unexpected("a path like `\"main.c\"`"));
+                    }
+                };
+                parser.expect(Tok::Newline)?;
+                let file = SourceFile::new(files.len());
+                if parser.files.insert(name.clone(), file).is_some() {
+                    return Err(error(name_loc, format!("file `{name}` is declared twice")));
+                }
+                files.push(path);
+            }
             "data" => data.push(parser.data_definition()?),
             "decl" if parser.eat(&Tok::Ident("data".into())) => {
                 let name = parser.global("a data name like `@environ`")?;
@@ -64,7 +99,7 @@ pub fn parse(src: &str) -> Result<Module, ParseError> {
             _ => {
                 return Err(error(
                     loc,
-                    format!("expected `func`, `data` or `decl`, found `{kw}`"),
+                    format!("expected `func`, `data`, `decl` or `file`, found `{kw}`"),
                 ));
             }
         }
@@ -80,14 +115,22 @@ pub fn parse(src: &str) -> Result<Module, ParseError> {
         sigs.entry(&func.name).or_insert(&func.sig);
     }
     let data_names: HashSet<&str> = data.iter().map(|d| d.name.as_str()).collect();
+    let ir_file = match ir_path {
+        Some(path) if files.is_empty() => {
+            files.push(path.to_string());
+            Some(SourceFile::new(0))
+        }
+        _ => None,
+    };
     let functions = parsed
         .iter()
-        .map(|func| build(func, &sigs, &data_names))
+        .map(|func| build(func, &sigs, &data_names, ir_file))
         .collect::<Result<_, _>>()?;
     Ok(Module {
         decls,
         data,
         functions,
+        files,
     })
 }
 
@@ -102,6 +145,8 @@ enum Tok {
     Float(String),
     /// `b"..."`, with escapes already decoded.
     Bytes(Vec<u8>),
+    /// `"..."`, with escapes already decoded.
+    Str(String),
     Punct(char),
     Arrow,
     /// `...`
@@ -119,6 +164,7 @@ impl fmt::Display for Tok {
             Tok::Hex(n) => write!(f, "`{n:#x}`"),
             Tok::Float(s) => write!(f, "`{s}`"),
             Tok::Bytes(_) => f.write_str("a byte string"),
+            Tok::Str(_) => f.write_str("a string"),
             Tok::Punct(c) => write!(f, "`{c}`"),
             Tok::Arrow => f.write_str("`->`"),
             Tok::Ellipsis => f.write_str("`...`"),
@@ -156,6 +202,15 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 let (bytes, end) = lex_bytes(&chars, i + 2, line_no)?;
                 tokens.push((Tok::Bytes(bytes), loc));
                 i = end;
+            } else if c == '"' {
+                let (bytes, end) = lex_bytes(&chars, i + 1, line_no)?;
+                let text = String::from_utf8(bytes).map_err(|_| ParseError {
+                    line: line_no,
+                    col: loc.col,
+                    message: "a string must be UTF-8".into(),
+                })?;
+                tokens.push((Tok::Str(text), loc));
+                i = end;
             } else if chars[i..].starts_with(&['.', '.', '.']) {
                 tokens.push((Tok::Ellipsis, loc));
                 i += 3;
@@ -181,7 +236,7 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                     },
                     loc,
                 ));
-            } else if "(),:={}+[]".contains(c) {
+            } else if "(),:={}+[]!".contains(c) {
                 tokens.push((Tok::Punct(c), loc));
                 i += 1;
             } else {
@@ -272,8 +327,9 @@ fn lex_number(chars: &[char], start: usize, line: u32) -> Result<(Tok, usize), P
     Ok((Tok::Int(n), i))
 }
 
-/// Decodes the body of a `b"..."` string starting at `chars[start]`, up to
-/// the closing quote. Returns the bytes and the index after the quote.
+/// Decodes the body of a `b"..."` or `"..."` string starting at
+/// `chars[start]`, up to the closing quote. Returns the bytes and the index
+/// after the quote.
 fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize), ParseError> {
     let err = |i: usize, message: String| ParseError {
         line,
@@ -284,7 +340,7 @@ fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize)
     let mut i = start;
     loop {
         let Some(&c) = chars.get(i) else {
-            return Err(err(start - 2, "unterminated byte string".into()));
+            return Err(err(start - 1, "unterminated string".into()));
         };
         i += 1;
         match c {
@@ -327,6 +383,8 @@ fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize)
 struct Parser {
     tokens: Vec<(Tok, Loc)>,
     pos: usize,
+    /// Source files declared so far, by name.
+    files: HashMap<String, SourceFile>,
 }
 
 /// One block as written, with temporary value and block handles.
@@ -340,6 +398,8 @@ struct ParsedInst {
     results: Vec<Value>,
     data: InstData,
     loc: Loc,
+    /// Written as `!f0:12:5` at the end of the line.
+    srcloc: Option<SourceLoc>,
 }
 
 /// A function as written, built once all signatures in the module are known.
@@ -1073,7 +1133,7 @@ impl Parser {
                 "return" => {
                     no_suffix()?;
                     let mut args = Vec::new();
-                    if !self.at(&Tok::Newline) {
+                    if !self.at(&Tok::Newline) && !self.at(&Tok::Punct('!')) {
                         args.push(self.value(names)?);
                         while self.eat(&Tok::Punct(',')) {
                             args.push(self.value(names)?);
@@ -1083,6 +1143,11 @@ impl Parser {
                 }
                 _ => return Err(error(op_loc, format!("unknown opcode `{opcode}`"))),
             }
+        };
+        let srcloc = if self.eat(&Tok::Punct('!')) {
+            Some(self.srcloc()?)
+        } else {
+            None
         };
         self.expect(Tok::Newline)?;
 
@@ -1123,7 +1188,22 @@ impl Parser {
             results,
             data,
             loc: op_loc,
+            srcloc,
         })
+    }
+
+    /// `f0:12:5`, after the `!`.
+    fn srcloc(&mut self) -> Result<SourceLoc, ParseError> {
+        let (name, loc) = self.ident("a file name like `f0`")?;
+        let file = *self
+            .files
+            .get(&name)
+            .ok_or_else(|| error(loc, format!("file `{name}` is not declared")))?;
+        self.expect(Tok::Punct(':'))?;
+        let line = self.u32("a line number")?;
+        self.expect(Tok::Punct(':'))?;
+        let col = self.u32("a column number")?;
+        Ok(SourceLoc { file, line, col })
     }
 
     /// `(v0, v1, ...)`
@@ -1169,6 +1249,7 @@ fn build(
     parsed: &ParsedFunction,
     sigs: &HashMap<&str, &Signature>,
     data_names: &HashSet<&str>,
+    ir_file: Option<SourceFile>,
 ) -> Result<Function, ParseError> {
     let ParsedFunction {
         name,
@@ -1339,6 +1420,12 @@ fn build(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let created = func.append_inst_with_results(block, data, &result_tys);
+            let ir_loc = ir_file.map(|file| SourceLoc {
+                file,
+                line: inst.loc.line,
+                col: inst.loc.col,
+            });
+            func.set_inst_loc(created, inst.srcloc.or(ir_loc));
             debug_assert!(
                 func.inst_results(created)
                     .iter()

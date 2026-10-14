@@ -1,5 +1,6 @@
 //! End-to-end tests: compile each `tests/programs/*.keel` to assembly, link
-//! it with `clang` (plus a same-named `.c` driver if there is one), run it,
+//! it with `clang` (plus a same-named `.c` driver if there is one, or a
+//! `.cpp` one, built with `clang++ -O2`), run it,
 //! and compare with the `; expect:` line, either `exit <code>` or `trap`.
 //! `; stdout: <text>` lines, if present, give the expected output line by
 //! line.
@@ -9,6 +10,8 @@
 //! code and register/stack mixes in parallel copies on every program); and
 //! after the default optimization pipeline, which must not change what the
 //! program does.
+//!
+//! `debug_info` checks the debug info in lldb.
 
 use keel_codegen::Pools;
 use keel_codegen::aarch64::REGISTERS;
@@ -64,7 +67,14 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
     let exe_path = dir.join(&stem);
     std::fs::write(&asm_path, asm).unwrap();
 
-    let mut clang = Command::new("clang");
+    let cpp_driver = path.with_extension("cpp");
+    let mut clang = if cpp_driver.exists() {
+        let mut clang = Command::new("clang++");
+        clang.arg("-O2").arg(&cpp_driver);
+        clang
+    } else {
+        Command::new("clang")
+    };
     clang.arg("-o").arg(&exe_path).arg(&asm_path);
     let driver = path.with_extension("c");
     if driver.exists() {
@@ -78,7 +88,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
         ));
     }
 
-    let out = run_with_timeout(&exe_path)?;
+    let out = run_with_timeout(&mut Command::new(&exe_path))?;
     let got = match (out.status.code(), out.status.signal()) {
         (Some(code), _) => format!("exit {code}"),
         (None, Some(SIGTRAP)) => "trap".to_string(),
@@ -106,12 +116,12 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
 /// loop fails the test instead of stalling it.
 const TIMEOUT: Duration = Duration::from_secs(10);
 
-fn run_with_timeout(exe: &Path) -> Result<Output, String> {
-    let mut child = Command::new(exe)
+fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("running {}: {e}", exe.display()))?;
+        .map_err(|e| format!("running {}: {e}", cmd.get_program().display()))?;
     let start = Instant::now();
     while child.try_wait().unwrap().is_none() {
         if start.elapsed() > TIMEOUT {
@@ -156,4 +166,107 @@ fn programs() {
         failures.len(),
         failures.join("\n\n")
     );
+}
+
+/// Breakpoints by function and by line stop where the line table says, and
+/// the backtrace reaches the C caller.
+#[test]
+fn debug_info() {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let lldb = debug_session(
+        &tests.join("debug/calc.keel"),
+        &tests.join("debug/main.c"),
+        false,
+        &[
+            "b calc",
+            "b calc.rs:3",
+            "b nocol",
+            "run",
+            "frame info",
+            "up",
+            "frame info",
+            "continue",
+            "frame info",
+            "continue",
+            "frame info",
+        ],
+    );
+    // `b calc` stops after the prologue, at the first line of the body,
+    // and so does `b nocol`, though its prologue has the same location.
+    for want in [
+        "`calc at calc.rs:2:13",
+        "`main at main.c:5",
+        "`calc at calc.rs:3:16",
+        "`nocol + ",
+        "`nocol at calc.rs:6\n",
+    ] {
+        assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+    }
+
+    // The IR's own lines, as `keel compile -g` gives them.
+    let lldb = debug_session(
+        &tests.join("programs/sum.keel"),
+        &tests.join("programs/sum.c"),
+        true,
+        &[
+            "b sum",
+            "run",
+            "frame info",
+            "up",
+            "frame info",
+            "breakpoint delete 1",
+            "b sum.keel:13",
+            "continue",
+            "frame info",
+        ],
+    );
+    for want in [
+        "`sum at sum.keel:4:10",
+        "`main at sum.c:",
+        "`sum at sum.keel:13:10",
+    ] {
+        assert!(lldb.contains(want), "lldb output lacks `{want}`:\n{lldb}");
+    }
+}
+
+/// Compiles `keel`, links it with `driver` built with `-g`, and runs
+/// `commands` in lldb. Returns lldb's output.
+fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) -> String {
+    let src = std::fs::read_to_string(keel).unwrap();
+    let module = if ir_lines {
+        keel_ir::parse_with_ir_lines(&src, keel.to_str().unwrap())
+    } else {
+        keel_ir::parse(&src)
+    };
+    let module = module.unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let asm = keel_codegen::aarch64::compile(&module).unwrap();
+
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("debug");
+    std::fs::create_dir_all(&dir).unwrap();
+    let stem = keel.file_stem().unwrap().to_string_lossy();
+    let asm_path = dir.join(format!("{stem}.s"));
+    let exe_path = dir.join(&*stem);
+    std::fs::write(&asm_path, asm).unwrap();
+    let out = Command::new("clang")
+        .arg("-g")
+        .arg("-o")
+        .arg(&exe_path)
+        .arg(&asm_path)
+        .arg(driver)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "clang failed:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let mut lldb = Command::new("lldb");
+    lldb.arg("--batch");
+    for command in commands {
+        lldb.arg("-o").arg(command);
+    }
+    let out = run_with_timeout(lldb.arg(&exe_path)).unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }

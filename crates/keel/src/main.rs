@@ -1,20 +1,23 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] <input.keel> [-o <output.s>]   IR to aarch64 assembly
+//! keel compile [-O] [-g] <input.keel> [-o <output.s>]   IR to aarch64 assembly
 //! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
 //!
 //! `-O` runs the default pass pipeline before code generation; `opt` runs
 //! the given passes (the default pipeline without `-p`) and prints the IR.
+//! Assembly has debug info if the input names source files (`file`
+//! lines); `-g` gives an input without them its own lines instead, for
+//! stepping through the IR in a debugger.
 //! Output goes to stdout without `-o`.
 
 use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] <input.keel> [-o <output.s>]
+  keel compile [-O] [-g] <input.keel> [-o <output.s>]
   keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
@@ -34,6 +37,7 @@ struct Options {
     input: Option<String>,
     output: Option<String>,
     optimize: bool,
+    ir_lines: bool,
     passes: Option<Vec<String>>,
 }
 
@@ -48,6 +52,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         match flag {
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimize = true,
+            "-g" => opts.ir_lines = true,
             "-p" => {
                 let list = args.next().ok_or("`-p` needs a list of passes")?;
                 opts.passes = Some(list.split(',').map(|s| s.trim().to_string()).collect());
@@ -65,7 +70,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "compile" => {
-            let opts = parse_options(rest, &["-o", "-O"])?;
+            let opts = parse_options(rest, &["-o", "-O", "-g"])?;
             let (input, mut module) = load(&opts)?;
             if opts.optimize {
                 keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
@@ -105,7 +110,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
 fn load(opts: &Options) -> Result<(String, Module), String> {
     let input = opts.input.clone().ok_or(USAGE)?;
     let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
-    let module = keel_ir::parse(&src).map_err(|e| format!("{input}:{e}"))?;
+    let module = if opts.ir_lines {
+        keel_ir::parse_with_ir_lines(&src, &input)
+    } else {
+        keel_ir::parse(&src)
+    };
+    let module = module.map_err(|e| format!("{input}:{e}"))?;
     if let Err(errors) = keel_ir::verify_module(&module) {
         let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
         return Err(format!("{input}: verifier errors:\n{}", lines.join("\n")));

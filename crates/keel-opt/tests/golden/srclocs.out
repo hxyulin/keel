@@ -1,0 +1,22 @@
+file f0 = "loop.c"
+
+func @f(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = iconst.i64 0 !f0:1:9
+    v10 = iconst.i64 3 !f0:5:24
+    v9 = iconst.i64 2 !f0:5:20
+    v11 = iconst.i64 5 !f0:5:22
+    v5 = imul v1, v1 !f0:3:15
+    jump block1(v2, v2) !f0:2:5
+block1(v3: i64, v4: i64):
+    v6 = iadd v4, v5 !f0:3:11
+    v7 = iconst.i64 1 !f0:4:14
+    v8 = iadd v3, v7 !f0:4:11
+    v12 = iadd v8, v11 !f0:5:18
+    v13 = icmp.ult v12, v0 !f0:2:12
+    brif v13, block1(v8, v6), block2 !f0:2:5
+block2:
+    v15 = iconst.i64 1 !f0:4:14
+    v14 = iadd v6, v15 !f0:7:14
+    return v14 !f0:7:5
+}

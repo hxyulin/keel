@@ -1,0 +1,65 @@
+; Unwinding through a keel frame: unwind.cpp throws a C++ exception from
+; a callback past @k_through, which holds values in every callee-saved
+; register across the call. The catcher's own values in those registers
+; must come back from @k_through's frame, as its CFI describes.
+; expect: exit 0
+func @k_through(ptr, i64, f64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64, v2: f64):
+    v3 = iconst.i64 1
+    v4 = iadd v1, v3
+    v5 = iconst.i64 2
+    v6 = iadd v1, v5
+    v7 = iconst.i64 3
+    v8 = iadd v1, v7
+    v9 = iconst.i64 4
+    v10 = iadd v1, v9
+    v11 = iconst.i64 5
+    v12 = iadd v1, v11
+    v13 = iconst.i64 6
+    v14 = iadd v1, v13
+    v15 = iconst.i64 7
+    v16 = iadd v1, v15
+    v17 = iconst.i64 8
+    v18 = iadd v1, v17
+    v19 = iconst.i64 9
+    v20 = iadd v1, v19
+    v21 = iconst.i64 10
+    v22 = iadd v1, v21
+    v23 = fconst.f64 1.5
+    v24 = fadd v2, v23
+    v25 = fconst.f64 2.5
+    v26 = fadd v2, v25
+    v27 = fconst.f64 3.5
+    v28 = fadd v2, v27
+    v29 = fconst.f64 4.5
+    v30 = fadd v2, v29
+    v31 = fconst.f64 5.5
+    v32 = fadd v2, v31
+    v33 = fconst.f64 6.5
+    v34 = fadd v2, v33
+    v35 = fconst.f64 7.5
+    v36 = fadd v2, v35
+    v37 = fconst.f64 8.5
+    v38 = fadd v2, v37
+    v39 = call_indirect v0(v1) : (i64) -> i64 cc(c)
+    v40 = iadd v39, v4
+    v41 = iadd v40, v6
+    v42 = iadd v41, v8
+    v43 = iadd v42, v10
+    v44 = iadd v43, v12
+    v45 = iadd v44, v14
+    v46 = iadd v45, v16
+    v47 = iadd v46, v18
+    v48 = iadd v47, v20
+    v49 = iadd v48, v22
+    v50 = fadd v24, v26
+    v51 = fadd v50, v28
+    v52 = fadd v51, v30
+    v53 = fadd v52, v32
+    v54 = fadd v53, v34
+    v55 = fadd v54, v36
+    v56 = fadd v55, v38
+    v57 = fptosi.i64 v56
+    v58 = iadd v49, v57
+    return v58
+}

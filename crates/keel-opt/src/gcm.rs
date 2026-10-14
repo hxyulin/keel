@@ -160,6 +160,7 @@ fn rematerialize(func: &mut Function, inst: Inst, users: &[Inst]) -> bool {
     for block in blocks {
         let first = first_user_in(func, block, users).expect("a user in its block");
         let copy = func.insert_inst(InsertPoint::Before(first), data.clone());
+        func.set_inst_loc(copy, func.inst_loc(inst));
         let copy = func.first_result(copy);
         let local: Vec<Inst> = users
             .iter()

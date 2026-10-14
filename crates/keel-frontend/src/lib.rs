@@ -27,7 +27,7 @@
 //! b.finalize();
 //! ```
 
-use keel_ir::{Block, EntityRef, Function, InsertPoint, Inst, InstBuilder, Type, Value};
+use keel_ir::{Block, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value};
 use std::collections::HashMap;
 
 keel_ir::entity!(
@@ -39,6 +39,8 @@ keel_ir::entity!(
 pub struct FunctionBuilder<'f> {
     pub func: &'f mut Function,
     current: Option<Block>,
+    /// The location instructions built from now on get.
+    srcloc: Option<SourceLoc>,
     var_types: Vec<Type>,
     /// The latest definition of each variable in each block.
     defs: HashMap<(Variable, Block), Value>,
@@ -57,6 +59,7 @@ impl<'f> FunctionBuilder<'f> {
         Self {
             func,
             current: None,
+            srcloc: None,
             var_types: Vec::new(),
             defs: HashMap::new(),
             sealed: HashMap::new(),
@@ -81,10 +84,15 @@ impl<'f> FunctionBuilder<'f> {
             .expect("no current block; call switch_to_block")
     }
 
+    /// Sets the source location of the instructions built after this.
+    pub fn set_srcloc(&mut self, loc: Option<SourceLoc>) {
+        self.srcloc = loc;
+    }
+
     /// A builder for one instruction at the end of the current block.
     pub fn ins(&mut self) -> InstBuilder<'_> {
         let block = self.current_block();
-        self.func.ins(InsertPoint::End(block))
+        self.func.ins(InsertPoint::End(block)).loc(self.srcloc)
     }
 
     pub fn declare_var(&mut self, ty: Type) -> Variable {

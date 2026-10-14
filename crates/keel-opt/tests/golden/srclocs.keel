@@ -1,0 +1,26 @@
+; passes: gcm, const-fold
+; Instructions keep their locations as passes move and fold them, and the
+; copy of `v7` that gcm rematerializes in block2 takes its location along.
+file f0 = "loop.c"
+
+func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iconst.i64 0 !f0:1:9
+    jump block1(v2, v2) !f0:2:5
+
+block1(v3: i64, v4: i64):
+    v5 = imul v1, v1 !f0:3:15
+    v6 = iadd v4, v5 !f0:3:11
+    v7 = iconst.i64 1 !f0:4:14
+    v8 = iadd v3, v7 !f0:4:11
+    v13 = iconst.i64 2 !f0:5:20
+    v14 = iconst.i64 3 !f0:5:24
+    v15 = iadd v13, v14 !f0:5:22
+    v16 = iadd v8, v15 !f0:5:18
+    v10 = icmp.ult v16, v0 !f0:2:12
+    brif v10, block1(v8, v6), block2 !f0:2:5
+
+block2:
+    v12 = iadd v6, v7 !f0:7:14
+    return v12 !f0:7:5
+}
