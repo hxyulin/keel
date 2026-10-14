@@ -113,6 +113,24 @@ fn locals_become_ssa_values() {
     assert_eq!(f.matches("stack_slot").count(), 2, "{f}");
 }
 
+/// A local declared in a loop without an initializer is a new object each
+/// iteration: what it held last time round is not carried over, so it is
+/// not a parameter of the loop header (it was, live through the whole
+/// loop, before declarations started a new value).
+#[test]
+fn uninitialized_locals_do_not_live_across_iterations() {
+    let module = compile(
+        "double f(int n, double *a) {\n\
+         double s = 0;\n\
+         for (int i = 0; i < n; i++) { double x; if (a[i] > 0) x = a[i]; s += x; }\n\
+         return s; }\n",
+    )
+    .unwrap();
+    let text = module.to_string();
+    let header = text.lines().find(|l| l.starts_with("block1(")).unwrap();
+    assert_eq!(header.matches(": f64").count(), 1, "only `s`:\n{text}");
+}
+
 /// Only what is used is emitted: unused `static` and `inline` functions
 /// and unused declarations leave nothing behind.
 #[test]

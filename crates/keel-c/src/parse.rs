@@ -487,9 +487,10 @@ impl Parser {
                 let local = &mut self.fs.as_mut().unwrap().locals[id];
                 local.in_memory |= !ty.is_scalar();
                 local.ty = ty;
-                if let Some(init) = init {
-                    out.push(Stmt::Init(id, init, loc));
-                }
+                out.push(match init {
+                    Some(init) => Stmt::Init(id, init, loc),
+                    None => Stmt::Declare(id),
+                });
             } else {
                 self.object_declaration(&spec, d, name, label, is_const, file_scope)?;
             }

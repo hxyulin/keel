@@ -532,6 +532,17 @@ impl FnGen<'_, '_, '_> {
                 self.set_loc(*loc);
                 self.init_local(*id, init)?;
             }
+            // Without this, a variable read on a path that did not assign it
+            // in this iteration would read the last iteration's value: a
+            // block parameter live around the whole loop. Zero starts a new
+            // value here instead.
+            Stmt::Declare(id) => {
+                if let Storage::Var(var) = self.locals[*id] {
+                    self.ensure_block();
+                    let zero = self.zero(self.def.locals[*id].ty.ir());
+                    self.b.def_var(var, zero);
+                }
+            }
             Stmt::Block(stmts) => {
                 for s in stmts {
                     self.stmt(s)?;

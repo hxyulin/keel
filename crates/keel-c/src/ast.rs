@@ -162,6 +162,10 @@ pub enum Stmt {
     Expr(Expr),
     /// A local's initialization, at its declaration.
     Init(LocalId, Init, Loc),
+    /// A local declared without an initializer. Each time its declaration
+    /// is reached it is a new object with an indeterminate value, so its
+    /// old value (from the last trip round a loop) is not needed.
+    Declare(LocalId),
     Block(Vec<Stmt>),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     While(Expr, Box<Stmt>),
