@@ -1,5 +1,6 @@
 mod arithmetic;
 mod control;
+mod data;
 mod float;
 mod memory;
 mod relocate;
@@ -298,17 +299,27 @@ struct Branch {
     spec: control::Branch,
 }
 
+struct DataFixup {
+    line: usize,
+    location: data::Location,
+    width: u8,
+    expression: data::Expression,
+}
+
 pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
     let mut result = Assembly {
         text: Vec::new(),
         text_alignment: 2,
         symbols: Vec::new(),
         relocations: Vec::new(),
+        sections: Vec::new(),
     };
-    let mut labels = BTreeMap::new();
+    let mut current = 0;
+    let mut labels: BTreeMap<String, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
     let mut branches = Vec::new();
     let mut addresses = Vec::new();
+    let mut data_fixups = Vec::new();
     let mut relocation_lines = BTreeMap::new();
     for (index, raw) in source.lines().enumerate() {
         let line = index + 1;
@@ -325,7 +336,13 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             let name = name.trim();
             symbol(name).map_err(err)?;
             if labels
-                .insert(name.to_string(), result.text.len() as u64)
+                .insert(
+                    name.to_string(),
+                    data::Location {
+                        section: current,
+                        offset: data::position(&result, current),
+                    },
+                )
                 .is_some()
             {
                 return Err(err(format!("duplicate label `{name}`")));
@@ -339,6 +356,128 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
         let operands = operands.trim();
         let op = op.to_ascii_lowercase();
         let args = memory::operands(operands).map_err(err)?;
+        if let Some(width) = data::width(&op) {
+            count(&args, 1, usize::MAX).map_err(err)?;
+            for argument in args {
+                let expr = data::expression(argument).map_err(err)?;
+                if expr.add.is_none() {
+                    data::append(
+                        &mut result,
+                        current,
+                        &data::value(expr.constant, width).map_err(err)?,
+                    )
+                    .map_err(err)?;
+                } else {
+                    if width < 4 || (width != 8 && expr.subtract.is_none()) {
+                        return Err(err(
+                            "symbolic data requires .quad pointers or .long/.quad differences"
+                                .into(),
+                        ));
+                    }
+                    data::bytes_mut(&mut result, current).map_err(err)?;
+                    let location = data::Location {
+                        section: current,
+                        offset: data::position(&result, current),
+                    };
+                    data_fixups.push(DataFixup {
+                        line,
+                        location,
+                        width,
+                        expression: expr,
+                    });
+                    data::reserve(&mut result, current, u64::from(width), 0).map_err(err)?;
+                }
+            }
+            continue;
+        }
+        match op.as_str() {
+            ".text" | ".data" | ".const" | ".const_data" | ".bss" => {
+                count(&args, 0, 0).map_err(err)?;
+                current = match op.as_str() {
+                    ".text" => 0,
+                    ".const" => {
+                        data::select(&mut result, "__TEXT", "__const", crate::SectionKind::Data)
+                            .map_err(err)?
+                    }
+                    ".const_data" => {
+                        data::select(&mut result, "__DATA", "__const", crate::SectionKind::Data)
+                            .map_err(err)?
+                    }
+                    ".bss" => {
+                        data::select(&mut result, "__DATA", "__bss", crate::SectionKind::ZeroFill)
+                            .map_err(err)?
+                    }
+                    _ => data::select(&mut result, "__DATA", "__data", crate::SectionKind::Data)
+                        .map_err(err)?,
+                };
+                continue;
+            }
+            ".section" => {
+                current = data::section(&mut result, &args).map_err(err)?;
+                continue;
+            }
+            ".globl" | ".global" | ".extern" => {
+                count(&args, 1, usize::MAX).map_err(err)?;
+                for name in args {
+                    symbol(name).map_err(err)?;
+                    globals.insert(name.to_string(), line);
+                }
+                continue;
+            }
+            ".p2align" => {
+                count(&args, 1, 1).map_err(err)?;
+                let power = unsigned(args[0], 16).map_err(err)?;
+                data::align(&mut result, current, power).map_err(err)?;
+                continue;
+            }
+            ".space" | ".zero" => {
+                count(&args, 1, 2).map_err(err)?;
+                let amount = u64::from(unsigned(args[0], u32::MAX as i64).map_err(err)?);
+                let fill = args
+                    .get(1)
+                    .map(|s| unsigned(s, 255))
+                    .transpose()
+                    .map_err(err)?
+                    .unwrap_or(0) as u8;
+                data::reserve(&mut result, current, amount, fill).map_err(err)?;
+                continue;
+            }
+            ".zerofill" | ".tbss" => {
+                let tls = op == ".tbss";
+                let (name, size, alignment) = data::allocation(&args, tls).map_err(err)?;
+                if labels.contains_key(name) {
+                    return Err(err(format!("duplicate label `{name}`")));
+                }
+                let section = data::select(
+                    &mut result,
+                    "__DATA",
+                    if tls { "__thread_bss" } else { "__bss" },
+                    if tls {
+                        crate::SectionKind::ThreadZeroFill
+                    } else {
+                        crate::SectionKind::ZeroFill
+                    },
+                )
+                .map_err(err)?;
+                data::align(&mut result, section, alignment).map_err(err)?;
+                labels.insert(
+                    name.into(),
+                    data::Location {
+                        section,
+                        offset: data::position(&result, section),
+                    },
+                );
+                data::reserve(&mut result, section, size, 0).map_err(err)?;
+                continue;
+            }
+            _ if op.starts_with('.') => return Err(err(format!("unsupported directive `{op}`"))),
+            _ => {}
+        }
+        if current != 0 || !result.text.len().is_multiple_of(4) {
+            return Err(err(
+                "instructions require four-byte-aligned __TEXT,__text locations".into(),
+            ));
+        }
         if let Some(spec) = control::branch(&op, &args).map_err(err)? {
             if !is_integer(&spec.target) {
                 let expression = relocate::expression(&spec.target).map_err(err)?;
@@ -360,7 +499,7 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
                 .len()
                 .try_into()
                 .map_err(|_| err("text offset exceeds 32 bits".into()))?;
-            relocation_lines.insert(relocation.offset, line);
+            relocation_lines.insert((0, relocation.offset), line);
             result.relocations.push(relocation);
             result.text.extend_from_slice(&word.to_le_bytes());
             continue;
@@ -380,40 +519,9 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             result.text.extend_from_slice(&word.to_le_bytes());
             continue;
         }
-        match op.as_str() {
-            ".text" => count(&args, 0, 0).map_err(err)?,
-            ".section" => {
-                if args != ["__TEXT", "__text"]
-                    && args != ["__TEXT", "__text", "regular", "pure_instructions"]
-                {
-                    return Err(err(
-                        "only the __TEXT,__text instruction section is supported".into(),
-                    ));
-                }
-            }
-            ".globl" | ".global" | ".extern" => {
-                count(&args, 1, usize::MAX).map_err(err)?;
-                for name in args {
-                    symbol(name).map_err(err)?;
-                    globals.insert(name.to_string(), line);
-                }
-            }
-            ".p2align" => {
-                count(&args, 1, 1).map_err(err)?;
-                let power = unsigned(args[0], 16).map_err(err)?;
-                result.text_alignment = result.text_alignment.max(power);
-                let alignment = 1usize << power;
-                let padding = (alignment - result.text.len() % alignment) % alignment;
-                let nop = encode("NOP_HI_hints", &[]).map_err(err)?.to_le_bytes();
-                for _ in 0..padding / 4 {
-                    result.text.extend_from_slice(&nop);
-                }
-            }
-            _ if op.starts_with('.') => return Err(err(format!("unsupported directive `{op}`"))),
-            _ => result
-                .text
-                .extend_from_slice(&instruction(&op, &args).map_err(err)?.to_le_bytes()),
-        }
+        result
+            .text
+            .extend_from_slice(&instruction(&op, &args).map_err(err)?.to_le_bytes());
     }
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
@@ -423,24 +531,34 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             let expr = relocate::expression(&branch.spec.target).map_err(err)?;
             let target = labels.get(&expr.name);
             let local = expr.name.starts_with('L') && !globals.contains_key(&expr.name);
-            if branch.spec.width == 26 && target.is_none() && !local {
+            if branch.spec.width == 26
+                && (target.is_some_and(|t| t.section != 0) || (target.is_none() && !local))
+            {
                 if expr.addend % 4 != 0 {
                     return Err(err("branch addend must be 4-byte aligned".into()));
                 }
-                relocation_lines.insert(branch.offset as u32, branch.line);
+                let offset = branch
+                    .offset
+                    .try_into()
+                    .map_err(|_| err("text offset exceeds 32 bits".into()))?;
+                relocation_lines.insert((0, offset), branch.line);
                 result.relocations.push(crate::Relocation {
-                    offset: branch
-                        .offset
-                        .try_into()
-                        .map_err(|_| err("text offset exceeds 32 bits".into()))?,
+                    section: 0,
+                    size: 4,
+                    subtract_symbol: None,
+                    offset,
                     symbol: expr.name,
                     kind: crate::RelocationKind::Branch26,
                     addend: expr.addend,
                 });
                 0
             } else {
-                let target = target.ok_or_else(|| err(format!("undefined local branch target `{}`; conditional branches require definitions in this file", expr.name)))?;
-                *target as i64 + expr.addend - branch.offset as i64
+                let target = target
+                    .ok_or_else(|| err(format!("undefined local branch target `{}`", expr.name)))?;
+                if target.section != 0 {
+                    return Err(err("conditional branches require targets in __text".into()));
+                }
+                target.offset as i64 + expr.addend - branch.offset as i64
             }
         };
         let bound = 1i64 << (branch.spec.width + 1);
@@ -465,35 +583,85 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
                 format!("adr requires a defined text symbol `{}`", expr.name),
             )
         })?;
+        if target.section != 0 {
+            return Err(Error::new(
+                line,
+                "adr requires a target in the same text section",
+            ));
+        }
         let word = relocate::address_word(
             "adr",
             &destination,
-            *target as i64 + expr.addend - offset as i64,
+            target.offset as i64 + expr.addend - offset as i64,
         )
         .map_err(|e| Error::new(line, e))?;
         result.text[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
     }
+    for fixup in data_fixups {
+        let expr = fixup.expression;
+        let add = expr.add.unwrap();
+        let mut constant = expr.constant;
+        let resolved = if expr.subtract.as_deref() == Some(add.as_str()) {
+            true
+        } else if let Some(subtract) = &expr.subtract {
+            match (labels.get(&add), labels.get(subtract)) {
+                (Some(a), Some(b)) if a.section == b.section => {
+                    constant = constant
+                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                        .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if resolved {
+            let bytes =
+                data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let out = data::bytes_mut(&mut result, fixup.location.section)
+                .map_err(|e| Error::new(fixup.line, e))?;
+            let offset = fixup.location.offset as usize;
+            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
+        } else {
+            data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let offset =
+                fixup.location.offset.try_into().map_err(|_| {
+                    Error::new(fixup.line, "data relocation offset exceeds 32 bits")
+                })?;
+            relocation_lines.insert((fixup.location.section, offset), fixup.line);
+            result.relocations.push(crate::Relocation {
+                section: fixup.location.section,
+                size: fixup.width,
+                subtract_symbol: expr.subtract,
+                offset,
+                symbol: add,
+                kind: crate::RelocationKind::Unsigned,
+                addend: constant as i64,
+            });
+        }
+    }
     let mut names: BTreeSet<_> = labels.keys().chain(globals.keys()).cloned().collect();
     for relocation in &result.relocations {
-        if relocation.symbol.starts_with('L')
-            && !labels.contains_key(&relocation.symbol)
-            && !globals.contains_key(&relocation.symbol)
-        {
-            return Err(Error::new(
-                relocation_lines[&relocation.offset],
-                format!("undefined local symbol `{}`", relocation.symbol),
-            ));
+        for name in std::iter::once(&relocation.symbol).chain(relocation.subtract_symbol.iter()) {
+            if name.starts_with('L') && !labels.contains_key(name) && !globals.contains_key(name) {
+                return Err(Error::new(
+                    relocation_lines[&(relocation.section, relocation.offset)],
+                    format!("undefined local symbol `{name}`"),
+                ));
+            }
+            names.insert(name.clone());
         }
-        names.insert(relocation.symbol.clone());
     }
     result.symbols = names
         .into_iter()
         .map(|name| {
-            let offset = labels.get(&name).copied();
+            let location = labels.get(&name);
             Symbol {
-                global: offset.is_none() || globals.contains_key(&name),
+                global: location.is_none() || globals.contains_key(&name),
+                offset: location.map(|l| l.offset),
+                section: location.map(|l| l.section),
                 name,
-                offset,
             }
         })
         .collect();

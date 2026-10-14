@@ -1077,21 +1077,64 @@ local by convention and require definitions unless explicitly declared
 external. `adr` and conditional/test branches require definitions in this
 file because Mach-O has no applicable external instruction relocation.
 
-**Objects and limits.** The writer emits little-endian arm64 `MH_OBJECT`, one
-`__TEXT,__text` section, local and external defined symbols, undefined
-symbols, instruction relocation records, and a macOS 11.0 build-version
-command. Relocations are ordered by descending offset, preserving addend
-pairs, and symbol indices follow local definitions, external definitions,
-then undefined symbols. The writer checks missing/duplicate symbols,
-relocation bounds, duplicate relocation offsets, and addend constraints.
+**Data directives and sections.** `.byte`, `.short`, `.long`, and `.quad`
+emit little-endian integers, with comma-separated operands. Constants accept
+decimal/hexadecimal values and addition/subtraction; values must fit the
+signed-or-unsigned range of their width. `.space`/`.zero` reserve bytes with
+an optional byte fill value. Raw strings can be emitted as byte lists, as
+Keel does; quoted-string and floating-point data directives are not yet
+supported.
 
-Subsection splitting remains rejected because local ADR and conditional
-branches still rely on text staying together. Other instructions, sections,
-and directives produce source diagnostics. Literal loads, data sections,
-absolute-pointer and symbol-difference relocations, `.cfi_*`, and debug
-directives remain to be added before this can assemble arbitrary Keel
-compiler output. The assembler writes objects; Apple’s linker still links
-them into executables.
+`.data`, `.const`, `.const_data`, and `.bss` switch to `__DATA,__data`,
+`__TEXT,__const`, `__DATA,__const`, and `__DATA,__bss`. `.section` also
+accepts those names with their regular/zerofill types, and
+`__DATA,__thread_data,thread_local_regular`,
+`__DATA,__thread_bss,thread_local_zerofill`, and
+`__DATA,__thread_vars,thread_local_variables` for TLS definitions.
+`.zerofill __DATA,__bss,symbol,size,log2_align` and
+`.tbss symbol,size,log2_align` allocate named zero-fill storage without
+switching the current section. Zero-fill storage reserves virtual space
+without allocating or writing bytes; nonzero initializers and relocations
+in zero-fill sections are errors.
+
+Labels record a section ID and a section-relative offset. `.p2align`
+raises that section’s alignment and pads data with zeros. Text padding uses
+zero bytes up to the next instruction boundary, then NOPs. Instructions
+require aligned `__TEXT,__text` locations; integer data may appear there
+for jump tables. `adr` and conditional branches must stay within that text
+section; cross-section addresses use page relocations.
+
+`.quad symbol [+/- integer]` emits an absolute pointer relocation.
+`.long`/`.quad A-B [+/- integer]` resolve directly when both labels belong
+to the same section, including forward references. Other differences use
+`ARM64_RELOC_SUBTRACTOR` for B followed immediately by `ARM64_RELOC_UNSIGNED`
+for A. Data addends are written into the 4-/8-byte word rather than into an
+ADDEND relocation. Repeated identical symbols cancel even when undefined.
+General algebra, symbol multiplication, and 8-/16-bit symbolic relocations
+remain unsupported.
+
+**Objects and limits.** The writer emits little-endian arm64 `MH_OBJECT`
+with one unnamed segment containing text, initialized data, and zero-fill
+sections. File-backed sections precede zero-fill sections in virtual layout.
+The writer remaps parser section IDs to on-disk ordinals and writes symbol
+values as section addresses plus offsets. Text bytes remain in
+`Assembly::text`; additional sections are in `Assembly::sections`, with
+separate byte and zero-fill contents. Relocations identify their section,
+width, and optional subtracted symbol.
+
+Relocations are ordered by descending offset within each section, preserving
+ADDEND and SUBTRACTOR pairs. Symbol indices follow local definitions,
+external definitions, then undefined symbols. TLS descriptor sections set
+`MH_HAS_TLV_DESCRIPTORS`. The writer checks section/symbol IDs, sizes,
+alignment, duplicate names, overlapping relocations, missing targets,
+relocation widths, and addend constraints. Objects include the macOS 11.0
+build-version command; Apple’s linker still produces the executable.
+
+Subsection splitting remains rejected because resolved differences, local
+ADR, and conditional branches rely on each section staying intact. Other
+instructions, sections, and directives produce source diagnostics. Literal
+loads, `.cfi_*`, and debug directives remain to be added before this can
+assemble arbitrary Keel compiler output.
 
 Tests compare every supported encoding form and operand boundaries against
 clang’s arm64 Mach-O output, inspect our objects with an independent object
@@ -1109,3 +1152,12 @@ page-offset integer/SIMD accesses, imported libc functions, GOT and TLVP
 references, and signed addends. Negative addends are also checked with an
 independent object reader and linked programs; some installed Apple clang
 versions emit malformed flags for negative ADDEND records.
+
+
+Data tests compare section bytes, sizes, symbols, and normalized relocations
+against clang, including file-backed/zero-fill layout and TLS descriptors.
+Linked programs check absolute-pointer tables and cross-section differences.
+The existing Keel globals, TLS (including multiple threads), switch/jump-table,
+and local-linkage programs run through the assembler with CFI/subsection
+directives explicitly removed for the tests. The linkage fixture is also
+prepared without its source debug metadata, which remains unsupported.

@@ -68,6 +68,9 @@ cargo run -p keel -- asm crates/keel-asm/examples/external_call.s -o caller.o
 cargo run -p keel -- asm crates/keel-asm/examples/answer.s -o answer.o
 clang -o external caller.o answer.o
 ./external; echo $?   # 42
+cargo run -p keel -- asm crates/keel-asm/examples/data_roundtrip.s -o data.o
+clang -o data data.o
+./data; echo $?       # 42
 ```
 
 The assembler generates Mach-O objects using tables from Arm’s
@@ -77,8 +80,10 @@ floating-point arithmetic/conversions, popcount’s SIMD instructions, and
 integer/FP/SIMD loads and stores (including pairs and acquire/release).
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
-Literal loads, data sections, and unwind/debug directives are still pending,
-so it cannot yet assemble arbitrary `keel compile` output. Unsupported
+Data support includes initialized/zero-fill/TLS sections, integer directives,
+pointer tables, and symbol differences. Literal loads and unwind/debug
+directives are still pending, so it cannot yet assemble arbitrary
+`keel compile` output. Unsupported
 syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
 

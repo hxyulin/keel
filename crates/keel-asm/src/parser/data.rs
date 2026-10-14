@@ -1,0 +1,249 @@
+//! Data sections and deferred symbol expressions. Zero-fill reserves virtual
+//! space without allocating bytes; all offsets remain relative to a section.
+use super::{count, symbol, unsigned};
+use crate::{Assembly, Section, SectionContents, SectionKind};
+
+#[derive(Clone, Copy)]
+pub(super) struct Location {
+    pub section: usize,
+    pub offset: u64,
+}
+pub(super) fn position(a: &Assembly, section: usize) -> u64 {
+    if section == 0 {
+        a.text.len() as u64
+    } else {
+        a.sections[section - 1].size()
+    }
+}
+pub(super) fn select(
+    a: &mut Assembly,
+    segment: &str,
+    name: &str,
+    kind: SectionKind,
+) -> Result<usize, String> {
+    if segment == "__TEXT" && name == "__text" {
+        return Ok(0);
+    }
+    if let Some(index) = a
+        .sections
+        .iter()
+        .position(|s| s.segment == segment && s.name == name)
+    {
+        if a.sections[index].kind != kind {
+            return Err("section redeclared with a different type".into());
+        }
+        return Ok(index + 1);
+    }
+    if a.sections.len() >= 254 {
+        return Err("Mach-O supports at most 255 sections".into());
+    }
+    a.sections.push(Section {
+        segment: segment.into(),
+        name: name.into(),
+        alignment: 0,
+        kind,
+        contents: if kind.is_zero_fill() {
+            SectionContents::ZeroFill(0)
+        } else {
+            SectionContents::Bytes(Vec::new())
+        },
+    });
+    Ok(a.sections.len())
+}
+pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> {
+    count(args, 2, 4)?;
+    let kind = match (args[0], args[1]) {
+        ("__TEXT", "__text")
+            if args.len() == 2 || args == ["__TEXT", "__text", "regular", "pure_instructions"] =>
+        {
+            return Ok(0);
+        }
+        ("__TEXT", "__const") | ("__DATA", "__data" | "__const") => SectionKind::Data,
+        ("__DATA", "__bss") => SectionKind::ZeroFill,
+        ("__DATA", "__thread_data") => SectionKind::ThreadData,
+        ("__DATA", "__thread_bss") => SectionKind::ThreadZeroFill,
+        ("__DATA", "__thread_vars") => SectionKind::ThreadVariables,
+        _ => return Err("unsupported Mach-O section".into()),
+    };
+    let expected = match kind {
+        SectionKind::Data => "regular",
+        SectionKind::ZeroFill => "zerofill",
+        SectionKind::ThreadData => "thread_local_regular",
+        SectionKind::ThreadZeroFill => "thread_local_zerofill",
+        SectionKind::ThreadVariables => "thread_local_variables",
+    };
+    if args.len() > 3 || (args.len() == 3 && args[2] != expected) {
+        return Err("unsupported section type or attributes".into());
+    }
+    select(a, args[0], args[1], kind)
+}
+pub(super) fn bytes_mut(a: &mut Assembly, section: usize) -> Result<&mut Vec<u8>, String> {
+    if section == 0 {
+        return Ok(&mut a.text);
+    }
+    match &mut a.sections[section - 1].contents {
+        SectionContents::Bytes(bytes) => Ok(bytes),
+        SectionContents::ZeroFill(_) => Err("relocations require a file-backed section".into()),
+    }
+}
+pub(super) fn append(a: &mut Assembly, section: usize, bytes: &[u8]) -> Result<(), String> {
+    if section != 0
+        && let SectionContents::ZeroFill(size) = &mut a.sections[section - 1].contents
+    {
+        if bytes.iter().any(|b| *b != 0) {
+            return Err("zero-fill sections cannot contain nonzero initializers".into());
+        }
+        *size = size
+            .checked_add(bytes.len() as u64)
+            .ok_or("zero-fill size overflow")?;
+    } else {
+        bytes_mut(a, section)?.extend_from_slice(bytes);
+    }
+    Ok(())
+}
+pub(super) fn reserve(
+    a: &mut Assembly,
+    section: usize,
+    amount: u64,
+    fill: u8,
+) -> Result<(), String> {
+    if section != 0
+        && let SectionContents::ZeroFill(size) = &mut a.sections[section - 1].contents
+    {
+        if fill != 0 {
+            return Err("zero-fill sections require zero padding".into());
+        }
+        *size = size.checked_add(amount).ok_or("zero-fill size overflow")?;
+    } else {
+        let bytes = bytes_mut(a, section)?;
+        let amount = usize::try_from(amount).map_err(|_| "data size overflow")?;
+        let len = bytes
+            .len()
+            .checked_add(amount)
+            .ok_or("data size overflow")?;
+        if len > u32::MAX as usize {
+            return Err("file-backed section exceeds 32 bits".into());
+        }
+        bytes
+            .try_reserve(amount)
+            .map_err(|_| "cannot allocate data section")?;
+        bytes.resize(len, fill);
+    }
+    Ok(())
+}
+pub(super) fn align(a: &mut Assembly, section: usize, power: u32) -> Result<(), String> {
+    if section == 0 {
+        a.text_alignment = a.text_alignment.max(power);
+    } else {
+        a.sections[section - 1].alignment = a.sections[section - 1].alignment.max(power);
+    }
+    let alignment = 1u64 << power;
+    let padding = (alignment - position(a, section) % alignment) % alignment;
+    if section == 0 {
+        let partial = padding % 4;
+        reserve(a, section, partial, 0)?;
+        let nop = crate::encode("NOP_HI_hints", &[])?.to_le_bytes();
+        for _ in 0..padding / 4 {
+            a.text.extend_from_slice(&nop);
+        }
+    } else {
+        reserve(a, section, padding, 0)?;
+    }
+    Ok(())
+}
+
+pub(super) struct Expression {
+    pub add: Option<String>,
+    pub subtract: Option<String>,
+    pub constant: i128,
+}
+pub(super) fn expression(text: &str) -> Result<Expression, String> {
+    let mut result = Expression {
+        add: None,
+        subtract: None,
+        constant: 0,
+    };
+    let mut rest = text.trim();
+    let mut first = true;
+    while !rest.is_empty() {
+        let sign = match rest.as_bytes()[0] {
+            b'+' => {
+                rest = rest[1..].trim_start();
+                1i128
+            }
+            b'-' => {
+                rest = rest[1..].trim_start();
+                -1
+            }
+            _ if first => 1,
+            _ => return Err("expected + or - in data expression".into()),
+        };
+        let end = rest.find(['+', '-']).unwrap_or(rest.len());
+        let term = rest[..end].trim();
+        if term.is_empty() {
+            return Err("missing data expression term".into());
+        }
+        if term.as_bytes()[0].is_ascii_digit() {
+            let value =
+                if let Some(digits) = term.strip_prefix("0x").or_else(|| term.strip_prefix("0X")) {
+                    i128::from_str_radix(digits, 16)
+                } else {
+                    term.parse::<i128>()
+                }
+                .map_err(|_| "invalid data integer")?;
+            result.constant = result
+                .constant
+                .checked_add(sign.checked_mul(value).ok_or("data integer overflow")?)
+                .ok_or("data integer overflow")?;
+        } else {
+            symbol(term)?;
+            let slot = if sign == 1 {
+                &mut result.add
+            } else {
+                &mut result.subtract
+            };
+            if slot.replace(term.into()).is_some() {
+                return Err(
+                    "data expressions allow at most one added and one subtracted symbol".into(),
+                );
+            }
+        }
+        rest = rest[end..].trim_start();
+        first = false;
+    }
+    if first || (result.subtract.is_some() && result.add.is_none()) {
+        return Err("invalid data expression".into());
+    }
+    Ok(result)
+}
+pub(super) fn value(constant: i128, width: u8) -> Result<Vec<u8>, String> {
+    let bits = u32::from(width) * 8;
+    if constant < -(1i128 << (bits - 1)) || constant >= 1i128 << bits {
+        return Err(format!("data value does not fit {bits} bits"));
+    }
+    Ok((constant as u64).to_le_bytes()[..usize::from(width)].to_vec())
+}
+pub(super) fn width(op: &str) -> Option<u8> {
+    match op {
+        ".byte" => Some(1),
+        ".short" => Some(2),
+        ".long" => Some(4),
+        ".quad" => Some(8),
+        _ => None,
+    }
+}
+pub(super) fn allocation<'a>(args: &[&'a str], tls: bool) -> Result<(&'a str, u64, u32), String> {
+    count(args, if tls { 3 } else { 5 }, if tls { 3 } else { 5 })?;
+    let values = if tls {
+        args
+    } else {
+        if args[..2] != ["__DATA", "__bss"] {
+            return Err("zerofill requires __DATA,__bss".into());
+        }
+        &args[2..]
+    };
+    symbol(values[0])?;
+    let size = u64::from(unsigned(values[1], u32::MAX as i64)?);
+    let alignment = unsigned(values[2], 16)?;
+    Ok((values[0], size, alignment))
+}

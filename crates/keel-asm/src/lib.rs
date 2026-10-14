@@ -40,8 +40,10 @@ impl std::error::Error for Error {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     pub name: String,
-    /// Text offset for definitions; `None` for undefined external symbols.
+    /// Offset within the defining section; `None` for undefined symbols.
     pub offset: Option<u64>,
+    /// Zero is __TEXT,__text; subsequent indices address Assembly::sections.
+    pub section: Option<usize>,
     pub global: bool,
 }
 
@@ -49,6 +51,7 @@ pub struct Symbol {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum RelocationKind {
+    Unsigned = 0,
     Branch26 = 2,
     Page21 = 3,
     PageOff12 = 4,
@@ -69,17 +72,77 @@ impl RelocationKind {
     }
 }
 
-/// A symbol reference to be resolved by the linker. Instruction immediate
-/// fields remain zero; nonzero addends use ARM64_RELOC_ADDEND records.
+/// A symbol reference to be resolved by the linker. Instruction addends use
+/// ARM64_RELOC_ADDEND pairs; data addends are serialized into the data word.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Relocation {
+    pub section: usize,
+    /// Number of relocated bytes: 4 for instructions, 4/8 for data.
+    pub size: u8,
+    /// A data difference uses SUBTRACTOR(subtract_symbol) then UNSIGNED(symbol).
+    pub subtract_symbol: Option<String>,
     pub offset: u32,
     pub symbol: String,
     pub kind: RelocationKind,
     pub addend: i64,
 }
 
-/// Encoded instructions and symbols, before writing the object container.
+/// Mach-O data-section types used by Keel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SectionKind {
+    Data,
+    ZeroFill,
+    ThreadData,
+    ThreadZeroFill,
+    ThreadVariables,
+}
+impl SectionKind {
+    pub fn is_zero_fill(self) -> bool {
+        matches!(self, Self::ZeroFill | Self::ThreadZeroFill)
+    }
+    fn flags(self) -> u32 {
+        match self {
+            Self::Data => 0,
+            Self::ZeroFill => 1,
+            Self::ThreadData => 0x11,
+            Self::ThreadZeroFill => 0x12,
+            Self::ThreadVariables => 0x13,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SectionContents {
+    Bytes(Vec<u8>),
+    ZeroFill(u64),
+}
+
+/// An additional section. The text section remains in Assembly::text;
+/// this vector has no duplicate copy of its bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Section {
+    pub segment: String,
+    pub name: String,
+    pub alignment: u32,
+    pub kind: SectionKind,
+    pub contents: SectionContents,
+}
+impl Section {
+    pub fn size(&self) -> u64 {
+        match &self.contents {
+            SectionContents::Bytes(bytes) => bytes.len() as u64,
+            SectionContents::ZeroFill(size) => *size,
+        }
+    }
+    pub fn data(&self) -> &[u8] {
+        match &self.contents {
+            SectionContents::Bytes(bytes) => bytes,
+            SectionContents::ZeroFill(_) => &[],
+        }
+    }
+}
+
+/// Encoded text, extra data sections, and symbols before writing the object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assembly {
     pub text: Vec<u8>,
@@ -87,6 +150,8 @@ pub struct Assembly {
     pub text_alignment: u32,
     pub symbols: Vec<Symbol>,
     pub relocations: Vec<Relocation>,
+    /// Extra sections, indexed from one in symbols and relocations.
+    pub sections: Vec<Section>,
 }
 
 impl Assembly {

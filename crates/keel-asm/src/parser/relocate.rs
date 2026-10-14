@@ -69,6 +69,9 @@ fn relocation(expr: Expression, kind: RelocationKind) -> Result<Relocation, Stri
         return Err("GOT/TLVP relocations do not support addends".into());
     }
     Ok(Relocation {
+        section: 0,
+        size: 4,
+        subtract_symbol: None,
         offset: 0,
         symbol: expr.name,
         kind,
