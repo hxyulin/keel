@@ -162,6 +162,7 @@ pub(crate) fn allocate_selected(
     returns_twice: impl Fn(&InstData) -> bool,
     selection: &crate::select::Selection,
 ) -> Allocation {
+    profiling::scope!("register-allocation");
     let cfg = ControlFlowGraph::compute(func);
     let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
     let intervals = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
@@ -275,6 +276,7 @@ fn liveness(
     order: &[Block],
     selection: &crate::select::Selection,
 ) -> Liveness {
+    profiling::scope!("liveness");
     let n = func.num_blocks();
     let mut uses = vec![BTreeSet::new(); n];
     let mut defs = vec![BTreeSet::new(); n];
@@ -332,6 +334,7 @@ fn build_intervals(
     returns_twice: &dyn Fn(&InstData) -> bool,
     selection: &crate::select::Selection,
 ) -> Vec<Interval> {
+    profiling::scope!("live-intervals");
     let live = liveness(func, cfg, order, selection);
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
@@ -451,6 +454,7 @@ fn linear_scan(
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &std::collections::HashMap<Value, Vec<Value>>,
 ) -> Vec<Interval> {
+    profiling::scope!("linear-scan");
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
     sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
 
@@ -559,6 +563,7 @@ fn linear_scan(
 /// that have ended: linear scan again, with as many "registers" as needed.
 /// Returns the number of slots.
 fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
+    profiling::scope!("spill-slot-assignment");
     spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
     // (end, slot) of slots in use.
     let mut active: Vec<(u32, u32)> = Vec::new();

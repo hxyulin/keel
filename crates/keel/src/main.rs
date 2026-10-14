@@ -30,6 +30,9 @@ const USAGE: &str = "usage:
   keel passes";
 
 fn main() -> ExitCode {
+    #[cfg(feature = "profile-with-tracy")]
+    let _client = tracy_client::Client::start();
+    profiling::register_thread!("keel");
     match run(std::env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -138,7 +141,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 debug_info: opts.ir_lines,
                 target,
             };
-            let mut module = keel_c::compile(&src, &input, c_opts).map_err(|e| e.to_string())?;
+            let mut module = {
+                profiling::scope!("c-frontend");
+                keel_c::compile(&src, &input, c_opts).map_err(|e| e.to_string())?
+            };
             if let Err(errors) = keel_ir::verify_module(&module) {
                 let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
                 return Err(format!(
@@ -185,6 +191,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
 
 /// Reads, parses and verifies the input.
 fn load(opts: &Options) -> Result<(String, Module), String> {
+    profiling::scope!("parse-and-verify");
     let input = opts.input.clone().ok_or(USAGE)?;
     let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
     let module = if opts.ir_lines {

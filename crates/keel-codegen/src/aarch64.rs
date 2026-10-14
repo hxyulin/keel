@@ -743,6 +743,7 @@ impl<'a> FunctionCompiler<'a> {
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
     fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
+        profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
         if !func.local {

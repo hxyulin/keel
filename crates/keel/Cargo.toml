@@ -5,7 +5,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+profile-with-tracy = ["profiling/profile-with-tracy", "keel-opt/profile-with-tracy", "keel-codegen/profile-with-tracy", "dep:tracy-client"]
+
 [dependencies]
+profiling.workspace = true
+tracy-client = { version = "0.18", optional = true }
+
 keel-ir = { path = "../keel-ir" }
 keel-c = { path = "../keel-c" }
 keel-codegen = { path = "../keel-codegen" }

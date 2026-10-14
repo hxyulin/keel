@@ -98,12 +98,14 @@ impl fmt::Display for OptError {
 
 /// Runs the named passes, in order, on every function in `module`.
 pub fn run_passes(module: &mut Module, names: &[&str]) -> Result<(), OptError> {
+    profiling::scope!("optimization");
     let passes = names
         .iter()
         .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
     for func in &mut module.functions {
         for pass in &passes {
+            profiling::scope!("pass", pass.name);
             (pass.run)(func);
             verify(func).map_err(|errors| OptError::Verifier {
                 pass: pass.name,
