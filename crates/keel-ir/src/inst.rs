@@ -69,6 +69,34 @@ pub enum InstData {
         value: Value,
         addr: Value,
     },
+    /// Atomic accesses, each to naturally aligned memory, ordered as C11's
+    /// `memory_order`s. Integers up to `i64` and `ptr`.
+    AtomicLoad {
+        ty: Type,
+        ordering: Ordering,
+        addr: Value,
+    },
+    AtomicStore {
+        ordering: Ordering,
+        value: Value,
+        addr: Value,
+    },
+    /// Applies `op` to the memory at `args[0]` with `args[1]`, and gives
+    /// the old value.
+    AtomicRmw {
+        op: RmwOp,
+        ordering: Ordering,
+        args: [Value; 2],
+    },
+    /// Compare and swap: if the memory at `args[0]` holds `args[1]`,
+    /// replaces it with `args[2]`. Gives the old value either way.
+    AtomicCas {
+        ordering: Ordering,
+        args: [Value; 3],
+    },
+    Fence {
+        ordering: Ordering,
+    },
     /// Reads the next variadic argument, of type `ty` (`i32`, `i64`, `ptr`
     /// or `f64`), from the `va_list` at `list`, and advances it.
     VaArg {
@@ -197,6 +225,32 @@ pub enum BinaryOp {
     Fmax,
     /// The magnitude of `args[0]` with the sign of `args[1]`.
     Fcopysign,
+}
+
+/// The memory ordering of an atomic operation, as in C11.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Ordering {
+    Relaxed,
+    Acquire,
+    Release,
+    AcqRel,
+    SeqCst,
+}
+
+/// The operation of an `atomic_rmw`.
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub enum RmwOp {
+    Add,
+    Sub,
+    And,
+    Or,
+    Xor,
+    /// Stores the operand.
+    Xchg,
+    Umin,
+    Umax,
+    Smin,
+    Smax,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -344,6 +398,11 @@ impl InstData {
             | InstData::SymbolAddr { .. } => false,
             InstData::Load { .. }
             | InstData::Store { .. }
+            | InstData::AtomicLoad { .. }
+            | InstData::AtomicStore { .. }
+            | InstData::AtomicRmw { .. }
+            | InstData::AtomicCas { .. }
+            | InstData::Fence { .. }
             | InstData::VaArg { .. }
             | InstData::Call { .. }
             | InstData::CallIndirect { .. }
@@ -391,11 +450,19 @@ impl InstData {
             | InstData::Fconst { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
+            | InstData::Fence { .. }
             | InstData::Trap => {}
             InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
+            | InstData::AtomicRmw { args, .. }
             | InstData::Icmp { args, .. }
             | InstData::Fcmp { args, .. } => args.iter().copied().for_each(f),
+            InstData::AtomicCas { args, .. } => args.iter().copied().for_each(f),
+            InstData::AtomicLoad { addr, .. } => f(*addr),
+            InstData::AtomicStore { value, addr, .. } => {
+                f(*value);
+                f(*addr);
+            }
             InstData::CallIndirect { callee, args, .. } => {
                 f(*callee);
                 args.iter().copied().for_each(f);
@@ -430,11 +497,19 @@ impl InstData {
             | InstData::Fconst { .. }
             | InstData::StackAddr { .. }
             | InstData::SymbolAddr { .. }
+            | InstData::Fence { .. }
             | InstData::Trap => {}
             InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
+            | InstData::AtomicRmw { args, .. }
             | InstData::Icmp { args, .. }
             | InstData::Fcmp { args, .. } => args.iter_mut().for_each(f),
+            InstData::AtomicCas { args, .. } => args.iter_mut().for_each(f),
+            InstData::AtomicLoad { addr, .. } => f(addr),
+            InstData::AtomicStore { value, addr, .. } => {
+                f(value);
+                f(addr);
+            }
             InstData::CallIndirect { callee, args, .. } => {
                 f(callee);
                 args.iter_mut().for_each(f);
@@ -492,6 +567,35 @@ impl fmt::Display for BinaryOp {
             BinaryOp::Fmin => "fmin",
             BinaryOp::Fmax => "fmax",
             BinaryOp::Fcopysign => "fcopysign",
+        })
+    }
+}
+
+impl fmt::Display for Ordering {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Ordering::Relaxed => "relaxed",
+            Ordering::Acquire => "acquire",
+            Ordering::Release => "release",
+            Ordering::AcqRel => "acq_rel",
+            Ordering::SeqCst => "seq_cst",
+        })
+    }
+}
+
+impl fmt::Display for RmwOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            RmwOp::Add => "add",
+            RmwOp::Sub => "sub",
+            RmwOp::And => "and",
+            RmwOp::Or => "or",
+            RmwOp::Xor => "xor",
+            RmwOp::Xchg => "xchg",
+            RmwOp::Umin => "umin",
+            RmwOp::Umax => "umax",
+            RmwOp::Smin => "smin",
+            RmwOp::Smax => "smax",
         })
     }
 }

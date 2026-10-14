@@ -20,8 +20,8 @@
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
-    Intrinsic, Layout, Module, OverflowOp, Purpose, SigRef, Signature, SourceFile, SourceLoc,
-    StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose, RmwOp, SigRef, Signature, SourceFile,
+    SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1101,6 +1101,59 @@ impl Parser {
                     ty: suffix_type("type")?,
                     addr: self.value(names)?,
                 },
+                "atomic_load" => InstData::AtomicLoad {
+                    ty: suffix_type("type")?,
+                    ordering: self.ordering()?,
+                    addr: self.value(names)?,
+                },
+                "atomic_store" => {
+                    no_suffix()?;
+                    let ordering = self.ordering()?;
+                    let value = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::AtomicStore {
+                        ordering,
+                        value,
+                        addr: self.value(names)?,
+                    }
+                }
+                "atomic_rmw" => {
+                    let s = suffix.ok_or_else(|| {
+                        error(
+                            op_loc,
+                            "`atomic_rmw` needs an operation like `atomic_rmw.add`".into(),
+                        )
+                    })?;
+                    let op = parse_rmw_op(s).ok_or_else(|| {
+                        error(op_loc, format!("unknown atomic_rmw operation `{s}`"))
+                    })?;
+                    let ordering = self.ordering()?;
+                    let addr = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::AtomicRmw {
+                        op,
+                        ordering,
+                        args: [addr, self.value(names)?],
+                    }
+                }
+                "atomic_cas" => {
+                    no_suffix()?;
+                    let ordering = self.ordering()?;
+                    let addr = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let expected = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::AtomicCas {
+                        ordering,
+                        args: [addr, expected, self.value(names)?],
+                    }
+                }
+                "fence" => {
+                    no_suffix()?;
+                    InstData::Fence {
+                        ordering: self.ordering()?,
+                    }
+                }
                 "store" => {
                     no_suffix()?;
                     let value = self.value(names)?;
@@ -1176,6 +1229,8 @@ impl Parser {
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Overflow { .. } => Some(2),
             InstData::Store { .. }
+            | InstData::AtomicStore { .. }
+            | InstData::Fence { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Switch { .. }
@@ -1214,6 +1269,26 @@ impl Parser {
             data,
             loc: op_loc,
             srcloc,
+        })
+    }
+
+    /// `relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`.
+    fn ordering(&mut self) -> Result<Ordering, ParseError> {
+        let (name, loc) = self.ident("an ordering like `seq_cst`")?;
+        Ok(match name.as_str() {
+            "relaxed" => Ordering::Relaxed,
+            "acquire" => Ordering::Acquire,
+            "release" => Ordering::Release,
+            "acq_rel" => Ordering::AcqRel,
+            "seq_cst" => Ordering::SeqCst,
+            _ => {
+                return Err(error(
+                    loc,
+                    format!(
+                        "expected an ordering (`relaxed`, `acquire`, `release`, `acq_rel` or `seq_cst`), found `{name}`"
+                    ),
+                ));
+            }
         })
     }
 
@@ -1380,7 +1455,10 @@ fn build(
                 | InstData::Fconst { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. }
+                | InstData::AtomicLoad { ty, .. }
                 | InstData::VaArg { ty, .. } => Some(*ty),
+                InstData::AtomicRmw { args, .. } => types[args[1].index()],
+                InstData::AtomicCas { args, .. } => types[args[1].index()],
                 InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
                 InstData::Unary { arg, .. } => types[arg.index()],
@@ -1531,6 +1609,22 @@ fn parse_unary_op(s: &str) -> Option<UnaryOp> {
         "ffloor" => UnaryOp::Ffloor,
         "ftrunc" => UnaryOp::Ftrunc,
         "fnearest" => UnaryOp::Fnearest,
+        _ => return None,
+    })
+}
+
+fn parse_rmw_op(s: &str) -> Option<RmwOp> {
+    Some(match s {
+        "add" => RmwOp::Add,
+        "sub" => RmwOp::Sub,
+        "and" => RmwOp::And,
+        "or" => RmwOp::Or,
+        "xor" => RmwOp::Xor,
+        "xchg" => RmwOp::Xchg,
+        "umin" => RmwOp::Umin,
+        "umax" => RmwOp::Umax,
+        "smin" => RmwOp::Smin,
+        "smax" => RmwOp::Smax,
         _ => return None,
     })
 }

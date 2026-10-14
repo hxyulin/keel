@@ -9,7 +9,7 @@ use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
     ArgExt, BinaryOp, BlockCall, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
-    Purpose, Signature, Type, UnaryOp, Value, ValueDef,
+    Ordering, Purpose, RmwOp, Signature, Type, UnaryOp, Value, ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -310,6 +310,24 @@ impl Verifier<'_> {
         }
     }
 
+    /// An atomic access of a `value` type through an `addr`: integers up
+    /// to 64 bits, and `ptr` where it makes sense.
+    fn check_atomic(&mut self, inst: Inst, what: &str, value: Type, addr: Type, allows_ptr: bool) {
+        let ok = matches!(value, Type::I8 | Type::I16 | Type::I32 | Type::I64)
+            || (allows_ptr && value == Type::Ptr);
+        if !ok {
+            let types = if allows_ptr {
+                "integers up to i64 and ptr"
+            } else {
+                "integers up to i64"
+            };
+            self.inst_error(inst, format!("{what} takes {types}, got {value}"));
+        }
+        if addr != Type::Ptr {
+            self.inst_error(inst, format!("{what} address must be ptr, got {addr}"));
+        }
+    }
+
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
@@ -460,6 +478,48 @@ impl Verifier<'_> {
                         inst,
                         format!("store address must be ptr, got {}", ty(*addr)),
                     );
+                }
+            }
+            InstData::AtomicLoad {
+                ty: t,
+                ordering,
+                addr,
+            } => {
+                self.check_atomic(inst, "atomic_load", *t, ty(*addr), true);
+                if matches!(ordering, Ordering::Release | Ordering::AcqRel) {
+                    self.inst_error(inst, format!("a load cannot be {ordering}"));
+                }
+            }
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } => {
+                self.check_atomic(inst, "atomic_store", ty(*value), ty(*addr), true);
+                if matches!(ordering, Ordering::Acquire | Ordering::AcqRel) {
+                    self.inst_error(inst, format!("a store cannot be {ordering}"));
+                }
+            }
+            InstData::AtomicRmw { op, args, .. } => {
+                let what = format!("atomic_rmw.{op}");
+                let allows_ptr = *op == RmwOp::Xchg;
+                self.check_atomic(inst, &what, ty(args[1]), ty(args[0]), allows_ptr);
+            }
+            InstData::AtomicCas { args, .. } => {
+                let (expected, new) = (ty(args[1]), ty(args[2]));
+                self.check_atomic(inst, "atomic_cas", expected, ty(args[0]), true);
+                if expected != new {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "atomic_cas values must have the same type, got ({expected}, {new})"
+                        ),
+                    );
+                }
+            }
+            InstData::Fence { ordering } => {
+                if *ordering == Ordering::Relaxed {
+                    self.inst_error(inst, "a fence cannot be relaxed".into());
                 }
             }
             InstData::Call { func: callee, args } => {

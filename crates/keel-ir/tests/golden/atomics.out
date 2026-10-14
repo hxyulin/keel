@@ -1,0 +1,12 @@
+func @f(ptr, i32, ptr) -> i32 cc(c) {
+block0(v0: ptr, v1: i32, v2: ptr):
+    v3 = atomic_load.i32 acquire v0
+    atomic_store release v1, v0
+    v4 = atomic_rmw.add seq_cst v0, v1
+    v5 = atomic_rmw.umax relaxed v0, v3
+    v6 = atomic_cas acq_rel v0, v3, v4
+    v7 = atomic_rmw.xchg seq_cst v2, v0
+    fence acquire
+    fence seq_cst
+    return v6
+}

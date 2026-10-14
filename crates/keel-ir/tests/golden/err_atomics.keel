@@ -1,0 +1,12 @@
+func @f(ptr, i32, i64, f64) cc(c) {
+block0(v0: ptr, v1: i32, v2: i64, v3: f64):
+    v4 = atomic_load.i32 release v0
+    atomic_store acq_rel v1, v0
+    v5 = atomic_rmw.add seq_cst v0, v3
+    v6 = atomic_rmw.add seq_cst v0, v0
+    v7 = atomic_cas seq_cst v0, v1, v2
+    v8 = atomic_load.i128 seq_cst v0
+    v9 = atomic_rmw.or relaxed v1, v1
+    fence relaxed
+    return
+}

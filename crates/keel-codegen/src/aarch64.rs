@@ -94,7 +94,7 @@ use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DataInit, DataItem,
     DataObject, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module,
-    OverflowOp, Purpose, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
+    Ordering, OverflowOp, Purpose, RmwOp, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value,
 };
 use std::fmt::Write;
 
@@ -804,6 +804,97 @@ impl<'a> FunctionCompiler<'a> {
                     _ => "str",
                 };
                 self.emit(format!("{op}\t{}, [x{a}]", reg(v, ty)));
+            }
+            InstData::AtomicLoad { ty, ordering, addr } => {
+                let d = self.def_reg(result);
+                let a = self.use_reg(addr, S0);
+                let op = if ordering == Ordering::Relaxed {
+                    "ldr"
+                } else {
+                    "ldar"
+                };
+                self.emit(format!("{op}{}\t{}, [x{a}]", width_suffix(ty), reg(d, ty)));
+                self.def_done(result, d);
+            }
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } => {
+                let ty = self.ty(value);
+                let v = self.use_reg(value, S0);
+                let a = self.use_reg(addr, S1);
+                let op = if ordering == Ordering::Relaxed {
+                    "str"
+                } else {
+                    "stlr"
+                };
+                self.emit(format!("{op}{}\t{}, [x{a}]", width_suffix(ty), reg(v, ty)));
+            }
+            InstData::AtomicRmw { op, ordering, args } => {
+                let ty = self.ty(args[1]);
+                let a = self.use_reg(args[0], S0);
+                let mut v = self.use_reg(args[1], S1);
+                // LSE has no subtract or and: add the negation, clear the
+                // complement.
+                let mnemonic = match op {
+                    RmwOp::Sub => {
+                        self.emit(format!("neg\t{}, {}", reg(S1, ty), reg(v, ty)));
+                        v = S1;
+                        "ldadd"
+                    }
+                    RmwOp::And => {
+                        self.emit(format!("mvn\t{}, {}", reg(S1, ty), reg(v, ty)));
+                        v = S1;
+                        "ldclr"
+                    }
+                    RmwOp::Add => "ldadd",
+                    RmwOp::Or => "ldset",
+                    RmwOp::Xor => "ldeor",
+                    RmwOp::Xchg => "swp",
+                    RmwOp::Umin => "ldumin",
+                    RmwOp::Umax => "ldumax",
+                    RmwOp::Smin => "ldsmin",
+                    RmwOp::Smax => "ldsmax",
+                };
+                // The old value goes to a scratch register, so it never
+                // shares one with the operands.
+                let order = ordering_suffix(ordering);
+                let (rv, rd) = (reg(v, ty), reg(S2, ty));
+                self.emit(format!(
+                    "{mnemonic}{order}{}\t{rv}, {rd}, [x{a}]",
+                    width_suffix(ty)
+                ));
+                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+                    self.emit_move(loc, Loc::Reg(S2));
+                }
+            }
+            InstData::AtomicCas { ordering, args } => {
+                // `cas` compares with its first register and overwrites it
+                // with the old value, so the expected value goes in a
+                // scratch register.
+                let ty = self.ty(args[1]);
+                let a = self.use_reg(args[0], S0);
+                let expected = self.use_reg(args[1], S1);
+                self.emit(format!("mov\tx{S2}, x{expected}"));
+                let new = self.use_reg(args[2], S1);
+                let order = ordering_suffix(ordering);
+                let (rs, rt) = (reg(S2, ty), reg(new, ty));
+                self.emit(format!(
+                    "cas{order}{}\t{rs}, {rt}, [x{a}]",
+                    width_suffix(ty)
+                ));
+                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+                    self.emit_move(loc, Loc::Reg(S2));
+                }
+            }
+            InstData::Fence { ordering } => {
+                let barrier = if ordering == Ordering::Acquire {
+                    "dmb\tishld"
+                } else {
+                    "dmb\tish"
+                };
+                self.emit(barrier);
             }
             InstData::Jump { dest } => {
                 self.block_args(&dest);
@@ -2386,6 +2477,26 @@ fn freg(n: u8, ty: Type) -> String {
     match ty {
         Type::F32 => format!("s{n}"),
         _ => format!("d{n}"),
+    }
+}
+
+/// The suffix sizing a load, store or atomic to `ty`: `b`, `h` or none.
+fn width_suffix(ty: Type) -> &'static str {
+    match ty {
+        Type::I8 => "b",
+        Type::I16 => "h",
+        _ => "",
+    }
+}
+
+/// The suffix giving an LSE atomic its ordering: `a`cquire and/or
+/// re`l`ease.
+fn ordering_suffix(ordering: Ordering) -> &'static str {
+    match ordering {
+        Ordering::Relaxed => "",
+        Ordering::Acquire => "a",
+        Ordering::Release => "l",
+        Ordering::AcqRel | Ordering::SeqCst => "al",
     }
 }
 

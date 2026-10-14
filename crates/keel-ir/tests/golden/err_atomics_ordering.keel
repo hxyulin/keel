@@ -1,0 +1,5 @@
+func @f(ptr) cc(c) {
+block0(v0: ptr):
+    fence strong
+    return
+}

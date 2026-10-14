@@ -357,7 +357,10 @@ impl Function {
             | InstData::Fconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. }
+            | InstData::AtomicLoad { ty, .. }
             | InstData::VaArg { ty, .. } => vec![*ty],
+            InstData::AtomicRmw { args, .. } => vec![self.value_type(args[1])],
+            InstData::AtomicCas { args, .. } => vec![self.value_type(args[1])],
             InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => vec![Type::Ptr],
             InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
             InstData::Binary { args, .. } => vec![self.value_type(args[0])],
@@ -369,6 +372,8 @@ impl Function {
             InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
             InstData::Store { .. }
+            | InstData::AtomicStore { .. }
+            | InstData::Fence { .. }
             | InstData::Jump { .. }
             | InstData::Brif { .. }
             | InstData::Switch { .. }
@@ -697,6 +702,30 @@ impl Function {
             InstData::Load { ty, addr } => write!(f, "load.{ty} {}", v(*addr)),
             InstData::VaArg { ty, list } => write!(f, "va_arg.{ty} {}", v(*list)),
             InstData::Store { value, addr } => write!(f, "store {}, {}", v(*value), v(*addr)),
+            InstData::AtomicLoad { ty, ordering, addr } => {
+                write!(f, "atomic_load.{ty} {ordering} {}", v(*addr))
+            }
+            InstData::AtomicStore {
+                ordering,
+                value,
+                addr,
+            } => write!(f, "atomic_store {ordering} {}, {}", v(*value), v(*addr)),
+            InstData::AtomicRmw { op, ordering, args } => {
+                write!(
+                    f,
+                    "atomic_rmw.{op} {ordering} {}, {}",
+                    v(args[0]),
+                    v(args[1])
+                )
+            }
+            InstData::AtomicCas { ordering, args } => write!(
+                f,
+                "atomic_cas {ordering} {}, {}, {}",
+                v(args[0]),
+                v(args[1]),
+                v(args[2])
+            ),
+            InstData::Fence { ordering } => write!(f, "fence {ordering}"),
             InstData::Jump { dest } => {
                 f.write_str("jump ")?;
                 self.write_block_call(f, dest)

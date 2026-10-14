@@ -9,7 +9,8 @@
 use crate::function::InsertPoint;
 use crate::{
     BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, Inst, InstData, IntCC,
-    Intrinsic, OverflowOp, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp, Value,
+    Intrinsic, Ordering, OverflowOp, RmwOp, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp,
+    Value,
 };
 
 pub struct InstBuilder<'f> {
@@ -161,6 +162,37 @@ impl InstBuilder<'_> {
 
     pub fn va_arg(self, ty: Type, list: Value) -> Value {
         self.value(InstData::VaArg { ty, list })
+    }
+
+    pub fn atomic_load(self, ty: Type, ordering: Ordering, addr: Value) -> Value {
+        self.value(InstData::AtomicLoad { ty, ordering, addr })
+    }
+
+    pub fn atomic_store(self, ordering: Ordering, value: Value, addr: Value) -> Inst {
+        self.build(InstData::AtomicStore {
+            ordering,
+            value,
+            addr,
+        })
+    }
+
+    pub fn atomic_rmw(self, op: RmwOp, ordering: Ordering, addr: Value, value: Value) -> Value {
+        self.value(InstData::AtomicRmw {
+            op,
+            ordering,
+            args: [addr, value],
+        })
+    }
+
+    pub fn atomic_cas(self, ordering: Ordering, addr: Value, expected: Value, new: Value) -> Value {
+        self.value(InstData::AtomicCas {
+            ordering,
+            args: [addr, expected, new],
+        })
+    }
+
+    pub fn fence(self, ordering: Ordering) -> Inst {
+        self.build(InstData::Fence { ordering })
     }
 
     pub fn store(self, value: Value, addr: Value) -> Inst {

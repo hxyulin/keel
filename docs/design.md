@@ -146,7 +146,22 @@ resumed by a debugger, so it is an intrinsic.
 - Memory operations are ordered by CFG order.
 - Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
   promise disjointness between classes.
-- Atomics and fences follow the C++11 memory model.
+- **Atomics** follow the C11/C++11 memory model, with the ordering written
+  after the opcode: `atomic_load.i32 acquire v0`, `atomic_store release v1,
+  v0`, `atomic_rmw.add seq_cst v0, v1` (also `sub and or xor xchg umin umax
+  smin smax`; each gives the old value), `atomic_cas acq_rel v0, v1, v2`
+  (gives the old value; the frontend compares it with the expected one) and
+  `fence acquire`. Types are integers up to `i64`, and `ptr` for loads,
+  stores, `xchg` and `cas`; memory must be naturally aligned. A load cannot
+  be `release`, a store cannot be `acquire`, and a fence cannot be
+  `relaxed`. `cas` has one ordering for success and failure, the stronger
+  of C11's pair.
+- On aarch64, read-modify-writes and `cas` use the LSE instructions
+  (`ldadd`, `ldclr`, `swp`, `cas`…, suffixed `a`/`l`/`al` for the
+  ordering), which every Apple arm64 CPU has, so there are no
+  load-exclusive/store-exclusive loops. `sub` adds the negation and `and`
+  clears the complement, since LSE has neither. Ordered loads and stores
+  are `ldar`/`stlr`; fences are `dmb ishld` (acquire) or `dmb ish`.
 
 ## Modules and calls
 
