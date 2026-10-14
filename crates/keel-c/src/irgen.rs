@@ -1610,6 +1610,7 @@ impl FnGen<'_, '_, '_> {
                 self.b.ins().store(value, vals[2]);
                 overflow
             }
+            Builtin::Hint => vals[0],
             Builtin::Signbit => {
                 let (int, bits) = match args[0].ty {
                     Ty::Float => (Type::I32, 31),

@@ -2,7 +2,7 @@
 //! parsed.
 
 use crate::ast::*;
-use crate::eval::{eval_int, fits_i64, normalize};
+use crate::eval::{Const, eval_constant, eval_int, fits_i64, normalize};
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
@@ -937,10 +937,61 @@ impl Parser {
                 self.expect(")")?;
                 Ok(mk(ExprKind::Int(offset as i64), ULONG, loc))
             }
-            "expect" => {
-                let args = self.builtin_args(2, loc)?;
-                let e = args.into_iter().next().unwrap();
-                Ok(self.cast(e, LONG))
+            "expect" => self.builtin_call(Builtin::Hint, &[LONG, LONG], LONG, loc),
+            "expect_with_probability" => {
+                let args = self.builtin_args(3, loc)?;
+                let mut args = args.into_iter();
+                let value = self.convert_for_assign(args.next().unwrap(), &LONG)?;
+                let expected = self.convert_for_assign(args.next().unwrap(), &LONG)?;
+                let probability = self.convert_for_assign(args.next().unwrap(), &Ty::Double)?;
+                let Some(Const::Float(p)) = eval_constant(&probability, true) else {
+                    return Err(Error::new(
+                        loc,
+                        "probability must be a constant floating-point expression",
+                    ));
+                };
+                if !p.is_finite() || !(0.0..=1.0).contains(&p) {
+                    return Err(Error::new(loc, "probability must be between 0 and 1"));
+                }
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::Hint, vec![value, expected]),
+                    LONG,
+                    loc,
+                ))
+            }
+            "assume_aligned" => {
+                let args = self.builtin_args_any()?;
+                if !(2..=3).contains(&args.len()) {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_assume_aligned` takes 2 or 3 arguments",
+                    ));
+                }
+                if !args[0].ty.is_ptr() && !is_null(&args[0]) {
+                    return Err(Error::new(loc, "alignment hint needs a pointer"));
+                }
+                if !args[1].ty.is_integer() {
+                    return Err(Error::new(loc, "alignment must be a constant integer"));
+                }
+                let alignment = self.cast(args[1].clone(), ULONG);
+                let Some(Const::Int(n)) = eval_constant(&alignment, false) else {
+                    return Err(Error::new(loc, "alignment must be a constant integer"));
+                };
+                if !(n as u64).is_power_of_two() {
+                    return Err(Error::new(loc, "alignment must be a nonzero power of two"));
+                }
+                let ptr = Ty::ptr_to(Ty::Void);
+                let mut args = args.into_iter();
+                let value = self.convert_for_assign(args.next().unwrap(), &ptr)?;
+                args.next(); // The checked constant alignment carries no runtime effect.
+                let mut values = vec![value];
+                if let Some(offset) = args.next() {
+                    if !offset.ty.is_integer() {
+                        return Err(Error::new(loc, "alignment offset must be an integer"));
+                    }
+                    values.push(self.cast(offset, ULONG));
+                }
+                Ok(mk(ExprKind::Builtin(Builtin::Hint, values), ptr, loc))
             }
             "object_size" | "dynamic_object_size" => {
                 // The size is never known here: "unknown" is -1 for types 0

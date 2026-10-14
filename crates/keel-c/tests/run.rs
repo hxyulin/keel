@@ -485,6 +485,41 @@ fn overflow_builtins_compile_on_both_targets() {
     }
 }
 
+/// Erasing hint metadata must preserve calls in every runtime argument.
+#[test]
+fn hint_argument_calls_survive_optimization() {
+    let src = "long value(void); long expected(void); void *pointer(void); unsigned long offset(void);\n\
+               long plain(void) { return __builtin_expect(value(), expected()); }\n\
+               long probability(void) { return __builtin_expect_with_probability(value(), expected(), 0.75); }\n\
+               void *aligned(void) { return __builtin_assume_aligned(pointer(), 8, offset()); }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+            let text = module.to_string();
+            for (name, count) in [("value", 2), ("expected", 2), ("pointer", 1), ("offset", 1)] {
+                assert_eq!(
+                    text.matches(&format!("call @{name}(")).count(),
+                    count,
+                    "{text}"
+                );
+            }
+        }
+    }
+}
+
 /// Programs keel-c does not compile get an error at the right place.
 #[test]
 fn rejected() {
@@ -592,6 +627,66 @@ fn rejected() {
         (
             "int f(int *a, int *r) { return __builtin_sadd_overflow(a, 2, r); }",
             "error: overflow operands must be arithmetic values",
+        ),
+        (
+            "long f(int x, double p) { return __builtin_expect_with_probability(x, 1, p); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, 1.5); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, -0.1); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, __builtin_nan(\"\")); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "int g(void); long f(int x) { return __builtin_expect_with_probability(x, 1, (g(), 0.5)); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "int g(void); long f(int x) { return __builtin_expect_with_probability(x, 1, 0.5 + (g(), 0.0)); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "void *f(void *p, int n) { return __builtin_assume_aligned(p, n); }",
+            "error: alignment must be a constant integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 0); }",
+            "error: alignment must be a nonzero power of two",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 3); }",
+            "error: alignment must be a nonzero power of two",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8.0); }",
+            "error: alignment must be a constant integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8, p); }",
+            "error: alignment offset must be an integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p); }",
+            "error: `__builtin_assume_aligned` takes 2 or 3 arguments",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8, 0, 0); }",
+            "error: `__builtin_assume_aligned` takes 2 or 3 arguments",
+        ),
+        (
+            "void *f(void) { return __builtin_assume_aligned(3, 8); }",
+            "error: alignment hint needs a pointer",
+        ),
+        (
+            "int g(void); void *f(void *p) { return __builtin_assume_aligned(p, (g(), 8)); }",
+            "error: alignment must be a constant integer",
         ),
     ];
     let mut failures = Vec::new();

@@ -147,6 +147,9 @@ pub enum Builtin {
     Popcount,
     /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
     Overflow(OverflowOp),
+    /// Evaluates its arguments once and returns the first value. Branch
+    /// and alignment metadata are validated by the parser, then ignored.
+    Hint,
     Alloca,
     Trap,
     /// `__builtin_frame_address(0)`.

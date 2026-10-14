@@ -790,8 +790,15 @@ this is not blanket support for every builtin.
 
 Some accepted extensions have deliberately limited behavior:
 
-- `__builtin_expect` returns its first operand converted to `long`; no
-  branch-likelihood information is retained.
+- `__builtin_expect` and `__builtin_expect_with_probability` return their
+  first operand converted to `long`, evaluating both runtime operands
+  once. Probability must be a finite constant expression between 0 and
+  1 inclusive; it carries no runtime effects. No branch-likelihood
+  information is retained.
+- `__builtin_assume_aligned` returns its pointer as `void *` without
+  adjusting it or checking alignment at runtime. Alignment must be a
+  nonzero power-of-two integer constant. The optional integer offset is
+  evaluated once, but no alignment information is retained by the IR.
 - `__builtin_constant_p` recognizes integer expressions the frontend can
   evaluate, rather than asking the optimizer whether a value is constant.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` always
@@ -881,11 +888,10 @@ Useful candidates for small follow-up patches, rather than current support:
   operand and destination types and need more than casting the operands
   to the destination type. The fixed-type forms are implemented above.
   See [GCC's overflow builtin semantics](https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html).
-- **Alignment and branch hints:** `__builtin_assume_aligned` and
-  `__builtin_expect_with_probability` can initially preserve their defined
-  value behavior without optimizing from the hints. Argument evaluation
-  and constant-argument constraints still need tests. See
-  [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html).
+- **Hint optimization:** the alignment and branch builtins preserve their
+  value and argument-evaluation behavior, but optimization from their
+  metadata would require additional IR and optimizer support. See
+  [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/Other-Builtins.html).
 - **Debugger entry:** Clang's `__builtin_debugtrap` can use the existing
   resumable `debugtrap` IR intrinsic. It differs from the terminating
   `__builtin_trap`; see [Clang's language extensions](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
