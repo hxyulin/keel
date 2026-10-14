@@ -14,7 +14,10 @@
 //! `debug_info` checks the debug info in lldb.
 
 use keel_codegen::Pools;
-use keel_codegen::aarch64::REGISTERS;
+#[cfg(target_arch = "aarch64")]
+use keel_codegen::aarch64::{REGISTERS, compile_with};
+#[cfg(target_arch = "x86_64")]
+use keel_codegen::x86_64::{REGISTERS, compile_with};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -22,21 +25,30 @@ use std::time::{Duration, Instant};
 
 /// SIGTRAP, raised by `brk`.
 const SIGTRAP: i32 = 5;
+/// SIGILL, raised by x86's `ud2`.
+const SIGILL: i32 = 4;
+
+/// Two registers of each kind, for the "-tiny" configuration.
+#[cfg(target_arch = "aarch64")]
+const TINY: Pools = Pools {
+    caller_saved: &[9, 10],
+    callee_saved: &[19, 20],
+    float_caller_saved: &[19, 20],
+    float_callee_saved: &[8, 9],
+};
+#[cfg(target_arch = "x86_64")]
+const TINY: Pools = Pools {
+    caller_saved: &[6, 7],
+    callee_saved: &[3, 12],
+    float_caller_saved: &[8, 9],
+    float_callee_saved: &[],
+};
 
 /// Register sets to compile with, whether to optimize first, and a suffix
 /// for the output files.
 const CONFIGS: [(Pools, bool, &str); 3] = [
     (REGISTERS, false, ""),
-    (
-        Pools {
-            caller_saved: &[9, 10],
-            callee_saved: &[19, 20],
-            float_caller_saved: &[19, 20],
-            float_callee_saved: &[8, 9],
-        },
-        false,
-        "-tiny",
-    ),
+    (TINY, false, "-tiny"),
     (REGISTERS, true, "-opt"),
 ];
 
@@ -58,7 +70,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = keel_codegen::aarch64::compile_with(&module, pools).map_err(|e| e.to_string())?;
+    let asm = compile_with(&module, pools).map_err(|e| e.to_string())?;
 
     let stem = format!("{}{suffix}", path.file_stem().unwrap().to_string_lossy());
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("programs");
@@ -75,7 +87,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
     } else {
         Command::new("clang")
     };
-    clang.arg("-o").arg(&exe_path).arg(&asm_path);
+    clang.arg("-o").arg(&exe_path).arg(&asm_path).arg("-lm");
     let driver = path.with_extension("c");
     if driver.exists() {
         clang.arg(&driver);
@@ -91,7 +103,7 @@ fn run_program(path: &Path, pools: &Pools, optimize: bool, suffix: &str) -> Resu
     let out = run_with_timeout(&mut Command::new(&exe_path))?;
     let got = match (out.status.code(), out.status.signal()) {
         (Some(code), _) => format!("exit {code}"),
-        (None, Some(SIGTRAP)) => "trap".to_string(),
+        (None, Some(SIGTRAP | SIGILL)) => "trap".to_string(),
         (None, Some(sig)) => format!("signal {sig}"),
         (None, None) => "unknown status".to_string(),
     };
@@ -171,6 +183,7 @@ fn programs() {
 /// Breakpoints by function and by line stop where the line table says, and
 /// the backtrace reaches the C caller.
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn debug_info() {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let lldb = debug_session(
@@ -231,6 +244,7 @@ fn debug_info() {
 
 /// Compiles `keel`, links it with `driver` built with `-g`, and runs
 /// `commands` in lldb. Returns lldb's output.
+#[cfg(target_arch = "aarch64")]
 fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) -> String {
     let src = std::fs::read_to_string(keel).unwrap();
     let module = if ir_lines {
@@ -280,6 +294,7 @@ fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) 
 /// the branch back to the head of a loop whose body is 1.2 MB of `add`s,
 /// run twice.
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn long_branches() {
     let n = 300_000;
     let mut src = String::from(
@@ -330,6 +345,7 @@ fn long_branches() {
 }
 
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn rejected() {
     let cases = [
         (

@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] <input.keel> [-o <output.s>]   IR to aarch64 assembly
-//! keel cc [-O] [-g] [--emit-ir] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
@@ -15,14 +15,17 @@
 //! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
 //! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
-//! Output goes to stdout without `-o`.
+//! Output goes to stdout without `-o`. `--target` picks the machine,
+//! `aarch64-apple-darwin` or `x86_64-unknown-linux-gnu`; the default is
+//! the one keel runs on.
 
+use keel_codegen::Target;
 use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] <input.i> [-o <output>]
+  keel compile [-O] [-g] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] [--target <triple>] <input.i> [-o <output>]
   keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
@@ -45,6 +48,15 @@ struct Options {
     ir_lines: bool,
     emit_ir: bool,
     passes: Option<Vec<String>>,
+    target: Option<Target>,
+}
+
+impl Options {
+    fn target(&self) -> Result<Target, String> {
+        self.target
+            .or_else(Target::host)
+            .ok_or_else(|| "keel does not run on this machine's target; pass `--target`".into())
+    }
 }
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
@@ -60,6 +72,14 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-O" => opts.optimize = true,
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
+            "--target" => {
+                let triple = args.next().ok_or("`--target` needs a target triple")?;
+                let target = Target::from_triple(triple).ok_or_else(|| {
+                    let known: Vec<_> = Target::ALL.iter().map(|t| t.triple()).collect();
+                    format!("unknown target `{triple}`; known: {}", known.join(", "))
+                })?;
+                opts.target = Some(target);
+            }
             "-p" => {
                 let list = args.next().ok_or("`-p` needs a list of passes")?;
                 opts.passes = Some(list.split(',').map(|s| s.trim().to_string()).collect());
@@ -77,17 +97,17 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "compile" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g"])?;
+            let opts = parse_options(rest, &["-o", "-O", "-g", "--target"])?;
             let (input, mut module) = load(&opts)?;
             if opts.optimize {
                 keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
             }
-            let asm =
-                keel_codegen::aarch64::compile(&module).map_err(|e| format!("{input}: {e}"))?;
+            let asm = keel_codegen::compile(&module, opts.target()?)
+                .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }
         "cc" => {
-            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir"])?;
+            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir", "--target"])?;
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
             let c_opts = keel_c::Options {
@@ -107,8 +127,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }
-            let asm =
-                keel_codegen::aarch64::compile(&module).map_err(|e| format!("{input}: {e}"))?;
+            let asm = keel_codegen::compile(&module, opts.target()?)
+                .map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &asm)
         }
         "opt" => {

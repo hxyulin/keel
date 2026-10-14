@@ -28,6 +28,10 @@ pub(crate) fn asm_string(s: &str) -> String {
 ///
 /// Objects are exported (`.globl`) unless local, like functions.
 pub(crate) fn emit_data(out: &mut String, format: Format, data: &DataObject, init: &DataInit) {
+    if format == Format::Elf {
+        emit_elf(out, data, init);
+        return;
+    }
     let name = &format.symbol(&data.name);
     let log2_align = init.align.trailing_zeros();
     if data.thread_local {
@@ -57,6 +61,41 @@ pub(crate) fn emit_data(out: &mut String, format: Format, data: &DataObject, ini
     )
     .unwrap();
     emit_items(out, format, init);
+}
+
+/// ELF puts a data object in the section its contents call for, as on
+/// Mach-O: `.bss` (zero-fill), `.data`, `.data.rel.ro` (constant, but
+/// with pointers the loader writes before making it read-only) or
+/// `.rodata`. A thread-local goes in `.tbss` or `.tdata`, the image each
+/// thread's copy is made from; the code finds its copy from the thread
+/// pointer. Each symbol gets its type and size, which debuggers and
+/// `nm` show.
+fn emit_elf(out: &mut String, data: &DataObject, init: &DataInit) {
+    let name = &data.name;
+    let section = match (data.thread_local, init.constant, init.is_zero()) {
+        (true, _, true) => ".tbss,\"awT\",@nobits",
+        (true, _, false) => ".tdata,\"awT\",@progbits",
+        (false, false, true) => ".bss",
+        (false, false, false) => ".data",
+        (false, true, _) if init.has_relocations() => ".data.rel.ro,\"aw\",@progbits",
+        (false, true, _) => ".rodata",
+    };
+    writeln!(out, "\t.section\t{section}").unwrap();
+    if !data.local {
+        writeln!(out, "\t.globl\t{name}").unwrap();
+    }
+    let log2_align = init.align.trailing_zeros();
+    writeln!(
+        out,
+        "\t.type\t{name},@object\n\t.size\t{name}, {}\n\t.p2align\t{log2_align}\n{name}:",
+        init.size()
+    )
+    .unwrap();
+    if section.contains("nobits") || section == ".bss" {
+        writeln!(out, "\t.zero\t{}", init.size()).unwrap();
+    } else {
+        emit_items(out, Format::Elf, init);
+    }
 }
 
 /// A thread-local variable is a descriptor, `_name` in `__thread_vars`:

@@ -99,6 +99,7 @@
 use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
 use crate::data::{self, asm_string};
 use crate::dwarf::{self, FrameDebug};
+use crate::fold::{self, iconst};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::{CodegenError, Format};
@@ -108,7 +109,7 @@ use keel_ir::{
     Intrinsic, Layout, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Write;
 
 /// The registers values are allocated to.
@@ -277,17 +278,6 @@ fn folded_offset(func: &Function, offsets: &[usize], addr: Value, ty: Type) -> O
     (size <= 8 && offset.is_multiple_of(size) && offset / size < 4096).then_some(offset)
 }
 
-/// The value of `v` if an `iconst` defines it.
-fn iconst(func: &Function, v: Value) -> Option<i64> {
-    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
-        return None;
-    };
-    match *func.inst_data(inst) {
-        InstData::Iconst { ty, imm } if ty != Type::I128 => Some(imm),
-        _ => None,
-    }
-}
-
 /// The operand of `data` that is a constant encoded in the instruction
 /// itself, and that immediate: an `add`/`sub`/`cmp` immediate is 12 bits
 /// unsigned, a shift amount is taken modulo the width, and a stored zero
@@ -323,75 +313,19 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
     }
 }
 
-/// The `stack_addr` and `iconst` results every use of which is folded
-/// into the instruction using it: the address of a load or store that
-/// [`folded_offset`] addresses directly, or a [`folded_imm`]. Those need
-/// no code of their own.
-fn folded_values(func: &Function, offsets: &[usize]) -> HashSet<Value> {
-    let mut values = HashSet::new();
-    let mut unfolded = HashSet::new();
-    for (_, inst) in func.layout_insts() {
-        let data = func.inst_data(inst);
-        if let InstData::StackAddr { .. } | InstData::Iconst { .. } = data {
-            values.extend(func.inst_results(inst).iter().copied());
-        }
-        let addr = match *data {
-            InstData::Load { ty, addr } => Some((addr, ty)),
-            InstData::Store { value, addr } => Some((addr, func.value_type(func.resolve(value)))),
-            _ => None,
-        }
-        .filter(|&(addr, ty)| folded_offset(func, offsets, addr, ty).is_some())
-        .map(|(addr, _)| addr);
-        let mut folds: Vec<Value> = addr
-            .into_iter()
-            .chain(folded_imm(func, data).map(|(v, _)| v))
-            .map(|v| func.resolve(v))
-            .collect();
-        data.for_each_operand(|v| {
-            let v = func.resolve(v);
-            match folds.iter().position(|&f| f == v) {
-                Some(i) => {
-                    folds.swap_remove(i);
-                }
-                None => {
-                    unfolded.insert(v);
-                }
-            }
-        });
+/// The operands of `data` folded into it: a stack address [`folded_offset`]
+/// addresses directly, and a [`folded_imm`].
+fn folds(func: &Function, offsets: &[usize], data: &InstData) -> Vec<Value> {
+    let addr = match *data {
+        InstData::Load { ty, addr } => Some((addr, ty)),
+        InstData::Store { value, addr } => Some((addr, func.value_type(func.resolve(value)))),
+        _ => None,
     }
-    values.retain(|v| !unfolded.contains(v));
-    values
-}
-
-/// The `icmp` and `fcmp` results only used as the condition of the
-/// `brif` right after them: the branch tests the flags of the compare
-/// itself, `cmp` + `b.cond`, with no 0/1 value in between.
-fn fused_compares(func: &Function) -> HashSet<Value> {
-    let mut uses: HashMap<Value, usize> = HashMap::new();
-    let mut candidates = HashSet::new();
-    for block in func.blocks() {
-        let insts = func.block_insts(block);
-        for (i, &inst) in insts.iter().enumerate() {
-            let data = func.inst_data(inst);
-            data.for_each_operand(|v| *uses.entry(func.resolve(v)).or_default() += 1);
-            let compare = match *data {
-                InstData::Icmp { args, .. } => func.value_type(func.resolve(args[0])) != Type::I128,
-                InstData::Fcmp { .. } => true,
-                _ => false,
-            };
-            let Some(&next) = insts.get(i + 1) else {
-                continue;
-            };
-            if let (true, InstData::Brif { cond, .. }) = (compare, func.inst_data(next)) {
-                let result = func.inst_results(inst)[0];
-                if func.resolve(*cond) == result {
-                    candidates.insert(result);
-                }
-            }
-        }
-    }
-    candidates.retain(|v| uses.get(v) == Some(&1));
-    candidates
+    .filter(|&(addr, ty)| folded_offset(func, offsets, addr, ty).is_some())
+    .map(|(addr, _)| addr);
+    addr.into_iter()
+        .chain(folded_imm(func, data).map(|(v, _)| v))
+        .collect()
 }
 
 /// Instructions that clobber the caller-saved registers: calls, the memory
@@ -755,8 +689,8 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
-            folded_values: folded_values(func, &stack_slot_offsets),
-            fused_compares: fused_compares(func),
+            folded_values: fold::folded_values(func, |data| folds(func, &stack_slot_offsets, data)),
+            fused_compares: fold::fused_compares(func),
             stack_slot_offsets,
             copy_base,
             sret_save,

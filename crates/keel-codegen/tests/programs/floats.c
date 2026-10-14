@@ -28,9 +28,22 @@ double swaps(double, double, int64_t);
 double pressure(double);
 void consts(double *);
 
-/* Overwrites every caller-saved FP register (v0-v7, v16-v31), as any call
- * may. */
+/* Overwrites every caller-saved FP register (v0-v7, v16-v31 on arm64,
+ * all of xmm0-xmm15 on x86-64), as any call may. */
 void fclobber(void) {
+#if defined(__x86_64__)
+    __asm__ volatile(
+        "mov $0x55555555, %%eax\n\tmovd %%eax, %%xmm0\n\tpshufd $0, %%xmm0, %%xmm0\n\t"
+        "movaps %%xmm0, %%xmm1\n\tmovaps %%xmm0, %%xmm2\n\tmovaps %%xmm0, %%xmm3\n\t"
+        "movaps %%xmm0, %%xmm4\n\tmovaps %%xmm0, %%xmm5\n\tmovaps %%xmm0, %%xmm6\n\t"
+        "movaps %%xmm0, %%xmm7\n\tmovaps %%xmm0, %%xmm8\n\tmovaps %%xmm0, %%xmm9\n\t"
+        "movaps %%xmm0, %%xmm10\n\tmovaps %%xmm0, %%xmm11\n\tmovaps %%xmm0, %%xmm12\n\t"
+        "movaps %%xmm0, %%xmm13\n\tmovaps %%xmm0, %%xmm14\n\tmovaps %%xmm0, %%xmm15"
+        :
+        :
+        : "rax", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8",
+          "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15");
+#else
     __asm__ volatile(
         "movi v0.16b, #0x55\n\tmovi v1.16b, #0x55\n\tmovi v2.16b, #0x55\n\t"
         "movi v3.16b, #0x55\n\tmovi v4.16b, #0x55\n\tmovi v5.16b, #0x55\n\t"
@@ -45,6 +58,7 @@ void fclobber(void) {
         : "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v16", "v17", "v18",
           "v19", "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28",
           "v29", "v30", "v31");
+#endif
 }
 
 double c_mix(int64_t a, double b, float c, int32_t d) {
@@ -119,8 +133,12 @@ static uint64_t sat_u64(double x, double hi, uint64_t max) {
 
 /* Calls `pressure` with known values in d8-d15 and returns how many of them
  * survived. keel must save and restore the callee-saved FP registers it
- * uses. */
+ * uses. x86-64 has none (System V makes every xmm register caller-saved),
+ * so there is nothing to check. */
 static int callee_saved_kept(void) {
+#if defined(__x86_64__)
+    return 8;
+#else
     double out[8];
     __asm__ volatile(
         "mov x19, %0\n\t"
@@ -141,6 +159,7 @@ static int callee_saved_kept(void) {
     int kept = 0;
     for (int i = 0; i < 8; i++) kept += out[i] == i + 1;
     return kept;
+#endif
 }
 
 static double model_pressure(double x) {
