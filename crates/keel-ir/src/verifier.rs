@@ -57,6 +57,12 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for data in &module.data {
+        if data.thread_local && data.init.as_ref().is_some_and(|init| init.constant) {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "thread-local data cannot be const".into(),
+            });
+        }
         if let Some(init) = &data.init {
             for message in check_data(module, init) {
                 errors.push(VerifierError {
@@ -153,6 +159,10 @@ fn check_data(module: &Module, init: &DataInit) -> Vec<String> {
             DataItem::Ptr { symbol, addend } => {
                 if !module.has_symbol(symbol) {
                     errors.push(format!("points to @{symbol}, which is not declared"));
+                } else if module.data_object(symbol).is_some_and(|d| d.thread_local) {
+                    errors.push(format!(
+                        "points to thread-local @{symbol}, whose address differs per thread"
+                    ));
                 } else if let Some(target) =
                     module.data_object(symbol).and_then(|d| d.init.as_ref())
                     && u64::from(*addend) > target.size()

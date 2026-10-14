@@ -586,7 +586,21 @@ impl<'a> FunctionCompiler<'a> {
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
                 let name = func.symbol_name(symbol);
-                if self.module.defines(name) {
+                let thread_local = self
+                    .module
+                    .data_object(name)
+                    .is_some_and(|d| d.thread_local);
+                if thread_local {
+                    // The symbol is the variable's descriptor; calling its
+                    // getter with the descriptor in x0 returns the address
+                    // in x0. The getter preserves every register but x0,
+                    // x16, x17 and x30, none of which hold values.
+                    self.emit(format!("adrp\tx0, _{name}@TLVPPAGE"));
+                    self.emit(format!("ldr\tx0, [x0, _{name}@TLVPPAGEOFF]"));
+                    self.emit(format!("ldr\tx{S0}, [x0]"));
+                    self.emit(format!("blr\tx{S0}"));
+                    self.emit(format!("mov\tx{d}, x0"));
+                } else if self.module.defines(name) {
                     self.emit(format!("adrp\tx{d}, _{name}@PAGE"));
                     self.emit(format!("add\tx{d}, x{d}, _{name}@PAGEOFF"));
                 } else {
@@ -2350,6 +2364,10 @@ fn asm_string(s: &str) -> String {
 fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
     let name = &data.name;
     let log2_align = init.align.trailing_zeros();
+    if data.thread_local {
+        emit_thread_local(out, data, init);
+        return;
+    }
     writeln!(out, "\t.globl\t_{name}").unwrap();
     if !init.constant && init.is_zero() {
         writeln!(
@@ -2370,6 +2388,46 @@ fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
         "\t.section\t{section}\n\t.p2align\t{log2_align}\n_{name}:"
     )
     .unwrap();
+    emit_items(out, init);
+}
+
+/// A thread-local variable is a descriptor, `_name` in `__thread_vars`:
+/// the getter (`__tlv_bootstrap` until first use), a key the loader fills
+/// in, and the address of the initial value, `_name$tlv$init`, in
+/// `__thread_data` (or `__thread_bss` if zero). Each thread's copy is
+/// made from that.
+fn emit_thread_local(out: &mut String, data: &DataObject, init: &DataInit) {
+    let name = &data.name;
+    let log2_align = init.align.trailing_zeros();
+    if init.is_zero() {
+        writeln!(
+            out,
+            "\t.tbss\t_{name}$tlv$init, {}, {log2_align}",
+            init.size()
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "\t.section\t__DATA,__thread_data,thread_local_regular\n\t.p2align\t{log2_align}\n_{name}$tlv$init:"
+        )
+        .unwrap();
+        emit_items(out, init);
+    }
+    writeln!(
+        out,
+        "\t.section\t__DATA,__thread_vars,thread_local_variables\n\t.globl\t_{name}\n\t.p2align\t3\n_{name}:"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "\t.quad\t__tlv_bootstrap\n\t.quad\t0\n\t.quad\t_{name}$tlv$init"
+    )
+    .unwrap();
+}
+
+/// The bytes of a data object, as directives.
+fn emit_items(out: &mut String, init: &DataInit) {
     for item in &init.items {
         match item {
             DataItem::Bytes(bytes) if bytes.is_empty() => {}

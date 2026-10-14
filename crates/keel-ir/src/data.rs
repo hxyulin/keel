@@ -5,6 +5,8 @@
 //! data @msg   = const align 1 { b"Hi!\n\0" }
 //! data @table = const align 8 { ptr @add, ptr @msg + 3, i32 7, zero 4 }
 //! decl data @environ
+//! data @count = thread_local align 8 { i64 0 }
+//! decl data thread_local @errno_value
 //! ```
 //!
 //! A `ptr @sym` item is a relocation: its value is an address only the
@@ -17,6 +19,9 @@ use std::fmt;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DataObject {
     pub name: String,
+    /// Each thread has its own copy, initialized from `init`;
+    /// `symbol_addr` gives the current thread's.
+    pub thread_local: bool,
     pub init: Option<DataInit>,
 }
 
@@ -88,10 +93,15 @@ impl DataInit {
 
 impl fmt::Display for DataObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(init) = &self.init else {
-            return write!(f, "decl data @{}", self.name);
+        let thread_local = if self.thread_local {
+            "thread_local "
+        } else {
+            ""
         };
-        write!(f, "data @{} = ", self.name)?;
+        let Some(init) = &self.init else {
+            return write!(f, "decl data {thread_local}@{}", self.name);
+        };
+        write!(f, "data @{} = {thread_local}", self.name)?;
         if init.constant {
             f.write_str("const ")?;
         }

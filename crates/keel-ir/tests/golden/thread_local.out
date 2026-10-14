@@ -1,0 +1,10 @@
+data @count = thread_local align 8 { i64 0 }
+data @name = thread_local align 1 { b"main\0" }
+decl data thread_local @errno_value
+
+func @f() -> ptr cc(c) {
+block0:
+    v0 = symbol_addr @count
+    v1 = symbol_addr @errno_value
+    return v0
+}

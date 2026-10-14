@@ -209,6 +209,17 @@ decl data @environ
   the executable loads at a random address. Symbols from other images
   (`decl`s, which may be in a dylib) are read from the global offset table
   (`adrp` + `ldr` with `@GOTPAGE`): the loader fills it in at startup.
+- **Thread-local data** (`data @n = thread_local align 8 { i64 0 }`, `decl
+  data thread_local @n`) has one copy per thread, and `symbol_addr` gives
+  the current thread's. It cannot be `const`, and no data object may point
+  to it, since its address differs per thread. On Darwin the symbol names
+  a descriptor in `__thread_vars` (a getter, a key, and the initial value
+  in `__thread_data` or `__thread_bss`); code loads it with `@TLVPPAGE`
+  and calls the getter with the descriptor in x0, which returns the
+  address in x0. The getter preserves every other register except x16,
+  x17 and x30, so the access is not a call to the register allocator.
+  `symbol_addr` stays pure: within one function the thread does not
+  change, so GVN may merge two accesses.
 
 ## ABI
 

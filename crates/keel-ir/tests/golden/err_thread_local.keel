@@ -1,0 +1,3 @@
+data @frozen = thread_local const align 8 { i64 1 }
+data @tls = thread_local align 8 { i64 2 }
+data @table = align 8 { ptr @tls }

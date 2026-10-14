@@ -1,0 +1,33 @@
+; Thread-local data: keel defines @counter (initialized) and @zeroed
+; (zero, so in __thread_bss) and reads C's @c_tls; tls.c reads keel's
+; from C, and runs threads that must each see their own copies.
+; expect: exit 0
+
+data @counter = thread_local align 8 { i64 5 }
+data @zeroed = thread_local align 4 { i32 0 }
+decl data thread_local @c_tls
+
+; Adds 1 to @counter and 2 to @zeroed, with a call in between, so the
+; addresses are live across it, and returns @counter + @zeroed + @c_tls.
+decl @clobber()
+
+func @k_bump() -> i64 cc(c) {
+block0:
+    v0 = symbol_addr @counter
+    v1 = load.i64 v0
+    v2 = iconst.i64 1
+    v3 = iadd v1, v2
+    store v3, v0
+    v4 = symbol_addr @zeroed
+    call @clobber()
+    v5 = load.i32 v4
+    v6 = iconst.i32 2
+    v7 = iadd v5, v6
+    store v7, v4
+    v8 = symbol_addr @c_tls
+    v9 = load.i64 v8
+    v10 = sext.i64 v7
+    v11 = iadd v3, v10
+    v12 = iadd v11, v9
+    return v12
+}

@@ -86,9 +86,14 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
             }
             "data" => data.push(parser.data_definition()?),
             "decl" if parser.eat(&Tok::Ident("data".into())) => {
+                let thread_local = parser.eat(&Tok::Ident("thread_local".into()));
                 let name = parser.global("a data name like `@environ`")?;
                 parser.expect(Tok::Newline)?;
-                data.push(DataObject { name, init: None });
+                data.push(DataObject {
+                    name,
+                    thread_local,
+                    init: None,
+                });
             }
             "decl" => {
                 let name = parser.global("a function name like `@putchar`")?;
@@ -743,12 +748,13 @@ impl Parser {
     }
 
     /// Everything after `data`:
-    /// `@name = [const] align <n> { item, ... }`, where an item is
+    /// `@name = [thread_local] [const] align <n> { item, ... }`, where an item is
     /// `b"..."`, `<int type> <n>`, `zero <n>` or `ptr @sym [+ <n>]`. Items
     /// may continue over several lines.
     fn data_definition(&mut self) -> Result<DataObject, ParseError> {
         let name = self.global("a data name like `@msg`")?;
         self.expect(Tok::Punct('='))?;
+        let thread_local = self.eat(&Tok::Ident("thread_local".into()));
         let constant = self.eat(&Tok::Ident("const".into()));
         let (kw, kw_loc) = self.ident("`align`")?;
         if kw != "align" {
@@ -772,6 +778,7 @@ impl Parser {
         self.expect(Tok::Newline)?;
         Ok(DataObject {
             name,
+            thread_local,
             init: Some(DataInit {
                 constant,
                 align,

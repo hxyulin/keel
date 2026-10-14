@@ -1,0 +1,3 @@
+verifier errors:
+  @frozen: thread-local data cannot be const
+  @table: points to thread-local @tls, whose address differs per thread
