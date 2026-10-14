@@ -11,22 +11,35 @@
 //!    in.
 //! 2. **Liveness.** A backward dataflow over blocks finds which values are
 //!    live on entry to and exit from each block.
-//! 3. **Intervals.** Each value gets one interval `[start, end]` of program
-//!    points: from its definition to its last use, stretched over every
-//!    block where it is live in or out. In a loop, a value used at the top of
-//!    the body is still needed on the next trip round, so it is live out of
-//!    the latch at the bottom, and the interval covers the whole loop. One
-//!    interval with no holes is conservative (a value may look live where it
-//!    is not), but it is always safe.
+//! 3. **Intervals.** Each value gets an interval: the ranges of program
+//!    points where it is live. Within a block that is one range, from the
+//!    block's start (if the value is live in) or its definition, to the
+//!    block's end (if live out) or its last use; the ranges of consecutive
+//!    blocks join up. In a loop, a value used at the top of the body is
+//!    still needed on the next trip round, so it is live out of the latch
+//!    at the bottom, and the interval covers the whole loop.
+//!
+//!    Between ranges are *lifetime holes*, where the value is not live
+//!    because the blocks laid out there do not need it: a value defined in
+//!    one `case` of a big `switch` and used in a tail block far below is not
+//!    live in the cases in between. Another value may use its register
+//!    there. (The first version used a single range from the first point to
+//!    the last, which made such values block a register through every case
+//!    in between.)
 //! 4. **Scan.** Walk the intervals by start point, keeping the *active*
-//!    ones (currently holding a register). An interval that has ended frees
-//!    its register. When none is free, spill whichever interval ends
-//!    furthest away: it would hold its register the longest, so evicting it
-//!    helps the most intervals that come after.
+//!    ones (live at the current point, holding a register) and the
+//!    *inactive* ones (holding a register, but in a hole). An inactive
+//!    interval's register is free for a new interval that fits in the hole,
+//!    that is, that does not intersect it. When no register is free, spill
+//!    whichever interval ends furthest away: it would hold its register the
+//!    longest, so evicting it helps the most intervals that come after.
+//!    This is the scan of Wimmer & Franz, "Linear Scan Register Allocation
+//!    on SSA Form" (CGO 2010), without its interval splitting.
 //!
 //! A spilled value lives in an 8-byte stack slot for its whole life; there
-//! is no interval splitting. Spill slots are shared by values whose
-//! intervals do not overlap, with the same scan.
+//! is no interval splitting, so a value spilled anywhere is spilled
+//! everywhere. Spill slots are shared by values whose intervals do not
+//! overlap, holes ignored.
 //!
 //! Integers and pointers go in general-purpose registers, floats in the
 //! SIMD/FP registers: two register classes that never interfere. One scan
@@ -53,8 +66,9 @@
 //! # Calls
 //!
 //! A call clobbers the caller-saved registers. An interval that is live
-//! across one (defined before it and used after it) may only take a
-//! callee-saved register, or be spilled. The call's arguments end at the
+//! across one (live just before it and just after it) may only take a
+//! callee-saved register, or be spilled. A value with a hole where the call
+//! is does not cross it. The call's arguments end at the
 //! call and its result starts after it, so neither counts as crossing it.
 //!
 //! A call that returns twice, like `setjmp`, returns the second time from
@@ -179,11 +193,44 @@ struct Interval {
     value: Value,
     /// 1 for the high half of an `i128`.
     half: usize,
-    start: u32,
-    end: u32,
+    /// Sorted, disjoint `[from, to]` ranges of points where it is live.
+    ranges: Vec<(u32, u32)>,
     crosses_call: bool,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
+}
+
+impl Interval {
+    fn start(&self) -> u32 {
+        self.ranges[0].0
+    }
+
+    fn end(&self) -> u32 {
+        self.ranges[self.ranges.len() - 1].1
+    }
+
+    /// Whether the value is live at `point`.
+    fn covers(&self, point: u32) -> bool {
+        let i = self.ranges.partition_point(|&(_, to)| to < point);
+        self.ranges.get(i).is_some_and(|&(from, _)| from <= point)
+    }
+
+    /// Whether the two are ever live at the same point.
+    fn intersects(&self, other: &Interval) -> bool {
+        let (mut i, mut j) = (0, 0);
+        while i < self.ranges.len() && j < other.ranges.len() {
+            let (a, b) = (self.ranges[i], other.ranges[j]);
+            if a.0 <= b.1 && b.0 <= a.1 {
+                return true;
+            }
+            if a.1 < b.1 {
+                i += 1;
+            } else {
+                j += 1;
+            }
+        }
+        false
+    }
 }
 
 /// Live-in and live-out sets, indexed by block.
@@ -263,15 +310,21 @@ fn build_intervals(
     let live = liveness(func, cfg, order);
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
-    // The smallest range covering every point passed to `extend`.
-    let mut ranges: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
-    let mut extend = |v: Value, point: u32| {
-        let range = &mut ranges[v.index()];
+    // Each value's ranges, built block by block: `open` is the range in
+    // the current block, from the first point to the last seen there.
+    let mut ranges: Vec<Vec<(u32, u32)>> = vec![Vec::new(); func.num_values()];
+    let mut open: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
+    let mut touched: Vec<Value> = Vec::new();
+    fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
+        let range = &mut open[v.index()];
         *range = Some(match *range {
-            None => (point, point),
+            None => {
+                touched.push(v);
+                (point, point)
+            }
             Some((start, end)) => (start.min(point), end.max(point)),
         });
-    };
+    }
     // Read points of calls, and of calls that return twice, in increasing
     // order.
     let mut calls = Vec::new();
@@ -284,22 +337,22 @@ fn build_intervals(
         slot += 1;
         for &param in func.block_params(block) {
             if !is_alias(param) {
-                extend(param, header);
+                extend(&mut open, param, header, &mut touched);
             }
         }
         for &v in &live.live_in[block.index()] {
-            extend(v, header);
+            extend(&mut open, v, header, &mut touched);
         }
 
         for &inst in func.block_insts(block) {
             let (read, write) = (2 * slot, 2 * slot + 1);
             slot += 1;
             let data = func.inst_data(inst);
-            data.for_each_operand(|v| extend(func.resolve(v), read));
+            data.for_each_operand(|v| extend(&mut open, func.resolve(v), read, &mut touched));
             for &result in func.inst_results(inst) {
                 // An alias's instruction is dead; its result goes nowhere.
                 if !is_alias(result) {
-                    extend(result, write);
+                    extend(&mut open, result, write, &mut touched);
                 }
             }
             if is_call(data) {
@@ -314,24 +367,37 @@ fn build_intervals(
         // block-argument copies on the way out.
         let end = 2 * slot - 1;
         for &v in &live.live_out[block.index()] {
-            extend(v, end);
+            extend(&mut open, v, end, &mut touched);
+        }
+
+        // Close this block's ranges. Live out of the previous block and
+        // into this one, it continues the previous range: the only point
+        // between them is a read point no instruction owns.
+        for v in touched.drain(..) {
+            let (from, to) = open[v.index()].take().unwrap();
+            let list = &mut ranges[v.index()];
+            match list.last_mut() {
+                Some(last) if last.1 + 2 >= from => last.1 = to,
+                _ => list.push((from, to)),
+            }
         }
     }
 
-    // Crossing a call means being live on both sides of its read point:
-    // the first call after `start` comes before `end`.
-    let crosses = |points: &[u32], start: u32, end: u32| {
-        let next = points.partition_point(|&c| c <= start);
-        points.get(next).is_some_and(|&c| c < end)
+    // Crossing a call means being live on both sides of its read point.
+    let crosses = |points: &[u32], iv: &[(u32, u32)]| {
+        iv.iter().any(|&(from, to)| {
+            let next = points.partition_point(|&c| c <= from);
+            points.get(next).is_some_and(|&c| c < to)
+        })
     };
     let mut intervals = Vec::new();
-    for (i, range) in ranges.iter().enumerate() {
-        let Some((mut start, mut end)) = *range else {
+    for (i, mut list) in ranges.into_iter().enumerate() {
+        if list.is_empty() {
             continue;
-        };
-        let crosses_call = crosses(&calls, start, end);
-        if crosses(&twice, start, end) {
-            (start, end) = (0, slot * 2);
+        }
+        let crosses_call = crosses(&calls, &list);
+        if crosses(&twice, &list) {
+            list = vec![(0, slot * 2)];
         }
         let value = Value::new(i);
         let ty = func.value_type(value);
@@ -340,8 +406,7 @@ fn build_intervals(
             intervals.push(Interval {
                 value,
                 half,
-                start,
-                end,
+                ranges: list.clone(),
                 crosses_call,
                 float: ty.is_float(),
             });
@@ -358,14 +423,39 @@ fn linear_scan(
     locs: &mut [Vec<Option<Loc>>; 2],
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
-    sorted.sort_by_key(|iv| (iv.start, iv.value, iv.half));
+    sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
 
-    // Intervals holding a register, with that register.
+    // Intervals holding a register, with that register: live at the
+    // current point (active), or in a hole (inactive).
     let mut active: Vec<(&Interval, Loc)> = Vec::new();
+    let mut inactive: Vec<(&Interval, Loc)> = Vec::new();
     let mut spilled = Vec::new();
     for cur in sorted {
-        // Free the registers of intervals that ended before this one starts.
-        active.retain(|(iv, _)| iv.end >= cur.start);
+        let pos = cur.start();
+        // Intervals that have ended give up their register; the others
+        // move between active and inactive as they enter or leave holes.
+        let mut moved = Vec::new();
+        active.retain(|&(iv, reg)| {
+            if iv.end() < pos {
+                false
+            } else if iv.covers(pos) {
+                true
+            } else {
+                moved.push((iv, reg));
+                false
+            }
+        });
+        inactive.retain(|&(iv, reg)| {
+            if iv.end() < pos {
+                false
+            } else if iv.covers(pos) {
+                active.push((iv, reg));
+                false
+            } else {
+                true
+            }
+        });
+        inactive.extend(moved);
 
         // Live across a call: only a callee-saved register survives it.
         // Otherwise prefer caller-saved ones, which need no save/restore.
@@ -387,10 +477,17 @@ fn linear_scan(
                 .map(|&r| class(r))
                 .collect()
         };
+        // An inactive interval's register is only taken where `cur`
+        // would need it during one of its ranges.
+        let blocked_by_inactive = |reg: Loc| {
+            inactive
+                .iter()
+                .any(|&(iv, r)| r == reg && iv.intersects(cur))
+        };
         let free = allowed
             .iter()
             .copied()
-            .find(|&r| active.iter().all(|&(_, used)| used != r));
+            .find(|&r| active.iter().all(|&(_, used)| used != r) && !blocked_by_inactive(r));
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
             active.push((cur, reg));
@@ -398,16 +495,17 @@ fn linear_scan(
         }
 
         // Out of registers. Of the active intervals whose register `cur`
-        // could use, find the one that ends last. If it outlives `cur`,
-        // take its register and spill it; otherwise spill `cur`.
+        // could use (once they are evicted), find the one that ends last.
+        // If it outlives `cur`, take its register and spill it; otherwise
+        // spill `cur`.
         let victim = active
             .iter()
             .enumerate()
-            .filter(|(_, (_, reg))| allowed.contains(reg))
-            .max_by_key(|(_, (iv, _))| iv.end)
+            .filter(|(_, (_, reg))| allowed.contains(reg) && !blocked_by_inactive(*reg))
+            .max_by_key(|(_, (iv, _))| iv.end())
             .map(|(i, _)| i);
         match victim {
-            Some(i) if active[i].0.end > cur.end => {
+            Some(i) if active[i].0.end() > cur.end() => {
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted.clone());
@@ -424,16 +522,16 @@ fn linear_scan(
 /// that have ended: linear scan again, with as many "registers" as needed.
 /// Returns the number of slots.
 fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
-    spilled.sort_by_key(|iv| (iv.start, iv.value, iv.half));
+    spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
     // (end, slot) of slots in use.
     let mut active: Vec<(u32, u32)> = Vec::new();
     let mut count = 0;
     for iv in spilled.iter() {
-        active.retain(|&(end, _)| end >= iv.start);
+        active.retain(|&(end, _)| end >= iv.start());
         let slot = (0..)
             .find(|&s| active.iter().all(|&(_, used)| used != s))
             .expect("some slot is free");
-        active.push((iv.end, slot));
+        active.push((iv.end(), slot));
         count = count.max(slot + 1);
         locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
     }
@@ -505,10 +603,49 @@ mod tests {
         // iteration reads it again: it must overlap v5, defined after that
         // use, or v5 could take its register.
         let (v1, v5) = (interval(&ivs, 1), interval(&ivs, 5));
-        assert!(v1.start < v5.start && v1.end >= v5.end, "{v1:?} vs {v5:?}");
+        assert!(v1.intersects(v5) && v1.covers(v5.end()), "{v1:?} vs {v5:?}");
         // A dying operand ends before the result of its last use starts, so
         // they can share a register: v3 is last read by `v4 = iadd v3, v1`.
-        assert!(interval(&ivs, 3).end < interval(&ivs, 4).start);
+        assert!(interval(&ivs, 3).end() < interval(&ivs, 4).start());
+    }
+
+    /// v2 is defined in block0 and used in block3; block1 and block2,
+    /// laid out in between, do not need it unless they flow to block3.
+    /// Only block2 does, so v2 has a hole over block1, where v3 may take
+    /// its register even with a single register to hand out.
+    #[test]
+    fn values_share_a_register_in_a_hole() {
+        let func = function(
+            "
+            func @f(i64, i8) -> i64 {
+            block0(v0: i64, v1: i8):
+                v2 = iadd v0, v0
+                brif v1, block2, block1
+            block1:
+                v3 = iconst.i64 7
+                return v3
+            block2:
+                jump block3
+            block3:
+                return v2
+            }",
+        );
+        let ivs = intervals(&func);
+        let (v2, v3) = (interval(&ivs, 2), interval(&ivs, 3));
+        assert!(
+            v2.ranges.len() == 2 && !v2.intersects(v3),
+            "{v2:?} vs {v3:?}"
+        );
+        assert!(v2.start() < v3.start() && v3.end() < v2.end());
+        let pools = Pools {
+            caller_saved: &[9],
+            callee_saved: &[],
+            float_caller_saved: &[],
+            float_callee_saved: &[],
+        };
+        let alloc = allocate(&func, &pools, |_| false, |_| false);
+        assert_eq!(alloc.loc(Value::new(2)), Some(Loc::Reg(9)));
+        assert_eq!(alloc.loc(Value::new(3)), Some(Loc::Reg(9)));
     }
 
     #[test]
@@ -582,7 +719,7 @@ mod tests {
                         );
                     }
                     for b in &ivs[i + 1..] {
-                        let overlap = a.start <= b.end && b.start <= a.end;
+                        let overlap = a.intersects(b);
                         assert!(
                             !overlap || alloc.locs[b.half][b.value.index()] != Some(loc),
                             "{}: {} and {} overlap but share {loc:?}",

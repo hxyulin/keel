@@ -447,18 +447,30 @@ stack; it was replaced once it had served as the baseline.
 2. **Liveness.** Backward dataflow over blocks for live-in/live-out sets.
    With block arguments instead of phis there is no special case:
    parameters are definitions and arguments are uses.
-3. **Intervals.** One interval per value, `[start, end]`, covering its
-   definition, its uses and every block it is live into or out of. A value
-   used at the top of a loop body is live out of the latch, so its interval
-   covers the whole loop. Single intervals without holes are conservative
-   but always safe. An `i128` gets two intervals with the same range, one
-   per half, so its halves are allocated (and spilled) independently.
-4. **Scan.** Intervals in start order. Integers and floats are separate
-   register classes (general-purpose and SIMD/FP registers) that never
-   interfere: each interval only competes for registers of its own class. When no register is free, spill
-   whichever active interval ends last (or the new one, if it ends last). A
-   spilled value lives in a stack slot for its whole life: no splitting.
-   Spill slots are shared by non-overlapping intervals with the same scan.
+3. **Intervals.** One interval per value: the ranges of points where it
+   is live. In each block that is one range, from the block's start (live
+   in) or the definition to the block's end (live out) or the last use;
+   ranges of consecutive blocks join. A value used at the top of a loop
+   body is live out of the latch, so its interval covers the whole loop.
+   Between ranges are *lifetime holes*, where the blocks laid out there do
+   not need the value. An `i128` gets two intervals with the same ranges,
+   one per half, so its halves are allocated (and spilled) independently.
+4. **Scan.** Intervals in start order, as in Wimmer & Franz (2010): the
+   *active* intervals are live at the current point; *inactive* ones hold
+   a register but are in a hole, and a new interval may take that register
+   if it fits in the hole. Integers and floats are separate register
+   classes (general-purpose and SIMD/FP registers) that never interfere:
+   each interval only competes for registers of its own class. When no
+   register is free, spill whichever active interval ends last (or the new
+   one, if it ends last). A spilled value lives in a stack slot for its
+   whole life: no splitting. Spill slots are shared by intervals that do
+   not overlap (holes ignored).
+
+   The first version gave each value a single range from its first point
+   to its last. Holes matter in big `switch`-based functions: a value
+   defined in one case and used in a tail block far below blocked a
+   register through every case in between. In Lua's interpreter loop they
+   cut stack accesses from 1,143 to 437.
 
 **Registers on aarch64:**
 
@@ -521,7 +533,8 @@ right after them so `ldr x, [sp, #imm]` reaches them (at most
 registers, so it does not depend on the size of the rest of the frame.
 
 Known gaps: no interval splitting (a value spilled anywhere is spilled
-everywhere), no hints to place values in x0–x7 or to coalesce copies,
+everywhere; the next step would be Wimmer & Franz's splitting, which
+needs code generation to follow a value between locations), no hints to place values in x0–x7 or to coalesce copies,
 blocks are laid out in reverse postorder only, and constants are
 re-materialized into registers rather than folded into immediates.
 
@@ -595,7 +608,12 @@ diagnostics and `-g`.
   array and function decay). IR generation only follows the tree.
 - **Locals.** A scalar local whose address is never taken, and that is not
   `volatile`, becomes a variable of the SSA builder; everything else gets
-  a stack slot. That is LLVM's `mem2reg`, decided while parsing, which has
+  a stack slot. A declaration without an initializer starts a new value
+  (zero): C makes the object's value indeterminate each time the
+  declaration is reached, so a local declared in a loop must not carry its
+  value round the loop. It did at first, and Lua's interpreter loop
+  carried 29 such `lua_Number`s as block parameters through every block,
+  making Lua's `fib` benchmark 2.2× slower. That is LLVM's `mem2reg`, decided while parsing, which has
   seen every `&x` before IR generation starts. Loops seal their header
   after the back edge; labels (`goto`) are sealed at the end of the
   function.
