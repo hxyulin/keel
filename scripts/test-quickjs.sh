@@ -21,11 +21,17 @@ version=2024-01-13
 name=quickjs-$version
 sha=3c4bf8f895bfa54beb486c8d1218112771ecfc5ac3be1036851ef41568212e03
 defines=(-D_GNU_SOURCE "-DCONFIG_VERSION=\"$version\"" -DCONFIG_BIGNUM)
+libs=(-lm -lpthread)
+[ "$(uname)" = Darwin ] || libs+=(-ldl)
+# shasum on macOS, sha256sum on Linux.
+check_sha256() {
+  if command -v sha256sum > /dev/null; then sha256sum -c --quiet; else shasum -a 256 -c --quiet; fi
+}
 
 mkdir -p "$work"
 cd "$work"
 [ -f $name.tar.xz ] || curl -sSfLO https://bellard.org/quickjs/$name.tar.xz
-echo "$sha  $name.tar.xz" | shasum -a 256 -c --quiet
+echo "$sha  $name.tar.xz" | check_sha256
 [ -d $name ] || tar xf $name.tar.xz
 
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p keel
@@ -34,7 +40,7 @@ keel=$root/target/debug/keel
 mkdir -p build
 cd $name
 lib=(quickjs libregexp libunicode cutils quickjs-libc libbf)
-clang -w -O2 "${defines[@]}" qjsc.c $(printf '%s.c ' "${lib[@]}") -o ../build/qjsc -lm
+clang -w -O2 "${defines[@]}" qjsc.c $(printf '%s.c ' "${lib[@]}") -o ../build/qjsc "${libs[@]}"
 ../build/qjsc -c -o ../build/repl.c -m repl.js
 ../build/qjsc -fbignum -c -o ../build/qjscalc.c qjscalc.js
 objs=()
@@ -45,7 +51,7 @@ for src in qjs.c $(printf '%s.c ' "${lib[@]}") ../build/repl.c ../build/qjscalc.
   clang -c "../build/$base.s" -o "../build/$base.o"
   objs+=("../build/$base.o")
 done
-clang -o ../build/qjs "${objs[@]}" -lm
+clang -o ../build/qjs "${objs[@]}" "${libs[@]}"
 echo "built $work/build/qjs"
 
 for test in tests/test_closure.js tests/test_language.js tests/test_builtin.js \

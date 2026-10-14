@@ -5,9 +5,9 @@
 #
 # Each source file is preprocessed by `clang -E` and compiled by
 # `keel cc`; clang only assembles and links. Lua is built as `make
-# macosx` builds it: GNU C99 with its POSIX extras (`dlopen`, `mkstemp`,
-# `popen`), and with computed gotos in the interpreter loop, which Lua
-# uses whenever the compiler is GNU C. The tests run in their portable
+# macosx` or `make linux` builds it: GNU C99 with its POSIX extras
+# (`dlopen`, `mkstemp`, `popen`), and with computed gotos in the
+# interpreter loop, which Lua uses whenever the compiler is GNU C. The tests run in their portable
 # mode (`_U`), which skips the ones that need Lua's internal test
 # library.
 set -euo pipefail
@@ -23,12 +23,21 @@ version=5.4.7
 lua_sha=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
 tests_sha=8a4898ffe4c7613c8009327a0722db7a41ef861d526c77c5b46114e59ebf811e
 
+# shasum on macOS, sha256sum on Linux.
+check_sha256() {
+  if command -v sha256sum > /dev/null; then sha256sum -c --quiet; else shasum -a 256 -c --quiet; fi
+}
+case $(uname) in
+  Darwin) platform=(-DLUA_USE_MACOSX) libs=(-lm) ;;
+  *) platform=(-DLUA_USE_LINUX) libs=(-lm -ldl) ;;
+esac
+
 mkdir -p "$work"
 cd "$work"
 fetch() {
   local file=$1 url=$2 sha=$3
   [ -f "$file" ] || curl -sSfL -o "$file" "$url"
-  echo "$sha  $file" | shasum -a 256 -c --quiet
+  echo "$sha  $file" | check_sha256
 }
 fetch lua-$version.tar.gz https://www.lua.org/ftp/lua-$version.tar.gz $lua_sha
 fetch lua-$version-tests.tar.gz https://www.lua.org/tests/lua-$version-tests.tar.gz $tests_sha
@@ -43,12 +52,12 @@ objs=()
 for src in lua-$version/src/*.c; do
   name=$(basename "$src" .c)
   [ "$name" = luac ] && continue
-  clang -E -std=gnu99 -DLUA_USE_MACOSX "$src" -o "build/$name.i"
+  clang -E -std=gnu99 "${platform[@]}" "$src" -o "build/$name.i"
   "$keel" cc ${opt[@]+"${opt[@]}"} "build/$name.i" -o "build/$name.s"
   clang -c "build/$name.s" -o "build/$name.o"
   objs+=("build/$name.o")
 done
-clang -o build/lua "${objs[@]}" -lm
+clang -o build/lua "${objs[@]}" "${libs[@]}"
 echo "built $work/build/lua"
 
 cd lua-$version-tests
