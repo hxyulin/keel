@@ -137,6 +137,17 @@ impl DebugTypes {
                 .function
                 .get_or_insert_with(|| push(module, DebugTypeData::Function)),
             Ty::Atomic(t) => return self.plain(module, p, t),
+            // Shown as a float of its size.
+            Ty::Opaque { name, size } => *self.bases.entry(name).or_insert_with(|| {
+                push(
+                    module,
+                    DebugTypeData::Base {
+                        name: name.to_string(),
+                        encoding: Encoding::Float,
+                        size: *size as u32,
+                    },
+                )
+            }),
             Ty::Struct(id) => {
                 if let Some(&dt) = self.structs.get(id) {
                     return Some(dt);

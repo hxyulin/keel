@@ -88,9 +88,9 @@ pub enum ExprKind {
         offset: u64,
         bits: Option<BitField>,
     },
-    /// `va_start(ap)` and `va_arg(ap)` (of this expression's type); `ap`
-    /// is the `va_list` lvalue. `va_copy` is an assignment, as `va_list`
-    /// is a pointer.
+    /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
+    /// the address of the `va_list` object. `va_copy` is an assignment, of
+    /// the pointer on Apple arm64 and of the struct on SysV.
     VaStart(Box<Expr>),
     VaArg(Box<Expr>),
     Builtin(Builtin, Vec<Expr>),
@@ -139,6 +139,9 @@ impl BinOp {
 pub enum Builtin {
     Bswap,
     Fabs,
+    /// The sign bit of a float, as an `int`: 1 for -0.0 and negative NaNs
+    /// too.
+    Signbit,
     Clz,
     Ctz,
     Popcount,

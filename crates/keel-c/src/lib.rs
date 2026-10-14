@@ -3,13 +3,17 @@
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
 //! types as it goes and builds a typed tree (`parse.rs`, `expr.rs`,
-//! `init.rs`, `ast.rs`) → IR generation (`irgen.rs`). Target facts are Apple
-//! arm64's: LP64, signed `char`, `long double` = `double`, `va_list` a
-//! `char *`.
+//! `init.rs`, `ast.rs`) → IR generation (`irgen.rs`). Both targets are
+//! LP64 with a signed `char`; `va_list` is the target's (a `char *` on
+//! Apple arm64, SysV's `struct __va_list_tag[1]` on x86-64 Linux).
+//! `long double` is `double` on Apple arm64. On x86-64 Linux it is the
+//! x87 80-bit format, which keel does not have: it has its size, so
+//! declarations and layouts are right, but its values are refused.
 //!
-//! The language is C11 without `_Generic`, `_Atomic`, `_Complex`,
-//! variable-length arrays and old-style (K&R) function definitions, plus
-//! the GNU extensions Apple's headers use.
+//! The language is C11 without `_Complex` (which only parses, in
+//! declarations), variable-length arrays and old-style (K&R) function
+//! definitions, plus GNU extensions: those the system headers (Apple's,
+//! glibc's) use and more.
 
 mod ast;
 mod debug;
@@ -75,6 +79,8 @@ pub struct Options {
     /// optimization in C compilers, so a debugger can show and change
     /// every one of them anywhere in the function.
     pub debug_info: bool,
+    /// The target, for the types its ABI fixes.
+    pub target: keel_ir::Target,
 }
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
@@ -90,7 +96,7 @@ pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, 
         message: e.message,
     };
     let toks = lex::tokenize(src, path, &mut files).map_err(|e| diagnostic(&files, e))?;
-    let mut parser = parse::Parser::new(toks);
+    let mut parser = parse::Parser::new(toks, opts.target);
     parser
         .translation_unit()
         .map_err(|e| diagnostic(&files, e))?;

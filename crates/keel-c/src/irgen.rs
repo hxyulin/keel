@@ -85,7 +85,7 @@ impl<'p> Gen<'p> {
                 (Ty::Func(fty), None) => {
                     let sig = match self.unprototyped.get(&g) {
                         Some(sig) => sig.clone(),
-                        None => self.signature(fty, g, &[]),
+                        None => self.signature(fty, g, &[])?,
                     };
                     self.module.decls.push(FuncDecl {
                         name: global.symbol.clone(),
@@ -195,9 +195,13 @@ impl<'p> Gen<'p> {
         self.dtypes.get(&mut self.module, self.p, ty, sugar)
     }
 
-    /// How a value of C type `ty` crosses a call.
-    fn abi_param(&self, ty: &Ty) -> AbiParam {
-        match ty {
+    /// How a value of C type `ty` crosses a call; the name of the type if
+    /// keel cannot pass it.
+    fn abi_param(&self, ty: &Ty) -> Result<AbiParam, &'static str> {
+        if let Some(name) = ty.unusable() {
+            return Err(name);
+        }
+        Ok(match ty {
             Ty::Struct(_) => AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
@@ -213,12 +217,12 @@ impl<'p> Gen<'p> {
                 purpose: Purpose::Normal,
             },
             _ => AbiParam::new(ty.ir()),
-        }
+        })
     }
 
     /// The keel signature of a C function type. A struct result becomes a
     /// leading `sret` parameter. `g` is the function, if known by name.
-    fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> Signature {
+    fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
         let mut sig = Signature::new(&[], &[]);
         if let Ty::Struct(_) = fty.ret {
             sig.params.push(AbiParam {
@@ -227,19 +231,33 @@ impl<'p> Gen<'p> {
                 purpose: Purpose::Sret(self.types().abi_layout(&fty.ret)),
             });
         } else if fty.ret != Ty::Void {
-            sig.returns.push(self.abi_param(&fty.ret));
+            sig.returns.push(
+                self.abi_param(&fty.ret)
+                    .map_err(|t| self.unsupported(g, t))?,
+            );
         }
         for ty in fty.params.iter().chain(extra) {
-            sig.params.push(self.abi_param(ty));
+            sig.params
+                .push(self.abi_param(ty).map_err(|t| self.unsupported(g, t))?);
         }
         sig.variadic = fty.variadic;
         sig.returns_twice = g != usize::MAX && self.p.globals[g].returns_twice;
-        sig
+        Ok(sig)
+    }
+
+    /// The error for a call to or definition of function `g` (if known)
+    /// that passes a value of type `name`.
+    fn unsupported(&self, g: usize, name: &str) -> Error {
+        let what = match self.p.globals.get(g) {
+            Some(global) => format!("`{}` passes a `{name}`", global.name),
+            None => format!("a call passes a `{name}`"),
+        };
+        Error::new(Loc::default(), format!("{what}, which is not supported"))
     }
 
     fn function(&mut self, def: &'p FuncDef) -> R<Function> {
         let global = &self.p.globals[def.global];
-        let sig = self.signature(&def.ty, def.global, &[]);
+        let sig = self.signature(&def.ty, def.global, &[])?;
         let mut func = Function::new(global.symbol.clone(), sig.clone());
         func.local = global.internal;
         let mut b = FunctionBuilder::new(&mut func);
@@ -1155,12 +1173,12 @@ impl FnGen<'_, '_, '_> {
             }
             ExprKind::Addr(inner) => self.addr(inner)?,
             ExprKind::VaStart(ap) => {
-                let addr = self.addr(ap)?;
+                let addr = self.val(ap)?;
                 self.b.ins().intrinsic(Intrinsic::VaStart, &[addr]);
                 return Ok(None);
             }
             ExprKind::VaArg(ap) => {
-                let addr = self.addr(ap)?;
+                let addr = self.val(ap)?;
                 match &e.ty {
                     Ty::Int(k) if k.size() < 4 => {
                         let v = self.b.ins().va_arg(Type::I32, addr);
@@ -1259,8 +1277,8 @@ impl FnGen<'_, '_, '_> {
         if from == to || (from.is_ptr() && to.is_ptr()) || to.is_struct() {
             return Ok(v);
         }
-        if *from == Ty::Half || *to == Ty::Half {
-            return Err(Error::new(loc, "`_Float16` is not supported"));
+        if let Some(name) = from.unusable().or(to.unusable()) {
+            return Err(Error::new(loc, format!("`{name}` is not supported")));
         }
         if *to == Ty::Int(IntKind::Bool) {
             let c = self.nonzero(v, from);
@@ -1367,8 +1385,8 @@ impl FnGen<'_, '_, '_> {
         Ok(Some(if Self::is_aggregate(&e.ty) {
             Place::Aggregate(addr)
         } else {
-            if e.ty == Ty::Half {
-                return Err(Error::new(e.loc, "`_Float16` is not supported"));
+            if let Some(name) = e.ty.unusable() {
+                return Err(Error::new(e.loc, format!("`{name}` is not supported")));
             }
             Place::Mem(addr, e.ty.ir())
         }))
@@ -1446,7 +1464,7 @@ impl FnGen<'_, '_, '_> {
                 self.g.use_global(*g);
                 let global = &self.g.p.globals[*g];
                 let symbol = if let Ty::Func(fty) = &global.ty {
-                    let sig = self.callee_signature(*g, fty, &[]);
+                    let sig = self.callee_signature(*g, fty, &[])?;
                     Symbol::Func(self.b.func.import_function(&global.symbol, sig))
                 } else {
                     Symbol::Data(self.b.func.import_data(&global.symbol))
@@ -1477,18 +1495,18 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// The signature to call global function `g` with.
-    fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> Signature {
+    fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> R<Signature> {
         if fty.prototyped || self.g.p.globals[g].func.is_some() {
             return self.g.signature(fty, g, &[]);
         }
         if let Some(sig) = self.g.unprototyped.get(&g) {
-            return sig.clone();
+            return Ok(sig.clone());
         }
-        let sig = self.g.signature(fty, g, args);
+        let sig = self.g.signature(fty, g, args)?;
         if !args.is_empty() {
             self.g.unprototyped.insert(g, sig.clone());
         }
-        sig
+        Ok(sig)
     }
 
     fn call(&mut self, f: &Expr, args: &[Expr], e: &Expr) -> R<Option<Value>> {
@@ -1532,7 +1550,7 @@ impl FnGen<'_, '_, '_> {
         let inst = match direct {
             Some(g) => {
                 self.g.use_global(g);
-                let sig = self.callee_signature(g, &fty, &extra);
+                let sig = self.callee_signature(g, &fty, &extra)?;
                 let name = self.g.p.globals[g].symbol.clone();
                 let fref = self.b.func.import_function(&name, sig);
                 self.b.ins().call(fref, &vals)
@@ -1540,7 +1558,7 @@ impl FnGen<'_, '_, '_> {
             None => {
                 let callee = self.val(f)?;
                 let extra = if fty.prototyped { &[][..] } else { &extra[..] };
-                let sig = self.g.signature(&fty, usize::MAX, extra);
+                let sig = self.g.signature(&fty, usize::MAX, extra)?;
                 let sig = self.b.func.import_signature(sig);
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
@@ -1560,6 +1578,20 @@ impl FnGen<'_, '_, '_> {
         Ok(Some(match op {
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
+            Builtin::Signbit => {
+                let (int, bits) = match args[0].ty {
+                    Ty::Float => (Type::I32, 31),
+                    _ => (Type::I64, 63),
+                };
+                let x = ins.convert(ConvertOp::Bitcast, int, vals[0]);
+                let shift = self.b.ins().iconst(int, bits);
+                let sign = self.b.ins().binary(BinaryOp::Ushr, x, shift);
+                if int == Type::I64 {
+                    self.b.ins().trunc(Type::I32, sign)
+                } else {
+                    sign
+                }
+            }
             Builtin::Clz | Builtin::Ctz | Builtin::Popcount => {
                 let r = match op {
                     Builtin::Clz => ins.clz(vals[0]),

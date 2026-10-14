@@ -110,8 +110,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir", "--target"])?;
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
+            let target = opts.target()?;
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
+                target,
             };
             let mut module = keel_c::compile(&src, &input, c_opts).map_err(|e| e.to_string())?;
             if let Err(errors) = keel_ir::verify_module(&module) {

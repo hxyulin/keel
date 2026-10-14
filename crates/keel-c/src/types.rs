@@ -82,6 +82,13 @@ pub enum Ty {
     Double,
     /// `_Float16`: only so headers declaring functions with it parse.
     Half,
+    /// A type keel only knows the size of, so headers declaring functions
+    /// and typedefs with it parse: `__float128`, `_Complex double`, and
+    /// `long double` on x86-64. Its values cannot be used.
+    Opaque {
+        name: &'static str,
+        size: u64,
+    },
     Ptr(Rc<Ty>),
     /// Element type and length; no length for `int a[]`.
     Array(Rc<Ty>, Option<u64>),
@@ -247,6 +254,16 @@ impl Ty {
     }
 
     /// The keel type of a scalar.
+    /// The name of a type whose values keel cannot use, if this is one:
+    /// `_Float16` and the opaque types.
+    pub fn unusable(&self) -> Option<&'static str> {
+        match self {
+            Ty::Half => Some("_Float16"),
+            Ty::Opaque { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+
     pub fn ir(&self) -> Type {
         match self {
             Ty::Int(k) => match k.size() {
@@ -296,6 +313,7 @@ impl Types<'_> {
             Ty::Float => 4,
             Ty::Double | Ty::Ptr(_) => 8,
             Ty::Half => 2,
+            Ty::Opaque { size, .. } => *size,
             Ty::Array(elem, n) => self.size(elem) * n.unwrap_or(0),
             Ty::Func(_) => 1,
             Ty::Struct(id) => self.0[*id].size,

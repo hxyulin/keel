@@ -14,6 +14,7 @@ pub mod layout;
 pub mod loops;
 pub mod module;
 pub mod parser;
+pub mod target;
 pub mod types;
 pub mod verifier;
 
@@ -37,6 +38,7 @@ pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use layout::Layout;
 pub use module::Module;
 pub use parser::{ParseError, parse, parse_with_ir_lines};
+pub use target::Target;
 pub use types::Type;
 pub use verifier::{VerifierError, verify, verify_module};
 

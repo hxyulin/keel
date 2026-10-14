@@ -6,6 +6,7 @@
 
 use std::path::Path;
 use std::process::{Command, Output};
+#[cfg(target_os = "macos")]
 use std::time::{Duration, Instant};
 
 fn run(cmd: &mut Command) -> Output {
@@ -31,7 +32,7 @@ fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Re
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = keel_codegen::aarch64::compile(&module).map_err(|e| e.to_string())?;
+    let asm = keel_codegen::compile(&module, opts.target).map_err(|e| e.to_string())?;
     let asm_path = exe.with_extension("s");
     std::fs::write(&asm_path, asm).unwrap();
     let out = Command::new("clang")
@@ -39,6 +40,7 @@ fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Re
         .arg("-o")
         .arg(exe)
         .arg(&asm_path)
+        .arg("-lm")
         .output()
         .unwrap();
     // dsymutil warns, rather than fails, on debug info it cannot read.
@@ -67,7 +69,8 @@ fn programs() {
         run(Command::new("clang")
             .args(["-std=c11", "-w", "-o"])
             .arg(&reference)
-            .arg(path));
+            .arg(path)
+            .arg("-lm"));
         let want = Command::new(&reference).output().unwrap();
         let i_path = out_dir.join(format!("{stem}.i"));
         run(Command::new("clang")
@@ -103,6 +106,7 @@ fn programs() {
 /// differs between any two builds (addresses, columns). Also with -O,
 /// which leaves stack slots alone.
 #[test]
+#[cfg(target_os = "macos")]
 fn debugger() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/debug/vars.c");
     let out_dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("c-debug");
@@ -152,7 +156,10 @@ fn debugger() {
                 .arg(&i_path)
                 .arg(&path));
         } else {
-            let opts = keel_c::Options { debug_info: true };
+            let opts = keel_c::Options {
+                debug_info: true,
+                target: Default::default(),
+            };
             if let Err(e) = build(&i_path, &exe, build_ == "keel-opt", opts) {
                 panic!("building vars.c: {e}");
             }
@@ -206,6 +213,7 @@ fn debugger() {
 /// addresses, process ids, offsets into functions (where a breakpoint
 /// goes after the prologue), columns and the column markers (`^`) under
 /// source lines.
+#[cfg(target_os = "macos")]
 fn normalize(out: &str) -> String {
     let mut lines = Vec::new();
     for line in out.lines() {
@@ -247,6 +255,7 @@ fn normalize(out: &str) -> String {
 }
 
 /// Runs `cmd` for at most a minute, giving its stdout and stderr.
+#[cfg(target_os = "macos")]
 fn run_with_timeout(cmd: &mut Command) -> String {
     use std::process::Stdio;
     let mut child = cmd
@@ -340,7 +349,7 @@ fn rejected() {
         ),
         (
             "_Complex double z;",
-            "1:1: error: `_Complex` is not supported",
+            "1:17: error: `z`: objects of type `_Complex` are not supported",
         ),
         (
             "int f(void) { return g(); }",

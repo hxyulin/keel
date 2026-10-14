@@ -15,6 +15,7 @@ use crate::ast::*;
 use crate::lex::{Tok, Token};
 use crate::types::*;
 use crate::{Error, Loc};
+use keel_ir::Target;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -120,6 +121,9 @@ pub struct Parser {
     last_params: Vec<(Option<String>, Ty, Sugar, Loc)>,
     /// Counts names made up for static locals and compound literals.
     unique: usize,
+    pub(crate) target: Target,
+    /// SysV's `struct __va_list_tag`, once a `va_list` needs it.
+    va_list_tag: Option<usize>,
 }
 
 const TYPE_KEYWORDS: &[&str] = &[
@@ -169,6 +173,7 @@ const TYPE_KEYWORDS: &[&str] = &[
     "__int128_t",
     "__uint128_t",
     "_Float16",
+    "__float128",
     "__builtin_va_list",
     "typeof",
     "__typeof__",
@@ -190,7 +195,7 @@ const IGNORED_QUALIFIERS: &[&str] = &[
 ];
 
 impl Parser {
-    pub fn new(toks: Vec<Token>) -> Self {
+    pub fn new(toks: Vec<Token>, target: Target) -> Self {
         Self {
             toks,
             pos: 0,
@@ -205,7 +210,45 @@ impl Parser {
             external_def: HashSet::new(),
             last_params: Vec::new(),
             unique: 0,
+            target,
+            va_list_tag: None,
         }
+    }
+
+    /// `__builtin_va_list`. Apple's is a pointer to the next argument.
+    /// SysV's is `struct __va_list_tag[1]`: the offsets of the next
+    /// general and vector register in the callee's register save area,
+    /// the next stack argument, and the save area. Being an array, it
+    /// decays to a pointer when passed, and a `va_list` parameter is one.
+    fn va_list(&mut self) -> Ty {
+        if self.target == Target::Aarch64AppleDarwin {
+            return Ty::ptr_to(crate::types::CHAR);
+        }
+        let id = *self.va_list_tag.get_or_insert_with(|| {
+            let member = |name: &str, ty: Ty, offset| Member {
+                name: Some(name.into()),
+                ty,
+                sugar: Sugar::Plain,
+                offset,
+                bits: None,
+            };
+            let void_ptr = Ty::ptr_to(Ty::Void);
+            self.structs.push(StructDef {
+                tag: Some("__va_list_tag".into()),
+                is_union: false,
+                members: vec![
+                    member("gp_offset", crate::types::UINT, 0),
+                    member("fp_offset", crate::types::UINT, 4),
+                    member("overflow_arg_area", void_ptr.clone(), 8),
+                    member("reg_save_area", void_ptr, 16),
+                ],
+                size: 24,
+                align: 8,
+                complete: true,
+            });
+            self.structs.len() - 1
+        });
+        Ty::Array(Rc::new(Ty::Struct(id)), Some(1))
     }
 
     // ---- tokens ----
@@ -492,6 +535,14 @@ impl Parser {
                 elem = inner;
             }
             let base = *elem == spec.ty;
+            if let Some(what) = elem.unusable()
+                && !matches!(spec.storage, Storage::Typedef | Storage::Extern)
+            {
+                return Err(Error::new(
+                    name_loc,
+                    format!("`{name}`: objects of type `{what}` are not supported"),
+                ));
+            }
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
@@ -776,12 +827,19 @@ impl Parser {
                 }
                 self.expect(")")?;
                 let text = String::from_utf8_lossy(&text).into_owned();
-                // Keel adds the `_` every Darwin symbol starts with.
-                let Some(name) = text.strip_prefix('_') else {
-                    return Err(Error::new(
-                        self.loc(),
-                        format!("asm label `{text}` does not start with `_`"),
-                    ));
+                // Keel adds the `_` every Darwin symbol starts with; ELF
+                // names are as written.
+                let name = match self.target {
+                    Target::Aarch64AppleDarwin => match text.strip_prefix('_') {
+                        Some(name) => name,
+                        None => {
+                            return Err(Error::new(
+                                self.loc(),
+                                format!("asm label `{text}` does not start with `_`"),
+                            ));
+                        }
+                    },
+                    Target::X86_64LinuxGnu => &text,
                 };
                 label = Some(name.to_string());
             } else if !self.attributes(attrs)? {
@@ -863,6 +921,7 @@ impl Parser {
         let mut counter = 0u32;
         let mut other: Option<Ty> = None;
         let mut is_atomic = false;
+        let mut is_complex = false;
         while let Tok::Ident(word) = self.peek().clone() {
             let storage = match word.as_str() {
                 "typedef" => Some(Storage::Typedef),
@@ -884,9 +943,7 @@ impl Parser {
                 "_Noreturn" => {}
                 w if IGNORED_QUALIFIERS.contains(&w) => {}
                 "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
-                "_Complex" => {
-                    return Err(Error::new(self.loc(), format!("`{word}` is not supported")));
-                }
+                "_Complex" => is_complex = true,
                 "__attribute__" | "__attribute" => {
                     let mut attrs = spec.attrs;
                     self.attributes(&mut attrs)?;
@@ -941,7 +998,14 @@ impl Parser {
                         }
                         "__builtin_va_list" => {
                             self.advance();
-                            Some(Ty::ptr_to(crate::types::CHAR))
+                            Some(self.va_list())
+                        }
+                        "__float128" => {
+                            self.advance();
+                            Some(Ty::Opaque {
+                                name: "__float128",
+                                size: 16,
+                            })
                         }
                         "__int128_t" => {
                             self.advance();
@@ -1036,10 +1100,25 @@ impl Parser {
             c if c == UNSIGNED + INT128 => Ty::Int(UInt128),
             FLOAT => Ty::Float,
             DOUBLE => Ty::Double,
-            c if c == LONG + DOUBLE => Ty::Double,
+            // On x86-64 Linux it is the x87 80-bit format, which keel does
+            // not have: its values are refused rather than miscompiled.
+            c if c == LONG + DOUBLE => match self.target {
+                Target::Aarch64AppleDarwin => Ty::Double,
+                Target::X86_64LinuxGnu => Ty::Opaque {
+                    name: "long double",
+                    size: 16,
+                },
+            },
             HALF => Ty::Half,
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
         };
+        if is_complex {
+            let size = 2 * Types(&self.structs).size(&spec.ty);
+            spec.ty = Ty::Opaque {
+                name: "_Complex",
+                size,
+            };
+        }
         if is_atomic {
             spec.ty = self.atomic_type(spec.ty, loc)?;
         }

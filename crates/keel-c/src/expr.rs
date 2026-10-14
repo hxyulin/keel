@@ -8,6 +8,7 @@ use crate::parse::{Parser, R};
 use crate::types::*;
 use crate::{Error, Loc};
 use keel_ir::RmwOp;
+use keel_ir::Target;
 use std::rc::Rc;
 
 pub(crate) fn mk(kind: ExprKind, ty: Ty, loc: Loc) -> Expr {
@@ -834,7 +835,7 @@ impl Parser {
                     "va_start" => {
                         self.expect(",")?;
                         self.assign()?;
-                        self.mark_address_taken(&ap);
+                        let ap = self.va_list_addr(ap);
                         mk(ExprKind::VaStart(Box::new(ap)), Ty::Void, loc)
                     }
                     "va_arg" => {
@@ -843,8 +844,20 @@ impl Parser {
                         if !ty.is_scalar() {
                             return Err(Error::new(loc, "`va_arg` of a non-scalar"));
                         }
-                        self.mark_address_taken(&ap);
+                        let ap = self.va_list_addr(ap);
                         mk(ExprKind::VaArg(Box::new(ap)), ty, loc)
+                    }
+                    // SysV's va_list is an array, so copying is copying the
+                    // struct it holds.
+                    "va_copy" if self.target == Target::X86_64LinuxGnu => {
+                        self.expect(",")?;
+                        let src = self.assign()?;
+                        let [dst, src] = [ap, src].map(|e| {
+                            let p = self.va_list_addr(e);
+                            let ty = p.ty.pointee().cloned().expect("a pointer");
+                            mk(ExprKind::Deref(Box::new(p)), ty, loc)
+                        });
+                        self.assignment("=", dst, src, loc)?
                     }
                     "va_copy" => {
                         self.expect(",")?;
@@ -948,6 +961,9 @@ impl Parser {
                 };
                 Ok(mk(ExprKind::Float(value), ty, loc))
             }
+            "isnan" | "isinf" | "isinf_sign" | "isfinite" | "isnormal" | "signbit" | "signbitf"
+            | "signbitl" | "fpclassify" | "isgreater" | "isgreaterequal" | "isless"
+            | "islessequal" | "islessgreater" | "isunordered" => self.float_class(base, loc),
             "fabs" | "fabsf" | "fabsl" => {
                 let ty = if base == "fabsf" {
                     Ty::Float
@@ -1215,6 +1231,121 @@ impl Parser {
     }
 
     /// `(a, b, ...)`, as values.
+    /// The classification and comparison builtins `<math.h>` uses on
+    /// glibc (`isnan(x)` is `__builtin_isnan(x)`), as C: each operand is
+    /// evaluated once, into a made-up local, and tested with compares,
+    /// which are false for NaN except `!=`. `isfinite(x)` is
+    /// `fabs(x) < INFINITY`, `isnan(x)` is `x != x`.
+    fn float_class(&mut self, base: &str, loc: Loc) -> R<Expr> {
+        let mut args = self.builtin_args_any()?;
+        let (n, first) = match base {
+            "fpclassify" => (6, 5),
+            "isgreater" | "isgreaterequal" | "isless" | "islessequal" | "islessgreater"
+            | "isunordered" => (2, 0),
+            _ => (1, 0),
+        };
+        if args.len() != n {
+            return Err(Error::new(loc, format!("builtin takes {n} argument(s)")));
+        }
+        if self.fs.is_none() {
+            return Err(Error::new(
+                loc,
+                format!("`__builtin_{base}` outside a function"),
+            ));
+        }
+        // The operands, each in a local; `sets` assigns them.
+        let mut sets = Vec::new();
+        let mut operands = Vec::new();
+        for arg in args.drain(first..) {
+            if !arg.ty.is_arith() {
+                return Err(Error::new(
+                    loc,
+                    format!("`__builtin_{base}` of a non-number"),
+                ));
+            }
+            let ty = if arg.ty == Ty::Float {
+                Ty::Float
+            } else {
+                Ty::Double
+            };
+            let arg = self.cast(arg, ty.clone());
+            let name = self.unique_name("fclass");
+            let t = self.new_local(name, ty.clone(), Sugar::Plain, false);
+            sets.push(self.assignment("=", mk(ExprKind::Local(t), ty.clone(), loc), arg, loc)?);
+            operands.push(mk(ExprKind::Local(t), ty, loc));
+        }
+        let x = operands[0].clone();
+        let ty = x.ty.clone();
+        let float = |v: f64| mk(ExprKind::Float(v), ty.clone(), loc);
+        let fabs = mk(
+            ExprKind::Builtin(Builtin::Fabs, vec![x.clone()]),
+            ty.clone(),
+            loc,
+        );
+        let int = |v: i64| mk(ExprKind::Int(v), INT, loc);
+        let min_normal = if ty == Ty::Float {
+            f64::from(f32::MIN_POSITIVE)
+        } else {
+            f64::MIN_POSITIVE
+        };
+        let cmp = |this: &mut Self, p: &str, a: Expr, b: Expr| this.binop(p, a, b, loc);
+        let result = match base {
+            "isnan" => cmp(self, "!=", x.clone(), x)?,
+            "isinf" => cmp(self, "==", fabs, float(f64::INFINITY))?,
+            "isfinite" => cmp(self, "<", fabs, float(f64::INFINITY))?,
+            "isnormal" => {
+                let low = cmp(self, ">=", fabs.clone(), float(min_normal))?;
+                let high = cmp(self, "<", fabs, float(f64::INFINITY))?;
+                cmp(self, "&&", low, high)?
+            }
+            "isinf_sign" => {
+                let pos = cmp(self, "==", x.clone(), float(f64::INFINITY))?;
+                let neg = cmp(self, "==", x, float(f64::NEG_INFINITY))?;
+                let neg = self.conditional_of(neg, int(-1), int(0), loc)?;
+                self.conditional_of(pos, int(1), neg, loc)?
+            }
+            "signbit" | "signbitf" | "signbitl" => {
+                mk(ExprKind::Builtin(Builtin::Signbit, vec![x]), INT, loc)
+            }
+            // fpclassify(nan, infinite, normal, subnormal, zero, x)
+            "fpclassify" => {
+                let [nan, inf, normal, subnormal, zero]: [Expr; 5] =
+                    args.try_into().expect("five classes");
+                let is_zero = cmp(self, "==", x.clone(), float(0.0))?;
+                let tiny = self.conditional_of(is_zero, zero, subnormal, loc)?;
+                let is_normal = cmp(self, ">=", fabs.clone(), float(min_normal))?;
+                let finite = self.conditional_of(is_normal, normal, tiny, loc)?;
+                let is_inf = cmp(self, "==", fabs, float(f64::INFINITY))?;
+                let number = self.conditional_of(is_inf, inf, finite, loc)?;
+                let is_number = cmp(self, "==", x.clone(), x)?;
+                self.conditional_of(is_number, number, nan, loc)?
+            }
+            _ => {
+                let y = operands[1].clone();
+                match base {
+                    "isgreater" => cmp(self, ">", x, y)?,
+                    "isgreaterequal" => cmp(self, ">=", x, y)?,
+                    "isless" => cmp(self, "<", x, y)?,
+                    "islessequal" => cmp(self, "<=", x, y)?,
+                    "islessgreater" => {
+                        let lt = cmp(self, "<", x.clone(), y.clone())?;
+                        let gt = cmp(self, ">", x, y)?;
+                        cmp(self, "||", lt, gt)?
+                    }
+                    _ => {
+                        let a = cmp(self, "!=", x.clone(), x)?;
+                        let b = cmp(self, "!=", y.clone(), y)?;
+                        cmp(self, "||", a, b)?
+                    }
+                }
+            }
+        };
+        let ty = result.ty.clone();
+        Ok(sets.into_iter().rev().fold(result, |e, set| {
+            mk(ExprKind::Comma(Box::new(set), Box::new(e)), ty.clone(), loc)
+        }))
+    }
+
     fn builtin_args_any(&mut self) -> R<Vec<Expr>> {
         self.expect("(")?;
         let mut args = Vec::new();
@@ -1277,6 +1408,22 @@ impl Parser {
         let ty = Ty::ptr_to(e.ty.clone());
         let loc = e.loc;
         mk(ExprKind::Addr(Box::new(e)), ty, loc)
+    }
+
+    /// The address of the `va_list` object `ap` names, which `va_start`
+    /// and `va_arg` work on. Apple's `va_list` is a pointer variable, whose
+    /// address it is; SysV's is an array, which decays to its own address,
+    /// and a `va_list` parameter already holds that.
+    fn va_list_addr(&mut self, ap: Expr) -> Expr {
+        match self.target {
+            Target::Aarch64AppleDarwin => {
+                self.mark_address_taken(&ap);
+                let ty = Ty::ptr_to(ap.ty.clone());
+                let loc = ap.loc;
+                mk(ExprKind::Addr(Box::new(ap)), ty, loc)
+            }
+            Target::X86_64LinuxGnu => self.rvalue(ap),
+        }
     }
 
     pub(crate) fn rvalue(&mut self, e: Expr) -> Expr {
