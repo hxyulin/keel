@@ -801,11 +801,11 @@ generic (non-`_n`) `__atomic_*` forms, and inline assembly statements
 
 **Testing.** Test programs are built by clang and by keel and must behave
 the same, so they print what they compute instead of hard-coding answers.
-`scripts/test-lua.sh` builds Lua 5.4 (as `make macosx` does: POSIX,
-computed gotos) and runs its test suite; `scripts/test-sqlite.sh` builds
-thread-safe SQLite and compares query results with clang's build;
-`scripts/test-quickjs.sh` builds QuickJS and runs its test suite. All
-pass, with and without `-O`; together they found the bugs the small
+The suite in `suite/` (run by `cargo suite`, see `suite/README.md`) builds
+Lua 5.4 (as `make macosx` does: POSIX, computed gotos) and runs its test
+suite, builds thread-safe SQLite and compares query results with clang's
+build, and builds QuickJS and runs its test suite. All pass, with and
+without `-O`, on both targets; together they found the bugs the small
 programs missed (an array of pointers to `const` placed in read-only
 memory, a variable used in its own initializer, `#pragma pack`, the
 `__int128` constant, a function too big for conditional branches).

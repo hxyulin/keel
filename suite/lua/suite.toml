@@ -1,0 +1,49 @@
+description = "Lua 5.4.7, built as `make macosx` / `make linux` do"
+
+[[fetch]]
+url = "https://www.lua.org/ftp/lua-5.4.7.tar.gz"
+sha256 = "9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30"
+
+[[fetch]]
+url = "https://www.lua.org/tests/lua-5.4.7-tests.tar.gz"
+sha256 = "8a4898ffe4c7613c8009327a0722db7a41ef861d526c77c5b46114e59ebf811e"
+
+# GNU C99 with Lua's POSIX extras (dlopen, mkstemp, popen) and computed
+# gotos in the interpreter loop, which Lua uses whenever the compiler is GNU C.
+[build]
+dir = "lua-5.4.7/src"
+std = "gnu99"
+sources = ["*.c"]
+exclude = ["luac.c"]
+libs = ["m"]
+binary = "lua"
+
+[[build.when]]
+os = "macos"
+defines = ["LUA_USE_MACOSX"]
+
+[[build.when]]
+os = "linux"
+defines = ["LUA_USE_LINUX"]
+libs = ["dl"]
+
+# The portable mode (_U) skips the tests that need Lua's internal test library.
+[test]
+dir = "lua-5.4.7-tests"
+run = ["{bin} -e _U=true all.lua"]
+
+[[bench]]
+name = "fib"
+run = "{bin} {suite}/bench.lua fib"
+
+[[bench]]
+name = "sort"
+run = "{bin} {suite}/bench.lua sort"
+
+[[bench]]
+name = "string"
+run = "{bin} {suite}/bench.lua string"
+
+[[bench]]
+name = "float"
+run = "{bin} {suite}/bench.lua float"

@@ -1,0 +1,45 @@
+# The build configurations, in the order result tables list them.
+
+# Benchmark ratios are against this configuration.
+baseline = "clang-O0"
+# What `keel-suite test` builds when no `--config` is given.
+test = ["keel", "keel-O"]
+
+[[config]]
+name = "clang-O0"
+compiler = "clang"
+flags = ["-O0"]
+
+[[config]]
+name = "clang-O0-g"
+compiler = "clang"
+flags = ["-O0", "-g"]
+
+[[config]]
+name = "clang-O1"
+compiler = "clang"
+flags = ["-O1"]
+
+[[config]]
+name = "clang-O2"
+compiler = "clang"
+flags = ["-O2"]
+
+[[config]]
+name = "clang-O3"
+compiler = "clang"
+flags = ["-O3"]
+
+[[config]]
+name = "keel"
+compiler = "keel"
+
+[[config]]
+name = "keel-g"
+compiler = "keel"
+flags = ["-g"]
+
+[[config]]
+name = "keel-O"
+compiler = "keel"
+flags = ["-O"]

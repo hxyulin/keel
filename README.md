@@ -48,10 +48,9 @@ Both commands take `--target aarch64-apple-darwin` or
 - C tests live in `crates/keel-c/tests/programs/`: each `.c` program is
   built by clang and by keel (as is and with `-O`), and both must print the
   same and exit the same.
-- `scripts/test-lua.sh [-O]` builds Lua 5.4 with keel and runs Lua's test
-  suite; `scripts/test-sqlite.sh [-O]` builds SQLite and compares its
-  answers to `scripts/sqlite-queries.sql` with clang's build;
-  `scripts/test-quickjs.sh [-O]` builds QuickJS and runs its tests. They
-  download the sources (checksummed) into `target/`.
+- `cargo suite test` builds Lua, SQLite and QuickJS with keel and runs
+  their test suites; `cargo suite run` builds them with clang and keel in
+  every configuration and times them. Each program is a directory in
+  `suite/`; see [suite/README.md](suite/README.md).
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.

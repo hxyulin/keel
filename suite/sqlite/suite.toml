@@ -1,0 +1,36 @@
+description = "SQLite 3.46.1, the amalgamation and its shell"
+
+[[fetch]]
+url = "https://www.sqlite.org/2024/sqlite-amalgamation-3460100.zip"
+sha256 = "77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784"
+
+[build]
+dir = "sqlite-amalgamation-3460100"
+std = "c11"
+sources = ["sqlite3.c", "shell.c"]
+defines = ["SQLITE_THREADSAFE=1"]
+libs = ["m", "pthread"]
+binary = "sqlite3"
+
+# glibc hides POSIX functions such as `fileno` under strict -std=c11.
+[[build.when]]
+os = "linux"
+defines = ["_GNU_SOURCE"]
+libs = ["dl"]
+
+# keel has no x87 `long double`. SQLite then does its high-precision
+# arithmetic in pairs of doubles, as where `long double` is `double`.
+[[build.when]]
+arch = "x86_64"
+defines = ["LONGDOUBLE_TYPE=double"]
+
+# The answers must match those of clang's build.
+[test]
+run = ["{bin} :memory:"]
+stdin = "{suite}/queries.sql"
+compare = "clang-O2"
+
+[[bench]]
+name = "queries"
+run = "{bin} :memory:"
+stdin = "{suite}/bench.sql"

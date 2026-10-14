@@ -1,0 +1,58 @@
+description = "QuickJS 2024-01-13 with BigNum, built as its Makefile does"
+
+[[fetch]]
+url = "https://bellard.org/quickjs/quickjs-2024-01-13.tar.xz"
+sha256 = "3c4bf8f895bfa54beb486c8d1218112771ecfc5ac3be1036851ef41568212e03"
+
+# GNU C: computed gotos in an interpreter loop of over a megabyte, C11
+# atomics, `__int128` in the bignum library. `qjsc`, built by clang,
+# compiles the REPL's JavaScript to C first.
+[build]
+dir = "quickjs-2024-01-13"
+std = "gnu11"
+defines = ["_GNU_SOURCE", 'CONFIG_VERSION="2024-01-13"', "CONFIG_BIGNUM"]
+includes = ["."]
+libs = ["m", "pthread"]
+prepare = [
+  "clang -w -O2 {defines} qjsc.c quickjs.c libregexp.c libunicode.c cutils.c quickjs-libc.c libbf.c -o {gen}/qjsc {libs}",
+  "{gen}/qjsc -c -o {gen}/repl.c -m repl.js",
+  "{gen}/qjsc -fbignum -c -o {gen}/qjscalc.c qjscalc.js",
+]
+sources = [
+  "qjs.c", "quickjs.c", "libregexp.c", "libunicode.c", "cutils.c",
+  "quickjs-libc.c", "libbf.c", "{gen}/repl.c", "{gen}/qjscalc.c",
+]
+binary = "qjs"
+
+[[build.when]]
+os = "linux"
+libs = ["dl"]
+
+# As `make test` runs them.
+[test]
+dir = "quickjs-2024-01-13"
+run = [
+  "{bin} tests/test_closure.js",
+  "{bin} tests/test_language.js",
+  "{bin} tests/test_builtin.js",
+  "{bin} tests/test_loop.js",
+  "{bin} tests/test_std.js",
+  "{bin} tests/test_worker.js",
+  "{bin} --bignum tests/test_op_overloading.js",
+  "{bin} --bignum tests/test_bignum.js",
+  "{bin} --qjscalc tests/test_qjscalc.js",
+]
+
+# -O0 interpreter frames are big: QuickJS's default 1 MB stack limit
+# overflows at a recursion depth of about 28.
+[[bench]]
+name = "fib"
+run = "{bin} --stack-size 4194304 {suite}/bench.js fib"
+
+[[bench]]
+name = "sort"
+run = "{bin} --stack-size 4194304 {suite}/bench.js sort"
+
+[[bench]]
+name = "string"
+run = "{bin} --stack-size 4194304 {suite}/bench.js string"
