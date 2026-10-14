@@ -1,0 +1,35 @@
+; Local linkage: @helper, @counter and @tls_count belong to this module.
+; The driver exports its own with the same names, which would clash at
+; link time if these were exported too. The source file makes the
+; functions show up in the debug info, local ones marked as such.
+; expect: exit 0
+
+file f0 = "linkage.keel"
+
+data @counter = local align 8 { i64 100 }
+data @tls_count = local thread_local align 8 { i64 7 }
+
+func @helper(i64) -> i64 cc(c) local {
+block0(v0: i64):
+    v1 = iconst.i64 1000
+    v2 = iadd v0, v1 !f0:15:5
+    return v2
+}
+
+; helper(x) + counter + tls_count, then increments both counters.
+func @k_linkage(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = call @helper(v0) !f0:22:5
+    v2 = symbol_addr @counter
+    v3 = load.i64 v2
+    v4 = iconst.i64 1
+    v5 = iadd v3, v4
+    store v5, v2
+    v6 = symbol_addr @tls_count
+    v7 = load.i64 v6
+    v8 = iadd v7, v4
+    store v8, v6
+    v9 = iadd v1, v3
+    v10 = iadd v9, v7
+    return v10
+}

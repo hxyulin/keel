@@ -307,6 +307,71 @@ fn rejected() {
              }",
             "umul_overflow on i128 is not supported yet",
         ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"\", \"{x9}\"(v0)
+                 return
+             }",
+            "asm operands can only be in x0–x8, x16, x17, v0–v7 and v16–v18",
+        ),
+        (
+            "func @g() cc(c) {
+             block0:
+                 asm \"\", \"~{fp}\"()
+                 return
+             }",
+            "x29 is the frame pointer",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 v1 = intrinsic stack_alloc(v0)
+                 asm \"\", \"~{x19}\"()
+                 return
+             }",
+            "x19 is the base pointer",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"\", \"{x1},{x1}\"(v0, v0)
+                 return
+             }",
+            "x1 is named by two inputs",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"\", \"{x1},~{x1}\"(v0)
+                 return
+             }",
+            "x1 is both an operand and clobbered",
+        ),
+        (
+            "func @g(f64) -> f64 cc(c) {
+             block0(v0: f64):
+                 v1 = asm \"fmov %w0, %1\", \"=w,w\"(v0) -> f64
+                 return v1
+             }",
+            "`%w0` does not fit operand 0 (`w`)",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"mov x0, %1\", \"r\"(v0)
+                 return
+             }",
+            "`%1`: the asm has only 1 operand(s)",
+        ),
+        (
+            "func @g(i64) cc(c) {
+             block0(v0: i64):
+                 asm \"\", \"r,r,r,r,r,r,r,r,r,r,r,r\"(v0, v0, v0, v0, v0, v0, v0, v0, v0, v0, v0, v0)
+                 return
+             }",
+            "too many asm operands",
+        ),
     ];
     for (src, want) in cases {
         let module = keel_ir::parse(src).unwrap();

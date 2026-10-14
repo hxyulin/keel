@@ -6,6 +6,7 @@
 //! data @table = const align 8 { ptr @add, ptr @msg + 3, i32 7, zero 4 }
 //! decl data @environ
 //! data @count = thread_local align 8 { i64 0 }
+//! data @hidden = local align 4 { i32 1 }
 //! decl data thread_local @errno_value
 //! ```
 //!
@@ -22,6 +23,9 @@ pub struct DataObject {
     /// Each thread has its own copy, initialized from `init`;
     /// `symbol_addr` gives the current thread's.
     pub thread_local: bool,
+    /// Visible only within its module, like C's `static`. Only for
+    /// definitions.
+    pub local: bool,
     pub init: Option<DataInit>,
 }
 
@@ -101,7 +105,8 @@ impl fmt::Display for DataObject {
         let Some(init) = &self.init else {
             return write!(f, "decl data {thread_local}@{}", self.name);
         };
-        write!(f, "data @{} = {thread_local}", self.name)?;
+        let local = if self.local { "local " } else { "" };
+        write!(f, "data @{} = {local}{thread_local}", self.name)?;
         if init.constant {
             f.write_str("const ")?;
         }

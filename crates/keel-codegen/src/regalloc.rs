@@ -56,6 +56,13 @@
 //! across one (defined before it and used after it) may only take a
 //! callee-saved register, or be spilled. The call's arguments end at the
 //! call and its result starts after it, so neither counts as crossing it.
+//!
+//! A call that returns twice, like `setjmp`, returns the second time from
+//! a `longjmp` made later, possibly from code where a value live across
+//! the call is not live, whose register or slot another value may have
+//! taken. `longjmp` restores the callee-saved registers, but not what
+//! happened to a spill slot in between. So a value live across such a call
+//! keeps its location for the whole function.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
@@ -116,11 +123,17 @@ impl Allocation {
 }
 
 /// Allocates every value in `func`. `is_call` says which instructions
-/// clobber the caller-saved registers.
-pub fn allocate(func: &Function, pools: &Pools, is_call: impl Fn(&InstData) -> bool) -> Allocation {
+/// clobber the caller-saved registers, `returns_twice` which calls may
+/// return again later.
+pub fn allocate(
+    func: &Function,
+    pools: &Pools,
+    is_call: impl Fn(&InstData) -> bool,
+    returns_twice: impl Fn(&InstData) -> bool,
+) -> Allocation {
     let cfg = ControlFlowGraph::compute(func);
     let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
-    let intervals = build_intervals(func, &cfg, &order, &is_call);
+    let intervals = build_intervals(func, &cfg, &order, &is_call, &returns_twice);
 
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let mut spilled = linear_scan(&intervals, pools, &mut locs);
@@ -245,6 +258,7 @@ fn build_intervals(
     cfg: &ControlFlowGraph,
     order: &[Block],
     is_call: &dyn Fn(&InstData) -> bool,
+    returns_twice: &dyn Fn(&InstData) -> bool,
 ) -> Vec<Interval> {
     let live = liveness(func, cfg, order);
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
@@ -258,8 +272,10 @@ fn build_intervals(
             Some((start, end)) => (start.min(point), end.max(point)),
         });
     };
-    // Read points of calls, in increasing order.
+    // Read points of calls, and of calls that return twice, in increasing
+    // order.
     let mut calls = Vec::new();
+    let mut twice = Vec::new();
 
     // Slot `k` owns the read point 2k and the write point 2k + 1.
     let mut slot = 0u32;
@@ -289,6 +305,9 @@ fn build_intervals(
             if is_call(data) {
                 calls.push(read);
             }
+            if returns_twice(data) {
+                twice.push(read);
+            }
         }
 
         // The terminator's write point: values live out survive the
@@ -299,15 +318,21 @@ fn build_intervals(
         }
     }
 
+    // Crossing a call means being live on both sides of its read point:
+    // the first call after `start` comes before `end`.
+    let crosses = |points: &[u32], start: u32, end: u32| {
+        let next = points.partition_point(|&c| c <= start);
+        points.get(next).is_some_and(|&c| c < end)
+    };
     let mut intervals = Vec::new();
     for (i, range) in ranges.iter().enumerate() {
-        let Some((start, end)) = *range else {
+        let Some((mut start, mut end)) = *range else {
             continue;
         };
-        // Crossing a call means being live on both sides of its read
-        // point: the first call after `start` comes before `end`.
-        let next_call = calls.partition_point(|&c| c <= start);
-        let crosses_call = calls.get(next_call).is_some_and(|&c| c < end);
+        let crosses_call = crosses(&calls, start, end);
+        if crosses(&twice, start, end) {
+            (start, end) = (0, slot * 2);
+        }
         let value = Value::new(i);
         let ty = func.value_type(value);
         let halves = if ty == Type::I128 { 2 } else { 1 };
@@ -428,7 +453,13 @@ mod tests {
     fn intervals(func: &Function) -> Vec<Interval> {
         let cfg = ControlFlowGraph::compute(func);
         let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
-        build_intervals(func, &cfg, &order, &|d| matches!(d, InstData::Call { .. }))
+        build_intervals(
+            func,
+            &cfg,
+            &order,
+            &|d| matches!(d, InstData::Call { .. }),
+            &|_| false,
+        )
     }
 
     fn interval(intervals: &[Interval], index: usize) -> &Interval {
@@ -525,9 +556,9 @@ mod tests {
             }
             let module = parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
             for func in &module.functions {
-                let alloc = allocate(func, &pools, is_call);
+                let alloc = allocate(func, &pools, is_call, |_| false);
                 let cfg = ControlFlowGraph::compute(func);
-                let ivs = build_intervals(func, &cfg, &alloc.order, &is_call);
+                let ivs = build_intervals(func, &cfg, &alloc.order, &is_call, &|_| false);
                 for (i, a) in ivs.iter().enumerate() {
                     let loc =
                         alloc.locs[a.half][a.value.index()].expect("every interval is allocated");

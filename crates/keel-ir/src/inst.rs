@@ -5,7 +5,7 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, DataRef, FuncRef, Intrinsic, SigRef, StackSlot, Type, Value};
+use crate::{Block, DataRef, FuncRef, InlineAsm, Intrinsic, SigRef, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -118,6 +118,13 @@ pub enum InstData {
     /// A call-like operation with known meaning; see [`Intrinsic`].
     Intrinsic {
         id: Intrinsic,
+        args: Vec<Value>,
+    },
+    /// Inline assembly: one result per output, one argument per input; see
+    /// [`InlineAsm`]. Pinned and never removed, as the template may do
+    /// anything.
+    InlineAsm {
+        asm: Box<InlineAsm>,
         args: Vec<Value>,
     },
     /// Address of a stack slot.
@@ -451,6 +458,7 @@ impl InstData {
             | InstData::VaArg { .. }
             | InstData::Call { .. }
             | InstData::CallIndirect { .. }
+            | InstData::InlineAsm { .. }
             | InstData::Trap
             | InstData::Jump { .. }
             | InstData::Brif { .. }
@@ -549,6 +557,7 @@ impl InstData {
             InstData::Return { args }
             | InstData::Call { args, .. }
             | InstData::ReturnCall { args, .. }
+            | InstData::InlineAsm { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter().copied().for_each(f),
         }
     }
@@ -604,6 +613,7 @@ impl InstData {
             InstData::Return { args }
             | InstData::Call { args, .. }
             | InstData::ReturnCall { args, .. }
+            | InstData::InlineAsm { args, .. }
             | InstData::Intrinsic { args, .. } => args.iter_mut().for_each(f),
         }
     }

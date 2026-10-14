@@ -1,0 +1,109 @@
+; Inline assembly: register operands of each class and width, with and
+; without modifiers, memory and constant operands, a tied operand, fixed
+; registers (a raw getpid system call), several outputs, and clobbers of
+; every allocatable register, which the driver checks are restored.
+; expect: exit 0
+
+; Registers are named for their type: x for i64.
+func @k_add64(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = asm "add %0, %1, %2", "=r,r,r"(v0, v1) -> i64
+    return v2
+}
+
+; And w for i32: `rev` on x registers would reverse all eight bytes.
+func @k_rev32(i32) -> i32 cc(c) {
+block0(v0: i32):
+    v1 = asm "rev %0, %1", "=r,r"(v0) -> i32
+    return v1
+}
+
+; `%w` takes the 32-bit view of 64-bit operands, which zero-extends.
+func @k_addw(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = asm "add %w0, %w1, %w2", "=r,r,r"(v0, v1) -> i64
+    return v2
+}
+
+func @k_fmadd(f64, f64, f64) -> f64 cc(c) {
+block0(v0: f64, v1: f64, v2: f64):
+    v3 = asm "fmadd %0, %1, %2, %3", "=w,w,w,w"(v0, v1, v2) -> f64
+    return v3
+}
+
+func @k_fadd32(f32, f32) -> f32 cc(c) {
+block0(v0: f32, v1: f32):
+    v2 = asm "fadd %0, %1, %2", "=w,w,w"(v0, v1) -> f32
+    return v2
+}
+
+; `%s` and `%d` name the views explicitly.
+func @k_fcvt(f64) -> f32 cc(c) {
+block0(v0: f64):
+    v1 = asm "fcvt %s0, %d1", "=w,w"(v0) -> f32
+    return v1
+}
+
+func @k_load(ptr) -> i64 cc(c) {
+block0(v0: ptr):
+    v1 = asm "ldr %0, %1", "=r,m"(v0) -> i64
+    return v1
+}
+
+func @k_add42(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 42
+    v2 = asm "add %0, %1, #%2", "=r,r,i"(v0, v1) -> i64
+    return v2
+}
+
+; The output starts with the value of input 1, tied to it: b + a. (With
+; the parameters the other way round, x0 would still hold the right value
+; by chance.)
+func @k_tied(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = asm "add %0, %0, %2", "=r,0,r"(v1, v0) -> i64
+    return v2
+}
+
+; x + 1, kept across assembly that zeroes the caller-saved allocatable
+; registers, which only clobbers keep it out of.
+func @k_clobber_caller(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 1
+    v2 = iadd v0, v1
+    asm "mov x9, xzr\n mov x10, xzr\n mov x11, xzr\n mov x12, xzr\n mov x13, xzr\n mov x14, xzr\n mov x15, xzr", "~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15}"()
+    return v2
+}
+
+; getpid is system call 20: the number in x16, the result in x0.
+func @k_getpid() -> i64 cc(c) {
+block0:
+    v0 = iconst.i64 20
+    v1 = asm "svc #0x80", "={x0},{x16},~{memory}"(v0) -> i64
+    return v1
+}
+
+; Stores a + b and returns the carry out of it.
+func @k_add_carry(i64, i64, ptr) -> i32 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr):
+    v3, v4 = asm "adds %0, %2, %3\n cset %w1, cs", "=r,=r,r,r,~{cc}"(v0, v1) -> (i64, i32)
+    store v3, v2
+    return v4
+}
+
+; 3x + (x + 3) + x = 28 for x = 5, with the intermediate values live across
+; assembly that zeroes every allocatable register and the link register:
+; they must be spilled, and the callee-saved ones restored on return.
+func @k_clobber_all(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 3
+    v2 = imul v0, v1
+    v3 = iadd v0, v1
+    v4 = sitofp.f64 v0
+    asm "mov x9, xzr\n mov x10, xzr\n mov x11, xzr\n mov x12, xzr\n mov x13, xzr\n mov x14, xzr\n mov x15, xzr\n mov x19, xzr\n mov x20, xzr\n mov x21, xzr\n mov x22, xzr\n mov x23, xzr\n mov x24, xzr\n mov x25, xzr\n mov x26, xzr\n mov x27, xzr\n mov x28, xzr\n mov x30, xzr\n movi d8, #0\n movi d9, #0\n movi d10, #0\n movi d11, #0\n movi d12, #0\n movi d13, #0\n movi d14, #0\n movi d15, #0\n movi d19, #0\n movi d24, #0\n movi d31, #0", "~{x9},~{x10},~{x11},~{x12},~{x13},~{x14},~{x15},~{x19},~{x20},~{x21},~{x22},~{x23},~{x24},~{x25},~{x26},~{x27},~{x28},~{lr},~{d8},~{d9},~{d10},~{d11},~{d12},~{d13},~{d14},~{d15},~{v19},~{v20},~{v21},~{v22},~{v23},~{v24},~{v25},~{v26},~{v27},~{v28},~{v29},~{v30},~{v31}"()
+    v5 = fptosi.i64 v4
+    v6 = iadd v2, v3
+    v7 = iadd v6, v5
+    return v7
+}

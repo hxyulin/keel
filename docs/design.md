@@ -155,6 +155,11 @@ resumed by a debugger, so it is an intrinsic.
   is no stack probing yet: an allocation larger than the guard page can
   skip past it.
 - Memory operations are ordered by CFG order.
+- There is no `volatile` flag: every load and store is pinned, and no pass
+  removes, merges or moves one, so C's `volatile` accesses are plain loads
+  and stores. The flag comes with the first pass that optimizes memory
+  (store-to-load forwarding, dead-store elimination), which must leave
+  volatile accesses alone.
 - Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
   promise disjointness between classes.
 - **Atomics** follow the C11/C++11 memory model, with the ordering written
@@ -200,6 +205,62 @@ resumed by a debugger, so it is an intrinsic.
   registers, then the epilogue runs and `b`/`br` jumps; arguments that
   would go on the stack, structs, and callers returning a struct are
   rejected for now.
+- Functions and data are exported unless marked `local`, like C's
+  `static`: `func @f(i64) -> i64 cc(c) local {`, `data @n = local align 4
+  { i32 0 }`. A local symbol still has a name in the object file, but
+  without `.globl` other object files cannot see it, so two modules may
+  each have their own `@count`. The debug info does not mark it external.
+- `returns_twice` on a signature (`decl @setjmp(ptr) -> i32 cc(c)
+  returns_twice`) marks calls that may return again later, from a
+  `longjmp`. C only promises the local variables not changed since the
+  `setjmp`; in keel those are the values live across the call. The second
+  return can come after code that, as far as liveness goes, could reuse
+  their registers and spill slots (a value live after the `setjmp` is not
+  live on the path that calls `longjmp`). So the register allocator gives
+  each of them one location for the whole function: `longjmp` restores the
+  callee-saved registers, and nothing else writes that slot. The optimizer
+  needs no change: SSA values never change, and memory (address-taken and
+  `volatile` locals) is left alone as always.
+
+## Inline assembly
+
+`v2 = asm "add %0, %1, %2", "=r,r,r"(v0, v1) -> i64` runs target
+instructions with operands substituted. The constraint string is the one
+GCC and LLVM use, so a C frontend passes `asm` statements through after
+numbering their operands the way LLVM does: `+r` becomes an output `=r`
+and an input `0` tied to it, and named operands become numbers.
+
+- Outputs come first, one per result: `=r` and `=w` for a general-purpose
+  or SIMD/FP register, `={x0}` for that one (`=&r` is accepted; see below
+  why it means nothing more). Then inputs, one per argument: `r`, `w`,
+  `{x16}`, `m` for memory at the address given, `i`/`n` for a constant
+  (an `iconst`), and `0`, `1`… for the register of that output, which the
+  input initializes. Then clobbers: `~{x9}`, `~{d8}`, `~{lr}`,
+  `~{memory}`, `~{cc}`.
+- An `asm` is pinned and never removed: every asm is treated as C's `asm
+  volatile`. Memory is never cached in registers across one, so
+  `~{memory}` changes nothing yet; nor does `~{cc}`, as no value lives in
+  the flags between instructions.
+- On aarch64 operands go in registers no value is allocated to: x0–x8,
+  x16, x17, v0–v7 and v16–v18. Inputs are moved in before the template
+  and outputs out after it, like a call's arguments and results. That
+  costs a move each way, but the allocator needs no special case, and as
+  every operand gets its own register there are no early-clobber
+  problems. Allocatable registers cannot be named as operands; the ones
+  that can cover system calls (the number goes in x16 on Darwin, x8 on
+  Linux).
+- The template names a register by its operand's type: `x0` or `w0`, `d0`
+  or `s0`. An `m` operand is `[x0]`, an `i` operand its number. Modifiers
+  pick another view: `%w0`, `%x0`, `%s0`, `%d0`, `%q0`, `%h0`, `%b0`, and
+  `%c0` for a constant; `%%` is `%`. Separate instructions with `\n`: on
+  Darwin `;` starts a comment.
+- Clobbering a caller-saved allocatable register (x9–x15, v19–v31) makes
+  the asm count as a call to the register allocator, so no value stays in
+  any of them across it. Clobbered callee-saved registers (x19–x28,
+  d8–d15) are saved by the prologue and not allocated in that function.
+  x30 may be clobbered, since the prologue always saves it; x18 (reserved
+  by Apple) and x29 (the frame pointer) may not, nor x19 in a function
+  that allocates stack, where it is the base pointer.
 
 ## Data
 
@@ -224,8 +285,8 @@ decl data @environ
 - On Apple arm64, constant data without pointers goes in `__TEXT,__const`,
   constant data with pointers in `__DATA,__const` (the loader writes the
   pointers, then makes the page read-only), mutable data in `__DATA,__data`,
-  and all-zero mutable data in zero-fill `__bss`. Data is exported, like
-  functions.
+  and all-zero mutable data in zero-fill `__bss`. Data is exported unless
+  `local`, like functions.
 - Code finds a symbol relative to the program counter (`adrp` + `add`), since
   the executable loads at a random address. Symbols from other images
   (`decl`s, which may be in a dylib) are read from the global offset table
@@ -417,13 +478,15 @@ place without moving live values out of the way first. It also gives the
 `i128` lowerings free working registers: they copy their operands into
 x0–x7 as pairs, compute there, and move the result out.
 
-**Calls** (including the memory intrinsics, which are libc calls, and
-`i128` division) clobber
-the caller-saved registers. An interval live across a call (defined before
-it and used after) may only take a callee-saved register or be spilled;
-other intervals prefer caller-saved registers, which cost nothing to use.
-The prologue saves and the epilogue restores the callee-saved registers the
-function actually uses, with `stp`/`ldp` pairs.
+**Calls** (including the memory intrinsics, which are libc calls, `i128`
+division, and inline assembly that clobbers allocatable caller-saved
+registers) clobber the caller-saved registers. An interval live across a
+call (defined before it and used after) may only take a callee-saved
+register or be spilled; other intervals prefer caller-saved registers,
+which cost nothing to use. An interval live across a call that returns
+twice covers the whole function (see `returns_twice`). The prologue saves
+and the epilogue restores the callee-saved registers the function actually
+uses, with `stp`/`ldp` pairs.
 
 **Parallel copies.** Block arguments move into parameters all at once, and
 so do call arguments into x0–x7 and incoming arguments into their allocated

@@ -8,9 +8,9 @@
 
 use crate::function::InsertPoint;
 use crate::{
-    BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, Inst, InstData, IntCC,
-    Intrinsic, Ordering, OverflowOp, RmwOp, SigRef, SourceLoc, StackSlot, Symbol, Type, UnaryOp,
-    Value,
+    BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, InlineAsm, Inst, InstData,
+    IntCC, Intrinsic, Ordering, OverflowOp, RmwOp, SigRef, SourceLoc, StackSlot, Symbol, Type,
+    UnaryOp, Value,
 };
 
 pub struct InstBuilder<'f> {
@@ -210,6 +210,14 @@ impl InstBuilder<'_> {
     pub fn call(self, func: FuncRef, args: &[Value]) -> Inst {
         self.build(InstData::Call {
             func,
+            args: args.to_vec(),
+        })
+    }
+
+    /// Inline assembly; its results are the outputs, in order.
+    pub fn inline_asm(self, asm: InlineAsm, args: &[Value]) -> Inst {
+        self.build(InstData::InlineAsm {
+            asm: Box::new(asm),
             args: args.to_vec(),
         })
     }

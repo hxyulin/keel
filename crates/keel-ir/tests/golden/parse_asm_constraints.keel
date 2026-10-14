@@ -1,0 +1,5 @@
+func @f(i64) {
+block0(v0: i64):
+    asm "", "r,q"(v0, v0)
+    return
+}

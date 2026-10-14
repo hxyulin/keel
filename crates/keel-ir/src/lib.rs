@@ -1,6 +1,7 @@
 //! Keel IR: a CFG of blocks with block arguments, pinned side-effecting
 //! instructions and floating pure ones. See `docs/design.md`.
 
+pub mod asm;
 pub mod builder;
 pub mod data;
 pub mod dominators;
@@ -15,6 +16,7 @@ pub mod parser;
 pub mod types;
 pub mod verifier;
 
+pub use asm::{AsmClobber, AsmOperand, InlineAsm, PhysReg};
 pub use builder::InstBuilder;
 pub use data::{DataInit, DataItem, DataObject};
 pub use entity::{Arena, EntityRef};

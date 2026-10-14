@@ -99,10 +99,10 @@ use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use keel_ir::{
-    AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
-    DataObject, DataRef, EntityRef, FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout,
-    Module, Ordering, OverflowOp, Purpose, RmwOp, Signature, SourceFile, SourceLoc, Type, UnaryOp,
-    Value,
+    AbiParam, ArgExt, AsmClobber, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause,
+    ConvertOp, DataInit, DataItem, DataObject, DataRef, EntityRef, FloatCC, Function, InlineAsm,
+    Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp, PhysReg, Purpose,
+    RmwOp, Signature, SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
 use std::fmt::Write;
 
@@ -128,6 +128,12 @@ const BASE: u8 = 19;
 const FS0: u8 = 16;
 const FS1: u8 = 17;
 const FS2: u8 = 18;
+
+/// The registers inline assembly operands go in: the argument and scratch
+/// registers, which are never allocated, so moving operands in and out of
+/// them disturbs no value.
+const ASM_REGS: [u8; 11] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 17];
+const ASM_FREGS: [u8; 11] = [0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18];
 
 /// Compiles a module into one assembly file for `clang`/`as`. Declared
 /// functions are left as undefined symbols for the linker to resolve.
@@ -171,11 +177,20 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
 }
 
 /// Instructions that clobber the caller-saved registers: calls, the memory
-/// intrinsics, which are calls to libc, and `i128` division, a call to
-/// compiler-rt.
+/// intrinsics, which are calls to libc, `i128` division, a call to
+/// compiler-rt, and inline assembly that says so.
 fn is_call(func: &Function, data: &InstData) -> bool {
     match data {
         InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => true,
+        // Inline assembly that clobbers allocatable caller-saved registers
+        // is treated like a call, which keeps values out of all of them.
+        InstData::InlineAsm { asm, .. } => asm.clobbers.iter().any(|c| match c {
+            AsmClobber::Reg(PhysReg { float: false, num }) => REGISTERS.caller_saved.contains(num),
+            AsmClobber::Reg(PhysReg { float: true, num }) => {
+                REGISTERS.float_caller_saved.contains(num)
+            }
+            AsmClobber::Memory | AsmClobber::Flags => false,
+        }),
         InstData::Binary { op, args } => {
             op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
         }
@@ -187,6 +202,17 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::StackSave
             | Intrinsic::StackRestore => false,
         },
+        _ => false,
+    }
+}
+
+/// Calls that may return a second time, from a `longjmp`.
+fn returns_twice(func: &Function, data: &InstData) -> bool {
+    match data {
+        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
+            func.callee(*callee).sig.returns_twice
+        }
+        InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
         _ => false,
     }
 }
@@ -405,16 +431,64 @@ impl<'a> FunctionCompiler<'a> {
                 }
             )
         });
+        // Callee-saved registers inline assembly clobbers: saved by the
+        // prologue, and never allocated, so no value lives in one across
+        // the assembly.
+        let (mut asm_saved, mut asm_float_saved) = (Vec::new(), Vec::new());
+        for (_, inst) in func.layout_insts() {
+            let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
+                continue;
+            };
+            let at = |message: String| err(format!("`{}`: {message}", func.display_inst(inst)));
+            let regs = asm_regs(asm).map_err(at)?;
+            asm_text(func, asm, args, &regs).map_err(at)?;
+            for clobber in &asm.clobbers {
+                let AsmClobber::Reg(r) = *clobber else {
+                    continue;
+                };
+                match (r.float, r.num) {
+                    (false, 18) => return Err(at("x18 is reserved by the platform".into())),
+                    (false, 29) => return Err(at("x29 is the frame pointer".into())),
+                    (false, BASE) if moves_sp => {
+                        return Err(at(
+                            "x19 is the base pointer of a function that allocates stack".into(),
+                        ));
+                    }
+                    (false, n) if REGISTERS.callee_saved.contains(&n) => asm_saved.push(n),
+                    (true, n) if REGISTERS.float_callee_saved.contains(&n) => {
+                        asm_float_saved.push(n)
+                    }
+                    _ => {}
+                }
+            }
+        }
         let callee_saved: Vec<u8> = (pools.callee_saved.iter().copied())
-            .filter(|&r| !moves_sp || r != BASE)
+            .filter(|&r| !(moves_sp && r == BASE) && !asm_saved.contains(&r))
+            .collect();
+        let float_callee_saved: Vec<u8> = (pools.float_callee_saved.iter().copied())
+            .filter(|r| !asm_float_saved.contains(r))
             .collect();
         let pools = Pools {
             callee_saved: &callee_saved,
+            float_callee_saved: &float_callee_saved,
             ..*pools
         };
-        let mut alloc = regalloc::allocate(func, &pools, |data| is_call(func, data));
+        let mut alloc = regalloc::allocate(
+            func,
+            &pools,
+            |data| is_call(func, data),
+            |data| returns_twice(func, data),
+        );
         if moves_sp {
-            alloc.callee_saved_used.insert(0, BASE);
+            asm_saved.push(BASE);
+        }
+        for (used, extra) in [
+            (&mut alloc.callee_saved_used, asm_saved),
+            (&mut alloc.float_callee_saved_used, asm_float_saved),
+        ] {
+            used.extend(extra);
+            used.sort_unstable();
+            used.dedup();
         }
         let mut offset = spill_base + 8 * alloc.spill_slots as usize;
         if offset > MAX_SLOT_OFFSET {
@@ -459,11 +533,10 @@ impl<'a> FunctionCompiler<'a> {
     fn compile(mut self, out: &mut String) {
         let func = self.func;
         let name = &func.name;
-        writeln!(
-            out,
-            "\t.globl\t_{name}\n\t.p2align\t2\n_{name}:\nL{name}_begin:"
-        )
-        .unwrap();
+        if !func.local {
+            writeln!(out, "\t.globl\t_{name}").unwrap();
+        }
+        writeln!(out, "\t.p2align\t2\n_{name}:\nL{name}_begin:").unwrap();
         self.allocation_comment();
 
         if self.debug {
@@ -1122,6 +1195,28 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(format!("mov\tsp, x{mark}"));
                 }
             },
+            InstData::InlineAsm { asm, args } => {
+                let regs = asm_regs(&asm).expect("checked when the compiler was made");
+                let n_out = asm.outputs.len();
+                // Inputs into their registers. No value is allocated to
+                // those, so no move overwrites another's source and they
+                // can go in any order (x16 included, which the parallel
+                // copy would need for itself).
+                for (i, &arg) in args.iter().enumerate() {
+                    if let Some(r) = regs[n_out + i] {
+                        self.emit_move(asm_loc(r), self.loc(arg));
+                    }
+                }
+                let text = asm_text(func, &asm, &args, &regs).expect("checked");
+                for line in text.lines() {
+                    self.emit(line.trim());
+                }
+                for (k, &output) in func.inst_results(inst).iter().enumerate() {
+                    if let (Some(dst), Some(r)) = (self.alloc.loc(output), regs[k]) {
+                        self.emit_move(dst, asm_loc(r));
+                    }
+                }
+            }
             InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
                 // A struct result in registers is loaded from where the
@@ -2610,7 +2705,8 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
 /// file names are taken relative to the directory of the compilation,
 /// which, as for C compilers, is the current directory.
 fn emit_debug_info(out: &mut String, module: &Module) {
-    // Abbreviation 1 is the compile unit, 2 a subprogram: a tag, whether
+    // Abbreviation 1 is the compile unit, 2 an exported subprogram and 3 a
+    // local one: a tag, whether
     // it has children, then (attribute, form) pairs ending in (0, 0).
     out.push_str(concat!(
         "\t.section\t__DWARF,__debug_abbrev,regular,debug\n",
@@ -2627,6 +2723,11 @@ fn emit_debug_info(out: &mut String, module: &Module) {
         "\t.byte\t0x11, 0x01\t; DW_AT_low_pc, DW_FORM_addr\n",
         "\t.byte\t0x12, 0x06\t; DW_AT_high_pc, DW_FORM_data4\n",
         "\t.byte\t0x3f, 0x19\t; DW_AT_external, DW_FORM_flag_present\n",
+        "\t.byte\t0, 0\n",
+        "\t.byte\t3, 0x2e, 0\t; DW_TAG_subprogram (local), no children\n",
+        "\t.byte\t0x03, 0x08\t; DW_AT_name, DW_FORM_string\n",
+        "\t.byte\t0x11, 0x01\t; DW_AT_low_pc, DW_FORM_addr\n",
+        "\t.byte\t0x12, 0x06\t; DW_AT_high_pc, DW_FORM_data4\n",
         "\t.byte\t0, 0\n",
         "\t.byte\t0\n",
     ));
@@ -2653,7 +2754,8 @@ fn emit_debug_info(out: &mut String, module: &Module) {
     .unwrap();
     for func in &module.functions {
         let name = &func.name;
-        writeln!(out, "\t.byte\t2\n\t.asciz\t{}", asm_string(name)).unwrap();
+        let abbrev = if func.local { 3 } else { 2 };
+        writeln!(out, "\t.byte\t{abbrev}\n\t.asciz\t{}", asm_string(name)).unwrap();
         writeln!(
             out,
             "\t.quad\tL{name}_begin\n\t.long\tL{name}_end-L{name}_begin"
@@ -2686,7 +2788,7 @@ fn asm_string(s: &str) -> String {
 ///   pointers at startup and then makes the pages read-only;
 /// - constant without pointers: `__TEXT,__const`, read-only from the start.
 ///
-/// Every object is exported (`.globl`), like functions.
+/// Objects are exported (`.globl`) unless local, like functions.
 fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
     let name = &data.name;
     let log2_align = init.align.trailing_zeros();
@@ -2694,7 +2796,9 @@ fn emit_data(out: &mut String, data: &DataObject, init: &DataInit) {
         emit_thread_local(out, data, init);
         return;
     }
-    writeln!(out, "\t.globl\t_{name}").unwrap();
+    if !data.local {
+        writeln!(out, "\t.globl\t_{name}").unwrap();
+    }
     if !init.constant && init.is_zero() {
         writeln!(
             out,
@@ -2740,11 +2844,11 @@ fn emit_thread_local(out: &mut String, data: &DataObject, init: &DataInit) {
         .unwrap();
         emit_items(out, init);
     }
-    writeln!(
-        out,
-        "\t.section\t__DATA,__thread_vars,thread_local_variables\n\t.globl\t_{name}\n\t.p2align\t3\n_{name}:"
-    )
-    .unwrap();
+    out.push_str("\t.section\t__DATA,__thread_vars,thread_local_variables\n");
+    if !data.local {
+        writeln!(out, "\t.globl\t_{name}").unwrap();
+    }
+    writeln!(out, "\t.p2align\t3\n_{name}:").unwrap();
     writeln!(
         out,
         "\t.quad\t__tlv_bootstrap\n\t.quad\t0\n\t.quad\t_{name}$tlv$init"
@@ -2802,6 +2906,147 @@ fn arg_kinds<'s>(func: &Function, params: &'s [AbiParam], args: &[Value]) -> Vec
             None => ArgKind::Value(func.value_type(func.resolve(arg))),
         })
         .collect()
+}
+
+/// Picks a register for each operand of `asm`, outputs then inputs, from
+/// [`ASM_REGS`] and [`ASM_FREGS`]: the named ones, then the first free one
+/// for each other operand, so no two operands share a register unless
+/// tied (or an input names an output's register: it is read before the
+/// output is written). A constant gets none.
+fn asm_regs(asm: &InlineAsm) -> Result<Vec<Option<PhysReg>>, String> {
+    let n_out = asm.outputs.len();
+    let operands: Vec<AsmOperand> = (asm.outputs.iter().map(|&(op, _)| op))
+        .chain(asm.inputs.iter().copied())
+        .collect();
+    let clobbered: Vec<PhysReg> = (asm.clobbers.iter())
+        .filter_map(|c| match *c {
+            AsmClobber::Reg(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    let mut taken = clobbered.clone();
+    let mut regs = vec![None; operands.len()];
+    for (i, &op) in operands.iter().enumerate() {
+        let AsmOperand::Fixed(r) = op else { continue };
+        let pool: &[u8] = if r.float { &ASM_FREGS } else { &ASM_REGS };
+        if !pool.contains(&r.num) {
+            return Err(format!(
+                "operand {i} names {r}, but asm operands can only be in x0–x8, x16, x17, v0–v7 and v16–v18"
+            ));
+        }
+        if clobbered.contains(&r) {
+            return Err(format!("{r} is both an operand and clobbered"));
+        }
+        if i < n_out && regs[..i].contains(&Some(r)) {
+            return Err(format!("{r} is named by two outputs"));
+        }
+        regs[i] = Some(r);
+        taken.push(r);
+    }
+    for (i, &op) in operands.iter().enumerate() {
+        let float = match op {
+            AsmOperand::Reg | AsmOperand::Mem => false,
+            AsmOperand::FloatReg => true,
+            AsmOperand::Tied(out) => {
+                regs[i] = regs[out as usize];
+                continue;
+            }
+            AsmOperand::Fixed(_) | AsmOperand::Imm => continue,
+        };
+        let pool: &[u8] = if float { &ASM_FREGS } else { &ASM_REGS };
+        let r = (pool.iter())
+            .map(|&num| PhysReg { float, num })
+            .find(|r| !taken.contains(r))
+            .ok_or("too many asm operands for the free registers")?;
+        regs[i] = Some(r);
+        taken.push(r);
+    }
+    // Two inputs in one register would need two values there at once.
+    for (i, r) in regs.iter().enumerate().skip(n_out) {
+        if r.is_some() && regs[n_out..i].contains(r) {
+            return Err(format!("{} is named by two inputs", r.unwrap()));
+        }
+    }
+    Ok(regs)
+}
+
+fn asm_loc(r: PhysReg) -> Loc {
+    if r.float {
+        Loc::FReg(r.num)
+    } else {
+        Loc::Reg(r.num)
+    }
+}
+
+/// `asm`'s template with its operands substituted. `%N` is operand N:
+/// a register named for its type (`x0` or `w0`, `d0` or `s0`), `[x0]` for
+/// memory, or the number for a constant. A modifier picks another view of
+/// a register (`%w0`, `%x0`; `%s0`, `%d0`, `%q0`, `%h0`, `%b0`), and `%c0`
+/// is a constant; `%%` is `%`.
+fn asm_text(
+    func: &Function,
+    asm: &InlineAsm,
+    args: &[Value],
+    regs: &[Option<PhysReg>],
+) -> Result<String, String> {
+    let n_out = asm.outputs.len();
+    let mut out = String::new();
+    let mut chars = asm.template.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        if chars.next_if_eq(&'%').is_some() {
+            out.push('%');
+            continue;
+        }
+        let modifier = chars.next_if(|c| c.is_ascii_alphabetic());
+        let mut digits = String::new();
+        while let Some(d) = chars.next_if(char::is_ascii_digit) {
+            digits.push(d);
+        }
+        let n: usize = digits
+            .parse()
+            .map_err(|_| "`%` must be followed by an operand number, or be `%%`".to_string())?;
+        if n >= regs.len() {
+            return Err(format!(
+                "`%{n}`: the asm has only {} operand(s)",
+                regs.len()
+            ));
+        }
+        let (op, ty) = if n < n_out {
+            asm.outputs[n]
+        } else {
+            let arg = func.resolve(args[n - n_out]);
+            (asm.inputs[n - n_out], func.value_type(arg))
+        };
+        let bad = || {
+            let shown = modifier.map_or(String::new(), String::from);
+            format!("`%{shown}{n}` does not fit operand {n} (`{op}`)")
+        };
+        match (op, regs[n], modifier) {
+            (AsmOperand::Imm, _, None | Some('c')) => {
+                let ValueDef::Result(def, _) = func.value_def(func.resolve(args[n - n_out])) else {
+                    unreachable!("the verifier checks constants");
+                };
+                let InstData::Iconst { imm, .. } = func.inst_data(def) else {
+                    unreachable!("the verifier checks constants");
+                };
+                write!(out, "{imm}").unwrap();
+            }
+            (AsmOperand::Mem, Some(r), None) => write!(out, "[x{}]", r.num).unwrap(),
+            (AsmOperand::Imm | AsmOperand::Mem, _, _) => return Err(bad()),
+            (_, Some(r), None) if r.float => out.push_str(&freg(r.num, ty)),
+            (_, Some(r), None) => out.push_str(&reg(r.num, ty)),
+            (_, Some(r), Some(m @ ('s' | 'd' | 'q' | 'h' | 'b'))) if r.float => {
+                write!(out, "{m}{}", r.num).unwrap()
+            }
+            (_, Some(r), Some(m @ ('w' | 'x'))) if !r.float => write!(out, "{m}{}", r.num).unwrap(),
+            _ => return Err(bad()),
+        }
+    }
+    Ok(out)
 }
 
 /// The register number of an argument register.

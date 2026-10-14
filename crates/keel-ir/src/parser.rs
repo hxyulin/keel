@@ -19,9 +19,9 @@
 
 use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
-    DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InstData, IntCC,
-    Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose, RmwOp, SigRef, Signature, SourceFile,
-    SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InlineAsm, InstData,
+    IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose, RmwOp, SigRef, Signature,
+    SourceFile, SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -92,6 +92,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                 data.push(DataObject {
                     name,
                     thread_local,
+                    local: false,
                     init: None,
                 });
             }
@@ -411,6 +412,7 @@ struct ParsedInst {
 struct ParsedFunction {
     name: String,
     sig: Signature,
+    local: bool,
     personality: Option<String>,
     slots: Vec<StackSlotData>,
     blocks: Vec<ParsedBlock>,
@@ -591,8 +593,9 @@ impl Parser {
         }
     }
 
-    /// `(i32, ptr) -> i64 cc(c)`; the return list and `cc(..)` are optional,
-    /// and the parameters may end in `...`.
+    /// `(i32, ptr) -> i64 cc(c) returns_twice`; the return list, `cc(..)`
+    /// and `returns_twice` are optional, and the parameters may end in
+    /// `...`.
     fn signature(&mut self) -> Result<Signature, ParseError> {
         let mut params = Vec::new();
         let mut variadic = false;
@@ -636,11 +639,13 @@ impl Parser {
             };
             self.expect(Tok::Punct(')'))?;
         }
+        let returns_twice = self.eat(&Tok::Ident("returns_twice".into()));
         Ok(Signature {
             params,
             returns,
             cc,
             variadic,
+            returns_twice,
         })
     }
 
@@ -694,6 +699,7 @@ impl Parser {
     fn function(&mut self) -> Result<ParsedFunction, ParseError> {
         let name = self.global("a function name like `@main`")?;
         let sig = self.signature()?;
+        let local = self.eat(&Tok::Ident("local".into()));
         let personality = if self.eat(&Tok::Ident("personality".into())) {
             Some(self.global("a personality function like `@__gxx_personality_v0`")?)
         } else {
@@ -721,6 +727,7 @@ impl Parser {
         Ok(ParsedFunction {
             name,
             sig,
+            local,
             personality,
             slots,
             blocks,
@@ -755,12 +762,13 @@ impl Parser {
     }
 
     /// Everything after `data`:
-    /// `@name = [thread_local] [const] align <n> { item, ... }`, where an item is
+    /// `@name = [local] [thread_local] [const] align <n> { item, ... }`, where an item is
     /// `b"..."`, `<int type> <n>`, `zero <n>` or `ptr @sym [+ <n>]`. Items
     /// may continue over several lines.
     fn data_definition(&mut self) -> Result<DataObject, ParseError> {
         let name = self.global("a data name like `@msg`")?;
         self.expect(Tok::Punct('='))?;
+        let local = self.eat(&Tok::Ident("local".into()));
         let thread_local = self.eat(&Tok::Ident("thread_local".into()));
         let constant = self.eat(&Tok::Ident("const".into()));
         let (kw, kw_loc) = self.ident("`align`")?;
@@ -786,6 +794,7 @@ impl Parser {
         Ok(DataObject {
             name,
             thread_local,
+            local,
             init: Some(DataInit {
                 constant,
                 align,
@@ -1136,6 +1145,54 @@ impl Parser {
                     no_suffix()?;
                     InstData::Trap
                 }
+                "asm" => {
+                    no_suffix()?;
+                    let template = self.string("a template string")?;
+                    self.expect(Tok::Punct(','))?;
+                    let constraints_loc = self.loc();
+                    let constraints = self.string("a constraint string like `\"=r,r\"`")?;
+                    let args = self.arg_list(names)?;
+                    let mut types = Vec::new();
+                    if self.eat(&Tok::Arrow) {
+                        if self.eat(&Tok::Punct('(')) {
+                            loop {
+                                types.push(self.ty()?);
+                                if self.eat(&Tok::Punct(')')) {
+                                    break;
+                                }
+                                self.expect(Tok::Punct(','))?;
+                            }
+                        } else {
+                            types.push(self.ty()?);
+                        }
+                    }
+                    if types.len() != results.len() {
+                        return Err(error(
+                            op_loc,
+                            format!(
+                                "`asm` returns {} value(s), but {} result(s) are named",
+                                types.len(),
+                                results.len()
+                            ),
+                        ));
+                    }
+                    let asm = InlineAsm::new(&template, &constraints, &types)
+                        .map_err(|message| error(constraints_loc, message))?;
+                    if asm.inputs.len() != args.len() {
+                        return Err(error(
+                            constraints_loc,
+                            format!(
+                                "{} input constraint(s) but {} argument(s)",
+                                asm.inputs.len(),
+                                args.len()
+                            ),
+                        ));
+                    }
+                    InstData::InlineAsm {
+                        asm: Box::new(asm),
+                        args,
+                    }
+                }
                 "stack_addr" => {
                     no_suffix()?;
                     let (name, loc) = self.ident("a stack slot")?;
@@ -1312,7 +1369,10 @@ impl Parser {
         // A call's result count depends on the callee's signature, which is
         // checked when building; every other instruction has 0 or 1 results.
         let expected = match &data {
-            InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Invoke { .. } => None,
+            InstData::Call { .. }
+            | InstData::CallIndirect { .. }
+            | InstData::Invoke { .. }
+            | InstData::InlineAsm { .. } => None,
             InstData::LandingPad { .. } => Some(2),
             InstData::Intrinsic { id, .. } => Some(id.info().returns.len()),
             InstData::Overflow { .. } => Some(2),
@@ -1412,6 +1472,16 @@ impl Parser {
         Ok(args)
     }
 
+    fn string(&mut self, wanted: &str) -> Result<String, ParseError> {
+        match self.next() {
+            (Tok::Str(s), _) => Ok(s),
+            _ => {
+                self.pos -= 1;
+                Err(self.unexpected(wanted))
+            }
+        }
+    }
+
     fn value(&mut self, names: &mut Names) -> Result<Value, ParseError> {
         let (name, loc) = self.ident("a value")?;
         Ok(names.value(&name, loc))
@@ -1444,6 +1514,7 @@ fn build(
     let ParsedFunction {
         name,
         sig,
+        local,
         personality,
         slots,
         blocks,
@@ -1504,6 +1575,11 @@ fn build(
         }
         if let InstData::Intrinsic { id, .. } = &inst.data {
             for (&v, &ty) in inst.results.iter().zip(id.info().returns) {
+                types[v.index()] = Some(ty);
+            }
+        }
+        if let InstData::InlineAsm { asm, .. } = &inst.data {
+            for (&v, &(_, ty)) in inst.results.iter().zip(&asm.outputs) {
                 types[v.index()] = Some(ty);
             }
         }
@@ -1577,6 +1653,7 @@ fn build(
 
     let mut func = Function::new(name.clone(), sig.clone());
     func.personality = personality.clone();
+    func.local = *local;
     // Slots and callees were numbered in declaration order, which is
     // creation order.
     for slot in slots {

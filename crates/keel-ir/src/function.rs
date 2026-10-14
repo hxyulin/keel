@@ -101,6 +101,10 @@ pub struct Signature {
     /// `params` and then any number of `i32`, `i64`, `ptr` or `f64`: the
     /// types C's default argument promotions leave.
     pub variadic: bool,
+    /// May return more than once, like `setjmp`: after a `longjmp`, the
+    /// call returns again with the registers it saved. Written
+    /// `returns_twice`.
+    pub returns_twice: bool,
 }
 
 impl fmt::Display for Signature {
@@ -126,8 +130,12 @@ impl fmt::Display for Signature {
             }
         }
         match self.cc {
-            CallConv::C => f.write_str(" cc(c)"),
+            CallConv::C => f.write_str(" cc(c)")?,
         }
+        if self.returns_twice {
+            f.write_str(" returns_twice")?;
+        }
+        Ok(())
     }
 }
 
@@ -139,6 +147,7 @@ impl Signature {
             returns: returns.iter().map(|&ty| AbiParam::new(ty)).collect(),
             cc: CallConv::C,
             variadic: false,
+            returns_twice: false,
         }
     }
 
@@ -245,6 +254,9 @@ pub struct Function {
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
     pub personality: Option<String>,
+    /// Visible only within its module, like C's `static`: not exported to
+    /// the linker, so other modules may use the name for their own.
+    pub local: bool,
 }
 
 impl Function {
@@ -261,6 +273,7 @@ impl Function {
             signatures: Arena::new(),
             layout: Vec::new(),
             personality: None,
+            local: false,
         }
     }
 
@@ -380,6 +393,7 @@ impl Function {
             InstData::EhTypeid { .. } => vec![Type::I32],
             InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
             InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
+            InstData::InlineAsm { asm, .. } => asm.outputs.iter().map(|&(_, ty)| ty).collect(),
             InstData::Store { .. }
             | InstData::AtomicStore { .. }
             | InstData::Fence { .. }
@@ -614,6 +628,9 @@ impl Function {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "func @{}{}", self.name, self.sig)?;
+        if self.local {
+            f.write_str(" local")?;
+        }
         if let Some(personality) = &self.personality {
             write!(f, " personality @{personality}")?;
         }
@@ -731,6 +748,24 @@ impl Function {
                 write!(f, "intrinsic {id}(")?;
                 write_list(f, args.iter().map(|&a| v(a)))?;
                 f.write_str(")")
+            }
+            InstData::InlineAsm { asm, args } => {
+                f.write_str("asm ")?;
+                crate::data::write_quoted(f, asm.template.as_bytes())?;
+                f.write_str(", ")?;
+                crate::data::write_quoted(f, asm.constraints().as_bytes())?;
+                f.write_str("(")?;
+                write_list(f, args.iter().map(|&a| v(a)))?;
+                f.write_str(")")?;
+                match &asm.outputs[..] {
+                    [] => Ok(()),
+                    [(_, ty)] => write!(f, " -> {ty}"),
+                    outputs => {
+                        f.write_str(" -> (")?;
+                        write_list(f, outputs.iter().map(|(_, ty)| ty))?;
+                        f.write_str(")")
+                    }
+                }
             }
             InstData::Trap => f.write_str("trap"),
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),

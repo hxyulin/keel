@@ -1,0 +1,9 @@
+func @f(i64, f64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: f64, v2: ptr):
+    v3 = iconst.i64 8
+    v4, v5 = asm "add %0, %2, %3\n fadd %d1, %d4, %d4", "=r,=w,r,i,w"(v0, v3, v1) -> (i64, f64)
+    v6 = asm "ldr %0, %1", "={x3},m,~{x30},~{memory},~{cc}"(v2) -> i64
+    v7 = asm "add %0, %0, %2", "=r,0,{v1}"(v4, v5) -> i64
+    asm "nop", ""()
+    return v7
+}

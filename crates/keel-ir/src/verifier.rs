@@ -8,8 +8,9 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    ArgExt, BinaryOp, BlockCall, Clause, ConvertOp, EntityRef, Function, Inst, InstData, Intrinsic,
-    Ordering, Purpose, RmwOp, Signature, Type, UnaryOp, Value, ValueDef,
+    ArgExt, AsmOperand, BinaryOp, BlockCall, Clause, ConvertOp, EntityRef, Function, InlineAsm,
+    Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type, UnaryOp, Value,
+    ValueDef,
 };
 use crate::{DataInit, DataItem, Module};
 use std::collections::{HashMap, HashSet};
@@ -61,6 +62,12 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             errors.push(VerifierError {
                 location: format!("@{}", data.name),
                 message: "thread-local data cannot be const".into(),
+            });
+        }
+        if data.local && data.init.is_none() {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "only a definition can be local".into(),
             });
         }
         if let Some(init) = &data.init {
@@ -365,6 +372,71 @@ impl Verifier<'_> {
         }
     }
 
+    /// Each operand's type fits its constraint: registers hold scalars of
+    /// their class, up to 64 bits, `m` takes an address, `i` a constant,
+    /// and a tied input the type of its output, which it may initialize
+    /// only once.
+    fn check_asm(&mut self, inst: Inst, asm: &InlineAsm, args: &[Value]) {
+        let func = self.func;
+        if args.len() != asm.inputs.len() {
+            self.inst_error(
+                inst,
+                format!(
+                    "{} input constraint(s) but {} argument(s)",
+                    asm.inputs.len(),
+                    args.len()
+                ),
+            );
+            return;
+        }
+        let fits = |op: AsmOperand, ty: Type| match op {
+            AsmOperand::Reg | AsmOperand::Fixed(PhysReg { float: false, .. }) => {
+                (ty.is_int() && ty != Type::I128) || ty == Type::Ptr
+            }
+            AsmOperand::FloatReg | AsmOperand::Fixed(PhysReg { float: true, .. }) => ty.is_float(),
+            AsmOperand::Mem => ty == Type::Ptr,
+            AsmOperand::Imm | AsmOperand::Tied(_) => true,
+        };
+        for (n, &(op, ty)) in asm.outputs.iter().enumerate() {
+            if !fits(op, ty) {
+                self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
+            }
+        }
+        let mut tied = Vec::new();
+        for (i, (&op, &arg)) in asm.inputs.iter().zip(args).enumerate() {
+            let n = asm.outputs.len() + i;
+            let ty = func.value_type(func.resolve(arg));
+            if !fits(op, ty) {
+                self.inst_error(inst, format!("asm operand {n} (`{op}`) cannot be {ty}"));
+            }
+            match op {
+                AsmOperand::Imm => {
+                    let is_const = matches!(
+                        func.value_def(func.resolve(arg)),
+                        ValueDef::Result(def, _) if matches!(func.inst_data(def), InstData::Iconst { .. })
+                    );
+                    if !is_const {
+                        self.inst_error(inst, format!("asm operand {n} (`i`) must be an iconst"));
+                    }
+                }
+                AsmOperand::Tied(out) => match asm.outputs.get(out as usize) {
+                    None => self.inst_error(
+                        inst,
+                        format!("asm operand {n} is tied to output {out}, which does not exist"),
+                    ),
+                    Some(&(_, out_ty)) if out_ty != ty => self.inst_error(
+                        inst,
+                        format!("asm operand {n} is {ty}, but its output {out} is {out_ty}"),
+                    ),
+                    Some(_) if tied.contains(&out) => self
+                        .inst_error(inst, format!("output {out} is tied to more than one input")),
+                    Some(_) => tied.push(out),
+                },
+                _ => {}
+            }
+        }
+    }
+
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
@@ -612,6 +684,7 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::InlineAsm { asm, args } => self.check_asm(inst, asm, args),
             InstData::Trap => {}
             InstData::StackAddr { slot } => {
                 if slot.index() >= func.num_stack_slots() {

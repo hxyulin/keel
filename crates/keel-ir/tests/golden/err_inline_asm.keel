@@ -1,0 +1,7 @@
+func @f(i64, f64, ptr, i128) {
+block0(v0: i64, v1: f64, v2: ptr, v3: i128):
+    v4 = asm "", "=r,w,m,i,r"(v0, v0, v0, v3) -> f64
+    v5, v6 = asm "", "=r,=r,2,0,0,1"(v0, v0, v0, v1) -> (i64, i64)
+    v7 = asm "", "={x0},{v1}"(v0) -> f64
+    return
+}
