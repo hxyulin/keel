@@ -49,6 +49,44 @@ For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
 
+## Compiler tiers and profiling
+
+The stages can be tuned independently:
+
+- `--opt-tier none|basic|full`: no IR passes; CFG simplification, constant
+  folding and DCE; or the existing full pipeline including GVN and GCM.
+  `-O` remains an alias for `full`; the default is `none`.
+- `--isel-tier baseline|trees|full`: existing per-instruction lowering;
+  generated tree selection; or trees plus folded operand liveness and
+  register affinities. The default is `baseline`. `--isel` still allows
+  individual features. When flags overlap, the last one wins.
+- `--regalloc fast|full`: contiguous live intervals without affinities;
+  or lifetime holes and register affinities. The default is `full`.
+  Both use linear scan with the same ABI and spill handling. These are
+  effort choices whose performance needs to be measured per workload.
+
+```sh
+cargo run -p keel -- compile --opt-tier basic --isel-tier trees --regalloc fast input.keel -o out.s
+cargo suite run -c keel-basic,keel-fast,keel-full
+```
+
+Library users can implement `keel_opt::Pass` and use `run_pipeline` (which
+verifies after every pass), or provide an `InstructionSelector` and
+`RegisterAllocator` through `CodegenPipeline`. Target-specific
+`compile_with_pipeline` also accepts restricted register pools for spill
+experiments. Selection produces the instruction plan consumed by the target
+lowering code and allocator; register hints are preferences, never constraints.
+The target emitters retain responsibility for ABI handling and assembly.
+
+The `profiling` crate instruments passes, selection, allocation, lowering,
+and IR parsing/verification. Instrumentation is inactive in default builds.
+To capture with Tracy, build with `cargo build --release -p keel --features
+profile-with-tracy` and connect a compatible Tracy profiler before running
+compilation. The driver starts and retains the client for the invocation.
+Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
+crates and manage the Tracy client themselves. Benchmark uninstrumented
+release builds for final timings; use instrumented builds to locate costs.
+
 ## Current scope
 
 - SSA IR with integer and floating-point operations, globals, thread-local
@@ -88,7 +126,8 @@ extensions, compatibility limits and possible next additions.
   same-named `.c` driver that it is linked with. Each program is compiled
   with the full register set, with a tiny one that forces spills, and
   after the default optimization pipeline, both with optional selection
-  disabled and with every selection pass enabled (six builds). A program that runs
+  disabled and with every selection pass enabled, plus the fast allocator
+  with ordinary and forced-spill register pools (eight builds). A program that runs
   for more than 10 seconds fails.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.

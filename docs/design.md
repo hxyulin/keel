@@ -530,6 +530,14 @@ is easy to follow, which matters more here than the last few percent that
 graph colouring would give. The first backend spilled every value to the
 stack; it was replaced once it had served as the baseline.
 
+Allocation is selected through `RegisterAllocator`, independently of
+`InstructionSelector` and IR optimization tiers. The default `Full` tier
+uses the algorithm below with lifetime holes and optional selection
+register affinities. `Fast` collapses each interval to its first and last
+points and skips affinities; it uses the same liveness, ABI constraints,
+and spill machinery. Both tiers can be compared with the same selected
+instruction plan and register pools through `CodegenPipeline`.
+
 1. **Linearize.** Reachable blocks in reverse postorder, which is also the
    emission order. Unreachable blocks are not emitted. Each instruction has
    two program points: it reads operands at `2k` and writes results at

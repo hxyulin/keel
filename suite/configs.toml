@@ -69,3 +69,19 @@ flags = ["-O", "--isel", "folds"]
 name = "keel-O-hints"
 compiler = "keel"
 flags = ["-O", "--isel", "hints"]
+
+# Independently selectable effort presets; opt-in for benchmark comparisons.
+[[config]]
+name = "keel-basic"
+compiler = "keel"
+flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
+
+[[config]]
+name = "keel-fast"
+compiler = "keel"
+flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
+
+[[config]]
+name = "keel-full"
+compiler = "keel"
+flags = ["--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
