@@ -74,16 +74,16 @@ pub enum Loc {
 
 /// The registers the allocator may hand out.
 #[derive(Copy, Clone, Debug)]
-pub struct Pools {
+pub struct Pools<'a> {
     /// Clobbered by calls. Preferred for values not live across a call:
     /// they cost nothing to use.
-    pub caller_saved: &'static [u8],
+    pub caller_saved: &'a [u8],
     /// Preserved by calls, but a function that writes one must save and
     /// restore it.
-    pub callee_saved: &'static [u8],
+    pub callee_saved: &'a [u8],
     /// The same for floats, in the SIMD/FP registers.
-    pub float_caller_saved: &'static [u8],
-    pub float_callee_saved: &'static [u8],
+    pub float_caller_saved: &'a [u8],
+    pub float_callee_saved: &'a [u8],
 }
 
 pub struct Allocation {

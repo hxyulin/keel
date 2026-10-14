@@ -26,6 +26,16 @@ pub enum Intrinsic {
     /// target-defined memory: 8 bytes, align 8, on Apple arm64. Read it with
     /// `va_arg`; copying its bytes copies the position.
     VaStart,
+    /// `stack_alloc(size) -> ptr`: `size` bytes of stack, 16-byte aligned,
+    /// live until the function returns or a `stack_restore` to a point
+    /// before it. For `alloca` and variable-length arrays.
+    StackAlloc,
+    /// `stack_save() -> ptr`: marks the current extent of the stack, for
+    /// `stack_restore`.
+    StackSave,
+    /// `stack_restore(mark)`: frees every `stack_alloc` since the
+    /// `stack_save` that returned `mark`, as a VLA's scope ends.
+    StackRestore,
 }
 
 pub struct IntrinsicInfo {
@@ -37,12 +47,15 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 5] = [
+    pub const ALL: [Intrinsic; 8] = [
         Intrinsic::Memcpy,
         Intrinsic::Memmove,
         Intrinsic::Memset,
         Intrinsic::Debugtrap,
         Intrinsic::VaStart,
+        Intrinsic::StackAlloc,
+        Intrinsic::StackSave,
+        Intrinsic::StackRestore,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -53,6 +66,9 @@ impl Intrinsic {
             Intrinsic::Memset => ("memset", &[Type::Ptr, Type::I8, Type::I64], &[], false),
             Intrinsic::Debugtrap => ("debugtrap", &[], &[], false),
             Intrinsic::VaStart => ("va_start", &[Type::Ptr], &[], false),
+            Intrinsic::StackAlloc => ("stack_alloc", &[Type::I64], &[Type::Ptr], false),
+            Intrinsic::StackSave => ("stack_save", &[], &[Type::Ptr], false),
+            Intrinsic::StackRestore => ("stack_restore", &[Type::Ptr], &[], false),
         };
         IntrinsicInfo {
             name,

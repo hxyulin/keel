@@ -1,0 +1,9 @@
+; Dynamic stack allocation and scoped freeing, for alloca and VLAs.
+func @f(i64) -> ptr cc(c) {
+block0(v0: i64):
+    v1 = intrinsic stack_save()
+    v2 = intrinsic stack_alloc(v0)
+    intrinsic stack_restore(v1)
+    v3 = intrinsic stack_alloc(v1)
+    return v2
+}

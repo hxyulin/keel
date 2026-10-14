@@ -84,7 +84,8 @@ format, so there is no reason to hide them behind calls, as LLVM does for
 call-like or target-specific operations, written `intrinsic memcpy(v0, v1, v2)`
 (no `@`: they are not symbols). They share one `Intrinsic { id, args }` format;
 everything passes need (signature, purity) is in a per-intrinsic table in
-`intrinsic.rs`. Current ones: `memcpy`, `memmove`, `memset`, `debugtrap`.
+`intrinsic.rs`. Current ones: `memcpy`, `memmove`, `memset`, `debugtrap`,
+`va_start`, `stack_alloc`, `stack_save`, `stack_restore`.
 The aarch64 backend lowers the memory ones to libc calls for now.
 
 `trap` is a terminator instruction, not an intrinsic: nothing after it runs,
@@ -142,7 +143,17 @@ resumed by a debugger, so it is an intrinsic.
 - Stack memory is declared per function, not allocated by an instruction:
   `ss0 = stack_slot 16, align 4` (alignment a power of two up to 16), and
   `stack_addr ss0` gives its address. Sizes are fixed, so the frame layout is
-  known before codegen; a separate `dynamic_alloca` can come later for VLAs.
+  known before codegen.
+- Dynamic stack memory, for `alloca` and VLAs, comes from intrinsics:
+  `intrinsic stack_alloc(v0)` gives `v0` bytes, 16-byte aligned, until the
+  function returns; `stack_save()` and `stack_restore(mark)` free
+  everything allocated in between, as a VLA's scope ends (a VLA in a loop
+  would otherwise grow the stack every iteration). They are intrinsics,
+  not instructions: rare, pinned, and nothing for the optimizer to fold.
+  A function that uses them addresses its fixed frame from a base
+  pointer, x19 on aarch64 (see the frame layout in `aarch64.rs`). There
+  is no stack probing yet: an allocation larger than the guard page can
+  skip past it.
 - Memory operations are ordered by CFG order.
 - Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
   promise disjointness between classes.

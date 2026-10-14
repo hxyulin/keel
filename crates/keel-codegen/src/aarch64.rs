@@ -59,7 +59,14 @@
 //! ```
 //!
 //! Calls store their stack arguments at `sp` directly: the area is part of
-//! the fixed frame, so `sp` never moves after the prologue.
+//! the fixed frame, so `sp` never moves after the prologue, except in a
+//! function that allocates stack dynamically (`stack_alloc`,
+//! `stack_restore`). There, x19 is the *base pointer*: it keeps the value
+//! `sp` had after the prologue, and everything in the fixed frame but the
+//! outgoing arguments is addressed from it. The outgoing arguments stay at
+//! the bottom, at whatever `sp` is: `stack_alloc` moves `sp` down by the
+//! size, rounded to 16, and returns the memory just above the outgoing
+//! area, part of which held the old outgoing area.
 //!
 //! # Symbols
 //!
@@ -112,6 +119,9 @@ pub const REGISTERS: Pools = Pools {
 const S0: u8 = 16;
 const S1: u8 = 17;
 const S2: u8 = 8;
+
+/// The base pointer of functions that move `sp`; see "Frame".
+const BASE: u8 = 19;
 
 /// FP scratch registers, used like `S0`–`S2` for floats.
 const FS0: u8 = 16;
@@ -170,7 +180,11 @@ fn is_call(func: &Function, data: &InstData) -> bool {
         }
         InstData::Intrinsic { id, .. } => match id {
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
-            Intrinsic::Debugtrap | Intrinsic::VaStart => false,
+            Intrinsic::Debugtrap
+            | Intrinsic::VaStart
+            | Intrinsic::StackAlloc
+            | Intrinsic::StackSave
+            | Intrinsic::StackRestore => false,
         },
         _ => false,
     }
@@ -206,6 +220,9 @@ struct FunctionCompiler<'a> {
     param_areas: Vec<Option<usize>>,
     /// Offset from `sp` of spill slot 0, above the areas for calls.
     spill_base: usize,
+    /// The register the fixed frame is addressed from: `sp`, or x19 in a
+    /// function that moves `sp`.
+    base: &'static str,
     /// Offset from x29 of the first variadic argument: the next 8-byte slot
     /// after the named stack parameters.
     variadic_offset: u32,
@@ -341,7 +358,26 @@ impl<'a> FunctionCompiler<'a> {
         }
         let spill_base = offset.next_multiple_of(8);
 
-        let alloc = regalloc::allocate(func, pools, |data| is_call(func, data));
+        let moves_sp = func.layout_insts().any(|(_, inst)| {
+            matches!(
+                func.inst_data(inst),
+                InstData::Intrinsic {
+                    id: Intrinsic::StackAlloc | Intrinsic::StackRestore,
+                    ..
+                }
+            )
+        });
+        let callee_saved: Vec<u8> = (pools.callee_saved.iter().copied())
+            .filter(|&r| !moves_sp || r != BASE)
+            .collect();
+        let pools = Pools {
+            callee_saved: &callee_saved,
+            ..*pools
+        };
+        let mut alloc = regalloc::allocate(func, &pools, |data| is_call(func, data));
+        if moves_sp {
+            alloc.callee_saved_used.insert(0, BASE);
+        }
         let mut offset = spill_base + 8 * alloc.spill_slots as usize;
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
@@ -369,6 +405,7 @@ impl<'a> FunctionCompiler<'a> {
             sret_save,
             param_areas,
             spill_base,
+            base: if moves_sp { "x19" } else { "sp" },
             variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
             next_block: None,
@@ -430,6 +467,9 @@ impl<'a> FunctionCompiler<'a> {
         if self.frame_size > 0 {
             self.sub_sp(self.frame_size);
         }
+        if self.base != "sp" {
+            self.emit(format!("mov\t{}, sp", self.base));
+        }
         // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
         // so this copy has no cycles; it may still store to spill slots.
         // Stack arguments are in the caller's frame, just above ours. An
@@ -469,11 +509,11 @@ impl<'a> FunctionCompiler<'a> {
                         let area = self.param_areas[i].expect("planned");
                         let layout = abi_param.layout().expect("a struct");
                         self.store_struct_regs(&regs, layout, area);
-                        addresses.push((dst, "sp", area));
+                        addresses.push((dst, self.base, area));
                     }
                     ArgLoc::OnStack(offset) => addresses.push((dst, "x29", 16 + offset as usize)),
                     ArgLoc::SretRegs(_) => {
-                        addresses.push((dst, "sp", self.param_areas[i].expect("planned")))
+                        addresses.push((dst, self.base, self.param_areas[i].expect("planned")))
                     }
                 }
             }
@@ -613,7 +653,7 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let offset = self.stack_slot_offsets[slot.index()];
                 // `add` takes a 12-bit immediate, optionally shifted by 12.
-                self.emit(format!("add\tx{d}, sp, #{}", offset & 0xfff));
+                self.emit(format!("add\tx{d}, {}, #{}", self.base, offset & 0xfff));
                 if offset >> 12 != 0 {
                     self.emit(format!("add\tx{d}, x{d}, #{}, lsl #12", offset >> 12));
                 }
@@ -960,6 +1000,26 @@ impl<'a> FunctionCompiler<'a> {
                     self.emit(format!("add\tx{S0}, x29, #{}", self.variadic_offset));
                     self.emit(format!("str\tx{S0}, [x{list}]"));
                 }
+                // Round up to keep `sp` 16-byte aligned; the memory starts
+                // above the outgoing arguments, which stay at `sp`.
+                Intrinsic::StackAlloc => {
+                    let size = self.use_reg(args[0], S0);
+                    self.emit(format!("add\tx{S0}, x{size}, #15"));
+                    self.emit(format!("and\tx{S0}, x{S0}, #-16"));
+                    self.emit(format!("sub\tsp, sp, x{S0}"));
+                    let d = self.def_reg(result);
+                    self.emit(format!("add\tx{d}, sp, #{}", self.copy_base));
+                    self.def_done(result, d);
+                }
+                Intrinsic::StackSave => {
+                    let d = self.def_reg(result);
+                    self.emit(format!("mov\tx{d}, sp"));
+                    self.def_done(result, d);
+                }
+                Intrinsic::StackRestore => {
+                    let mark = self.use_reg(args[0], S0);
+                    self.emit(format!("mov\tsp, x{mark}"));
+                }
             },
             InstData::Trap => self.emit("brk\t#1"),
             InstData::Return { args } => {
@@ -1041,7 +1101,8 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 ArgLoc::OnStack(offset) => {
                     let src = self.use_reg(arg, S0);
-                    self.copy_bytes(offset as usize, src, layout.expect("a struct").size());
+                    let size = layout.expect("a struct").size();
+                    self.copy_bytes("sp", offset as usize, src, size);
                 }
                 ArgLoc::Copy(slot) => {
                     let size = layout.expect("a struct").size();
@@ -1049,11 +1110,11 @@ impl<'a> FunctionCompiler<'a> {
                     let at = self.copy_base + copied as usize;
                     copied += size;
                     let src = self.use_reg(arg, S0);
-                    self.copy_bytes(at, src, size);
+                    self.copy_bytes(self.base, at, src, size);
                     match slot {
                         Slot::Reg(dst) => late.push(Late::Address(dst, at)),
                         Slot::Stack(offset) => {
-                            self.address(Loc::Reg(S0), "sp", at);
+                            self.address(Loc::Reg(S0), self.base, at);
                             self.emit(format!("str\tx{S0}, [sp, #{offset}]"));
                         }
                     }
@@ -1065,7 +1126,7 @@ impl<'a> FunctionCompiler<'a> {
                 ArgLoc::SretRegs(regs) => {
                     let p = self.use_reg(arg, S0);
                     let save = self.sret_save.expect("planned");
-                    self.emit(format!("str\tx{p}, [sp, #{save}]"));
+                    self.emit(format!("str\tx{p}, [{}, #{save}]", self.base));
                     sret = Some((regs, layout.expect("a struct")));
                 }
             }
@@ -1076,7 +1137,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         for step in late {
             match step {
-                Late::Address(dst, at) => self.address(dst, "sp", at),
+                Late::Address(dst, at) => self.address(dst, self.base, at),
                 Late::Sret(arg) => {
                     let p = self.use_reg(arg, S0);
                     self.emit(format!("mov\tx8, x{p}"));
@@ -1476,7 +1537,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some((regs, layout)) = sret {
             let save = self.sret_save.expect("planned");
-            self.emit(format!("ldr\tx{S0}, [sp, #{save}]"));
+            self.emit(format!("ldr\tx{S0}, [{}, #{save}]", self.base));
             match abi::classify(layout) {
                 StructClass::Hfa { ty, .. } => {
                     for (&(offset, _), &r) in layout.leaves().iter().zip(&regs) {
@@ -1495,38 +1556,40 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Stores struct registers `regs` (as passed or returned) into the
-    /// frame at `sp + area`, which is rounded up to 8 bytes, so whole
-    /// registers fit.
+    /// frame at `area`, which is rounded up to 8 bytes, so whole registers
+    /// fit.
     fn store_struct_regs(&mut self, regs: &[Loc], layout: &Layout, area: usize) {
+        let base = self.base;
         match abi::classify(layout) {
             StructClass::Hfa { ty, .. } => {
                 for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
                     let fr = freg(loc_reg(r), ty);
-                    self.emit(format!("str\t{fr}, [sp, #{}]", area + offset as usize));
+                    self.emit(format!("str\t{fr}, [{base}, #{}]", area + offset as usize));
                 }
             }
             _ => {
                 for (k, &r) in regs.iter().enumerate() {
                     let r = loc_reg(r);
-                    self.emit(format!("str\tx{r}, [sp, #{}]", area + 8 * k));
+                    self.emit(format!("str\tx{r}, [{base}, #{}]", area + 8 * k));
                 }
             }
         }
     }
 
     /// Loads the registers a struct of `layout` is returned in from the
-    /// frame at `sp + area`.
+    /// frame at `area`.
     fn load_struct_regs(&mut self, layout: &Layout, area: usize) {
+        let base = self.base;
         match abi::classify(layout) {
             StructClass::Hfa { ty, .. } => {
                 for (i, &(offset, _)) in layout.leaves().iter().enumerate() {
                     let fr = freg(i as u8, ty);
-                    self.emit(format!("ldr\t{fr}, [sp, #{}]", area + offset as usize));
+                    self.emit(format!("ldr\t{fr}, [{base}, #{}]", area + offset as usize));
                 }
             }
             StructClass::Gprs { count } => {
                 for k in 0..count as usize {
-                    self.emit(format!("ldr\tx{k}, [sp, #{}]", area + 8 * k));
+                    self.emit(format!("ldr\tx{k}, [{base}, #{}]", area + 8 * k));
                 }
             }
             StructClass::Indirect => unreachable!("returned through memory"),
@@ -1581,13 +1644,16 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
-    /// Copies `size` bytes from `[x<src>]` to `[sp, #to]` through x17.
-    fn copy_bytes(&mut self, to: usize, src: u8, size: u64) {
+    /// Copies `size` bytes from `[x<src>]` to `[<base>, #to]` through x17.
+    fn copy_bytes(&mut self, base: &str, to: usize, src: u8, size: u64) {
         for (at, n) in pieces(size) {
             let (load, store) = piece_ops(n);
             let wide = if n == 8 { 'x' } else { 'w' };
             self.emit(format!("{load}\t{wide}{S1}, [x{src}, #{at}]"));
-            self.emit(format!("{store}\t{wide}{S1}, [sp, #{}]", to + at as usize));
+            self.emit(format!(
+                "{store}\t{wide}{S1}, [{base}, #{}]",
+                to + at as usize
+            ));
         }
     }
 
@@ -2234,7 +2300,7 @@ impl<'a> FunctionCompiler<'a> {
     /// The address of spill slot `index`: above the outgoing arguments at
     /// the bottom of the frame, close enough to `sp` for a scaled immediate.
     fn slot(&self, index: u32) -> String {
-        format!("[sp, #{}]", self.spill_base + 8 * index as usize)
+        format!("[{}, #{}]", self.base, self.spill_base + 8 * index as usize)
     }
 
     fn loc_name(&self, loc: Loc) -> String {

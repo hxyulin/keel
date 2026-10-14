@@ -1,0 +1,89 @@
+; Dynamic stack allocation. After stack_alloc moves sp, the fixed frame
+; (spill slots, stack slots, struct copies) is addressed from the base
+; pointer, while calls still put stack arguments at sp, below the
+; allocated memory. dyn_alloca.c checks the results.
+; expect: exit 0
+
+decl @c_fill(ptr, i64)
+; Nine i64 arguments after the pointer: the last two go on the stack.
+decl @c_many(ptr, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> i64
+decl @c_big(ptr byval {i64, i64, i64}) -> i64
+
+; Allocates n i64s, has C fill them with 0..n-1, and returns their sum
+; plus what c_many and c_big return. A value from before the allocation
+; (v2, in a spill slot with few registers) is used after it, and a stack
+; slot holds the struct passed by value.
+func @k_vla(i64) -> i64 cc(c) {
+    ss0 = stack_slot 24, align 8
+block0(v0: i64):
+    v1 = iconst.i64 1000
+    v2 = imul v0, v1
+    v3 = iconst.i64 8
+    v4 = imul v0, v3
+    v5 = intrinsic stack_alloc(v4)
+    call @c_fill(v5, v0)
+    v6 = iconst.i64 0
+    jump block1(v6, v6)
+block1(v7: i64, v8: i64):
+    v9 = icmp.ult v7, v0
+    brif v9, block2, block3
+block2:
+    v10 = imul v7, v3
+    v11 = ptradd v5, v10
+    v12 = load.i64 v11
+    v13 = iadd v8, v12
+    v14 = iconst.i64 1
+    v15 = iadd v7, v14
+    jump block1(v15, v13)
+block3:
+    v16 = iconst.i64 2
+    v17 = iconst.i64 3
+    v18 = call @c_many(v5, v0, v1, v3, v6, v16, v17, v2, v0, v1)
+    v19 = stack_addr ss0
+    store v0, v19
+    v20 = ptradd v19, v3
+    store v2, v20
+    v21 = ptradd v20, v3
+    store v8, v21
+    v22 = call @c_big(v19)
+    v23 = iadd v8, v18
+    v24 = iadd v23, v22
+    v25 = iadd v24, v2
+    return v25
+}
+
+; Allocates 64 KiB per iteration, n times, freeing each with
+; stack_restore: without it, 100000 iterations would need 6 GiB of stack.
+; Returns the sum of the first word written in each.
+func @k_loop(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    jump block1(v1, v1)
+block1(v2: i64, v3: i64):
+    v4 = icmp.ult v2, v0
+    brif v4, block2, block3
+block2:
+    v5 = intrinsic stack_save()
+    v6 = iconst.i64 65536
+    v7 = intrinsic stack_alloc(v6)
+    store v2, v7
+    v8 = load.i64 v7
+    v9 = iadd v3, v8
+    intrinsic stack_restore(v5)
+    v10 = iconst.i64 1
+    v11 = iadd v2, v10
+    jump block1(v11, v9)
+block3:
+    return v3
+}
+
+; Keeps a value in a callee-saved register (x19 first) across k_vla,
+; which uses x19 as its base pointer and must restore it.
+func @k_outer(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v1 = iconst.i64 7
+    v2 = imul v0, v1
+    v3 = call @k_vla(v0)
+    v4 = iadd v3, v2
+    return v4
+}

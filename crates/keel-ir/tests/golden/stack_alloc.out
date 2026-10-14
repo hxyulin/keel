@@ -1,0 +1,2 @@
+verifier errors:
+  @f inst3 `v3 = intrinsic stack_alloc(v1)`: intrinsic stack_alloc takes (i64), got (ptr)
