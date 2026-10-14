@@ -577,9 +577,6 @@ impl Verifier<'_> {
                 if ty(*list) != Type::Ptr {
                     self.inst_error(inst, format!("va_arg list must be ptr, got {}", ty(*list)));
                 }
-                if !func.sig.variadic {
-                    self.inst_error(inst, "va_arg in a function that is not variadic".into());
-                }
             }
             InstData::Store { addr, .. } => {
                 if ty(*addr) != Type::Ptr {

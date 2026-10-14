@@ -360,7 +360,9 @@ Apple arm64's C convention, as implemented:
   a `va_list` at `v0`, and `v1 = va_arg.i64 v0` reads the next argument and
   advances it (types as for calls). A `va_list` is target-defined memory, 8
   bytes on Apple arm64 (a pointer to the next 8-byte slot), so a frontend
-  can pass one to `vprintf` by loading it as a `ptr`.
+  can pass one to `vprintf` by loading it as a `ptr`. `va_arg` works in
+  any function, on a `va_list` it was passed (as `vprintf` reads its
+  arguments); only `va_start` needs a variadic function.
 
 Limits: at most one return value (return structs through `sret`); at most
 4080 bytes of stack arguments per call.
@@ -572,4 +574,69 @@ the predecessors, adding a block parameter where several meet. Blocks are
 incomplete parameters that sealing fills in. Parameters whose arguments are
 all one value are removed, and `finalize` repeats that until nothing changes,
 since removing one can make another trivial.
+Reading a variable that nothing defined gives zero (C's uninitialized
+locals, code after a `return` that no branch reaches, a label nothing
+jumps to), rather than a panic.
 
+## C frontend
+
+`keel-c` compiles one preprocessed C file to one module: `keel cc in.i -o
+out.s`. Preprocessing is clang's (`clang -E`): a preprocessor is a separate
+language with little to teach about compiling, and taking clang's means
+the system headers come out exactly as clang sees them. Line markers (`#
+12 "file.c"`) in its output give tokens their original locations, for
+diagnostics and `-g`.
+
+- **Lexer → parser → IR.** C cannot be parsed without knowing which names
+  are types (`T * x;` is a declaration if `T` is a typedef), so the parser
+  keeps scopes; since it then knows every name's type, it type-checks as
+  it goes and builds a typed tree in which every implicit conversion is an
+  explicit `Cast` (promotions, usual arithmetic conversions, assignment,
+  array and function decay). IR generation only follows the tree.
+- **Locals.** A scalar local whose address is never taken, and that is not
+  `volatile`, becomes a variable of the SSA builder; everything else gets
+  a stack slot. That is LLVM's `mem2reg`, decided while parsing, which has
+  seen every `&x` before IR generation starts. Loops seal their header
+  after the back edge; labels (`goto`) are sealed at the end of the
+  function.
+- **Aggregates** are addresses: a struct-typed expression evaluates to a
+  pointer to its bytes, assignment copies (with loads and stores up to 64
+  bytes, `memcpy` beyond), and calls pass them `byval` and return them
+  `sret`. The ABI only looks at a struct's size and whether it is a
+  homogeneous float aggregate, so the layout on the signature is an array
+  of its float type or of integers as wide as its alignment.
+- **Initializers** are flattened to (offset, value) items: designators,
+  brace elision and string literals are resolved while parsing. Locals are
+  zeroed and then stored to; objects with static storage are evaluated to
+  bytes plus relocations (`&x`, `"str" + 6`, function addresses).
+- **Only what is used is emitted.** Headers declare hundreds of functions
+  and define `inline` ones a file may never call; external definitions are
+  always emitted and everything else only when something emitted refers to
+  it. A C99 `inline` definition with no `extern` declaration becomes a
+  local copy.
+- **Target facts** are Apple arm64's: LP64, signed `char`, `long double`
+  is `double`, `va_list` is a `char *` (so `va_copy` is an assignment, and
+  `va_arg` works on a passed `va_list`).
+
+Beyond ISO C11 it accepts what Apple's headers and real programs use:
+`__attribute__((..))` (`aligned`, `packed` and `returns_twice` are
+honoured), `#pragma pack`, `__asm("_name")` symbol renames, C23 enums with
+a fixed type, zero-length arrays, block pointers (`^`, as plain pointers),
+`__int128`, `typeof`, GCC's `__atomic_load_n`/`__atomic_store_n`, and the
+`__builtin_`s the headers expand to. `_FORTIFY_SOURCE`'s checked calls
+(`__builtin___memcpy_chk`) become the plain function, since
+`__builtin_object_size` always answers "unknown". `setjmp` and friends are
+marked `returns_twice`.
+
+Not supported: `_Generic`, `_Atomic`, `_Complex`, variable-length arrays,
+K&R definitions, computed `goto`, statement expressions, and inline
+assembly statements (the backend has them; the frontend does not pass
+them through yet).
+
+**Testing.** Test programs are built by clang and by keel and must behave
+the same, so they print what they compute instead of hard-coding answers.
+`scripts/test-lua.sh` builds Lua 5.4 and runs its test suite;
+`scripts/test-sqlite.sh` builds SQLite and compares query results with
+clang's build. Both pass, with and without `-O`; together they found the
+bugs the small programs missed (an array of pointers to `const` placed in
+read-only memory, a variable used in its own initializer, `#pragma pack`).

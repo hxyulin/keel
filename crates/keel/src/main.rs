@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! keel compile [-O] [-g] <input.keel> [-o <output.s>]   IR to aarch64 assembly
+//! keel cc [-O] [-g] [--emit-ir] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel passes                                      list the passes
 //! ```
@@ -11,6 +12,8 @@
 //! Assembly has debug info if the input names source files (`file`
 //! lines); `-g` gives an input without them its own lines instead, for
 //! stepping through the IR in a debugger.
+//! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
+//! with `--emit-ir`, to keel IR; `-g` gives it debug info.
 //! Output goes to stdout without `-o`.
 
 use keel_ir::Module;
@@ -18,6 +21,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] <input.i> [-o <output>]
   keel opt [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel passes";
 
@@ -38,6 +42,7 @@ struct Options {
     output: Option<String>,
     optimize: bool,
     ir_lines: bool,
+    emit_ir: bool,
     passes: Option<Vec<String>>,
 }
 
@@ -53,6 +58,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimize = true,
             "-g" => opts.ir_lines = true,
+            "--emit-ir" => opts.emit_ir = true,
             "-p" => {
                 let list = args.next().ok_or("`-p` needs a list of passes")?;
                 opts.passes = Some(list.split(',').map(|s| s.trim().to_string()).collect());
@@ -74,6 +80,31 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let (input, mut module) = load(&opts)?;
             if opts.optimize {
                 keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
+            }
+            let asm =
+                keel_codegen::aarch64::compile(&module).map_err(|e| format!("{input}: {e}"))?;
+            write_output(&opts, &asm)
+        }
+        "cc" => {
+            let opts = parse_options(rest, &["-o", "-O", "-g", "--emit-ir"])?;
+            let input = opts.input.clone().ok_or(USAGE)?;
+            let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
+            let c_opts = keel_c::Options {
+                debug_info: opts.ir_lines,
+            };
+            let mut module = keel_c::compile(&src, &input, c_opts).map_err(|e| e.to_string())?;
+            if let Err(errors) = keel_ir::verify_module(&module) {
+                let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
+                return Err(format!(
+                    "{input}: internal error, invalid IR:\n{}",
+                    lines.join("\n")
+                ));
+            }
+            if opts.optimize {
+                keel_opt::optimize(&mut module).map_err(|e| format!("{input}: {e}"))?;
+            }
+            if opts.emit_ir {
+                return write_output(&opts, &module.to_string());
             }
             let asm =
                 keel_codegen::aarch64::compile(&module).map_err(|e| format!("{input}: {e}"))?;

@@ -245,14 +245,34 @@ fn nested_loops(seal_at_end: bool) {
     assert!(text.contains("icmp.slt v6, v0"), "{text}");
 }
 
+/// C reads an uninitialized local as some value; the builder gives zero,
+/// also through a block parameter when only some paths define it.
 #[test]
-#[should_panic(expected = "used in block0 before it is defined")]
-fn use_before_definition_panics() {
-    let mut func = Function::new("f", sig(&[], &[]));
+fn use_before_definition_reads_zero() {
+    let mut func = Function::new("f", sig(&[Type::I8], &[Type::I64]));
     let mut b = FunctionBuilder::new(&mut func);
-    let entry = b.create_block();
+    let (entry, then, join) = (b.create_block(), b.create_block(), b.create_block());
+    let x = b.declare_var(Type::I64);
+
     b.switch_to_block(entry);
     b.seal_block(entry);
-    let x = b.declare_var(Type::I64);
-    b.use_var(x);
+    let c = b.func.append_block_param(entry, Type::I8);
+    b.ins().brif(c, then, &[], join, &[]);
+    b.seal_block(then);
+
+    b.switch_to_block(then);
+    let one = b.ins().iconst(Type::I64, 1);
+    b.def_var(x, one);
+    b.ins().jump(join, &[]);
+    b.seal_block(join);
+
+    b.switch_to_block(join);
+    let value = b.use_var(x);
+    b.ins().return_(&[value]);
+    b.finalize();
+
+    verify(&func).unwrap();
+    let text = func.to_string();
+    assert!(text.contains("iconst.i64 0"), "{text}");
+    assert!(text.contains("block2(v"), "{text}");
 }

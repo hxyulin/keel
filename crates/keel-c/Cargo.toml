@@ -1,0 +1,14 @@
+[package]
+name = "keel-c"
+description = "A C frontend for keel: preprocessed C to keel IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
+keel-frontend = { path = "../keel-frontend" }
+
+[dev-dependencies]
+keel-codegen = { path = "../keel-codegen" }
+keel-opt = { path = "../keel-opt" }

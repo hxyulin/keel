@@ -6,7 +6,18 @@ version = 4
 name = "keel"
 version = "0.1.0"
 dependencies = [
+ "keel-c",
  "keel-codegen",
+ "keel-ir",
+ "keel-opt",
+]
+
+[[package]]
+name = "keel-c"
+version = "0.1.0"
+dependencies = [
+ "keel-codegen",
+ "keel-frontend",
  "keel-ir",
  "keel-opt",
 ]

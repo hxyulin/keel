@@ -17,6 +17,8 @@
 //!   **trivial**: it is removed and its uses replaced by that value. A
 //!   variable that is merely read in a loop (`n` in `while i < n`) gets a
 //!   parameter at the loop header that turns out trivial this way.
+//! - A variable read where nothing defined it (C's uninitialized locals, or
+//!   code after a `return` that no branch reaches) reads as zero.
 //!
 //! ```text
 //! let mut b = FunctionBuilder::new(&mut func);
@@ -27,7 +29,9 @@
 //! b.finalize();
 //! ```
 
-use keel_ir::{Block, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value};
+use keel_ir::{
+    Block, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value,
+};
 use std::collections::HashMap;
 
 keel_ir::entity!(
@@ -169,7 +173,7 @@ impl<'f> FunctionBuilder<'f> {
             param
         } else {
             match self.preds[&block].as_slice() {
-                [] => panic!("{var} is used in {block} before it is defined"),
+                [] => self.zero(block, ty),
                 &[(branch, _)] => {
                     let pred = self.func.inst_block(branch);
                     self.read(var, pred)
@@ -185,6 +189,26 @@ impl<'f> FunctionBuilder<'f> {
         };
         self.defs.insert((var, block), value);
         value
+    }
+
+    /// A zero of type `ty` at the top of `block`, for a variable read where
+    /// nothing defined it.
+    fn zero(&mut self, block: Block, ty: Type) -> Value {
+        let at = match self.func.block_insts(block).first() {
+            Some(&inst) => InsertPoint::Before(inst),
+            None => InsertPoint::End(block),
+        };
+        match ty {
+            Type::Ptr => {
+                let zero = self.func.ins(at).iconst(Type::I64, 0);
+                self.func
+                    .ins(at)
+                    .convert(ConvertOp::IntToPtr, Type::Ptr, zero)
+            }
+            Type::F32 => self.func.ins(at).f32const(0.0),
+            Type::F64 => self.func.ins(at).f64const(0.0),
+            _ => self.func.ins(at).iconst(ty, 0),
+        }
     }
 
     fn add_param(&mut self, block: Block, ty: Type) -> Value {
@@ -232,7 +256,9 @@ impl<'f> FunctionBuilder<'f> {
             }
             same = Some(arg);
         }
-        let same = same.unwrap_or_else(|| panic!("{param} in {block} has no value besides itself"));
+        // No value besides itself: no branch into the block defines it.
+        let ty = self.func.value_type(param);
+        let same = same.unwrap_or_else(|| self.zero(block, ty));
         self.func.remove_block_param(block, index);
         for &(branch, i) in &self.preds[&block] {
             self.func.inst_data_mut(branch).branch_dests_mut()[i]
