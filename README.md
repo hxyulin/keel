@@ -44,7 +44,8 @@ cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
   same and exit the same.
 - `scripts/test-lua.sh [-O]` builds Lua 5.4 with keel and runs Lua's test
   suite; `scripts/test-sqlite.sh [-O]` builds SQLite and compares its
-  answers to `scripts/sqlite-queries.sql` with clang's build. Both download
-  the sources (checksummed) into `target/`.
+  answers to `scripts/sqlite-queries.sql` with clang's build;
+  `scripts/test-quickjs.sh [-O]` builds QuickJS and runs its tests. They
+  download the sources (checksummed) into `target/`.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.

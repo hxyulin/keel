@@ -34,6 +34,18 @@ pub fn eval_int(e: &Expr) -> Option<i64> {
 
 /// `v` as a value of integer type `ty`: truncated and sign- or
 /// zero-extended back to 64 bits.
+/// Whether `v`, of integer type `from`, converted to integer type `to`
+/// is still an `i64` constant, whose bits a 128-bit type gets sign
+/// extended. Not an unsigned 64-bit value with the top bit set: as an
+/// `__int128` it is above `i64::MAX`.
+pub fn fits_i64(v: i64, from: &Ty, to: &Ty) -> bool {
+    let wide = to.int_kind().is_some_and(|k| k.size() == 16);
+    let unsigned64 = from
+        .int_kind()
+        .is_some_and(|k| k.size() == 8 && !k.signed());
+    !(wide && unsigned64 && v < 0)
+}
+
 pub fn normalize(v: i64, ty: &Ty) -> i64 {
     match ty {
         Ty::Int(IntKind::Bool) => i64::from(v != 0),
@@ -62,6 +74,7 @@ pub fn eval(e: &Expr) -> Option<Const> {
     Some(match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
+        ExprKind::LabelAddr(n) => Const::Int(*n as i64),
         ExprKind::Addr(inner) => eval_addr(inner)?,
         ExprKind::Cast(inner) => cast(eval(inner)?, &inner.ty, &e.ty)?,
         ExprKind::Unary(op, a) => {
@@ -126,7 +139,8 @@ fn eval_addr(e: &Expr) -> Option<Const> {
 fn cast(c: Const, from: &Ty, to: &Ty) -> Option<Const> {
     Some(match (c, to) {
         (_, Ty::Int(IntKind::Bool)) => Const::Int(i64::from(truthy(c))),
-        (Const::Int(v), Ty::Int(_)) => Const::Int(normalize(v, to)),
+        (Const::Int(v), Ty::Int(_)) if fits_i64(v, from, to) => Const::Int(normalize(v, to)),
+        (Const::Int(_), Ty::Int(_)) => return None,
         (Const::Float(f), Ty::Int(k)) => {
             let v = if k.signed() {
                 f as i64

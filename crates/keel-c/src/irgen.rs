@@ -23,9 +23,10 @@ use crate::types::*;
 use crate::{Error, Loc};
 use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
-    AbiParam, ArgExt, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal, DebugScope,
-    DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic, Language,
-    Module, Ordering, Purpose, Signature, SourceFile, SourceLoc, StackSlot, Symbol, Type, Value,
+    AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
+    DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic,
+    Language, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc, StackSlot,
+    Symbol, Type, Value,
 };
 use std::collections::HashMap;
 
@@ -818,6 +819,28 @@ impl FnGen<'_, '_, '_> {
                 let block = self.label_block(label);
                 self.jump_to(block);
             }
+            Stmt::GotoIndirect(target) => {
+                // A switch on the label's number: a jump table for each
+                // `goto *`, as an indirect branch would be.
+                self.ensure_block();
+                self.set_loc(target.loc);
+                let p = self.val(target)?;
+                let n = self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, p);
+                let call = |block| keel_ir::BlockCall {
+                    block,
+                    args: Vec::new(),
+                };
+                let table = (self.def.label_addrs.iter().enumerate())
+                    .map(|(i, label)| (i as i64 + 1, call(self.label_block(label))))
+                    .collect();
+                // Anywhere else is undefined.
+                let nowhere = self.new_block();
+                self.b.ins().switch(n, call(nowhere), table);
+                self.b.seal_block(nowhere);
+                self.switch_to(nowhere);
+                self.b.ins().trap();
+                self.terminated = true;
+            }
             Stmt::Label(label) => {
                 let block = self.label_block(label);
                 self.jump_to(block);
@@ -903,6 +926,10 @@ impl FnGen<'_, '_, '_> {
 
     fn emit(&mut self, e: &Expr) -> R<Option<Value>> {
         let v = match &e.kind {
+            ExprKind::LabelAddr(n) => {
+                let n = self.b.ins().iconst(Type::I64, *n as i64);
+                self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n)
+            }
             ExprKind::Int(v) => match &e.ty {
                 Ty::Ptr(_) => {
                     let n = self.b.ins().iconst(Type::I64, *v);
@@ -1096,6 +1123,26 @@ impl FnGen<'_, '_, '_> {
             ExprKind::Comma(a, b) => {
                 self.emit(a)?;
                 return self.emit(b);
+            }
+            ExprKind::StmtExpr {
+                scope,
+                stmts,
+                value,
+            } => {
+                let outer = self.scope;
+                self.set_scope(self.scopes.get(*scope).copied().flatten());
+                for s in stmts {
+                    self.stmt(s)?;
+                }
+                let v = match value {
+                    Some(v) => {
+                        self.ensure_block();
+                        self.emit(v)?
+                    }
+                    None => None,
+                };
+                self.set_scope(outer);
+                return Ok(v);
             }
             ExprKind::Call(f, args) => return self.call(f, args, e),
             ExprKind::Cast(inner) => {
@@ -1529,25 +1576,81 @@ impl FnGen<'_, '_, '_> {
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
                 self.b.func.inst_results(inst)[0]
             }
-            Builtin::AtomicLoad | Builtin::AtomicStore => {
-                let order = crate::eval::eval_int(args.last().unwrap()).unwrap();
-                let store = op == Builtin::AtomicStore;
-                // `__ATOMIC_RELAXED` is 0 ... `__ATOMIC_SEQ_CST` 5; consume
-                // is acquire. A load cannot release nor a store acquire, so
-                // those orders weaken to what applies.
-                let ordering = match (order, store) {
-                    (0, _) => Ordering::Relaxed,
-                    (1 | 2 | 4, false) => Ordering::Acquire,
-                    (3 | 4, true) => Ordering::Release,
-                    (3, false) => Ordering::Relaxed,
-                    (1 | 2, true) => Ordering::Relaxed,
+            Builtin::FrameAddress => {
+                let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
+                self.b.func.inst_results(inst)[0]
+            }
+            Builtin::AtomicLoad
+            | Builtin::AtomicStore
+            | Builtin::AtomicRmw { .. }
+            | Builtin::AtomicCas
+            | Builtin::AtomicCasBool
+            | Builtin::AtomicCompareExchange
+            | Builtin::Fence => {
+                // `__ATOMIC_RELAXED` 0 ... `__ATOMIC_SEQ_CST` 5; consume
+                // (1) is acquire. A load cannot release nor a store
+                // acquire, so those orders weaken to what applies.
+                let order = crate::eval::eval_int(args.last().unwrap()).unwrap_or(5);
+                let load = matches!(op, Builtin::AtomicLoad);
+                let store = matches!(op, Builtin::AtomicStore);
+                let ordering = match order {
+                    0 => Ordering::Relaxed,
+                    1 | 2 if store => Ordering::Relaxed,
+                    1 | 2 => Ordering::Acquire,
+                    3 if load => Ordering::Relaxed,
+                    3 => Ordering::Release,
+                    4 if load => Ordering::Acquire,
+                    4 if store => Ordering::Release,
+                    4 => Ordering::AcqRel,
                     _ => Ordering::SeqCst,
                 };
-                if store {
-                    ins.atomic_store(ordering, vals[1], vals[0]);
-                    return Ok(None);
+                match op {
+                    Builtin::AtomicLoad => ins.atomic_load(e.ty.ir(), ordering, vals[0]),
+                    Builtin::AtomicStore => {
+                        ins.atomic_store(ordering, vals[1], vals[0]);
+                        if e.ty == Ty::Void {
+                            return Ok(None);
+                        }
+                        vals[1]
+                    }
+                    Builtin::AtomicRmw { op, new } => {
+                        let old = ins.atomic_rmw(op, ordering, vals[0], vals[1]);
+                        if !new {
+                            return Ok(Some(old));
+                        }
+                        let bin = match op {
+                            RmwOp::Add => BinaryOp::Iadd,
+                            RmwOp::Sub => BinaryOp::Isub,
+                            RmwOp::And => BinaryOp::And,
+                            RmwOp::Or => BinaryOp::Or,
+                            RmwOp::Xor => BinaryOp::Xor,
+                            _ => unreachable!("the parser only asks for these"),
+                        };
+                        self.b.ins().binary(bin, old, vals[1])
+                    }
+                    Builtin::AtomicCas => ins.atomic_cas(ordering, vals[0], vals[1], vals[2]),
+                    Builtin::AtomicCasBool => {
+                        let old = ins.atomic_cas(ordering, vals[0], vals[1], vals[2]);
+                        self.b.ins().icmp(IntCC::Eq, old, vals[1])
+                    }
+                    Builtin::AtomicCompareExchange => {
+                        let ty = args[2].ty.ir();
+                        let expected = ins.load(ty, vals[1]);
+                        let old = self
+                            .b
+                            .ins()
+                            .atomic_cas(ordering, vals[0], expected, vals[2]);
+                        // Unconditionally: on success it is the same value.
+                        self.b.ins().store(old, vals[1]);
+                        self.b.ins().icmp(IntCC::Eq, old, expected)
+                    }
+                    _ => {
+                        if order != 0 {
+                            ins.fence(ordering);
+                        }
+                        return Ok(None);
+                    }
                 }
-                ins.atomic_load(e.ty.ir(), ordering, vals[0])
             }
             Builtin::Trap => {
                 ins.trap();

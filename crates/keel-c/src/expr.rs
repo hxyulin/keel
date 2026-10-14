@@ -2,11 +2,12 @@
 //! parsed.
 
 use crate::ast::*;
-use crate::eval::{eval_int, normalize};
+use crate::eval::{eval_int, fits_i64, normalize};
 use crate::lex::Tok;
 use crate::parse::{Parser, R};
 use crate::types::*;
 use crate::{Error, Loc};
+use keel_ir::RmwOp;
 use std::rc::Rc;
 
 pub(crate) fn mk(kind: ExprKind, ty: Ty, loc: Loc) -> Expr {
@@ -64,6 +65,41 @@ impl Parser {
 
     fn assignment(&mut self, op: &str, lhs: Expr, rhs: Expr, loc: Loc) -> R<Expr> {
         self.check_lvalue(&lhs)?;
+        if let Ty::Atomic(ty) = &lhs.ty {
+            let ty = ty.as_ref().clone();
+            let rmw = match op {
+                "=" => None,
+                "+=" => Some(RmwOp::Add),
+                "-=" => Some(RmwOp::Sub),
+                "&=" => Some(RmwOp::And),
+                "|=" => Some(RmwOp::Or),
+                "^=" => Some(RmwOp::Xor),
+                _ => {
+                    return Err(Error::new(
+                        loc,
+                        format!("`{op}` on an `_Atomic` object is not supported"),
+                    ));
+                }
+            };
+            if rmw.is_some() && !ty.is_integer() {
+                return Err(Error::new(
+                    loc,
+                    format!("`{op}` on an `_Atomic` pointer is not supported"),
+                ));
+            }
+            let rhs = self.rvalue(rhs);
+            let rhs = self.convert_for_assign(rhs, &ty)?;
+            let builtin = match rmw {
+                None => Builtin::AtomicStore,
+                Some(op) => Builtin::AtomicRmw { op, new: true },
+            };
+            let args = vec![
+                self.address_of_atomic(lhs),
+                rhs,
+                mk(ExprKind::Int(5), INT, loc),
+            ];
+            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc));
+        }
         let ty = lhs.ty.clone();
         if op == "=" {
             let rhs = self.convert_for_assign(rhs, &ty)?;
@@ -146,9 +182,33 @@ impl Parser {
         let loc = self.loc();
         self.advance();
         let cond = self.rvalue(cond);
+        if self.eat(":") {
+            // GNU's `a ?: b` is `a ? a : b` evaluating `a` once:
+            // `(t = a, t ? t : b)`, with `t` a made-up local.
+            let b = self.conditional()?;
+            let Some(_) = self.fs else {
+                return Err(Error::new(
+                    loc,
+                    "`?:` without a middle operand outside a function",
+                ));
+            };
+            let name = self.unique_name("elvis");
+            let ty = cond.ty.clone();
+            let t = self.new_local(name, ty.clone(), Sugar::Plain, false);
+            let local = || mk(ExprKind::Local(t), ty.clone(), loc);
+            let set = self.assignment("=", local(), cond, loc)?;
+            let pick = self.conditional_of(local(), local(), b, loc)?;
+            let ty = pick.ty.clone();
+            return Ok(mk(ExprKind::Comma(Box::new(set), Box::new(pick)), ty, loc));
+        }
         let a = self.expr()?;
         self.expect(":")?;
         let b = self.conditional()?;
+        self.conditional_of(cond, a, b, loc)
+    }
+
+    /// `cond ? a : b`, typed.
+    fn conditional_of(&mut self, cond: Expr, a: Expr, b: Expr, loc: Loc) -> R<Expr> {
         let (a, b) = (self.rvalue(a), self.rvalue(b));
         let ty = if a.ty.is_arith() && b.ty.is_arith() {
             usual(&a.ty, &b.ty)
@@ -355,10 +415,6 @@ impl Parser {
             return self.postfix();
         };
         match word.as_str() {
-            "__extension__" => {
-                self.advance();
-                self.cast_expr()
-            }
             "sizeof" | "_Alignof" | "__alignof__" | "__alignof" => {
                 self.advance();
                 let ty = if self.is("(") && self.type_follows(1) {
@@ -397,6 +453,25 @@ impl Parser {
                 self.advance();
                 let e = self.cast_expr()?;
                 self.address_of(e, loc)
+            }
+            "&&" => {
+                // GNU's label address: the label's number. `goto *` only
+                // goes to labels of the same function, so a number is as
+                // good as an address, and is a constant, as static
+                // dispatch tables need.
+                self.advance();
+                let name = self.ident()?;
+                let Some(fs) = self.fs.as_mut() else {
+                    return Err(Error::new(loc, "`&&label` outside a function"));
+                };
+                let n = match fs.label_addrs.iter().position(|l| *l == name) {
+                    Some(i) => i + 1,
+                    None => {
+                        fs.label_addrs.push(name);
+                        fs.label_addrs.len()
+                    }
+                };
+                Ok(mk(ExprKind::LabelAddr(n), Ty::ptr_to(Ty::Void), loc))
             }
             "*" => {
                 self.advance();
@@ -464,6 +539,25 @@ impl Parser {
 
     fn incdec(&mut self, e: Expr, inc: bool, prefix: bool, loc: Loc) -> R<Expr> {
         self.check_lvalue(&e)?;
+        if let Ty::Atomic(ty) = &e.ty {
+            let ty = ty.as_ref().clone();
+            if !ty.is_integer() {
+                return Err(Error::new(
+                    loc,
+                    "`++`/`--` on an `_Atomic` pointer is not supported",
+                ));
+            }
+            let one = mk(ExprKind::Int(1), INT, loc);
+            let one = self.cast(one, ty.clone());
+            let op = if inc { RmwOp::Add } else { RmwOp::Sub };
+            let args = vec![
+                self.address_of_atomic(e),
+                one,
+                mk(ExprKind::Int(5), INT, loc),
+            ];
+            let builtin = Builtin::AtomicRmw { op, new: prefix };
+            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc));
+        }
         if !e.ty.is_scalar() {
             return Err(Error::new(loc, "`++`/`--` needs a scalar"));
         }
@@ -635,6 +729,35 @@ impl Parser {
                 }
                 Ok(self.string_expr(bytes, wide, loc))
             }
+            Tok::Punct("(") if self.is("{") => {
+                // GNU's statement expression.
+                self.advance();
+                if self.fs.is_none() {
+                    return Err(Error::new(loc, "statement expression outside a function"));
+                }
+                let scope = self.push_block();
+                let mut stmts = self.block_items()?;
+                self.pop_block();
+                self.expect(")")?;
+                let value = match stmts.pop() {
+                    Some(Stmt::Expr(e)) => Some(Box::new(self.rvalue(e))),
+                    Some(s) => {
+                        stmts.push(s);
+                        None
+                    }
+                    None => None,
+                };
+                let ty = value.as_ref().map_or(Ty::Void, |v| v.ty.clone());
+                Ok(mk(
+                    ExprKind::StmtExpr {
+                        scope,
+                        stmts,
+                        value,
+                    },
+                    ty,
+                    loc,
+                ))
+            }
             Tok::Punct("(") => {
                 let e = self.expr()?;
                 self.expect(")")?;
@@ -647,18 +770,49 @@ impl Parser {
                     return Ok(self.string_expr(bytes, false, loc));
                 }
                 if name == "_Generic" {
-                    return Err(Error::new(loc, "`_Generic` is not supported"));
+                    return self.generic(loc);
                 }
                 if name.starts_with("__builtin_") {
                     return self.builtin(&name, loc);
                 }
-                if name == "__atomic_load_n" || name == "__atomic_store_n" {
+                if name.starts_with("__atomic_")
+                    || name.starts_with("__sync_")
+                    || name.starts_with("__c11_atomic_")
+                {
                     return self.atomic(&name, loc);
                 }
                 self.lookup_value(&name, loc)
             }
             _ => unreachable!(),
         }
+    }
+
+    /// C11's `_Generic(e, type: a, ..., default: b)`: the association
+    /// whose type is that of `e`'s value, unqualified.
+    fn generic(&mut self, loc: Loc) -> R<Expr> {
+        self.expect("(")?;
+        let e = self.assign()?;
+        let ty = self.rvalue(e).ty.unatomic().clone();
+        let (mut chosen, mut default) = (None, None);
+        while self.eat(",") {
+            let is_default = self.eat("default");
+            let assoc_ty = if is_default {
+                None
+            } else {
+                Some(self.type_name()?)
+            };
+            self.expect(":")?;
+            let value = self.assign()?;
+            match assoc_ty {
+                None => default = Some(value),
+                Some(t) if t == ty => chosen = Some(value),
+                Some(_) => {}
+            }
+        }
+        self.expect(")")?;
+        chosen
+            .or(default)
+            .ok_or_else(|| Error::new(loc, "no `_Generic` association matches"))
     }
 
     pub(crate) fn string_expr(&mut self, mut bytes: Vec<u8>, wide: bool, loc: Loc) -> Expr {
@@ -753,6 +907,30 @@ impl Parser {
                 let v = if kind & 2 == 0 { -1 } else { 0 };
                 Ok(mk(ExprKind::Int(v), ULONG, loc))
             }
+            "types_compatible_p" => {
+                self.expect("(")?;
+                let a = self.type_name()?;
+                self.expect(",")?;
+                let b = self.type_name()?;
+                self.expect(")")?;
+                let same = a.unatomic() == b.unatomic();
+                Ok(mk(ExprKind::Int(i64::from(same)), INT, loc))
+            }
+            "choose_expr" => {
+                // Like `?:` with a constant condition, but the chosen
+                // operand keeps its own type.
+                self.expect("(")?;
+                let c = self.assign()?;
+                let Some(c) = eval_int(&c) else {
+                    return Err(Error::new(loc, "`__builtin_choose_expr` needs a constant"));
+                };
+                self.expect(",")?;
+                let a = self.assign()?;
+                self.expect(",")?;
+                let b = self.assign()?;
+                self.expect(")")?;
+                Ok(if c != 0 { a } else { b })
+            }
             "constant_p" => {
                 let args = self.builtin_args(1, loc)?;
                 let known = eval_int(&args[0]).is_some();
@@ -797,6 +975,20 @@ impl Parser {
                 self.builtin_call(op, &[arg], INT, loc)
             }
             "alloca" => self.builtin_call(Builtin::Alloca, &[ULONG], Ty::ptr_to(Ty::Void), loc),
+            "frame_address" => {
+                let args = self.builtin_args(1, loc)?;
+                if eval_int(&args[0]) != Some(0) {
+                    return Err(Error::new(
+                        loc,
+                        "`__builtin_frame_address` is only supported for frame 0",
+                    ));
+                }
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::FrameAddress, Vec::new()),
+                    Ty::ptr_to(Ty::Void),
+                    loc,
+                ))
+            }
             "trap" | "unreachable" => self.builtin_call(Builtin::Trap, &[], Ty::Void, loc),
             _ => {
                 // `__builtin_memcpy` and friends: the library function.
@@ -830,27 +1022,210 @@ impl Parser {
     }
 
     /// GCC's `__atomic_load_n` and `__atomic_store_n` on a scalar.
+    /// The atomic builtins: GCC's `__atomic_*` (with an order) and
+    /// `__sync_*` (seq_cst), and clang's `__c11_atomic_*`, which
+    /// `<stdatomic.h>` expands to. See [`Builtin::AtomicLoad`] for the
+    /// shape their arguments are put in.
     fn atomic(&mut self, name: &str, loc: Loc) -> R<Expr> {
-        let store = name == "__atomic_store_n";
-        let mut args = self.builtin_args(if store { 3 } else { 2 }, loc)?;
-        let Some(ty) = args[0].ty.pointee().cloned() else {
+        let (op, sync) = match name.strip_prefix("__sync_") {
+            Some(op) => (op, true),
+            None => (
+                name.strip_prefix("__c11_atomic_")
+                    .or_else(|| name.strip_prefix("__atomic_"))
+                    .unwrap(),
+                false,
+            ),
+        };
+        let mut args = self.builtin_args_any()?;
+        let unsupported = || Error::new(loc, format!("`{name}` is not supported"));
+        let order = |v: i64| mk(ExprKind::Int(v), INT, loc);
+        // `__sync_*` are seq_cst, except the lock ones.
+        if sync {
+            match op {
+                "lock_test_and_set" => args.push(order(2)),
+                "lock_release" => {
+                    args.push(mk(ExprKind::Int(0), INT, loc));
+                    args.push(order(3));
+                }
+                _ => args.push(order(5)),
+            }
+        }
+        let want = |args: &[Expr], n: usize| {
+            if args.len() == n {
+                Ok(())
+            } else {
+                Err(Error::new(loc, format!("`{name}` takes {n} argument(s)")))
+            }
+        };
+        let rmw = |op: &str| {
+            Some(match op {
+                "add" => RmwOp::Add,
+                "sub" => RmwOp::Sub,
+                "and" => RmwOp::And,
+                "or" => RmwOp::Or,
+                "xor" => RmwOp::Xor,
+                _ => return None,
+            })
+        };
+        // The operation, and how many arguments it has once in shape.
+        let (builtin, n) = match op {
+            "synchronize" | "thread_fence" | "signal_fence" => {
+                // A signal fence only has to stop the compiler; a real
+                // fence is stronger than needed but correct.
+                want(&args, 1)?;
+                return Ok(mk(ExprKind::Builtin(Builtin::Fence, args), Ty::Void, loc));
+            }
+            "always_lock_free" | "is_lock_free" => {
+                let size = args.first().and_then(eval_int);
+                let free = matches!(size, Some(1 | 2 | 4 | 8));
+                return Ok(mk(
+                    ExprKind::Int(i64::from(free)),
+                    Ty::Int(IntKind::Bool),
+                    loc,
+                ));
+            }
+            "load_n" | "load" if args.len() == 2 => (Builtin::AtomicLoad, 2),
+            "store_n" | "store" | "init" | "lock_release" if args.len() >= 2 => {
+                if op == "init" {
+                    args.push(order(5));
+                }
+                (Builtin::AtomicStore, 3)
+            }
+            "exchange_n" | "exchange" | "lock_test_and_set" if args.len() == 3 => (
+                Builtin::AtomicRmw {
+                    op: RmwOp::Xchg,
+                    new: false,
+                },
+                3,
+            ),
+            "val_compare_and_swap" => (Builtin::AtomicCas, 4),
+            "bool_compare_and_swap" => (Builtin::AtomicCasBool, 4),
+            "compare_exchange_n" | "compare_exchange_strong" | "compare_exchange_weak" => {
+                // (ptr, expected, desired[, weak], success, failure): the
+                // failure order is never stronger, so the success one does.
+                let weak_arg = op == "compare_exchange_n";
+                want(&args, if weak_arg { 6 } else { 5 })?;
+                args.truncate(if weak_arg { 5 } else { 4 });
+                if weak_arg {
+                    args.remove(3);
+                }
+                (Builtin::AtomicCompareExchange, 4)
+            }
+            "test_and_set" | "clear" => {
+                // On a byte: set to 1 (giving whether it was set) or 0.
+                want(&args, 2)?;
+                let ptr = args.remove(0);
+                let ptr = self.cast(ptr, Ty::ptr_to(Ty::Int(IntKind::UChar)));
+                let value = mk(ExprKind::Int(i64::from(op == "test_and_set")), INT, loc);
+                let value = self.cast(value, Ty::Int(IntKind::UChar));
+                let args = vec![ptr, value, args.remove(0)];
+                if op == "clear" {
+                    return Ok(mk(
+                        ExprKind::Builtin(Builtin::AtomicStore, args),
+                        Ty::Void,
+                        loc,
+                    ));
+                }
+                let builtin = Builtin::AtomicRmw {
+                    op: RmwOp::Xchg,
+                    new: false,
+                };
+                let old = mk(
+                    ExprKind::Builtin(builtin, args),
+                    Ty::Int(IntKind::UChar),
+                    loc,
+                );
+                return Ok(self.cast(old, Ty::Int(IntKind::Bool)));
+            }
+            _ => {
+                // fetch_add, add_fetch, fetch_and_add, add_and_fetch, ...
+                let (rmw_op, new) = if let Some(o) = op.strip_prefix("fetch_and_") {
+                    (o, false)
+                } else if let Some(o) = op.strip_prefix("fetch_") {
+                    (o, false)
+                } else if let Some(o) = op.strip_suffix("_and_fetch") {
+                    (o, true)
+                } else if let Some(o) = op.strip_suffix("_fetch") {
+                    (o, true)
+                } else {
+                    return Err(unsupported());
+                };
+                let ptr_ty = args.first().map(|a| a.ty.clone());
+                let signed = ptr_ty
+                    .as_ref()
+                    .and_then(|t| t.pointee())
+                    .is_some_and(|t| t.unatomic().is_signed());
+                let op = match (rmw_op, new) {
+                    ("min", false) if signed => RmwOp::Smin,
+                    ("max", false) if signed => RmwOp::Smax,
+                    ("min", false) => RmwOp::Umin,
+                    ("max", false) => RmwOp::Umax,
+                    _ => rmw(rmw_op).ok_or_else(unsupported)?,
+                };
+                (Builtin::AtomicRmw { op, new }, 3)
+            }
+        };
+        want(&args, n)?;
+        let Some(ty) = args[0].ty.pointee().map(|t| t.unatomic().clone()) else {
             return Err(Error::new(loc, format!("`{name}` needs a pointer")));
         };
-        let order = args.last().unwrap();
-        if !matches!(eval_int(order), Some(0..=5)) || !(ty.is_integer() || ty.is_ptr()) {
-            return Err(Error::new(loc, format!("unsupported `{name}`")));
-        }
-        if store {
-            let value = args.remove(1);
-            let value = self.convert_for_assign(value, &ty)?;
-            args.insert(1, value);
-            return Ok(mk(
-                ExprKind::Builtin(Builtin::AtomicStore, args),
-                Ty::Void,
+        if !(ty.is_integer() || ty.is_ptr()) {
+            return Err(Error::new(
                 loc,
+                format!("`{name}` is only supported on integers and pointers"),
             ));
         }
-        Ok(mk(ExprKind::Builtin(Builtin::AtomicLoad, args), ty, loc))
+        // Arithmetic on a pointer is on its address, in bytes.
+        let arith = matches!(builtin, Builtin::AtomicRmw { op, .. } if op != RmwOp::Xchg);
+        let value_ty = if arith && ty.is_ptr() {
+            ULONG
+        } else {
+            ty.clone()
+        };
+        let pointee = ty;
+        let value_args = match builtin {
+            Builtin::AtomicLoad => 0..0,
+            Builtin::AtomicCas | Builtin::AtomicCasBool => 1..3,
+            Builtin::AtomicCompareExchange => 2..3,
+            _ => 1..2,
+        };
+        for i in value_args {
+            let v = args[i].clone();
+            args[i] = self.convert_for_assign(v, &value_ty)?;
+        }
+        if builtin == Builtin::AtomicCompareExchange && !args[1].ty.is_ptr() {
+            return Err(Error::new(
+                loc,
+                format!("`{name}` needs a pointer to the expected value"),
+            ));
+        }
+        let ty = match builtin {
+            // A store's value is only needed in an assignment.
+            Builtin::AtomicStore => Ty::Void,
+            Builtin::AtomicCasBool | Builtin::AtomicCompareExchange => Ty::Int(IntKind::Bool),
+            _ => value_ty.clone(),
+        };
+        let result = mk(ExprKind::Builtin(builtin, args), ty, loc);
+        // Back from the address to the pointer.
+        Ok(if value_ty != pointee && result.ty == value_ty {
+            self.cast(result, pointee)
+        } else {
+            result
+        })
+    }
+
+    /// `(a, b, ...)`, as values.
+    fn builtin_args_any(&mut self) -> R<Vec<Expr>> {
+        self.expect("(")?;
+        let mut args = Vec::new();
+        while !self.eat(")") {
+            if !args.is_empty() {
+                self.expect(",")?;
+            }
+            let e = self.assign()?;
+            args.push(self.rvalue(e));
+        }
+        Ok(args)
     }
 
     fn builtin_args(&mut self, n: usize, loc: Loc) -> R<Vec<Expr>> {
@@ -896,8 +1271,22 @@ impl Parser {
     // ---- conversions ----
 
     /// Array-to-pointer and function-to-pointer decay.
+    /// The address of an `_Atomic` lvalue, for an atomic access.
+    fn address_of_atomic(&mut self, e: Expr) -> Expr {
+        self.mark_address_taken(&e);
+        let ty = Ty::ptr_to(e.ty.clone());
+        let loc = e.loc;
+        mk(ExprKind::Addr(Box::new(e)), ty, loc)
+    }
+
     pub(crate) fn rvalue(&mut self, e: Expr) -> Expr {
         match &e.ty {
+            Ty::Atomic(ty) => {
+                let ty = ty.as_ref().clone();
+                let loc = e.loc;
+                let args = vec![self.address_of_atomic(e), mk(ExprKind::Int(5), INT, loc)];
+                mk(ExprKind::Builtin(Builtin::AtomicLoad, args), ty, loc)
+            }
             Ty::Array(elem, _) => {
                 let ty = Ty::Ptr(elem.clone());
                 let loc = e.loc;
@@ -921,6 +1310,7 @@ impl Parser {
         if let ExprKind::Int(v) = e.kind
             && let Ty::Int(_) = ty
             && e.ty.is_integer()
+            && fits_i64(v, &e.ty, &ty)
         {
             return mk(ExprKind::Int(normalize(v, &ty)), ty, e.loc);
         }

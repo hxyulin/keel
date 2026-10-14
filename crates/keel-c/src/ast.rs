@@ -6,6 +6,7 @@
 
 use crate::Loc;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
+use keel_ir::RmwOp;
 use std::rc::Rc;
 
 pub type LocalId = usize;
@@ -24,6 +25,9 @@ pub enum ExprKind {
     Float(f64),
     /// A string literal (an array lvalue), by index in the string table.
     Str(usize),
+    /// GNU's `&&label`: the label's number in its function's
+    /// [`FuncDef::label_addrs`], from 1, as a `void *`.
+    LabelAddr(usize),
     Local(LocalId),
     /// A function or an object with static storage, by index in the
     /// global table.
@@ -62,6 +66,14 @@ pub enum ExprKind {
         prefix: bool,
     },
     Cond(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// GNU's statement expression `({ ...; e; })`: the statements, in
+    /// a block scope, then the value of the last one if it is an
+    /// expression.
+    StmtExpr {
+        scope: usize,
+        stmts: Vec<Stmt>,
+        value: Option<Box<Expr>>,
+    },
     Comma(Box<Expr>, Box<Expr>),
     /// Calls a function pointer. Arguments are converted to the parameter
     /// types, and extra ones promoted.
@@ -132,10 +144,31 @@ pub enum Builtin {
     Popcount,
     Alloca,
     Trap,
-    /// `__atomic_load_n(ptr, order)` and `__atomic_store_n(ptr, value,
-    /// order)`; the order is a constant.
+    /// `__builtin_frame_address(0)`.
+    FrameAddress,
+    /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),
+    /// with their arguments put in one shape, the C11 memory order last
+    /// (`__ATOMIC_RELAXED` 0 to `__ATOMIC_SEQ_CST` 5; a non-constant one
+    /// is taken as seq_cst).
+    ///
+    /// `(ptr, order)`: the value.
     AtomicLoad,
+    /// `(ptr, value, order)`: the value stored, if the type is not void.
     AtomicStore,
+    /// `(ptr, value, order)`: the old value, or with `new` the result.
+    AtomicRmw {
+        op: RmwOp,
+        new: bool,
+    },
+    /// `(ptr, expected, desired, order)`: the old value.
+    AtomicCas,
+    /// `(ptr, expected, desired, order)`: whether it swapped.
+    AtomicCasBool,
+    /// `(ptr, expected_ptr, desired, order)`: whether it swapped; if not,
+    /// `*expected_ptr` gets the value found.
+    AtomicCompareExchange,
+    /// `(order)`.
+    Fence,
 }
 
 /// An initializer, flattened: the object is zero except for these items.
@@ -194,6 +227,8 @@ pub enum Stmt {
     Continue,
     Return(Option<Expr>, Loc),
     Goto(String),
+    /// GNU's `goto *p`, to a label whose address was taken.
+    GotoIndirect(Expr),
     Label(String),
 }
 
@@ -221,6 +256,8 @@ pub struct FuncDef {
     pub locals: Vec<Local>,
     /// The parent of each block scope; `None` for the outermost.
     pub scopes: Vec<Option<usize>>,
+    /// The labels whose address is taken (`&&label`), numbered from 1.
+    pub label_addrs: Vec<String>,
     pub body: Vec<Stmt>,
     pub loc: Loc,
 }

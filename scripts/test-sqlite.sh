@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds SQLite 3.46.1 (the amalgamation and its shell) with keel's C
 # compiler, and checks that it answers scripts/sqlite-queries.sql exactly
-# as SQLite built by clang does.
+# as SQLite built by clang does. It is thread-safe, with pthread mutexes
+# and atomics, as by default.
 #
 #   scripts/test-sqlite.sh [-O] [work-dir]
 set -euo pipefail
@@ -15,7 +16,7 @@ work=${1:-target/sqlite}
 root=$(cd "$(dirname "$0")/.." && pwd)
 name=sqlite-amalgamation-3460100
 sha=77823cb110929c2bcb0f5d48e4833b5c59a8a6e40cdea3936b99e199dbbe5784
-defines=(-DSQLITE_THREADSAFE=0)
+defines=(-DSQLITE_THREADSAFE=1)
 
 mkdir -p "$work"
 cd "$work"

@@ -34,6 +34,8 @@ impl DebugTypes {
         ty: &Ty,
         sugar: &Sugar,
     ) -> Option<DebugType> {
+        // DWARF 4 has no atomic types.
+        let ty = ty.unatomic();
         match (sugar, ty) {
             (Sugar::Typedef(i), _) => {
                 if let Some(&dt) = self.typedefs.get(i) {
@@ -134,6 +136,7 @@ impl DebugTypes {
             Ty::Func(_) => *self
                 .function
                 .get_or_insert_with(|| push(module, DebugTypeData::Function)),
+            Ty::Atomic(t) => return self.plain(module, p, t),
             Ty::Struct(id) => {
                 if let Some(&dt) = self.structs.get(id) {
                     return Some(dt);

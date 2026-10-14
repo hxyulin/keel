@@ -36,6 +36,11 @@ pub enum Intrinsic {
     /// `stack_restore(mark)`: frees every `stack_alloc` since the
     /// `stack_save` that returned `mark`, as a VLA's scope ends.
     StackRestore,
+    /// `frame_address() -> ptr`: the address of the function's frame
+    /// record (its saved frame pointer and return address), as GNU C's
+    /// `__builtin_frame_address(0)`; programs compare it to find how
+    /// deep the stack is.
+    FrameAddress,
 }
 
 pub struct IntrinsicInfo {
@@ -47,7 +52,7 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 8] = [
+    pub const ALL: [Intrinsic; 9] = [
         Intrinsic::Memcpy,
         Intrinsic::Memmove,
         Intrinsic::Memset,
@@ -56,6 +61,7 @@ impl Intrinsic {
         Intrinsic::StackAlloc,
         Intrinsic::StackSave,
         Intrinsic::StackRestore,
+        Intrinsic::FrameAddress,
     ];
 
     pub fn info(self) -> IntrinsicInfo {
@@ -69,6 +75,7 @@ impl Intrinsic {
             Intrinsic::StackAlloc => ("stack_alloc", &[Type::I64], &[Type::Ptr], false),
             Intrinsic::StackSave => ("stack_save", &[], &[Type::Ptr], false),
             Intrinsic::StackRestore => ("stack_restore", &[Type::Ptr], &[], false),
+            Intrinsic::FrameAddress => ("frame_address", &[], &[Type::Ptr], false),
         };
         IntrinsicInfo {
             name,

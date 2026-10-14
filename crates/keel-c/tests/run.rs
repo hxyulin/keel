@@ -367,8 +367,8 @@ fn rejected() {
             "1:26: error: expected an expression, found `;`",
         ),
         (
-            "void f(void) { void *p = 0; goto *p; }",
-            "error: computed goto is not supported",
+            "struct s { _Atomic double d; };",
+            "1:12: error: `_Atomic` is only supported on integers and pointers",
         ),
     ];
     let mut failures = Vec::new();

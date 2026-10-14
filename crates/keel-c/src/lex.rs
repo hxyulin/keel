@@ -72,6 +72,11 @@ pub fn tokenize(src: &str, path: &str, files: &mut Vec<String>) -> Result<Vec<To
     let mut out = Vec::new();
     loop {
         let tok = lx.next()?;
+        // GNU's `__extension__` only silences pedantic warnings, and may
+        // come before a declaration or any expression.
+        if matches!(&tok.tok, Tok::Ident(s) if s == "__extension__") {
+            continue;
+        }
         let end = tok.tok == Tok::Eof;
         out.push(tok);
         if end {

@@ -95,6 +95,7 @@ pub(crate) struct FuncState {
     /// Block scopes, by their parent, and the one being parsed.
     pub scopes: Vec<Option<usize>>,
     pub scope: Option<usize>,
+    pub label_addrs: Vec<String>,
     pub ret: Ty,
     pub name: String,
     pub switches: Vec<SwitchCtx>,
@@ -159,7 +160,6 @@ const TYPE_KEYWORDS: &[&str] = &[
     "_Alignas",
     "__attribute__",
     "__attribute",
-    "__extension__",
     "_Nullable",
     "_Nonnull",
     "_Null_unspecified",
@@ -187,7 +187,6 @@ const IGNORED_QUALIFIERS: &[&str] = &[
     "_Null_unspecified",
     "__nullable",
     "__nonnull",
-    "__extension__",
 ];
 
 impl Parser {
@@ -315,7 +314,7 @@ impl Parser {
     }
 
     /// Opens a block scope in a function, giving its index.
-    fn push_block(&mut self) -> usize {
+    pub(crate) fn push_block(&mut self) -> usize {
         self.push_scope();
         let fs = self.fs.as_mut().unwrap();
         fs.scopes.push(fs.scope);
@@ -324,7 +323,7 @@ impl Parser {
         id
     }
 
-    fn pop_block(&mut self) {
+    pub(crate) fn pop_block(&mut self) {
         self.pop_scope();
         let fs = self.fs.as_mut().unwrap();
         fs.scope = fs.scopes[fs.scope.unwrap()];
@@ -730,6 +729,7 @@ impl Parser {
             locals: Vec::new(),
             scopes: Vec::new(),
             scope: None,
+            label_addrs: Vec::new(),
             ret: fty.ret.clone(),
             name,
             switches: Vec::new(),
@@ -752,6 +752,7 @@ impl Parser {
             params: ids,
             locals: fs.locals,
             scopes: fs.scopes,
+            label_addrs: fs.label_addrs,
             body,
             loc,
         });
@@ -861,6 +862,7 @@ impl Parser {
         };
         let mut counter = 0u32;
         let mut other: Option<Ty> = None;
+        let mut is_atomic = false;
         while let Tok::Ident(word) = self.peek().clone() {
             let storage = match word.as_str() {
                 "typedef" => Some(Storage::Typedef),
@@ -881,7 +883,8 @@ impl Parser {
                 "_Thread_local" | "__thread" => spec.thread_local = true,
                 "_Noreturn" => {}
                 w if IGNORED_QUALIFIERS.contains(&w) => {}
-                "_Atomic" | "_Complex" => {
+                "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
+                "_Complex" => {
                     return Err(Error::new(self.loc(), format!("`{word}` is not supported")));
                 }
                 "__attribute__" | "__attribute" => {
@@ -917,6 +920,13 @@ impl Parser {
                             let (ty, sugar) = self.enum_spec()?;
                             spec.sugar = sugar;
                             Some(ty)
+                        }
+                        "_Atomic" => {
+                            self.advance();
+                            self.expect("(")?;
+                            let ty = self.type_name()?;
+                            self.expect(")")?;
+                            Some(self.atomic_type(ty, loc)?)
                         }
                         "typeof" | "__typeof__" | "__typeof" => {
                             self.advance();
@@ -1030,6 +1040,9 @@ impl Parser {
             HALF => Ty::Half,
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
         };
+        if is_atomic {
+            spec.ty = self.atomic_type(spec.ty, loc)?;
+        }
         if spec.is_volatile {
             spec.sugar = Sugar::Volatile(Rc::new(spec.sugar));
         }
@@ -1046,11 +1059,24 @@ impl Parser {
         Ok(self.declarator(spec.ty)?.ty)
     }
 
-    /// Pointer qualifiers after a `*`. Returns (const, volatile).
-    fn qualifiers(&mut self) -> R<(bool, bool)> {
-        let (mut c, mut v) = (false, false);
+    /// `_Atomic(ty)`, which keel supports for integers and pointers.
+    fn atomic_type(&self, ty: Ty, loc: Loc) -> R<Ty> {
+        match ty {
+            Ty::Atomic(_) => Ok(ty),
+            ty if ty.is_integer() || ty.is_ptr() => Ok(Ty::Atomic(Rc::new(ty))),
+            _ => Err(Error::new(
+                loc,
+                "`_Atomic` is only supported on integers and pointers",
+            )),
+        }
+    }
+
+    /// Pointer qualifiers after a `*`. Returns (const, volatile, atomic).
+    fn qualifiers(&mut self) -> R<(bool, bool, bool)> {
+        let (mut c, mut v, mut a) = (false, false, false);
         loop {
             match self.peek() {
+                Tok::Ident(w) if w == "_Atomic" => a = true,
                 Tok::Ident(w) if w == "const" || w == "__const" => c = true,
                 Tok::Ident(w) if w == "volatile" || w == "__volatile__" || w == "__volatile" => {
                     v = true
@@ -1060,7 +1086,7 @@ impl Parser {
                     self.attributes(&mut Attrs::default())?;
                     continue;
                 }
-                _ => return Ok((c, v)),
+                _ => return Ok((c, v, a)),
             }
             self.advance();
         }
@@ -1077,9 +1103,14 @@ impl Parser {
         // `^` is a block pointer (Apple's closures, in headers when
         // `__BLOCKS__` is defined); as a value it is just a pointer.
         while self.eat("*") || self.eat("^") {
+            let loc = self.loc();
             ty = Ty::ptr_to(ty);
             sugar = sugar.wrap(Sugar::Ptr);
-            (is_const, is_volatile) = self.qualifiers()?;
+            let is_atomic;
+            (is_const, is_volatile, is_atomic) = self.qualifiers()?;
+            if is_atomic {
+                ty = self.atomic_type(ty, loc)?;
+            }
             if is_volatile {
                 sugar = Sugar::Volatile(Rc::new(sugar));
             }
@@ -1112,7 +1143,7 @@ impl Parser {
             _ => None,
         };
         let (ty, sugar) = self.type_suffix(ty, sugar)?;
-        if !matches!(ty, Ty::Ptr(_)) {
+        if !matches!(ty.unatomic(), Ty::Ptr(_)) {
             // Qualifiers apply to the pointer only when it is the object.
             is_const = false;
             is_volatile = false;
@@ -1144,7 +1175,7 @@ impl Parser {
             return Ok((Ty::Func(Rc::new(fty)), sugar.wrap(Sugar::Func)));
         }
         if self.eat("[") {
-            while self.eat("static") || self.qualifiers()? != (false, false) {}
+            while self.eat("static") || self.qualifiers()? != (false, false, false) {}
             let loc = self.loc();
             let len = if self.is("]") {
                 None
@@ -1306,7 +1337,7 @@ impl Parser {
                     }
                     Some(w as u32)
                 } else {
-                    if matches!(ty, Ty::Func(_)) || (self.size_of(&ty) == 0 && !is_flexible(&ty)) {
+                    if self.incomplete(&ty) {
                         return Err(Error::new(floc, "member has an incomplete type"));
                     }
                     None
@@ -1408,7 +1439,7 @@ impl Parser {
     // ---- statements ----
 
     /// The items of a `{}` block, after the `{`, in a new scope.
-    fn block_items(&mut self) -> R<Vec<Stmt>> {
+    pub(crate) fn block_items(&mut self) -> R<Vec<Stmt>> {
         let mut out = Vec::new();
         while !self.eat("}") {
             if self.is_declaration_start() {
@@ -1526,12 +1557,18 @@ impl Parser {
                 }
                 "case" | "default" => {
                     self.advance();
-                    let value = if word == "case" {
+                    // GNU's `case 1 ... 5:` is a case for each value.
+                    let values = if word == "case" {
                         let v = self.const_int()?;
-                        if self.eat("...") {
-                            return Err(Error::new(loc, "case ranges are not supported"));
+                        let last = if self.eat("...") {
+                            self.const_int()?
+                        } else {
+                            v
+                        };
+                        if last < v || last - v >= 1 << 16 {
+                            return Err(Error::new(loc, "case range is empty or too big"));
                         }
-                        Some(v)
+                        Some(v..=last)
                     } else {
                         None
                     };
@@ -1541,13 +1578,15 @@ impl Parser {
                     };
                     let label = sw.labels;
                     sw.labels += 1;
-                    match value {
-                        Some(v) => {
-                            let v = crate::eval::normalize(v, &sw.ty);
-                            if sw.cases.iter().any(|&(c, _)| c == v) {
-                                return Err(Error::new(loc, format!("duplicate case {v}")));
+                    match values {
+                        Some(values) => {
+                            for v in values {
+                                let v = crate::eval::normalize(v, &sw.ty);
+                                if sw.cases.iter().any(|&(c, _)| c == v) {
+                                    return Err(Error::new(loc, format!("duplicate case {v}")));
+                                }
+                                sw.cases.push((v, label));
                             }
-                            sw.cases.push((v, label));
                         }
                         None => {
                             if sw.default.is_some() {
@@ -1585,8 +1624,14 @@ impl Parser {
                 }
                 "goto" => {
                     self.advance();
-                    if self.is("*") {
-                        return Err(Error::new(loc, "computed goto is not supported"));
+                    if self.eat("*") {
+                        let e = self.expr()?;
+                        let e = self.rvalue(e);
+                        if !e.ty.is_ptr() {
+                            return Err(Error::new(loc, "`goto *` needs a pointer"));
+                        }
+                        self.expect(";")?;
+                        return Ok(Stmt::GotoIndirect(e));
                     }
                     let label = self.ident()?;
                     self.expect(";")?;
@@ -1644,8 +1689,18 @@ impl Parser {
 }
 
 /// A flexible array member, or GNU's zero-length array used as one.
-fn is_flexible(ty: &Ty) -> bool {
-    matches!(ty, Ty::Array(_, None | Some(0)))
+impl Parser {
+    /// A type a member cannot have. A struct or union of size 0 is
+    /// complete (GNU allows empty ones, and zero-length arrays); an array
+    /// with no length is a flexible array member if its element is.
+    fn incomplete(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Void | Ty::Func(_) => true,
+            Ty::Struct(id) => !self.structs[*id].complete,
+            Ty::Array(elem, _) => self.incomplete(elem),
+            _ => false,
+        }
+    }
 }
 
 /// Words that cannot be identifiers.

@@ -88,6 +88,10 @@ pub enum Ty {
     Func(Rc<FuncTy>),
     /// A struct or union, by its index in the struct table.
     Struct(usize),
+    /// `_Atomic(T)`, of an integer or pointer: reading the object is an
+    /// atomic load, assigning it an atomic store, `+=` and `++` atomic
+    /// read-modify-writes, all seq_cst. A value of it has type `T`.
+    Atomic(Rc<Ty>),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -182,6 +186,14 @@ pub const CHAR: Ty = Ty::Int(IntKind::Char);
 impl Ty {
     pub fn ptr_to(ty: Ty) -> Ty {
         Ty::Ptr(Rc::new(ty))
+    }
+
+    /// The type without `_Atomic`.
+    pub fn unatomic(&self) -> &Ty {
+        match self {
+            Ty::Atomic(t) => t,
+            t => t,
+        }
     }
 
     pub fn int_kind(&self) -> Option<IntKind> {
@@ -287,6 +299,7 @@ impl Types<'_> {
             Ty::Array(elem, n) => self.size(elem) * n.unwrap_or(0),
             Ty::Func(_) => 1,
             Ty::Struct(id) => self.0[*id].size,
+            Ty::Atomic(t) => self.size(t),
         }
     }
 
@@ -294,6 +307,7 @@ impl Types<'_> {
         match ty {
             Ty::Array(elem, _) => self.align(elem),
             Ty::Struct(id) => self.0[*id].align,
+            Ty::Atomic(t) => self.align(t),
             Ty::Void | Ty::Func(_) => 1,
             _ => self.size(ty),
         }

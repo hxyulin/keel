@@ -404,6 +404,11 @@ Limits: at most one return value (return structs through `sret`); at most
 - First and only target until everything works end to end: **aarch64-apple**
   (Mach-O). Executables must carry an ad-hoc code signature
   (`LC_CODE_SIGNATURE`) or the kernel refuses to run them.
+- Conditional branches reach ±1 MiB. A function whose code may be bigger
+  (interpreter loops get there: QuickJS's is about 4 MB from keel) has each
+  rewritten as the opposite branch over a `b`, which reaches ±128 MiB.
+  Only those functions pay the extra instruction; the size is bounded by
+  counting instructions, so no branch is measured.
 
 ## Debug info
 
@@ -682,25 +687,54 @@ diagnostics and `-g`.
   is `double`, `va_list` is a `char *` (so `va_copy` is an assignment, and
   `va_arg` works on a passed `va_list`).
 
-Beyond ISO C11 it accepts what Apple's headers and real programs use:
-`__attribute__((..))` (`aligned`, `packed` and `returns_twice` are
+Beyond ISO C11 it accepts what Apple's headers and real GNU C programs
+use: `__attribute__((..))` (`aligned`, `packed` and `returns_twice` are
 honoured), `#pragma pack`, `__asm("_name")` symbol renames, C23 enums with
-a fixed type, zero-length arrays, block pointers (`^`, as plain pointers),
-`__int128`, `typeof`, GCC's `__atomic_load_n`/`__atomic_store_n`, and the
-`__builtin_`s the headers expand to. `_FORTIFY_SOURCE`'s checked calls
-(`__builtin___memcpy_chk`) become the plain function, since
+a fixed type, zero-length arrays and empty structs, block pointers (`^`,
+as plain pointers), `__int128`, `typeof`, `__extension__`, statement
+expressions, `a ?: b`, case ranges (`case 'a' ... 'z':`), range
+designators (`[0 ... 9] = x`), computed `goto`, the `__builtin_`s the
+headers expand to (and `__builtin_frame_address(0)`,
+`types_compatible_p`, `choose_expr`), and `_Generic`. `_FORTIFY_SOURCE`'s
+checked calls (`__builtin___memcpy_chk`) become the plain function, since
 `__builtin_object_size` always answers "unknown". `setjmp` and friends are
 marked `returns_twice`.
 
-Not supported: `_Generic`, `_Atomic`, `_Complex`, variable-length arrays,
-K&R definitions, computed `goto`, statement expressions, and inline
-assembly statements (the backend has them; the frontend does not pass
-them through yet).
+- **Computed goto** without an indirect branch in the IR: `&&label` is
+  the label's number in its function (from 1), and `goto *p` a `switch`
+  on it over the labels whose address is taken, which codegen makes a
+  jump table. Each `goto *` gets its own, so dispatch is predicted per
+  site as with real indirect branches. GNU only defines jumping to a
+  label of the same function, where a number is as good as an address;
+  and being constants, the numbers can fill static dispatch tables, and
+  `&&a - &&b` offsets work. An indirect branch in the IR would need edge
+  copies for block parameters on every possible target at once.
+- **Atomics.** `_Atomic(T)` is a type of its own (`Ty::Atomic`), for
+  integers and pointers: the one place a value is read from an object
+  (`rvalue`) makes reading one an atomic load, and assignment, `+=` and
+  `++` atomic stores and read-modify-writes, all seq_cst. Treating it as
+  `T` would compile plain accesses to non-atomic ones silently. The
+  builtins, GCC's `__atomic_*` and `__sync_*` and clang's `__c11_atomic_*`
+  (which `<stdatomic.h>` expands to), are put in one shape and become the
+  IR's atomic instructions; `compare_exchange` is a `cas` whose old value
+  is stored back to `*expected`.
+- **Constants** are `i64`s, sign extended to wider types, so an unsigned
+  64-bit constant above `i64::MAX` converted to `__int128` is not folded
+  but extended at run time: folded, it came out negative, which broke
+  QuickJS's decimal arithmetic (multiplying by `17014118346046923173`).
+
+Not supported: `_Complex`, variable-length arrays, K&R definitions,
+`__auto_type`, nested functions, `_Atomic` structs and floats, the
+generic (non-`_n`) `__atomic_*` forms, and inline assembly statements
+(the backend has them; the frontend does not pass them through yet).
 
 **Testing.** Test programs are built by clang and by keel and must behave
 the same, so they print what they compute instead of hard-coding answers.
-`scripts/test-lua.sh` builds Lua 5.4 and runs its test suite;
-`scripts/test-sqlite.sh` builds SQLite and compares query results with
-clang's build. Both pass, with and without `-O`; together they found the
-bugs the small programs missed (an array of pointers to `const` placed in
-read-only memory, a variable used in its own initializer, `#pragma pack`).
+`scripts/test-lua.sh` builds Lua 5.4 (as `make macosx` does: POSIX,
+computed gotos) and runs its test suite; `scripts/test-sqlite.sh` builds
+thread-safe SQLite and compares query results with clang's build;
+`scripts/test-quickjs.sh` builds QuickJS and runs its test suite. All
+pass, with and without `-O`; together they found the bugs the small
+programs missed (an array of pointers to `const` placed in read-only
+memory, a variable used in its own initializer, `#pragma pack`, the
+`__int128` constant, a function too big for conditional branches).

@@ -274,6 +274,61 @@ fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) 
 }
 
 /// Valid IR the aarch64 backend refuses, with the reason it gives.
+/// A conditional branch over more than its ±1 MiB reach, as in big
+/// interpreter loops, is relaxed into one that reaches; without that the
+/// assembler rejects the program ("fixup value out of range"). Here it is
+/// the branch back to the head of a loop whose body is 1.2 MB of `add`s,
+/// run twice.
+#[test]
+fn long_branches() {
+    let n = 300_000;
+    let mut src = String::from(
+        "func @main(i32) -> i32 {\n    ss0 = stack_slot 4, align 4\nblock0(v0: i32):\n    \
+         v1 = stack_addr ss0\n    v2 = iconst.i32 2\n    store v2, v1\n    jump block1\n\
+         block1:\n",
+    );
+    for i in 0..n {
+        let prev = if i == 0 { 0 } else { i + 2 };
+        src.push_str(&format!("    v{} = iadd v{prev}, v0\n", i + 3));
+    }
+    let v = n + 3;
+    src.push_str(&format!(
+        "    v{v} = load.i32 v1\n    v{} = iconst.i32 1\n    v{} = isub v{v}, v{}\n    \
+         store v{}, v1\n    v{} = iconst.i32 0\n    v{} = icmp.eq v{}, v{}\n    \
+         brif v{}, block2, block1\nblock2:\n    v{} = iconst.i32 7\n    return v{}\n}}\n",
+        v + 1,
+        v + 2,
+        v + 1,
+        v + 2,
+        v + 3,
+        v + 4,
+        v + 2,
+        v + 3,
+        v + 4,
+        v + 5,
+        v + 5,
+    ));
+    let module = keel_ir::parse(&src).unwrap();
+    let asm = keel_codegen::aarch64::compile(&module).unwrap();
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("long-branches");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (asm_path, exe) = (dir.join("long.s"), dir.join("long"));
+    std::fs::write(&asm_path, asm).unwrap();
+    let out = Command::new("clang")
+        .arg("-o")
+        .arg(&exe)
+        .arg(&asm_path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let status = run_with_timeout(&mut Command::new(&exe)).unwrap().status;
+    assert_eq!(status.code(), Some(7));
+}
+
 #[test]
 fn rejected() {
     let cases = [

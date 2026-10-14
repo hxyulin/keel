@@ -182,6 +182,83 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     Ok(out)
 }
 
+/// How far a conditional branch (`b.cond`, `cbz`, `cbnz`) reaches: a
+/// signed 19-bit count of instructions, ±1 MiB.
+const COND_BRANCH_RANGE: usize = 1 << 20;
+
+/// Makes the conditional branches of a function too big for them to be
+/// sure to reach their targets into a branch on the opposite condition
+/// over a `b`, which reaches ±128 MiB. Interpreter loops get that big.
+fn relax_branches(out: &mut String, name: &str) {
+    // An upper bound on the size: every line that is not a label, a
+    // comment or a directive is one instruction; data in the code is
+    // jump table entries, four bytes each.
+    let size: usize = out
+        .lines()
+        .filter(|l| l.starts_with('\t') && !l.starts_with("\t;"))
+        .filter(|l| !l.starts_with("\t.") || l.starts_with("\t.long"))
+        .count()
+        * 4;
+    if size < COND_BRANCH_RANGE {
+        return;
+    }
+    let mut relaxed = String::with_capacity(out.len() + out.len() / 8);
+    let mut n = 0;
+    for line in out.lines() {
+        // The inverted branch up to its target, which skips the `b`.
+        let far = |inverse: String, target: &str| {
+            format!("\t{inverse}L{name}_near{n}\n\tb\t{target}\nL{name}_near{n}:\n")
+        };
+        let rewritten = if let Some((cond, target)) = line
+            .strip_prefix("\tb.")
+            .and_then(|rest| rest.split_once('\t'))
+        {
+            Some(far(format!("b.{}\t", invert_cond(cond)), target))
+        } else if let Some((op, rest)) = line
+            .strip_prefix("\tcbz\t")
+            .map(|r| ("cbnz", r))
+            .or_else(|| line.strip_prefix("\tcbnz\t").map(|r| ("cbz", r)))
+        {
+            let (reg, target) = rest.split_once(", ").expect("cbz reg, label");
+            Some(far(format!("{op}\t{reg}, "), target))
+        } else {
+            None
+        };
+        match rewritten {
+            Some(code) => {
+                relaxed.push_str(&code);
+                n += 1;
+            }
+            None => {
+                relaxed.push_str(line);
+                relaxed.push('\n');
+            }
+        }
+    }
+    *out = relaxed;
+}
+
+/// The condition code that holds when `cond` does not.
+fn invert_cond(cond: &str) -> &'static str {
+    match cond {
+        "eq" => "ne",
+        "ne" => "eq",
+        "hs" | "cs" => "lo",
+        "lo" | "cc" => "hs",
+        "mi" => "pl",
+        "pl" => "mi",
+        "vs" => "vc",
+        "vc" => "vs",
+        "hi" => "ls",
+        "ls" => "hi",
+        "ge" => "lt",
+        "lt" => "ge",
+        "gt" => "le",
+        "le" => "gt",
+        _ => panic!("unknown condition `{cond}`"),
+    }
+}
+
 /// What the debug info needs to know of a compiled function.
 struct FrameDebug {
     /// Where each stack slot is, from `x29`.
@@ -215,7 +292,8 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             | Intrinsic::VaStart
             | Intrinsic::StackAlloc
             | Intrinsic::StackSave
-            | Intrinsic::StackRestore => false,
+            | Intrinsic::StackRestore
+            | Intrinsic::FrameAddress => false,
         },
         _ => false,
     }
@@ -703,6 +781,7 @@ impl<'a> FunctionCompiler<'a> {
             self.emit("brk\t#1");
         }
         writeln!(self.out, "L{name}_end:").unwrap();
+        relax_branches(&mut self.out, name);
         self.emit(".cfi_endproc");
         if func.personality.is_some() {
             self.eh.emit(&mut self.out, name);
@@ -1251,6 +1330,12 @@ impl<'a> FunctionCompiler<'a> {
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
                     self.emit(format!("mov\tsp, x{mark}"));
+                }
+                // The frame record is where the prologue points x29.
+                Intrinsic::FrameAddress => {
+                    let d = self.def_reg(result);
+                    self.emit(format!("mov\tx{d}, x29"));
+                    self.def_done(result, d);
                 }
             },
             InstData::InlineAsm { asm, args } => {

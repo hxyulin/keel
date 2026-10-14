@@ -28,7 +28,7 @@ impl Parser {
     pub(crate) fn initializer(&mut self, ty: &Ty) -> R<(Init, Ty)> {
         let mut items = Vec::new();
         let slot = Slot {
-            ty: ty.clone(),
+            ty: ty.unatomic().clone(),
             offset: 0,
             bits: None,
         };
@@ -119,7 +119,7 @@ impl Parser {
                 let size = self.size_of(elem);
                 (0..*n)
                     .map(|i| Slot {
-                        ty: (**elem).clone(),
+                        ty: elem.unatomic().clone(),
                         offset: slot.offset + i * size,
                         bits: None,
                     })
@@ -132,7 +132,7 @@ impl Parser {
                     .iter()
                     .filter(|m| m.name.is_some() || m.bits.is_none())
                     .map(|m| Slot {
-                        ty: m.ty.clone(),
+                        ty: m.ty.unatomic().clone(),
                         offset: slot.offset + m.offset,
                         bits: m.bits,
                     });
@@ -210,16 +210,19 @@ impl Parser {
         let mut count = 0u64;
         while !self.eat("}") {
             let loc = self.loc();
+            // GNU's `[first ... last] =` initializes each of a range.
+            let mut range = (1, 0);
             let sub = if self.is("[") || self.is(".") {
-                let (index, sub) = self.designation(slot)?;
-                next = index;
+                let (index, sub, n) = self.designation(slot)?;
+                next = index + n - 1;
+                range = (n, self.size_of(&sub.ty));
                 sub
             } else if unbounded {
                 let Ty::Array(elem, _) = &slot.ty else {
                     unreachable!()
                 };
                 Slot {
-                    ty: (**elem).clone(),
+                    ty: elem.unatomic().clone(),
                     offset: slot.offset + next as u64 * self.size_of(elem),
                     bits: None,
                 }
@@ -229,6 +232,7 @@ impl Parser {
                     None => return Err(Error::new(loc, "too many initializers")),
                 }
             };
+            let first = items.len();
             if self.is("[") || self.is(".") {
                 // `.a.b = ` or `[1].x =`: designators into the sub-object.
                 self.designated_rest(&sub, items)?;
@@ -237,6 +241,18 @@ impl Parser {
                 self.init_item(&sub, None, items)?;
             } else {
                 self.init_item(&sub, None, items)?;
+            }
+            let (n, stride) = range;
+            let one: Vec<InitItem> = items[first..].to_vec();
+            for k in 1..n as u64 {
+                items.extend(one.iter().cloned().map(|mut item| {
+                    match &mut item {
+                        InitItem::Expr { offset, .. } | InitItem::Bytes { offset, .. } => {
+                            *offset += k * stride
+                        }
+                    }
+                    item
+                }));
             }
             next += 1;
             count = count.max(next as u64);
@@ -248,25 +264,31 @@ impl Parser {
         Ok(count)
     }
 
-    /// The first designator of an item: which sub-object of `slot`, and
-    /// its index in initialization order.
-    fn designation(&mut self, slot: &Slot) -> R<(usize, Slot)> {
+    /// The first designator of an item: which sub-object of `slot`, its
+    /// index in initialization order, and how many elements from it a
+    /// range designator (`[2 ... 5]`) covers.
+    fn designation(&mut self, slot: &Slot) -> R<(usize, Slot, usize)> {
         let loc = self.loc();
         if self.eat("[") {
             let i = self.const_int()?;
+            let last = if self.eat("...") {
+                self.const_int()?
+            } else {
+                i
+            };
             self.expect("]")?;
             let Ty::Array(elem, len) = &slot.ty else {
                 return Err(Error::new(loc, "`[]` designator for a non-array"));
             };
-            if i < 0 || len.is_some_and(|n| i as u64 >= n) {
+            if i < 0 || last < i || len.is_some_and(|n| last as u64 >= n) {
                 return Err(Error::new(loc, "array designator out of range"));
             }
             let sub = Slot {
-                ty: (**elem).clone(),
+                ty: elem.unatomic().clone(),
                 offset: slot.offset + i as u64 * self.size_of(elem),
                 bits: None,
             };
-            return Ok((i as usize, sub));
+            return Ok((i as usize, sub, (last - i + 1) as usize));
         }
         self.expect(".")?;
         let name = self.ident()?;
@@ -284,22 +306,22 @@ impl Parser {
         for (i, m) in named.iter().enumerate() {
             if m.name.as_deref() == Some(name.as_str()) {
                 let sub = Slot {
-                    ty: m.ty.clone(),
+                    ty: m.ty.unatomic().clone(),
                     offset: slot.offset + m.offset,
                     bits: m.bits,
                 };
-                return Ok((i, sub));
+                return Ok((i, sub, 1));
             }
             if m.name.is_none()
                 && let Ty::Struct(inner) = m.ty
                 && let Some((off, found)) = self.structs[inner].find(&name, &self.structs)
             {
                 let sub = Slot {
-                    ty: found.ty,
+                    ty: found.ty.unatomic().clone(),
                     offset: slot.offset + m.offset + off,
                     bits: found.bits,
                 };
-                return Ok((i, sub));
+                return Ok((i, sub, 1));
             }
         }
         Err(Error::new(loc, format!("no member `{name}`")))
@@ -308,7 +330,11 @@ impl Parser {
     /// Further designators, then `=` and the initializer.
     fn designated_rest(&mut self, slot: &Slot, items: &mut Vec<InitItem>) -> R<()> {
         if self.is("[") || self.is(".") {
-            let (_, sub) = self.designation(slot)?;
+            let loc = self.loc();
+            let (_, sub, n) = self.designation(slot)?;
+            if n > 1 {
+                return Err(Error::new(loc, "a range designator must come first"));
+            }
             return self.designated_rest(&sub, items);
         }
         self.expect("=")?;

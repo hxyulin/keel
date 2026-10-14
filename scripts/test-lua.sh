@@ -4,11 +4,12 @@
 #   scripts/test-lua.sh [-O] [work-dir]
 #
 # Each source file is preprocessed by `clang -E` and compiled by
-# `keel cc`; clang only assembles and links. Lua is built as ISO C99,
-# without its POSIX extras. `LUA_USE_JUMPTABLE=0` turns off computed
-# gotos, which Lua otherwise uses whenever the compiler claims to be GNU C
-# (clang does). The tests run in their portable mode (`_U`), which skips
-# the ones that need Lua's internal test library.
+# `keel cc`; clang only assembles and links. Lua is built as `make
+# macosx` builds it: GNU C99 with its POSIX extras (`dlopen`, `mkstemp`,
+# `popen`), and with computed gotos in the interpreter loop, which Lua
+# uses whenever the compiler is GNU C. The tests run in their portable
+# mode (`_U`), which skips the ones that need Lua's internal test
+# library.
 set -euo pipefail
 
 opt=()
@@ -42,7 +43,7 @@ objs=()
 for src in lua-$version/src/*.c; do
   name=$(basename "$src" .c)
   [ "$name" = luac ] && continue
-  clang -E -std=c99 -DLUA_USE_JUMPTABLE=0 "$src" -o "build/$name.i"
+  clang -E -std=gnu99 -DLUA_USE_MACOSX "$src" -o "build/$name.i"
   "$keel" cc ${opt[@]+"${opt[@]}"} "build/$name.i" -o "build/$name.s"
   clang -c "build/$name.s" -o "build/$name.o"
   objs+=("build/$name.o")
