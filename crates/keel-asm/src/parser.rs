@@ -10,7 +10,7 @@ mod memory;
 mod relocate;
 mod vector;
 
-use super::{Assembly, Error, Symbol, encode};
+use super::{Assembly, Error, InstructionLocation, Symbol, encode};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -315,14 +315,18 @@ struct DataFixup {
     got: bool,
 }
 
-pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
+pub(super) fn assemble(
+    source: &str,
+    metrics: bool,
+) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
     let mut previous = None;
     for _ in 0..32 {
-        let (assembly, symbolic_leb) = assemble_pass(source, previous.as_ref())?;
+        let (assembly, symbolic_leb, locations) =
+            assemble_pass(source, previous.as_ref(), metrics)?;
         if !symbolic_leb {
-            return Ok(assembly);
+            return Ok((assembly, locations));
         }
-        let locations: BTreeMap<_, _> = assembly
+        let symbol_locations: BTreeMap<_, _> = assembly
             .symbols
             .iter()
             .filter_map(|s| {
@@ -335,10 +339,10 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
                 ))
             })
             .collect();
-        if previous.as_ref() == Some(&locations) {
-            return Ok(assembly);
+        if previous.as_ref() == Some(&symbol_locations) {
+            return Ok((assembly, locations));
         }
-        previous = Some(locations);
+        previous = Some(symbol_locations);
     }
     Err(Error::new(
         0,
@@ -348,7 +352,9 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
 fn assemble_pass(
     source: &str,
     previous: Option<&BTreeMap<String, data::Location>>,
-) -> Result<(Assembly, bool), Error> {
+    metrics: bool,
+) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
+    let mut locations = Vec::new();
     let mut symbolic_leb = false;
     let mut leb_differences = Vec::new();
     let mut label_order = Vec::new();
@@ -643,6 +649,12 @@ fn assemble_pass(
             return Err(err(
                 "instructions require four-byte-aligned __TEXT,__text locations".into(),
             ));
+        }
+        if metrics {
+            locations.push(InstructionLocation {
+                line,
+                offset: result.text.len(),
+            });
         }
         if let Some(spec) = control::branch(&op, &args).map_err(err)? {
             if !is_integer(&spec.target) {
@@ -1002,5 +1014,5 @@ fn assemble_pass(
             }
         })
         .collect();
-    Ok((result, symbolic_leb))
+    Ok((result, symbolic_leb, locations))
 }

@@ -5,6 +5,7 @@
 //! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -30,6 +31,7 @@ const USAGE: &str = "usage:
   keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel asm <input.s> -o <output.o>
+  keel asm-metrics <input.s> [-o <metrics.json>]
   keel passes";
 
 fn main() -> ExitCode {
@@ -161,6 +163,34 @@ fn run(args: Vec<String>) -> Result<(), String> {
         return Err(USAGE.into());
     };
     match cmd.as_str() {
+        "asm-metrics" => {
+            let opts = parse_options(rest, &["-o"])?;
+            let input = opts.input.as_ref().ok_or(USAGE)?;
+            let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
+            let (assembly, locations) =
+                keel_asm::assemble_with_metrics(&src).map_err(|e| format!("{input}: {e}"))?;
+            let rows: Vec<_> = locations
+                .iter()
+                .map(|loc| {
+                    let word = u32::from_le_bytes(
+                        assembly.text[loc.offset..loc.offset + 4]
+                            .try_into()
+                            .unwrap(),
+                    );
+                    format!(
+                        "{{\"line\":{},\"offset\":{},\"word\":{}}}",
+                        loc.line, loc.offset, word
+                    )
+                })
+                .collect();
+            let output = format!(
+                "{{\"schema_version\":1,\"target\":\"aarch64-apple-darwin\",\"text_bytes\":{},\"instruction_bytes\":{},\"instructions\":[{}]}}\n",
+                assembly.text.len(),
+                locations.len() * 4,
+                rows.join(",")
+            );
+            write_output(&opts, &output)
+        }
         "asm" => {
             let opts = parse_options(rest, &["-o"])?;
             let input = opts.input.as_ref().ok_or(USAGE)?;

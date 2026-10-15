@@ -175,7 +175,20 @@ impl Assembly {
 
 /// Assemble A64 syntax, resolving local branches/ADR and retaining linker relocations.
 pub fn assemble(source: &str) -> Result<Assembly, Error> {
-    parser::assemble(source)
+    parser::assemble(source, false).map(|(assembly, _)| assembly)
+}
+
+/// A source instruction's location in the assembled text (excluding padding/data).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstructionLocation {
+    pub line: usize,
+    pub offset: usize,
+}
+
+/// Assemble while retaining instruction locations for metrics and CPU modeling.
+/// Words must be read from the final text after branch/address fixups.
+pub fn assemble_with_metrics(source: &str) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
+    parser::assemble(source, true)
 }
 
 /// Assemble source directly into an Apple arm64 `.o` file.

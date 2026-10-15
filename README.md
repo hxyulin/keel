@@ -165,6 +165,13 @@ arbitrary `keel compile` output.
 Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
 
+Instruction metrics are available through `keel asm-metrics input.s` and
+[`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates
+an inventory of all supported A64 forms, optionally imports CPU scheduling
+estimates from LLVM, and compares equivalent sequences by size or modeled
+execution cost. See [instruction costs](docs/instruction-costs.md) for coverage,
+provenance, and the limits of the shared LLVM Apple CPU model.
+
 ## Development
 
 - `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,
