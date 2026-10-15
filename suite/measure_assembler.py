@@ -59,6 +59,9 @@ def main():
     parser.add_argument('--compiler', type=pathlib.Path, help='measure an existing candidate binary without rebuilding')
     parser.add_argument('--profiler', type=pathlib.Path, help='stage profiler built from the same candidate')
     parser.add_argument('--input-dir', type=pathlib.Path, help='also measure every .s file in this directory')
+    parser.add_argument('--extra-input', type=pathlib.Path, action='append', default=[])
+    parser.add_argument('--cpu', choices=['baseline', 'apple-m5'], default='baseline',
+                        help='match Keel feature selection and Clang CPU; baseline retains apple-m1 reference')
     parser.add_argument('--only-inputs', action='store_true', help='skip synthetic/generated-C inputs')
     args = parser.parse_args()
     if args.pairs < 3 or args.warmups < 1 or args.functions < 1:
@@ -109,6 +112,9 @@ def main():
             parser.error('--input-dir contains no .s files')
         sources.extend(inputs)
 
+    sources.extend(p.resolve() for p in args.extra_input)
+    clang_cpu = 'apple-m5' if args.cpu == 'apple-m5' else 'apple-m1'
+    keel_cpu_flags = ['--cpu', 'apple-m5'] if args.cpu == 'apple-m5' else []
     report = {
         'commit': run(['git', 'rev-parse', 'HEAD']).decode().strip(),
         'host': platform.platform(),
@@ -117,6 +123,7 @@ def main():
         'rustc': run(['rustc', '--version']).decode().strip(),
         'keel_sha256': hashlib.sha256(keel.read_bytes()).hexdigest(),
         'script_sha256': hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+        'cpu_selection': args.cpu, 'clang_cpu': clang_cpu,
         'pairs': args.pairs, 'warmups': args.warmups,
         'functions': args.functions, 'rows': [],
         'scope': 'Warm filesystem cache, serial subprocess wall time including startup, file input and object output; no preprocessing. In-process stages exclude input I/O and destruction. Coverage is limited to the listed synthetic/generated-C or supplied assembly inputs.',
@@ -126,12 +133,12 @@ def main():
     rng = random.Random(42)
     for path in sources:
         commands = {
-            'keel': [str(keel), 'asm', str(path), '-o', str(work / 'keel.o')],
-            'clang-driver': [str(clang), '-target', 'arm64-apple-macosx11.0.0', '-mcpu=apple-m1', '-x', 'assembler', '-c', str(path), '-o', str(work / 'clang-driver.o')],
-            'clang-cc1as': [str(clang), '-cc1as', '-triple', 'arm64-apple-macosx11.0.0', '-target-cpu', 'apple-m1', '-filetype', 'obj', str(path), '-o', str(work / 'clang-cc1as.o')],
+            'keel': [str(keel), 'asm', *keel_cpu_flags, str(path), '-o', str(work / 'keel.o')],
+            'clang-driver': [str(clang), '-target', 'arm64-apple-macosx11.0.0', f'-mcpu={clang_cpu}', '-x', 'assembler', '-c', str(path), '-o', str(work / 'clang-driver.o')],
+            'clang-cc1as': [str(clang), '-cc1as', '-triple', 'arm64-apple-macosx11.0.0', '-target-cpu', clang_cpu, '-filetype', 'obj', str(path), '-o', str(work / 'clang-cc1as.o')],
         }
         if args.baseline_compiler:
-            commands['keel-before'] = [str(args.baseline_compiler.resolve()), 'asm', str(path), '-o', str(work / 'keel-before.o')]
+            commands['keel-before'] = [str(args.baseline_compiler.resolve()), 'asm', *keel_cpu_flags, str(path), '-o', str(work / 'keel-before.o')]
         for _ in range(args.warmups):
             for command in commands.values():
                 run(command)
@@ -147,11 +154,12 @@ def main():
                 start = time.perf_counter_ns()
                 run(commands[name])
                 samples[name].append((time.perf_counter_ns() - start) / 1e6)
-        stage = json.loads(run([profiler, path, args.pairs]))
+        stage = json.loads(run([profiler, path, args.pairs, *(['apple-m5'] if args.cpu == 'apple-m5' else [])]))
         ratios = [a / b for a, b in zip(samples['keel'], samples['clang-cc1as'])]
         boots = sorted(statistics.median(rng.choices(ratios, k=len(ratios))) for _ in range(2000))
         row = {
             'name': path.stem, 'source_bytes': path.stat().st_size,
+            'source': str(path),
             'source_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'commands': commands, 'samples_ms': samples,
             'median_ms': {k: statistics.median(v) for k, v in samples.items()},
@@ -166,7 +174,7 @@ def main():
             row['keel_after_over_before'] = statistics.median(before_ratios)
             row['keel_after_over_before_bootstrap_95'] = [before_boots[49], before_boots[1949]]
         if args.baseline_profiler:
-            row['in_process_before'] = json.loads(run([args.baseline_profiler.resolve(), path, args.pairs]))
+            row['in_process_before'] = json.loads(run([args.baseline_profiler.resolve(), path, args.pairs, *(['apple-m5'] if args.cpu == 'apple-m5' else [])]))
         report['rows'].append(row)
         # Sum the serial per-file invocation times within each round. This is
         # assembly batch cost, not parallel build wall time or a linked runtime.
