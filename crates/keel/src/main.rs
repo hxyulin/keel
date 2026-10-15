@@ -30,6 +30,7 @@ use keel_ir::Module;
 use std::process::ExitCode;
 mod asm;
 mod input;
+mod link;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
@@ -39,6 +40,7 @@ const USAGE: &str = "usage:
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
+  keel link [--system] [--sysroot SDK] [-l NAME] <input.o|input.a>... -o executable
   keel passes
 
   Input files must remain unchanged during parsing.";
@@ -309,6 +311,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             write_output(&opts, &output)
         }
         "asm" => asm::run(rest),
+        "link" => link::run(rest),
         "compile" => {
             let opts = parse_options(
                 rest,

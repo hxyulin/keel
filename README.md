@@ -453,3 +453,9 @@ inputs, not complete applications; the measurements use a warm filesystem cache.
   `suite/`; see [suite/README.md](suite/README.md).
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.
+
+An opt-in native macOS arm64 linker is available as `keel link inputs.o -o program`.
+It resolves system interfaces from the macOS SDK and ad-hoc signs its output.
+`keel link --system` selects the Clang driver fallback. See
+[the supported scope and validation record](docs/macos-linker.md) before using
+this initial implementation; it is not a general ld64 replacement.

@@ -1,0 +1,92 @@
+; target: aarch64-apple-darwin
+; Catching C++ exceptions in keel, with __gxx_personality_v0: catch
+; clauses for int and anything, a cleanup that resumes unwinding, and a
+; plain call between invokes whose exception must propagate. The driver,
+; exceptions.cpp, throws from c_may_throw: int -x for x < 0, a
+; long for x = 1000; otherwise it returns 2x.
+; expect: exit 0
+
+decl @c_may_throw(i32) -> i32
+decl @__gxx_personality_v0()
+decl @__cxa_begin_catch(ptr) -> ptr
+decl @__cxa_end_catch()
+decl @_Unwind_Resume(ptr)
+decl data @_ZTIi
+
+; c_may_throw(x) + 1; a caught int e gives e + 1000 + (x + 7), where
+; x + 7 lives across the invoke into the landing pad; anything else -1.
+func @k_catch(i32) -> i32 cc(c) personality @__gxx_personality_v0 {
+block0(v0: i32):
+    v1 = iconst.i32 7
+    v2 = iadd v0, v1
+    v3 = invoke @c_may_throw(v0), block1, block2
+block1:
+    v4 = iconst.i32 1
+    v5 = iadd v3, v4
+    return v5
+block2:
+    v6, v7 = landingpad catch @_ZTIi, catch null
+    v8 = call @__cxa_begin_catch(v6)
+    v9 = eh_typeid @_ZTIi
+    v10 = icmp.eq v7, v9
+    brif v10, block3, block4
+block3:
+    v11 = load.i32 v8
+    call @__cxa_end_catch()
+    v12 = iconst.i32 1000
+    v13 = iadd v11, v12
+    v14 = iadd v13, v2
+    return v14
+block4:
+    call @__cxa_end_catch()
+    v15 = iconst.i32 -1
+    return v15
+}
+
+; Adds x + 100 to @cleanups for each exception passing through, then
+; lets it go on. x + 100 is live across the invoke and nothing else, so
+; only the invoke being a call keeps it in a callee-saved register.
+data @cleanups = align 4 { i32 0 }
+
+func @k_cleanup(i32) -> i32 cc(c) personality @__gxx_personality_v0 {
+block0(v0: i32):
+    v8 = iconst.i32 100
+    v6 = iadd v0, v8
+    v1 = invoke @c_may_throw(v0), block1, block2
+block1:
+    return v1
+block2:
+    v2, v3 = landingpad cleanup
+    v4 = symbol_addr @cleanups
+    v5 = load.i32 v4
+    v7 = iadd v5, v6
+    store v7, v4
+    call @_Unwind_Resume(v2)
+    trap
+}
+
+; 100 if the first call throws, 200 if the third does; an exception from
+; the plain call in between reaches the caller.
+func @k_two(i32, i32, i32) -> i32 cc(c) personality @__gxx_personality_v0 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = invoke @c_may_throw(v0), block1, block3
+block1:
+    v4 = call @c_may_throw(v1)
+    v5 = invoke @c_may_throw(v2), block2, block4
+block2:
+    v6 = iadd v3, v4
+    v7 = iadd v6, v5
+    return v7
+block3:
+    v8, v9 = landingpad catch null
+    v10 = call @__cxa_begin_catch(v8)
+    call @__cxa_end_catch()
+    v11 = iconst.i32 100
+    return v11
+block4:
+    v12, v13 = landingpad catch null
+    v14 = call @__cxa_begin_catch(v12)
+    call @__cxa_end_catch()
+    v15 = iconst.i32 200
+    return v15
+}
