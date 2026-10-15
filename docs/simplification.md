@@ -244,3 +244,21 @@ inputs and wider sign boundaries. Native tests include i128 intermediates and
 a sign-then-zero extension that must preserve its intermediate sign bits.
 
 The [incremental cast-chain report](../suite/reports/cast-chains-aarch64-2026-10-15.json) records 914 fewer IR instructions, -3,628 text bytes, runtime ratio 0.9991, and compile-time ratio 1.0017. Three-pair timing does not establish a small runtime gain.
+
+## Wrapping integer algebra
+
+Integer combining cancels repeated terms in `(x+y)-x`, `(x-y)+y`,
+`x-(x-y)`, `(x+y)-(x+z)` and `x+(-x)`, accepting interchangeable operand
+positions. Associative add/multiply/AND/OR/XOR chains group two constants
+when the inner result has only one recorded use. This conservative gate avoids
+reassociating shared computations. Stale worklist use records can miss a fold,
+but cannot incorrectly classify multiple actual uses as one. Constants wrap
+at the result width; an i128 result is materialized only when representable by
+the IR's sign-extended i64 literal. Strict FP and checked arithmetic are excluded.
+
+Tests exhaust i8 cancellation pairs and grouping inputs/constants, exercise
+common addends in every operand position, wider overflow boundaries, i128
+representation and shared-chain guards. Native regression inputs include
+unsigned wraparound and run with restricted registers.
+
+The [incremental algebra report](../suite/reports/algebra-aarch64-2026-10-15.json) records 129 fewer IR instructions, -360 text bytes, runtime ratio 0.9942, and compile-time ratio 1.0047. Three-pair timing does not establish a small runtime gain.

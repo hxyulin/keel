@@ -26,3 +26,14 @@ block0(v0: i64):
     v3 = uext.i64 v2
     return v3
 }
+
+func @scalar_algebra(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    v3 = isub v2, v0
+    v4 = iconst.i64 37
+    v5 = iadd v3, v4
+    v6 = iconst.i64 7
+    v7 = iadd v5, v6
+    return v7
+}

@@ -85,7 +85,104 @@ fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Optio
     None
 }
 
-fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
+fn algebra(
+    func: &mut Function,
+    inst: Inst,
+    op: BinaryOp,
+    a: Value,
+    b: Value,
+    ty: Type,
+    users: &[Vec<Inst>],
+) -> Option<Fold> {
+    if !matches!(
+        op,
+        BinaryOp::Iadd
+            | BinaryOp::Isub
+            | BinaryOp::Imul
+            | BinaryOp::And
+            | BinaryOp::Or
+            | BinaryOp::Xor
+    ) {
+        return None;
+    }
+    if op == BinaryOp::Isub {
+        if let Some((BinaryOp::Iadd, args)) = binary(func, a) {
+            if args[0] == b {
+                return Some(Fold::Value(args[1]));
+            }
+            if args[1] == b {
+                return Some(Fold::Value(args[0]));
+            }
+        }
+        if let Some((BinaryOp::Isub, [left, right])) = binary(func, b)
+            && a == left
+        {
+            return Some(Fold::Value(right));
+        }
+        if let (Some((BinaryOp::Iadd, left)), Some((BinaryOp::Iadd, right))) =
+            (binary(func, a), binary(func, b))
+        {
+            for i in 0..2 {
+                for j in 0..2 {
+                    if left[i] == right[j] {
+                        return Some(Fold::Data(InstData::Binary {
+                            op: BinaryOp::Isub,
+                            args: [left[1 - i], right[1 - j]],
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    if op == BinaryOp::Iadd {
+        for (a, b) in [(a, b), (b, a)] {
+            if let Some((BinaryOp::Isub, [left, right])) = binary(func, a)
+                && b == right
+            {
+                return Some(Fold::Value(left));
+            }
+            if let ValueDef::Result(inner, 0) = func.value_def(b)
+                && let InstData::Unary {
+                    op: UnaryOp::Ineg,
+                    arg,
+                } = *func.inst_data(inner)
+                && func.resolve(arg) == a
+            {
+                return Some(zero(ty));
+            }
+        }
+    }
+    // Reassociation must remove the inner operation, rather than duplicate a
+    // shared computation or merely move constants between live expressions.
+    if op != BinaryOp::Isub
+        && users[a.index()].len() == 1
+        && let Some((inner_op, args)) = binary(func, a)
+        && inner_op == op
+        && let (Some(c1), Some(c2)) = (bits(func, args[1]), bits(func, b))
+    {
+        let combined = match op {
+            BinaryOp::Iadd => c1.wrapping_add(c2),
+            BinaryOp::Imul => c1.wrapping_mul(c2),
+            BinaryOp::And => c1 & c2,
+            BinaryOp::Or => c1 | c2,
+            BinaryOp::Xor => c1 ^ c2,
+            _ => unreachable!(),
+        } & mask(ty);
+        let imm = combined as i64;
+        if ty == Type::I128 && imm as i128 as u128 != combined {
+            return None;
+        }
+        let c = func.insert_inst(InsertPoint::Before(inst), InstData::Iconst { ty, imm });
+        func.set_inst_loc(c, func.inst_loc(inst));
+        return Some(Fold::Data(InstData::Binary {
+            op,
+            args: [args[0], func.first_result(c)],
+        }));
+    }
+    None
+}
+
+fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
     let canonicalized = data != *func.inst_data(inst);
@@ -147,6 +244,9 @@ fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
                 _ => {}
             }
             if let Some(fold) = boolean(func, op, a, b, ty) {
+                return Some(fold);
+            }
+            if let Some(fold) = algebra(func, inst, op, a, b, ty, users) {
                 return Some(fold);
             }
             let power = match op {
@@ -289,7 +389,7 @@ pub fn run(func: &mut Function) -> bool {
         if func.is_removed(inst) || func.inst_results(inst).is_empty() {
             continue;
         }
-        let Some(fold) = simplify(func, inst) else {
+        let Some(fold) = simplify(func, inst, &users) else {
             continue;
         };
         let result = func.first_result(inst);
