@@ -49,6 +49,21 @@ For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
 
+`asm`, `compile`, `cc`, and `opt` also accept experimental `--mmap` input.
+This uses a read-only copy-on-write file mapping instead of an owned read
+buffer for nonempty regular files, while retaining UTF-8 validation. Keep
+mapped inputs unchanged until parsing completes; copy-on-write does not
+protect against another process truncating the file. Empty files, streams,
+and filesystems that reject mapping fall back to ordinary reads. Mappings
+are released before writing output, including when output reuses the input
+path. Ordinary reads remain the default while input strategies are measured.
+
+To compare the two paths on already generated Lua assembly, run
+`python3 suite/measure_assembler_io.py --compiler target/release/keel
+--input-dir target/suite/lua/build/keel --work-dir target/assembler-bench/io
+--output target/assembler-bench/io/report.json`. Builds and tests should finish
+before timing. This measures warm-cache CLI costs, not cold-storage latency.
+
 ## Compiler tiers and profiling
 
 The stages can be tuned independently:

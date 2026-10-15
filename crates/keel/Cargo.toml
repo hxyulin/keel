@@ -9,6 +9,7 @@ license.workspace = true
 profile-with-tracy = ["profiling/profile-with-tracy", "keel-opt/profile-with-tracy", "keel-codegen/profile-with-tracy", "dep:tracy-client"]
 
 [dependencies]
+memmap2 = "0.9"
 profiling.workspace = true
 tracy-client = { version = "0.18", optional = true }
 
