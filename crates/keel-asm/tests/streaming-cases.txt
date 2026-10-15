@@ -1,0 +1,49 @@
+# Named cases from Arm AARCHMRS 2025-12, schema 2.7.4.
+# Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.
+# Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.
+addvl_r_ri_	addvl sp, x30, #-32
+dup_z_r_	dup z31.d, sp
+ld1b_z_p_bi_u16	ld1b {z31.h}, p7/z, [sp, #-8, mul vl]
+ld1b_z_p_bi_u32	ld1b {z31.s}, p7/z, [sp, #-8, mul vl]
+ld1b_z_p_bi_u64	ld1b {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1b_z_p_bi_u8	ld1b {z31.b}, p7/z, [sp, #-8, mul vl]
+ld1b_z_p_br_u16	ld1b {z31.h}, p7/z, [sp, x30, lsl #0]
+ld1b_z_p_br_u32	ld1b {z31.s}, p7/z, [sp, x30, lsl #0]
+ld1b_z_p_br_u64	ld1b {z31.d}, p7/z, [sp, x30, lsl #0]
+ld1b_z_p_br_u8	ld1b {z31.b}, p7/z, [sp, x30, lsl #0]
+ld1d_z_p_bi_u64	ld1d {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1d_z_p_br_u64	ld1d {z31.d}, p7/z, [sp, x30, lsl #3]
+ld1h_z_p_bi_u16	ld1h {z31.h}, p7/z, [sp, #-8, mul vl]
+ld1h_z_p_bi_u32	ld1h {z31.s}, p7/z, [sp, #-8, mul vl]
+ld1h_z_p_bi_u64	ld1h {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1h_z_p_br_u16	ld1h {z31.h}, p7/z, [sp, x30, lsl #1]
+ld1h_z_p_br_u32	ld1h {z31.s}, p7/z, [sp, x30, lsl #1]
+ld1h_z_p_br_u64	ld1h {z31.d}, p7/z, [sp, x30, lsl #1]
+ld1sb_z_p_bi_s16	ld1sb {z31.h}, p7/z, [sp, #-8, mul vl]
+ld1sb_z_p_bi_s32	ld1sb {z31.s}, p7/z, [sp, #-8, mul vl]
+ld1sb_z_p_bi_s64	ld1sb {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1sb_z_p_br_s16	ld1sb {z31.h}, p7/z, [sp, x30, lsl #0]
+ld1sb_z_p_br_s32	ld1sb {z31.s}, p7/z, [sp, x30, lsl #0]
+ld1sb_z_p_br_s64	ld1sb {z31.d}, p7/z, [sp, x30, lsl #0]
+ld1sh_z_p_bi_s32	ld1sh {z31.s}, p7/z, [sp, #-8, mul vl]
+ld1sh_z_p_bi_s64	ld1sh {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1sh_z_p_br_s32	ld1sh {z31.s}, p7/z, [sp, x30, lsl #1]
+ld1sh_z_p_br_s64	ld1sh {z31.d}, p7/z, [sp, x30, lsl #1]
+ld1sw_z_p_bi_s64	ld1sw {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1sw_z_p_br_s64	ld1sw {z31.d}, p7/z, [sp, x30, lsl #2]
+ld1w_z_p_bi_u32	ld1w {z31.s}, p7/z, [sp, #-8, mul vl]
+ld1w_z_p_bi_u64	ld1w {z31.d}, p7/z, [sp, #-8, mul vl]
+ld1w_z_p_br_u32	ld1w {z31.s}, p7/z, [sp, x30, lsl #2]
+ld1w_z_p_br_u64	ld1w {z31.d}, p7/z, [sp, x30, lsl #2]
+st1b_z_p_bi_	st1b {z31.d}, p7, [sp, #-8, mul vl]
+st1b_z_p_br_	st1b {z31.d}, p7, [sp, x30, lsl #0]
+st1d_z_p_bi_	st1d {z31.d}, p7, [sp, #-8, mul vl]
+st1d_z_p_br_	st1d {z31.d}, p7, [sp, x30, lsl #3]
+st1h_z_p_bi_	st1h {z31.d}, p7, [sp, #-8, mul vl]
+st1h_z_p_br_	st1h {z31.d}, p7, [sp, x30, lsl #1]
+st1w_z_p_bi_	st1w {z31.d}, p7, [sp, #-8, mul vl]
+st1w_z_p_br_	st1w {z31.d}, p7, [sp, x30, lsl #2]
+whilele_p_p_rr_	whilele p15.d, x30, xzr
+whilelo_p_p_rr_	whilelo p15.d, x30, xzr
+whilels_p_p_rr_	whilels p15.d, x30, xzr
+whilelt_p_p_rr_	whilelt p15.d, x30, xzr

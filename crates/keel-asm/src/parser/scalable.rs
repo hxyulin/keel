@@ -1,6 +1,7 @@
 //! Explicitly opted-in SVE/SME forms. Assembly validates feature availability;
 //! execution mode, OS support, and ZA lifetime remain caller responsibilities.
 mod matrix;
+mod streaming;
 
 use super::{count, integer, reg, shift, unsigned};
 use crate::{TargetFeatures, encode_with_features};
@@ -67,6 +68,9 @@ pub(super) fn instruction(
     features: TargetFeatures,
 ) -> Result<Option<u32>, String> {
     if let Some(word) = matrix::instruction(op, args, features)? {
+        return Ok(Some(word));
+    }
+    if let Some(word) = streaming::instruction(op, args, features)? {
         return Ok(Some(word));
     }
     // Lowercase only operands handled here; ordinary instructions keep their
@@ -174,6 +178,18 @@ pub(super) fn instruction(
         "dup" => {
             count(&a, 2, 3)?;
             let (zd, size) = lane(a[0], "z", 31)?;
+            if a.len() == 2 && !a[1].starts_with('#') && !super::is_integer(a[1]) {
+                let rn = reg(a[1], true, false)?;
+                if rn.bits != if size == 3 { 64 } else { 32 } {
+                    return Err("dup from GPR requires W for B/H/S or X for D".into());
+                }
+                return encode_with_features(
+                    "dup_z_r_",
+                    &[("Zd", zd), ("size", size), ("Rn", rn.number)],
+                    features,
+                )
+                .map(Some);
+            }
             let mut imm = integer(a[1])?;
             let sh = if a.len() == 3 {
                 match shift(a[2])? {

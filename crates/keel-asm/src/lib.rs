@@ -537,6 +537,25 @@ mod tests {
     }
 
     #[test]
+    fn streaming_cases_match_each_selected_generated_form() {
+        let mut seen = std::collections::BTreeSet::new();
+        for line in include_str!("../tests/streaming-cases.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+        {
+            let (name, source) = line.split_once('\t').unwrap();
+            assert!(seen.insert(name));
+            let e = generated::encoding(name).unwrap();
+            let bytes = assemble_with_features(source, TargetFeatures::apple_m5())
+                .unwrap()
+                .text;
+            let word = u32::from_le_bytes(bytes.try_into().unwrap());
+            assert_eq!(word & e.mask, e.base, "{name}");
+        }
+        assert_eq!(seen.len(), 46);
+    }
+
+    #[test]
     fn every_selected_sme_record_has_a_matching_gated_case() {
         use std::collections::BTreeSet;
         let expected: BTreeSet<_> = include_str!("../isa/sme.txt")
