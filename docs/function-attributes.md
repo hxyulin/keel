@@ -37,8 +37,15 @@ not a proof result or an excuse to change existing runtime behavior.
 
 ## C declarations and contracts
 
-C `inline` adds `inlinehint` while preserving the existing C99 inline
-emission/linkage rules. GNU `always_inline`, `noinline`, `noreturn`, `nothrow`
+C `inline` adds `inlinehint`. Inline-only emission is resolved after all
+translation-unit declarations: a later `extern` or plain non-inline declaration
+makes the definition external, just as an earlier one does. Explicit `static`
+linkage is tracked independently and remains private. A definition declared only
+`inline` retains the existing private-copy emission behavior. Inline policy does
+not change this determination; an externally emitted definition cannot pass the
+inliner's private-only boundary.
+
+GNU `always_inline`, `noinline`, `noreturn`, `nothrow`
 (including double-underscore spellings), and C `_Noreturn` map to their IR
 counterparts. `nothrow` means the function promises no exception unwinding;
 it supplies no C++ termination semantics. No C++ `noexcept` syntax is added.
@@ -58,7 +65,15 @@ execution still traps. This includes inlined bodies. Debug locations/scopes
 retain the inliner's existing lexical-subtree treatment.
 
 Contracts apply to the named direct function, including declarations without
-bodies. Indirect call signatures carry none of these new attributes. Function
+bodies. Contracts written in a pointer qualifier list (after `*` or `^`) are
+conservatively discarded, including when that pointer is the named function's
+return type. They cannot become promises on the factory. This includes
+`returns_twice`; noncontract layout attributes retain their existing handling.
+Declaration-specifier and final named-declarator attributes still apply to the
+named function. This is a bounded ownership correction, not a complete GNU
+attribute-placement compatibility implementation.
+
+Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no
 contract propagates through pointer types, casts, matching ABI types, or a
 possible target's name. Indirect calls keep their continuations. Calls and
