@@ -34,11 +34,13 @@ impl Output {
     pub(super) fn native(
         &mut self,
         instruction: impl FnOnce() -> Instruction,
-        text: impl FnOnce() -> String,
+        text: impl FnOnce(&mut String) -> fmt::Result,
     ) {
         match self {
             Self::Text(out) => {
-                writeln!(out, "\t{}", text()).unwrap();
+                out.push('\t');
+                text(out).unwrap();
+                out.push('\n');
             }
             Self::Structured(out) => out.instruction(instruction()),
         }

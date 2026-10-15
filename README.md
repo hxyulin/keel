@@ -311,6 +311,27 @@ tool versions, source hashes, and in-process parse/encode versus Mach-O writer
 timings are retained. The stage profiler can also run separately with
 `cargo run --release -p keel-asm --example profile -- input.s 30`.
 
+To compare IR parsing, AArch64 assembly text generation, and text assembly
+independently, build `cargo build --release -p keel-asm --example profile_stages`
+on each revision and retain both binaries (copy the example into an older
+checkout if needed). Then run:
+
+```sh
+python3 suite/measure_pipeline_stages.py --baseline /path/to/baseline-profile_stages \
+  --candidate target/release/examples/profile_stages \
+  --output target/pipeline-stages/comparison.json
+```
+
+The script generates arithmetic, loop, and register-pressure scaling inputs
+from existing IR fixtures. It randomizes paired process order, rotates stage
+order, discards warmups, and retains raw samples, binary and input hashes,
+and bootstrap intervals. File reading, verification, and prerequisite stages
+are outside each timer; result allocation and destruction are included.
+These synthetic inputs measure compiler throughput, rather than application
+runtime. The [October 15 comparison](suite/reports/pipeline-stages-aarch64-2026-10-15.json)
+records the byte-scanning IR lexer, direct assembly formatting, and encoder
+field-validation changes.
+
 For a before/after comparison, copy the release compiler and stage profiler
 before changing the assembler, then pass `--baseline-compiler <copy>` and
 `--baseline-profiler <copy>`. To measure actual suite assembly, prepare it

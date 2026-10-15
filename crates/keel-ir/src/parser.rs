@@ -226,80 +226,84 @@ struct Loc {
 
 fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
     let mut tokens = Vec::new();
+    let mut last_line = 1;
     for (line_idx, line) in src.lines().enumerate() {
         let line_no = line_idx as u32 + 1;
-        let chars: Vec<char> = line.chars().collect();
+        last_line = line_no + 1;
+        let bytes = line.as_bytes();
         let mut i = 0;
-        while i < chars.len() {
-            let c = chars[i];
+        // Syntax is ASCII. Only whitespace can contain Unicode; retain character
+        // columns while scanning ordinary lines directly from borrowed bytes.
+        let mut extra_bytes = 0;
+        while i < bytes.len() {
+            let c = bytes[i];
             let loc = Loc {
                 line: line_no,
-                col: i as u32 + 1,
+                col: (i - extra_bytes) as u32 + 1,
             };
-            let ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '.';
-            if c == ';' {
-                // A comment runs to the end of the line.
+            if c == b';' {
                 break;
-            } else if c.is_whitespace() {
+            } else if c.is_ascii_whitespace() || c == 0x0b {
                 i += 1;
-            } else if c == 'b' && chars.get(i + 1) == Some(&'"') {
-                let (bytes, end) = lex_bytes(&chars, i + 2, line_no)?;
-                tokens.push((Tok::Bytes(bytes), loc));
+            } else if !c.is_ascii() {
+                let ch = line[i..].chars().next().unwrap();
+                if !ch.is_whitespace() {
+                    return Err(error(loc, format!("unexpected character `{ch}`")));
+                }
+                i += ch.len_utf8();
+                extra_bytes += ch.len_utf8() - 1;
+            } else if c == b'b' && bytes.get(i + 1) == Some(&b'"') {
+                let (data, end) = lex_bytes(line, i + 2, line_no)?;
+                tokens.push((Tok::Bytes(data), loc));
                 i = end;
-            } else if c == '"' {
-                let (bytes, end) = lex_bytes(&chars, i + 1, line_no)?;
-                let text = String::from_utf8(bytes).map_err(|_| ParseError {
-                    line: line_no,
-                    col: loc.col,
-                    message: "a string must be UTF-8".into(),
-                })?;
+            } else if c == b'"' {
+                let (data, end) = lex_bytes(line, i + 1, line_no)?;
+                let text = String::from_utf8(data)
+                    .map_err(|_| error(loc, "a string must be UTF-8".into()))?;
                 tokens.push((Tok::Str(text), loc));
                 i = end;
-            } else if chars[i..].starts_with(&['.', '.', '.']) {
+            } else if bytes[i..].starts_with(b"...") {
                 tokens.push((Tok::Ellipsis, loc));
                 i += 3;
-            } else if c == '-' && chars.get(i + 1) == Some(&'>') {
+            } else if c == b'-' && bytes.get(i + 1) == Some(&b'>') {
                 tokens.push((Tok::Arrow, loc));
                 i += 2;
-            } else if c == '-' || c.is_ascii_digit() {
-                let (tok, end) = lex_number(&chars, i, line_no)?;
+            } else if c == b'-' || c.is_ascii_digit() {
+                let (tok, end) = lex_number(line, i, line_no)?;
                 tokens.push((tok, loc));
                 i = end;
-            } else if c == '@' || c.is_ascii_alphabetic() || c == '_' {
-                let start = if c == '@' { i + 1 } else { i };
+            } else if c == b'@' || c.is_ascii_alphabetic() || c == b'_' {
+                let start = if c == b'@' { i + 1 } else { i };
                 i = start;
-                while i < chars.len() && ident_char(chars[i]) {
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'.'))
+                {
                     i += 1;
                 }
-                let text: String = chars[start..i].iter().collect();
+                let text = line[start..i].to_owned();
                 tokens.push((
-                    if c == '@' {
+                    if c == b'@' {
                         Tok::Global(text)
                     } else {
                         Tok::Ident(text)
                     },
                     loc,
                 ));
-            } else if "(),:={}+[]!".contains(c) {
-                tokens.push((Tok::Punct(c), loc));
+            } else if b"(),:={}+[]!".contains(&c) {
+                tokens.push((Tok::Punct(c as char), loc));
                 i += 1;
             } else {
-                return Err(ParseError {
-                    line: loc.line,
-                    col: loc.col,
-                    message: format!("unexpected character `{c}`"),
-                });
+                return Err(error(loc, format!("unexpected character `{}`", c as char)));
             }
         }
         tokens.push((
             Tok::Newline,
             Loc {
                 line: line_no,
-                col: i as u32 + 1,
+                col: (i - extra_bytes) as u32 + 1,
             },
         ));
     }
-    let last_line = src.lines().count() as u32 + 1;
     tokens.push((
         Tok::Eof,
         Loc {
@@ -310,60 +314,64 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
     Ok(tokens)
 }
 
-/// Lexes a number starting at `chars[start]`: a decimal integer, `0x` hex
-/// bits, or a float (`1.5`, `-2e-3`, `-inf`; `inf` and `nan` alone are
-/// identifiers). Returns the token and the index after it.
-fn lex_number(chars: &[char], start: usize, line: u32) -> Result<(Tok, usize), ParseError> {
+/// Scan numbers in place; integer and hex conversion borrow the source rather
+/// than allocating a temporary string. Floats retain their spelling for width.
+fn lex_number(text: &str, start: usize, line: u32) -> Result<(Tok, usize), ParseError> {
+    let bytes = text.as_bytes();
     let err = |message: String| ParseError {
         line,
-        col: start as u32 + 1,
+        col: text[..start].chars().count() as u32 + 1,
         message,
     };
-    let text = |end: usize| chars[start..end].iter().collect::<String>();
-    let digits = |mut i: usize, radix: u32| {
-        while i < chars.len() && chars[i].is_digit(radix) {
+    let digits = |mut i: usize, hex: bool| {
+        while i < bytes.len()
+            && if hex {
+                bytes[i].is_ascii_hexdigit()
+            } else {
+                bytes[i].is_ascii_digit()
+            }
+        {
             i += 1;
         }
         i
     };
-    let negative = chars[start] == '-';
+    let negative = bytes[start] == b'-';
     let mut i = start + usize::from(negative);
-    if negative && chars[i..].starts_with(&['i', 'n', 'f']) {
+    if negative && bytes[i..].starts_with(b"inf") {
         return Ok((Tok::Float("-inf".into()), i + 3));
     }
-    if chars[i..].starts_with(&['0', 'x']) {
-        let end = digits(i + 2, 16);
-        let hex: String = chars[i + 2..end].iter().collect();
+    if bytes[i..].starts_with(b"0x") {
+        let end = digits(i + 2, true);
         if negative {
             return Err(err("hex literals are bits and cannot be negative".into()));
         }
-        let bits = u64::from_str_radix(&hex, 16)
-            .map_err(|_| err(format!("invalid hex literal `{}`", text(end))))?;
+        let bits = u64::from_str_radix(&text[i + 2..end], 16)
+            .map_err(|_| err(format!("invalid hex literal `{}`", &text[start..end])))?;
         return Ok((Tok::Hex(bits), end));
     }
-    let int_end = digits(i, 10);
+    let int_end = digits(i, false);
     if int_end == i {
-        return Err(err(format!("invalid number `{}`", text(int_end))));
+        return Err(err(format!("invalid number `{}`", &text[start..int_end])));
     }
     i = int_end;
     let mut is_float = false;
-    if chars.get(i) == Some(&'.') && chars.get(i + 1).is_some_and(char::is_ascii_digit) {
-        i = digits(i + 1, 10);
+    if bytes.get(i) == Some(&b'.') && bytes.get(i + 1).is_some_and(u8::is_ascii_digit) {
+        i = digits(i + 1, false);
         is_float = true;
     }
-    if matches!(chars.get(i), Some('e' | 'E')) {
+    if matches!(bytes.get(i), Some(b'e' | b'E')) {
         let mut j = i + 1;
-        if matches!(chars.get(j), Some('+' | '-')) {
+        if matches!(bytes.get(j), Some(b'+' | b'-')) {
             j += 1;
         }
-        if chars.get(j).is_some_and(char::is_ascii_digit) {
-            i = digits(j, 10);
+        if bytes.get(j).is_some_and(u8::is_ascii_digit) {
+            i = digits(j, false);
             is_float = true;
         }
     }
-    let text = text(i);
+    let text = &text[start..i];
     if is_float {
-        return Ok((Tok::Float(text), i));
+        return Ok((Tok::Float(text.to_owned()), i));
     }
     let n = text
         .parse()
@@ -371,13 +379,13 @@ fn lex_number(chars: &[char], start: usize, line: u32) -> Result<(Tok, usize), P
     Ok((Tok::Int(n), i))
 }
 
-/// Decodes the body of a `b"..."` or `"..."` string starting at
-/// `chars[start]`, up to the closing quote. Returns the bytes and the index
-/// after the quote.
-fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize), ParseError> {
+/// Decode a string body. Literal non-ASCII characters remain an error; UTF-8
+/// strings are written with byte escapes, as in the text printer's output.
+fn lex_bytes(text: &str, start: usize, line: u32) -> Result<(Vec<u8>, usize), ParseError> {
+    let chars = text.as_bytes();
     let err = |i: usize, message: String| ParseError {
         line,
-        col: i as u32 + 1,
+        col: text[..i].chars().count() as u32 + 1,
         message,
     };
     let mut bytes = Vec::new();
@@ -388,36 +396,43 @@ fn lex_bytes(chars: &[char], start: usize, line: u32) -> Result<(Vec<u8>, usize)
         };
         i += 1;
         match c {
-            '"' => return Ok((bytes, i)),
-            '\\' => {
+            b'"' => return Ok((bytes, i)),
+            b'\\' => {
                 let escape = chars.get(i).copied();
                 i += 1;
                 bytes.push(match escape {
-                    Some('n') => b'\n',
-                    Some('t') => b'\t',
-                    Some('r') => b'\r',
-                    Some('0') => 0,
-                    Some('\\') => b'\\',
-                    Some('"') => b'"',
-                    Some('x') => {
-                        let hex: String = chars.get(i..i + 2).unwrap_or(&[]).iter().collect();
+                    Some(b'n') => b'\n',
+                    Some(b't') => b'\t',
+                    Some(b'r') => b'\r',
+                    Some(b'0') => 0,
+                    Some(b'\\') => b'\\',
+                    Some(b'"') => b'"',
+                    Some(b'x') => {
+                        let hex = chars.get(i..i + 2).unwrap_or(&[]);
+                        let value = std::str::from_utf8(hex)
+                            .ok()
+                            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
                         i += 2;
-                        u8::from_str_radix(&hex, 16).map_err(|_| {
+                        value.ok_or_else(|| {
                             err(i - 4, "`\\x` needs two hex digits, like `\\x0a`".into())
                         })?
                     }
                     other => {
-                        let shown = other.map_or(String::new(), String::from);
+                        let shown = other.map_or(String::new(), |_| {
+                            text[i - 1..].chars().next().unwrap().to_string()
+                        });
                         return Err(err(i - 2, format!("unknown escape `\\{shown}`")));
                     }
                 });
             }
-            c if c.is_ascii() => bytes.push(c as u8),
-            // Non-ASCII text would need an encoding; spell it with `\x`.
-            c => {
+            c if c.is_ascii() => bytes.push(c),
+            _ => {
                 return Err(err(
                     i - 1,
-                    format!("non-ASCII character `{c}`; use `\\x` escapes"),
+                    format!(
+                        "non-ASCII character `{}`; use `\\x` escapes",
+                        text[i - 1..].chars().next().unwrap()
+                    ),
                 ));
             }
         }
@@ -2184,4 +2199,75 @@ fn parse_float_cond(s: &str) -> Option<FloatCC> {
         "uno" => FloatCC::Uno,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod lexer_tests {
+    use super::*;
+
+    #[test]
+    fn unicode_whitespace_keeps_character_columns() {
+        let tokens = lex("\u{2003}\u{a0}\u{b}func @f\r\n; Unicode comment: 猫\n").unwrap();
+        assert_eq!(tokens[0].0, Tok::Ident("func".into()));
+        assert_eq!(tokens[0].1.col, 4);
+        assert_eq!(tokens[1].1.col, 9);
+        assert_eq!(tokens.last().unwrap().1.line, 3);
+        for (source, col, message) in [
+            ("\u{2003}?", 2, "unexpected character `?`"),
+            (
+                "\u{2003}9223372036854775808",
+                2,
+                "invalid integer `9223372036854775808`",
+            ),
+            (
+                "\u{2003}\"猫\"",
+                3,
+                "non-ASCII character `猫`; use `\\x` escapes",
+            ),
+            ("\u{2003}\"\\猫\"", 3, "unknown escape `\\猫`"),
+            (
+                "\u{2003}\"\\x猫\"",
+                3,
+                "`\\x` needs two hex digits, like `\\x0a`",
+            ),
+        ] {
+            let err = lex(source).unwrap_err();
+            assert_eq!(
+                (err.line, err.col, err.message.as_str()),
+                (1, col, message),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_boundaries_and_escaped_bytes() {
+        let tokens = lex("-9223372036854775808 9223372036854775807 0xffffffffffffffff -2e-3 -inf b\"\\x00\\xff\"\n").unwrap();
+        let kinds: Vec<_> = tokens.into_iter().map(|(tok, _)| tok).collect();
+        assert_eq!(
+            kinds,
+            vec![
+                Tok::Int(i64::MIN),
+                Tok::Int(i64::MAX),
+                Tok::Hex(u64::MAX),
+                Tok::Float("-2e-3".into()),
+                Tok::Float("-inf".into()),
+                Tok::Bytes(vec![0, 255]),
+                Tok::Newline,
+                Tok::Eof
+            ]
+        );
+        for source in [
+            "0x10000000000000000",
+            "-9223372036854775809",
+            "0x",
+            "-0x1",
+            "-",
+            "\"\\x0\"",
+            "\"\\",
+            "\"\\x",
+        ] {
+            assert!(lex(source).is_err(), "{source}");
+        }
+    }
 }

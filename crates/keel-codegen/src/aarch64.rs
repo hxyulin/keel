@@ -838,7 +838,7 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::Rn, 31),
                 (FieldId::imm7, 126),
             ],
-            || "stp\tx29, x30, [sp, #-16]!".into(),
+            |out| out.write_str("stp\tx29, x30, [sp, #-16]!"),
         );
         self.native(
             Opcode::ADD_64_addsub_imm,
@@ -848,7 +848,7 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::imm12, 0),
                 (FieldId::sh, 0),
             ],
-            || "mov\tx29, sp".into(),
+            |out| out.write_str("mov\tx29, sp"),
         );
         self.out.directive(Directive::Cfi(Cfi::DefCfa {
             register: 29,
@@ -885,7 +885,7 @@ impl<'a> FunctionCompiler<'a> {
                             (FieldId::Rn, 31),
                             (FieldId::imm7, 126),
                         ],
-                        || format!("stp\t{class}{a}, {class}{b}, [sp, #-16]!"),
+                        |out| write!(out, "stp\t{class}{a}, {class}{b}, [sp, #-16]!"),
                     );
                     self.out.directive(Directive::Cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
@@ -908,7 +908,7 @@ impl<'a> FunctionCompiler<'a> {
                             (FieldId::Rn, 31),
                             (FieldId::imm9, 496),
                         ],
-                        || format!("str\t{class}{a}, [sp, #-16]!"),
+                        |out| write!(out, "str\t{class}{a}, [sp, #-16]!"),
                     );
                     self.out.directive(Directive::Cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
@@ -995,8 +995,8 @@ impl<'a> FunctionCompiler<'a> {
         }
         if self.uses_trap {
             self.out.label(format!("L{name}_trap"));
-            self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], || {
-                "brk\t#1".into()
+            self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], |out| {
+                out.write_str("brk\t#1")
             });
         }
         self.out.label(format!("L{name}_end"));
@@ -1764,8 +1764,8 @@ impl<'a> FunctionCompiler<'a> {
                     self.extend_in_place(0, ret.ty, ret.ext);
                 }
                 self.epilogue();
-                self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], || {
-                    "ret".into()
+                self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], |out| {
+                    out.write_str("ret")
                 });
             }
         }
@@ -2878,7 +2878,7 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::imm12, 0),
                     (FieldId::sh, 0),
                 ],
-                || "mov\tsp, x29".into(),
+                |out| out.write_str("mov\tsp, x29"),
             );
         } else {
             self.native(
@@ -2889,7 +2889,7 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::imm12, (16 * pairs) as u32),
                     (FieldId::sh, 0),
                 ],
-                || format!("sub\tsp, x29, #{}", 16 * pairs),
+                |out| write!(out, "sub\tsp, x29, #{}", 16 * pairs),
             );
         }
         for pair in float_saved.chunks(2).rev() {
@@ -2902,7 +2902,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm7, 2),
                     ],
-                    || format!("ldp\td{a}, d{b}, [sp], #16"),
+                    |out| write!(out, "ldp\td{a}, d{b}, [sp], #16"),
                 ),
                 [a] => self.native(
                     Opcode::LDR_D_ldst_immpost,
@@ -2911,7 +2911,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm9, 16),
                     ],
-                    || format!("ldr\td{a}, [sp], #16"),
+                    |out| write!(out, "ldr\td{a}, [sp], #16"),
                 ),
                 _ => unreachable!(),
             }
@@ -2926,7 +2926,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm7, 2),
                     ],
-                    || format!("ldp\tx{a}, x{b}, [sp], #16"),
+                    |out| write!(out, "ldp\tx{a}, x{b}, [sp], #16"),
                 ),
                 [a] => self.native(
                     Opcode::LDR_64_ldst_immpost,
@@ -2935,7 +2935,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm9, 16),
                     ],
-                    || format!("ldr\tx{a}, [sp], #16"),
+                    |out| write!(out, "ldr\tx{a}, [sp], #16"),
                 ),
                 _ => unreachable!(),
             }
@@ -2948,7 +2948,7 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::Rn, 31),
                 (FieldId::imm7, 2),
             ],
-            || "ldp\tx29, x30, [sp], #16".into(),
+            |out| out.write_str("ldp\tx29, x30, [sp], #16"),
         );
     }
 
@@ -2992,7 +2992,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::imm12, k as u32),
                         (FieldId::sh, 0),
                     ],
-                    || format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                    |out| write!(out, "{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
                 );
             } else {
                 let amount = k as u32;
@@ -3009,7 +3009,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::immr, immr),
                         (FieldId::imms, imms),
                     ],
-                    || format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                    |out| write!(out, "{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
                 );
             }
             return;
@@ -3051,7 +3051,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rm, b.into()),
                         (FieldId::Ra, 31),
                     ],
-                    || format!("{mnemonic}\t{rd}, {ra}, {rb}"),
+                    |out| write!(out, "{mnemonic}\t{rd}, {ra}, {rb}"),
                 );
             } else {
                 self.native(
@@ -3063,7 +3063,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::shift, 0),
                         (FieldId::imm6, 0),
                     ],
-                    || format!("{mnemonic}\t{rd}, {ra}, {rb}"),
+                    |out| write!(out, "{mnemonic}\t{rd}, {ra}, {rb}"),
                 );
             }
             return;
@@ -3459,22 +3459,22 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::shift, 0),
                     (FieldId::imm6, 0),
                 ],
-                || format!("mov\tx{d}, x{s}"),
+                |out| write!(out, "mov\tx{d}, x{s}"),
             ),
             (Loc::FReg(d), Loc::FReg(s)) => self.native(
                 Opcode::FMOV_D_floatdp1,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                || format!("fmov\td{d}, d{s}"),
+                |out| write!(out, "fmov\td{d}, d{s}"),
             ),
             (Loc::Reg(d), Loc::FReg(s)) => self.native(
                 Opcode::FMOV_64D_float2int,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                || format!("fmov\tx{d}, d{s}"),
+                |out| write!(out, "fmov\tx{d}, d{s}"),
             ),
             (Loc::FReg(d), Loc::Reg(s)) => self.native(
                 Opcode::FMOV_D64_float2int,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                || format!("fmov\td{d}, x{s}"),
+                |out| write!(out, "fmov\td{d}, x{s}"),
             ),
             (Loc::Reg(d), Loc::Stack(s)) => self.spill(false, false, d, s),
             (Loc::FReg(d), Loc::Stack(s)) => self.spill(false, true, d, s),
@@ -3524,7 +3524,7 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::imm16, (bits & 0xffff) as u32),
                 (FieldId::hw, 0),
             ],
-            || format!("movz\t{class}{reg}, #{:#x}", bits & 0xffff),
+            |out| write!(out, "movz\t{class}{reg}, #{:#x}", bits & 0xffff),
         );
         for k in 1..chunks {
             let chunk = (bits >> (16 * k)) & 0xffff;
@@ -3540,7 +3540,7 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::imm16, chunk as u32),
                         (FieldId::hw, k),
                     ],
-                    || format!("movk\t{class}{reg}, #{chunk:#x}, lsl #{}", 16 * k),
+                    |out| write!(out, "movk\t{class}{reg}, #{chunk:#x}, lsl #{}", 16 * k),
                 );
             }
         }
@@ -3556,7 +3556,7 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::imm12, (bytes >> 12) as u32),
                     (FieldId::sh, 1),
                 ],
-                || format!("sub\tsp, sp, #{}, lsl #12", bytes >> 12),
+                |out| write!(out, "sub\tsp, sp, #{}, lsl #12", bytes >> 12),
             );
         }
         if bytes & 0xfff != 0 {
@@ -3568,7 +3568,7 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::imm12, (bytes & 0xfff) as u32),
                     (FieldId::sh, 0),
                 ],
-                || format!("sub\tsp, sp, #{}", bytes & 0xfff),
+                |out| write!(out, "sub\tsp, sp, #{}", bytes & 0xfff),
             );
         }
     }
@@ -3728,7 +3728,7 @@ impl<'a> FunctionCompiler<'a> {
         let width = width_suffix(ty);
         if self.out.structured() {
             let i = native::atomic(root, order, width, &args);
-            self.out.native(|| i, || unreachable!());
+            self.out.native(|| i, |_| unreachable!());
         } else {
             write!(self.out, "\t{root}{order}{width}\t").unwrap();
             for (i, arg) in args.iter().enumerate() {
@@ -3744,7 +3744,7 @@ impl<'a> FunctionCompiler<'a> {
     fn mach<const N: usize>(&mut self, op: &str, args: [Arg; N]) {
         if self.out.structured() {
             let instruction = native::lower(op, &args);
-            self.out.native(|| instruction, || unreachable!());
+            self.out.native(|| instruction, |_| unreachable!());
         } else {
             write!(self.out, "\t{op}").unwrap();
             for (i, a) in args.iter().enumerate() {
@@ -3758,7 +3758,7 @@ impl<'a> FunctionCompiler<'a> {
         &mut self,
         opcode: Opcode,
         fields: [(FieldId, u32); N],
-        text: impl FnOnce() -> String,
+        text: impl FnOnce(&mut String) -> std::fmt::Result,
     ) {
         self.out
             .native(|| NativeInstruction::new(opcode, fields), text);
@@ -3780,8 +3780,9 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::Rn, if base == "sp" { 31 } else { 19 }),
                 (FieldId::imm12, (offset / 8) as u32),
             ],
-            || {
-                format!(
+            |out| {
+                write!(
+                    out,
                     "{}\t{}{register}, [{base}, #{offset}]",
                     if store { "str" } else { "ldr" },
                     if float { 'd' } else { 'x' }
@@ -3804,8 +3805,9 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::shift, 0),
                 (FieldId::imm6, 0),
             ],
-            || {
-                format!(
+            |out| {
+                write!(
+                    out,
                     "mov\t{}{d}, {}{n}",
                     if is64 { 'x' } else { 'w' },
                     if is64 { 'x' } else { 'w' }

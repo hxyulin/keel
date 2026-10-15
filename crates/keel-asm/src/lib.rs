@@ -561,16 +561,26 @@ fn encode_record(
         return Err(format!("wrong number of fields for `{name}`"));
     }
     let mut word = encoding.base;
-    for field in encoding.fields {
-        let mut matches = values.iter().filter(|(n, _)| *n == field.id);
-        let (_, value) = matches
-            .next()
-            .ok_or_else(|| format!("missing field `{}`", field.name))?;
-        if matches.next().is_some() {
-            return Err(format!("duplicate field `{}`", field.name));
+    let mut seen = 0u128;
+    for (id, value) in values {
+        // Each input names one unique field. Validating uniqueness once avoids
+        // scanning the full operand list twice for every encoding field.
+        let Some((index, field)) = encoding
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.id == *id)
+        else {
+            return encode_invalid_fields(encoding, values);
+        };
+        let bit = 1u128 << index;
+        if seen & bit != 0 {
+            return encode_invalid_fields(encoding, values);
         }
+        seen |= bit;
         if u64::from(*value) >= 1u64 << field.width {
-            return Err(format!("field `{}` is out of range", field.name));
+            // Keep diagnostics in encoding-field order for invalid operands.
+            return encode_invalid_fields(encoding, values);
         }
         let span = (((1u64 << field.width) - 1) as u32) << field.start;
         word = (word & !span) | (value << field.start);
@@ -586,6 +596,24 @@ fn encode_record(
     Ok(word)
 }
 
+/// Cold validation path preserving field-order diagnostics for malformed inputs.
+#[cold]
+fn encode_invalid_fields(encoding: &Encoding, values: &[(FieldId, u32)]) -> Result<u32, String> {
+    for field in encoding.fields {
+        let mut matches = values.iter().filter(|(n, _)| *n == field.id);
+        let (_, value) = matches
+            .next()
+            .ok_or_else(|| format!("missing field `{}`", field.name))?;
+        if matches.next().is_some() {
+            return Err(format!("duplicate field `{}`", field.name));
+        }
+        if u64::from(*value) >= 1u64 << field.width {
+            return Err(format!("field `{}` is out of range", field.name));
+        }
+    }
+    unreachable!("invalid field list passed valid field validation")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -599,11 +627,36 @@ mod tests {
     }
 
     #[test]
+    fn encoding_fields_accept_any_order() {
+        for encoding in generated::ENCODINGS {
+            let mut fields: Vec<_> = encoding
+                .fields
+                .iter()
+                .map(|field| {
+                    let mask = ((1u64 << field.width) - 1) as u32;
+                    (field.id, (encoding.base >> field.start) & mask)
+                })
+                .collect();
+            let expected = encode(encoding.name, &fields);
+            for _ in 0..fields.len() {
+                fields.rotate_left(1);
+                assert_eq!(
+                    encode(encoding.name, &fields),
+                    expected,
+                    "{}",
+                    encoding.name
+                );
+            }
+        }
+    }
+
+    #[test]
     fn numeric_fields_preserve_validation_and_diagnostic_names() {
         use FieldId::*;
         for encoding in generated::ENCODINGS {
             for field in encoding.fields {
                 assert_eq!(field.name, field.id.to_string());
+                assert!(encoding.fields.len() <= 128);
             }
         }
         let name = "MOVZ_64_movewide";
