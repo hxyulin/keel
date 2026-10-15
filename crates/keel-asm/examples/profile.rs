@@ -1,4 +1,5 @@
 //! In-process stage timings; build with --release. Input is read before timing.
+//! Usage: profile INPUT ITERATIONS [baseline|apple-m5|sve].
 use std::{hint::black_box, time::Instant};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -8,7 +9,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if iterations == 0 {
         return Err("iterations must be positive".into());
     }
-    let assembly = keel_asm::assemble(&source)?;
+    let features = match args.get(3).map(String::as_str).unwrap_or("baseline") {
+        "baseline" => keel_asm::TargetFeatures::default(),
+        "apple-m5" => keel_asm::TargetFeatures::apple_m5(),
+        "sve" => keel_asm::TargetFeatures::default().with_sve(),
+        _ => return Err("expected baseline, apple-m5, or sve feature selection".into()),
+    };
+    let assembly = keel_asm::assemble_with_features(&source, features)?;
     black_box(assembly.to_macho()?);
     let mut parse = Vec::new();
     let mut write = Vec::new();
@@ -16,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Alternate stage order to reduce systematic temperature/frequency bias.
         let mut measure_parse = || -> Result<(), keel_asm::Error> {
             let start = Instant::now();
-            let result = keel_asm::assemble(black_box(&source))?;
+            let result = keel_asm::assemble_with_features(black_box(&source), features)?;
             parse.push(start.elapsed().as_secs_f64() * 1000.0);
             drop(black_box(result));
             Ok(())
