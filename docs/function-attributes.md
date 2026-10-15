@@ -66,28 +66,40 @@ execution still traps. This includes inlined bodies. Debug locations/scopes
 retain the inliner's existing lexical-subtree treatment.
 
 Contracts apply to the named direct function, including declarations without
-bodies and named functions returning pointers. Declarator parsing keeps the
-function owner of each layer's contracts: a function constructed by an enclosing
-declarator layer owns them; otherwise its suffix constructs the owner. A new
-suffix supplies the incoming owner for the next nested layer without changing
-the owner of attributes already collected. A grouping layer without either
-passes through the nested owner. Only contracts whose owner
-is the declared function survive into named metadata. Identity is separate from
-ABI/type equality. Layout attributes and pointer qualifiers retain their existing
-handling independently of contract ownership.
+bodies and named functions returning pointers. Attribute ownership is specific
+to the attribute category. Inline policies, `returns_twice`, and GNU `nothrow`
+are declaration attributes in the supported placements: they accumulate through
+intermediate declarator layers until the complete declarator identifies the
+named function. This includes factory declarations and attributes inside an
+already supported array suffix. Pointer objects, typedefs and parameters do not
+acquire indirect-call contracts.
 
-For example, `int * __attribute__((noinline)) h(void)` retains `noinline` on `h`,
-while `void (* __attribute__((noreturn)) get(void))(void)` and
-`void (__attribute__((noreturn)) (*get(void)))(void)` assign the contract to the
-returned function, so neither promises that `get` cannot return. Parenthesized
-composition preserves the same ownership invariant. Contracts on pointer types
-remain unrepresented, including `returns_twice`; they do not become factory or
-indirect-call promises. Declaration-specifier and final named-declarator
-attributes retain their direct-function handling. Declarator-position contracts
-on a function-pointer typedef base are diagnosed when the hidden function makes
-ownership ambiguous; declaration-specifier/final named-declarator placements and
-unambiguous grouping remain available. This is bounded declarator ownership
-support, not full GNU attribute-placement or C++ grammar support.
+GNU `noreturn` can instead qualify a function type. For this promise, declarator
+parsing keeps the function owner of each layer: an incoming enclosing function
+owns it; otherwise its suffix (or the nested declarator of a pure grouping
+layer) supplies the owner. Only a promise whose owner is the declared function
+survives into named metadata. Function-node identity is independent of ABI/type
+equality. Layout attributes and pointer qualifiers retain their handling
+independently of either contract category.
+
+For example, `int * __attribute__((noinline)) h(void)` and
+`void (* __attribute__((noinline)) h(void))(void)` both retain `noinline` on `h`.
+In contrast, `void (* __attribute__((noreturn)) get(void))(void)` and
+`void (__attribute__((noreturn)) (*get(void)))(void)` assign `noreturn` to the
+returned function, so neither promises that `get` cannot return. If that same
+attribute list contains `returns_twice`, that declaration attribute still applies
+to `get`; the two promises have different owners. Unsupported pointer-type
+promises remain unrepresented. Declaration-specifier and final named-declarator
+attributes retain their direct-function handling, and conflicting named policies
+are diagnosed across placements and redeclarations.
+
+Declarator-position contracts on a function-pointer typedef base remain diagnosed
+when the hidden function makes ownership ambiguous; declaration-specifier/final
+named-declarator placements and unambiguous grouping remain available. This is
+bounded ownership support, not full GNU attribute-placement or C++ grammar support.
+The classification follows [Clang's attribute definitions](https://github.com/llvm/llvm-project/blob/main/clang/include/clang/Basic/Attr.td)
+and retained per-attribute Clang AST evidence, detailed in
+[the ROUND3 correction record](function-attributes-round3-corrections.md).
 
 Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no

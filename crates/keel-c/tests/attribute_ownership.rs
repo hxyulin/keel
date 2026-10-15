@@ -1,4 +1,4 @@
-//! Correctness assertions for the three independent ROUND2 findings.
+//! Correctness assertions for ROUND2 and attribute-specific ROUND3 ownership.
 use keel_ir::{Function, FunctionAttrs, InstData, Target};
 const TARGETS: [Target; 2] = [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu];
 fn calls(f: &Function, name: &str) -> bool {
@@ -105,20 +105,28 @@ fn factories(attr: &str) -> Vec<String> {
     .collect()
 }
 #[test]
-fn nested_composition_keeps_returned_function_contracts_off_factory() {
+fn nested_composition_distinguishes_declaration_and_function_type_contracts() {
     for attr in [
         "noreturn",
         "nothrow",
         "noinline",
         "always_inline",
         "returns_twice",
-        "noreturn,noinline,always_inline,returns_twice",
     ] {
         for source in factories(attr) {
             check_matrix(&source, |m, _| {
                 let get = m.functions.iter().find(|f| f.name == "get").unwrap();
-                assert_eq!(get.attrs, FunctionAttrs::default(), "{source}\n{m}");
-                assert!(!get.sig.returns_twice);
+                assert_eq!(
+                    get.attrs,
+                    FunctionAttrs {
+                        noinline: attr == "noinline",
+                        alwaysinline: attr == "always_inline",
+                        nounwind: attr == "nothrow",
+                        ..Default::default()
+                    },
+                    "{source}\n{m}"
+                );
+                assert_eq!(get.sig.returns_twice, attr == "returns_twice");
                 let main = m.functions.iter().find(|f| f.name == "main").unwrap();
                 assert!(
                     !main
@@ -264,7 +272,7 @@ fn named_pointer_returning_functions_retain_their_own_contracts() {
         "void (*__attribute__((noreturn,returns_twice)) (__attribute__((noinline)) get)(void))(void); int f(void){get();return 7;}",
         |m, _| {
             let get = m.decls.iter().find(|d| d.name == "get").unwrap();
-            assert!(get.attrs.noinline && !get.attrs.noreturn && !get.sig.returns_twice);
+            assert!(get.attrs.noinline && !get.attrs.noreturn && get.sig.returns_twice);
         },
     );
     // Typedef-supplied function pointers are not functions constructed by an
@@ -285,8 +293,8 @@ fn named_pointer_returning_functions_retain_their_own_contracts() {
                 .contains("ambiguous function attribute ownership")
         );
     }
-    // A named contract and a contradictory returned-function contract must
-    // neither conflict nor overwrite one another, in either declaration order.
+    // Declaration policies at nested factory placements are still named:
+    // contradictory policies must conflict in either declaration order.
     for late in [false, true] {
         let named = "void (*get(void))(void) __attribute__((noinline,nothrow));";
         let pointer = "void (__attribute__((always_inline,returns_twice)) (*get(void)))(void);";
@@ -295,15 +303,12 @@ fn named_pointer_returning_functions_retain_their_own_contracts() {
         } else {
             format!("{pointer}{named}")
         } + "int f(void){get();return 7;}";
-        check_matrix(&source, |m, _| {
-            let get = m.decls.iter().find(|d| d.name == "get").unwrap();
-            assert!(
-                get.attrs.noinline
-                    && get.attrs.nounwind
-                    && !get.attrs.alwaysinline
-                    && !get.sig.returns_twice
-            );
-        });
+        assert!(
+            keel_c::compile(&source, "conflict.c", Default::default())
+                .unwrap_err()
+                .to_string()
+                .contains("conflicts")
+        );
     }
 }
 

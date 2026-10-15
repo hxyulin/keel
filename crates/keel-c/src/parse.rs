@@ -1543,7 +1543,16 @@ impl<'a> Parser<'a> {
 
     /// A declarator applied to the specifiers' type and its sugar.
     fn declarator_sugar(&mut self, ty: Ty, sugar: Sugar) -> R<Declarator<'a>> {
-        self.declarator_layer(ty, sugar, None)
+        let mut d = self.declarator_layer(ty, sugar, None)?;
+        // Declaration attributes belong to the final named function, regardless
+        // of the intervening pointer/array/function layers. Do not decide this
+        // while composing those layers. Pointer objects, typedefs and parameters
+        // do not acquire indirect-call contracts.
+        if !matches!(d.ty, Ty::Func(_)) {
+            d.attrs.returns_twice = false;
+            d.attrs.function_attrs = keel_ir::FunctionAttrs::default();
+        }
+        Ok(d)
     }
 
     fn declarator_layer(
@@ -1594,7 +1603,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let start = self.pos;
             self.skip_parens()?;
-            let (ty, sugar) = self.type_suffix(ty, sugar)?;
+            let (ty, sugar) = self.type_suffix(ty, sugar, &mut attrs)?;
             // The current layer's attributes retain their incoming owner.
             // A newly constructed suffix becomes the incoming owner for the
             // nested layer, which may carry separate named-function promises.
@@ -1622,7 +1631,7 @@ impl<'a> Parser<'a> {
             }
             _ => None,
         };
-        let (ty, sugar) = self.type_suffix(ty, sugar)?;
+        let (ty, sugar) = self.type_suffix(ty, sugar, &mut attrs)?;
         let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty).cloned());
         let mut named_attrs = Attrs::default();
         Self::merge_declarator_attrs(&mut named_attrs, attrs, owner.as_ref(), &ty);
@@ -1641,7 +1650,8 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// A declarator layer inherits the function constructed by its enclosing
+    /// For the supported function-type promise `noreturn`, a declarator layer
+    /// inherits the function constructed by its enclosing
     /// layer, or otherwise owns the function constructed by its own suffix (or nested
     /// declarator when this is a purely grouping layer). Parentheses apply
     /// that suffix before parsing the nested layer. Thus `* attr h(void)` owns
@@ -1669,15 +1679,15 @@ impl<'a> Parser<'a> {
         owner: Option<&Rc<FuncTy>>,
         declared: &Ty,
     ) {
-        // Only contracts owned by the actual declared function escape the
-        // declarator. Pointer contracts remain unrepresented; layout attributes
-        // still merge exactly as before, independently of contract ownership.
+        // GNU noreturn can qualify a function type, including the returned
+        // function of a factory. Only that promise uses function-node identity.
+        // Policies, returns_twice and nothrow are declaration attributes here:
+        // keep them until the complete declarator identifies the named subject.
+        // Layout attributes merge independently of either contract category.
         let is_named =
             matches!((owner, declared), (Some(owner), Ty::Func(f)) if Rc::ptr_eq(owner, f));
         if !is_named {
-            layer.returns_twice = false;
             layer.noreturn = false;
-            layer.function_attrs = keel_ir::FunctionAttrs::default();
         }
         named.merge(layer);
     }
@@ -1693,20 +1703,30 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn type_suffix(&mut self, ty: Ty, sugar: Sugar) -> R<(Ty, Sugar)> {
+    fn type_suffix(&mut self, ty: Ty, sugar: Sugar, attrs: &mut Attrs) -> R<(Ty, Sugar)> {
         if self.eat("(") {
             let fty = self.params(ty)?;
             return Ok((Ty::Func(Rc::new(fty)), sugar.wrap(Sugar::Func)));
         }
         if self.eat("[") {
-            let mut attrs = Attrs::default();
-            while self.eat("static") || self.qualifiers(&mut attrs)? != (false, false, false) {}
-            if attrs.alignment().is_some() || attrs.alignas.is_some() {
+            let mut array_attrs = Attrs::default();
+            while self.eat("static") || self.qualifiers(&mut array_attrs)? != (false, false, false)
+            {
+            }
+            if array_attrs.alignment().is_some() || array_attrs.alignas.is_some() {
                 return Err(Error::new(
                     self.loc(),
                     "alignment attributes in array declarators are not supported",
                 ));
             }
+            // Attributes in an already supported array suffix are still part
+            // of this declarator, not the element type or an enclosing parameter.
+            attrs.merge(Attrs {
+                returns_twice: array_attrs.returns_twice,
+                noreturn: array_attrs.noreturn,
+                function_attrs: array_attrs.function_attrs,
+                ..Default::default()
+            });
             let loc = self.loc();
             let len = if self.is("]") {
                 None
@@ -1723,7 +1743,7 @@ impl<'a> Parser<'a> {
                 }
             };
             self.expect("]")?;
-            let (elem, sugar) = self.type_suffix(ty, sugar)?;
+            let (elem, sugar) = self.type_suffix(ty, sugar, attrs)?;
             if !self
                 .size_of(&elem)
                 .is_multiple_of(self.type_alignment(&elem, &sugar))

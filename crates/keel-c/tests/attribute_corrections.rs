@@ -80,7 +80,6 @@ fn pointer_contracts_do_not_leak_into_factory_or_indirect_calls() {
         "always_inline",
         "noinline",
         "returns_twice",
-        "noreturn,nothrow,always_inline,noinline",
     ] {
         for target in TARGETS {
             for debug_info in [false, true] {
@@ -117,8 +116,23 @@ fn pointer_contracts_do_not_leak_into_factory_or_indirect_calls() {
                         }
                         keel_ir::verify_module(&m).unwrap();
                         for f in &m.functions {
-                            assert_eq!(f.attrs, FunctionAttrs::default(), "{source}\n{m}");
-                            assert!(!f.sig.returns_twice, "{source}\n{m}");
+                            // Noreturn follows the returned function type;
+                            // declaration-only attributes belong to named get.
+                            assert_eq!(
+                                f.attrs,
+                                FunctionAttrs {
+                                    noinline: f.name == "get" && attr == "noinline",
+                                    alwaysinline: f.name == "get" && attr == "always_inline",
+                                    nounwind: f.name == "get" && attr == "nothrow",
+                                    ..Default::default()
+                                },
+                                "{source}\n{m}"
+                            );
+                            assert_eq!(
+                                f.sig.returns_twice,
+                                f.name == "get" && attr == "returns_twice",
+                                "{source}\n{m}"
+                            );
                             assert!(
                                 !f.layout_insts()
                                     .any(|(_, i)| matches!(f.inst_data(i), InstData::Trap)),
@@ -153,7 +167,9 @@ fn named_factory_and_parenthesized_direct_attributes_are_retained() {
         "void (*get(void))(void) __attribute__((noreturn,nothrow,noinline));",
         "void (get)(void) __attribute__((noreturn,nothrow,noinline));",
         "__attribute__((noreturn,nothrow,noinline)) void (*get(void))(void);",
-        "void (* __attribute__((always_inline,returns_twice)) get(void))(void) __attribute__((noreturn,nothrow,noinline));",
+        // The nested noreturn qualifies the returned function, independently
+        // of final named declaration policies.
+        "void (* __attribute__((noreturn)) get(void))(void) __attribute__((noreturn,nothrow,noinline));",
     ] {
         for target in TARGETS {
             let source = format!("{declaration} int main(void) {{ get(); return 0; }}");
