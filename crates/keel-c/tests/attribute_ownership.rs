@@ -412,7 +412,12 @@ fn native_round2_links_returns_and_traps() {
                     run(cmd.arg("-o").arg(&exe));
                     let status = Command::new(&exe).status().unwrap();
                     if trap {
-                        assert_eq!(status.signal(), Some(5), "{stem}: {status}");
+                        // Match the native trap instruction on each enabled target.
+                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                        let trap_signal = 5; // brk: SIGTRAP
+                        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+                        let trap_signal = 4; // ud2: SIGILL
+                        assert_eq!(status.signal(), Some(trap_signal), "{stem}: {status}");
                     } else {
                         assert!(status.success(), "{stem}: {status}");
                     }
