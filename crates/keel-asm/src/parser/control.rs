@@ -1,6 +1,7 @@
 use super::storage::{encode_named, lower, upper};
 use super::{count, reg, unsigned};
 use crate::encode;
+use bumpalo::{Bump, collections::Vec as BumpVec};
 
 pub(super) fn condition(text: &str) -> Result<u32, String> {
     match lower(text).as_ref() {
@@ -24,15 +25,19 @@ pub(super) fn condition(text: &str) -> Result<u32, String> {
     }
 }
 
-pub(super) struct Branch {
+pub(super) struct Branch<'a> {
     pub encoding: &'static str,
     pub field: &'static str,
     pub width: u32,
-    pub fields: Vec<(&'static str, u32)>,
-    pub target: String,
+    pub fields: BumpVec<'a, (&'static str, u32)>,
+    pub target: &'a str,
 }
 
-pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> {
+pub(super) fn branch<'a>(
+    op: &str,
+    args: &[&'a str],
+    arena: &'a Bump,
+) -> Result<Option<Branch<'a>>, String> {
     let (encoding, field, width, fields, target) = if op == "b" || op == "bl" {
         count(args, 1, 1)?;
         (
@@ -43,7 +48,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
             },
             "imm26",
             26,
-            vec![],
+            bumpalo::vec![in arena;],
             args[0],
         )
     } else if let Some(cc) = op.strip_prefix("b.") {
@@ -52,7 +57,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
             "B_only_condbranch",
             "imm19",
             19,
-            vec![("cond", condition(cc)?)],
+            bumpalo::vec![in arena; ("cond", condition(cc)?)],
             args[0],
         )
     } else if op == "cbz" || op == "cbnz" {
@@ -67,7 +72,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
             },
             "imm19",
             19,
-            vec![("Rt", r.number)],
+            bumpalo::vec![in arena; ("Rt", r.number)],
             args[1],
         )
     } else if op == "tbz" || op == "tbnz" {
@@ -82,7 +87,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
             },
             "imm14",
             14,
-            vec![("Rt", r.number), ("b5", bit >> 5), ("b40", bit & 31)],
+            bumpalo::vec![in arena; ("Rt", r.number), ("b5", bit >> 5), ("b40", bit & 31)],
             args[2],
         )
     } else {
@@ -93,7 +98,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
         field,
         width,
         fields,
-        target: target.into(),
+        target,
     }))
 }
 

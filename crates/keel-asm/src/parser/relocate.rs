@@ -5,8 +5,8 @@ use super::storage::{encode_named, upper};
 use super::{count, integer, is_integer, reg, symbol};
 use crate::{Relocation, RelocationKind};
 
-pub(super) struct Expression {
-    pub name: String,
+pub(super) struct Expression<'a> {
+    pub name: &'a str,
     pub modifier: Option<String>,
     pub addend: i64,
 }
@@ -18,16 +18,16 @@ fn addend(text: &str) -> Result<i64, String> {
     }
     integer(&format!("{sign}{}", text[1..].trim()))
 }
-fn plain(text: &str) -> Result<(String, i64), String> {
+fn plain(text: &str) -> Result<(&str, i64), String> {
     let (name, tail) = match text.find(['+', '-']) {
         Some(index) => (&text[..index], &text[index..]),
         None => (text, ""),
     };
     let name = name.trim();
     symbol(name)?;
-    Ok((name.into(), if tail.is_empty() { 0 } else { addend(tail)? }))
+    Ok((name, if tail.is_empty() { 0 } else { addend(tail)? }))
 }
-pub(super) fn expression(text: &str) -> Result<Expression, String> {
+pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
     let (name, modifier, value) = if let Some((base, tail)) = text.split_once('@') {
         let (name, before) = plain(base)?;
         let (modifier, after) = match tail.find(['+', '-']) {
@@ -65,7 +65,7 @@ pub(super) fn expression(text: &str) -> Result<Expression, String> {
         addend: value,
     })
 }
-fn relocation(expr: Expression, kind: RelocationKind) -> Result<Relocation, String> {
+fn relocation(expr: Expression<'_>, kind: RelocationKind) -> Result<Relocation, String> {
     if !kind.accepts_addend() && expr.addend != 0 {
         return Err("GOT/TLVP relocations do not support addends".into());
     }
@@ -74,7 +74,7 @@ fn relocation(expr: Expression, kind: RelocationKind) -> Result<Relocation, Stri
         size: 4,
         subtract_symbol: None,
         offset: 0,
-        symbol: expr.name,
+        symbol: expr.name.to_string(),
         kind,
         addend: expr.addend,
     })

@@ -333,6 +333,7 @@ dependencies = [
 name = "keel-asm"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "keel-c",
  "keel-codegen",
  "keel-ir",

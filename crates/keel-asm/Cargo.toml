@@ -11,3 +11,6 @@ keel-codegen = { path = "../keel-codegen" }
 keel-ir = { path = "../keel-ir" }
 keel-opt = { path = "../keel-opt" }
 keel-c = { path = "../keel-c" }
+
+[dependencies]
+bumpalo = { version = "3", features = ["collections"] }

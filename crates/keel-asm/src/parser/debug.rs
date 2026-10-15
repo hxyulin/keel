@@ -3,14 +3,15 @@
 use super::compact::{self, Rule};
 use super::data::{self, Location};
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
+use bumpalo::{Bump, collections::Vec as BumpVec};
 use std::collections::BTreeMap;
 
-#[derive(Default)]
-pub(super) struct Debug {
+pub(super) struct Debug<'a> {
+    arena: &'a Bump,
     files: BTreeMap<u32, Vec<u8>>,
-    rows: Vec<Row>,
-    frames: Vec<Frame>,
-    active: Option<Frame>,
+    rows: BumpVec<'a, Row>,
+    frames: BumpVec<'a, Frame<'a>>,
+    active: Option<Frame<'a>>,
 }
 struct Row {
     address: u64,
@@ -19,32 +20,32 @@ struct Row {
     column: u32,
     prologue: bool,
 }
-struct Frame {
+struct Frame<'a> {
     start: u64,
     end: u64,
     line: usize,
-    events: Vec<(u64, Vec<u8>)>,
-    rules: Vec<Rule>,
+    events: BumpVec<'a, (u64, BumpVec<'a, u8>)>,
+    rules: BumpVec<'a, Rule>,
     saved: usize,
-    personality: Option<String>,
-    lsda: Option<String>,
+    personality: Option<&'a str>,
+    lsda: Option<&'a str>,
 }
-pub(super) fn uleb(mut n: u64, out: &mut Vec<u8>) {
+pub(super) fn uleb(mut n: u64, out: &mut impl Extend<u8>) {
     loop {
         let b = (n & 127) as u8;
         n >>= 7;
-        out.push(b | if n != 0 { 128 } else { 0 });
+        out.extend([b | if n != 0 { 128 } else { 0 }]);
         if n == 0 {
             break;
         }
     }
 }
-pub(super) fn sleb(mut n: i64, out: &mut Vec<u8>) {
+pub(super) fn sleb(mut n: i64, out: &mut impl Extend<u8>) {
     loop {
         let b = (n & 127) as u8;
         n >>= 7;
         let end = (n == 0 && b & 64 == 0) || (n == -1 && b & 64 != 0);
-        out.push(b | if end { 0 } else { 128 });
+        out.extend([b | if end { 0 } else { 128 }]);
         if end {
             break;
         }
@@ -137,11 +138,20 @@ fn reg(s: &str) -> Result<u64, String> {
         Err("invalid CFI register".into())
     }
 }
-impl Debug {
+impl<'a> Debug<'a> {
+    pub(super) fn new(arena: &'a Bump) -> Self {
+        Self {
+            arena,
+            files: BTreeMap::new(),
+            rows: BumpVec::new_in(arena),
+            frames: BumpVec::new_in(arena),
+            active: None,
+        }
+    }
     pub(super) fn directive(
         &mut self,
         op: &str,
-        operands: &str,
+        operands: &'a str,
         section: usize,
         address: u64,
         line: usize,
@@ -195,8 +205,8 @@ impl Debug {
                 start: address,
                 end: address,
                 line,
-                events: Vec::new(),
-                rules: Vec::new(),
+                events: BumpVec::new_in(self.arena),
+                rules: BumpVec::new_in(self.arena),
                 saved: 0,
                 personality: None,
                 lsda: None,
@@ -227,7 +237,7 @@ impl Debug {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
-        let mut bytes = Vec::new();
+        let mut bytes = BumpVec::new_in(self.arena);
         let mut rule = Rule::Other;
         match (op, args.as_slice()) {
             (".cfi_personality", [encoding, name]) | (".cfi_lsda", [encoding, name]) => {
@@ -243,7 +253,7 @@ impl Debug {
                 } else {
                     &mut frame.lsda
                 };
-                if slot.replace((*name).to_string()).is_some() {
+                if slot.replace(*name).is_some() {
                     return Err(format!("duplicate {op}"));
                 }
                 return Ok(true);
@@ -309,13 +319,14 @@ impl Debug {
     pub(super) fn finish(
         self,
         a: &mut Assembly,
-        labels: &mut BTreeMap<String, Location>,
+        labels: &mut BTreeMap<&'a str, Location>,
         prefix: &str,
     ) -> Result<(), Error> {
         if let Some(frame) = self.active {
             return Err(Error::new(frame.line, "unterminated .cfi_startproc"));
         }
         let mut references = References {
+            arena: self.arena,
             labels,
             prefix,
             counter: 0,
@@ -345,7 +356,7 @@ impl Debug {
             let encodings: Vec<_> = self
                 .frames
                 .iter()
-                .map(|frame| compact::encoding(&frame.rules, frame.personality.as_deref()))
+                .map(|frame| compact::encoding(&frame.rules, frame.personality))
                 .collect();
             for (frame, encoding) in self.frames.iter().zip(&encodings) {
                 references.address(&mut index, compact, frame.start, false, a);
@@ -359,12 +370,12 @@ impl Debug {
                 index.extend_from_slice(&encoding.to_le_bytes());
                 if encoding & 0x0f00_0000 != 0x0300_0000 {
                     if let Some(personality) = &frame.personality {
-                        references.symbol(&mut index, compact, personality.clone(), false, a);
+                        references.symbol(&mut index, compact, personality.to_string(), false, a);
                     } else {
                         index.extend_from_slice(&[0; 8]);
                     }
                     if let Some(lsda) = &frame.lsda {
-                        references.symbol(&mut index, compact, lsda.clone(), false, a);
+                        references.symbol(&mut index, compact, lsda.to_string(), false, a);
                     } else {
                         index.extend_from_slice(&[0; 8]);
                     }
@@ -383,7 +394,7 @@ impl Debug {
                     if encoding.is_some() {
                         continue;
                     }
-                    let key = (frame.personality.clone(), frame.lsda.is_some());
+                    let key = (frame.personality, frame.lsda.is_some());
                     let cie = if let Some(cie) = cies.get(&key) {
                         *cie
                     } else {
@@ -410,7 +421,7 @@ impl Debug {
                                 size: 4,
                                 subtract_symbol: None,
                                 offset: bytes.len() as u32,
-                                symbol: personality.clone(),
+                                symbol: personality.to_string(),
                                 kind: RelocationKind::PointerToGot,
                                 addend: 0,
                             });
@@ -436,7 +447,7 @@ impl Debug {
                     bytes.extend_from_slice(&(frame.end - frame.start).to_le_bytes());
                     bytes.push(if frame.lsda.is_some() { 8 } else { 0 });
                     if let Some(lsda) = &frame.lsda {
-                        references.symbol(&mut bytes, section, lsda.clone(), true, a);
+                        references.symbol(&mut bytes, section, lsda.to_string(), true, a);
                     }
                     let mut position = frame.start;
                     for (address, event) in frame.events {
@@ -555,12 +566,13 @@ impl Debug {
 
 /// Synthetic labels let the existing Mach-O difference relocation machinery
 /// represent PC-relative native-width pointers without inventing a new kind.
-struct References<'a> {
-    labels: &'a mut BTreeMap<String, Location>,
-    prefix: &'a str,
+struct References<'a, 'b> {
+    arena: &'a Bump,
+    labels: &'b mut BTreeMap<&'a str, Location>,
+    prefix: &'b str,
     counter: usize,
 }
-impl References<'_> {
+impl References<'_, '_> {
     fn name(&mut self) -> String {
         let name = format!("{}ref{}", self.prefix, self.counter);
         self.counter += 1;
@@ -576,7 +588,7 @@ impl References<'_> {
     ) {
         let name = self.name();
         self.labels.insert(
-            name.clone(),
+            self.arena.alloc_str(&name),
             Location {
                 section: 0,
                 offset: address,
@@ -595,7 +607,7 @@ impl References<'_> {
         let subtract_symbol = if relative {
             let name = self.name();
             self.labels.insert(
-                name.clone(),
+                self.arena.alloc_str(&name),
                 Location {
                     section,
                     offset: bytes.len() as u64,
