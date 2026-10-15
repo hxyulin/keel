@@ -55,7 +55,17 @@ impl Features {
 }
 impl super::Opcode {
     pub fn required_features(self) -> Features {
-        Features::default()
+        use super::Opcode::*;
+        match self {
+            Vaddss | Vaddsd | Vsubss | Vsubsd | Vmulss | Vmulsd | Vdivss | Vdivsd | Vsqrtss
+            | Vsqrtsd | Vminss | Vminsd | Vmaxss | Vmaxsd | Vucomiss | Vucomisd | Vmovss
+            | Vmovsd | Vmovaps | Vmovups | Vmovapd | Vmovupd | Vandps | Vandpd | Vorps | Vorpd
+            | Vxorps | Vxorpd | Vroundss | Vroundsd | Vzeroupper => Features {
+                avx: true,
+                ..Features::default()
+            },
+            _ => Features::default(),
+        }
     }
 }
 #[cfg(test)]

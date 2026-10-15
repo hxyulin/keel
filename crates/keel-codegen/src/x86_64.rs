@@ -2505,6 +2505,14 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(bit_op, [asm_arg(&(gpr)), asm_arg(&(sign))]);
                 self.emit(mov, [asm_arg(&(xmm(d))), asm_arg(&(gpr))]);
             }
+            UnaryOp::Fsqrt if self.features.avx => self.emit(
+                if ty == Type::F32 {
+                    Opcode::Vsqrtss
+                } else {
+                    Opcode::Vsqrtsd
+                },
+                [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(a))],
+            ),
             UnaryOp::Fsqrt => self.emit(
                 scalar(Opcode::Sqrtsd, ty),
                 [asm_arg(&(xmm(d))), asm_arg(&(xmm(a)))],
@@ -2531,6 +2539,27 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(args[0]);
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
+
+        if self.features.avx {
+            let opcode = match (op, ty == Type::F32) {
+                (BinaryOp::Fadd, true) => Some(Opcode::Vaddss),
+                (BinaryOp::Fadd, false) => Some(Opcode::Vaddsd),
+                (BinaryOp::Fsub, true) => Some(Opcode::Vsubss),
+                (BinaryOp::Fsub, false) => Some(Opcode::Vsubsd),
+                (BinaryOp::Fmul, true) => Some(Opcode::Vmulss),
+                (BinaryOp::Fmul, false) => Some(Opcode::Vmulsd),
+                (BinaryOp::Fdiv, true) => Some(Opcode::Vdivss),
+                (BinaryOp::Fdiv, false) => Some(Opcode::Vdivsd),
+                _ => None,
+            };
+            if let Some(opcode) = opcode {
+                self.emit(
+                    opcode,
+                    [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(b))],
+                );
+                return;
+            }
+        }
 
         // Two-address, computed in xmm13 unless d is free to overwrite.
         let dst = if b == d && a != d { FS0 } else { d };

@@ -1,3 +1,5 @@
+mod vex;
+
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
     Address, Instruction, Memory, Modifier, Opcode::*, Operand, Register, RegisterClass,
@@ -666,7 +668,13 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             };
             e.rm(0, &bytes, w, r.number, a, Some(r))?;
         }
-        _ => encode_sse(&mut e, i).map_err(|_| err())?,
+        _ => {
+            if op.required_features().avx {
+                vex::encode(&mut e, i)?;
+            } else {
+                encode_sse(&mut e, i).map_err(|_| err())?;
+            }
+        }
     }
     // PC-relative relocation addends are measured from the relocated field,
     // but the CPU uses the end of the entire instruction (including immediates).
