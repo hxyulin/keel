@@ -1,0 +1,15 @@
+; expect: exit 0
+; opt-passes: simplify-cfg, instcombine, gvn, memory-forward, dce, gcm
+func @memory_forward(ptr, ptr, i64) -> i64 {
+block0(v0: ptr, v1: ptr, v2: i64):
+    v3 = load.i64 v0
+    v4 = load.i64 v0
+    store v2, v1
+    v5 = load.i64 v0
+    store v5, v0
+    v6 = load.i64 v0
+    v7 = iadd v3, v4
+    v8 = iadd v5, v6
+    v9 = iadd v7, v8
+    return v9
+}

@@ -119,3 +119,14 @@ flags = ["-p", "simplify-cfg,const-fold,simplify-cfg,gvn,dce,gcm"]
 name = "keel-O-phi-late"
 compiler = "keel"
 flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm,phi-simplify"]
+
+# Conservative block-local memory optimization, measured independently.
+[[config]]
+name = "keel-O-memory"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm"]
+
+[[config]]
+name = "keel-O-memory-select"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm", "--isel", "all"]

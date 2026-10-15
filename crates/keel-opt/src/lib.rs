@@ -18,6 +18,7 @@ mod dce;
 mod gcm;
 mod gvn;
 mod instcombine;
+mod memory_forward;
 mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
@@ -76,6 +77,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "replace trivial block parameters with their dominating incoming value",
         run: phi_simplify::run,
     },
+    BuiltinPass {
+        name: "memory-forward",
+        description: "forward exact-address ordinary loads and stores within a block",
+        run: memory_forward::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -99,6 +105,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[5],
     &BUILTINS[6],
     &BUILTINS[7],
+    &BUILTINS[8],
 ];
 
 /// Independent optimizer effort; Full adds value numbering and code motion.

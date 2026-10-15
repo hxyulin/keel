@@ -204,9 +204,10 @@ they do not wrap at 65,536 entries.
   memory. It can defer copying across expressions proven free of writes and
   volatile accesses. A regression previously returned 9 instead of 3 after a
   later argument mutated the assignment destination.
-- All loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
-  Explicit properties enable later memory-aware passes without silently
-  changing current scheduling or fault behavior. Alias classes and call
+- Loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
+  The opt-in `memory-forward` pass uses explicit effects to eliminate
+  redundant ordinary loads without moving accesses or removing the first
+  potentially faulting access. Alias classes and call
   read/write summaries are not implemented; the old alias-class design
   note described future metadata, not fields present in the IR.
 - **Atomics** follow the C11/C++11 memory model, with the ordering written
@@ -735,6 +736,7 @@ analyses they need; there is no analysis cache yet.
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `instcombine` | fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
+| `memory-forward` (opt-in) | block-local exact-address, same-type load reuse and store-to-load forwarding; every write invalidates all prior facts, and volatile accesses, calls, atomics and lifetime barriers clear them |
 | `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
@@ -866,6 +868,27 @@ Debugger integration tests were excluded. This is a correctness/enabling
 change; memory optimizations remain separate passes and no runtime speedup
 is claimed. Effect/trap classification is exhaustive so future opcodes
 cannot silently inherit memory-free or non-trapping behavior.
+
+The first memory optimization is measured separately in the
+[memory-forward sweep](../suite/reports/memory-forward-aarch64-2026-10-15.json).
+It forwards only resolved identical SSA addresses and identical types within
+one block. An earlier successful ordinary load/store establishes the bytes;
+all writes clear the table, then an ordinary store establishes its own value.
+No access moves across a block boundary, no first access or store is deleted,
+and no alias-freedom or call-purity claim is inferred. Existing loads remain
+pinned to GCM/DCE. Tests cover partial and unknown-alias writes, volatility,
+atomics, calls, stack restore, intrinsics, result types, aliases created by GVN,
+and native aliasing cases with restricted registers and both selectors.
+
+On the Apple M5 Max application corpus, this eliminates 118/5,398 static Lua
+loads, 480/22,431 QuickJS loads and 1,160/29,829 SQLite loads. Executable text
+falls by 500, 1,776 and 5,308 bytes respectively (0.26% combined). Seven paired
+runtime samples give a geometric mean ratio of 0.9951; individual intervals
+generally overlap 1.0, so this does not establish a reliable runtime speedup.
+Compilation takes 2.4% longer. Another instcombine after forwarding produces
+ratio 0.9964 with 6.5% more compile time. Both variants remain opt-in; the
+existing default pipeline is unchanged. These are static instruction counts,
+not counts of dynamically executed memory operations.
 
 ## Frontend
 

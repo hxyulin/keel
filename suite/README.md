@@ -144,3 +144,10 @@ and adds 2.8% compiler cost. Adding SCCP is near-neutral for runtime with
 5.6% compiler overhead. Both additions remain opt-in. CFG and DCE also stay
 in the default pipelines. These choices concern this measured pipeline;
 individual pass profitability can change with the selector or allocator.
+
+The opt-in `keel-O-memory` and `keel-O-memory-select` presets add conservative
+block-local memory forwarding after GVN. The [paired memory sweep](reports/memory-forward-aarch64-2026-10-15.json)
+records both forwarding alone and a subsequent instcombine, plus static load
+counts on the same preprocessed inputs. Forwarding removes 1,758 static loads
+and 7,584 text bytes, but its 0.5% lower aggregate runtime is within the observed
+variation and compilation costs 2.4% more; it is not enabled by default.
