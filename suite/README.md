@@ -658,3 +658,63 @@ python3 suite/profile_preprocessor_current.py \
   --output suite/reports/c-preprocessor-deeper-profile-20261015.json
 python3 suite/render_preprocessor_deeper.py
 ```
+
+
+### Non-preprocessor frontend stages (2026-10-15, commit 2808137)
+
+[Interactive report](reports/c-frontend-stages-20261015.html),
+[raw stage measurements](reports/c-frontend-stages-20261015.json),
+[stack and ownership analysis](reports/c-frontend-stages-analysis-20261015.json),
+and [validation / callsite evidence](reports/c-frontend-stages-details-20261015.json)
+refresh the C-to-IR profile after preprocessing optimization. The same 44 native
+preprocessed input hashes match the original corpus: 1.99 million tokens and
+6,136 functions. Nine serial rounds measure public and staged APIs in normal
+and debug-info modes, with IR verification and exact Debug IR equality in each
+process's warmup. Baseline/staged median ratios are 0.983–1.003; no optimization
+of these stages is claimed. Separate six-second stack captures cover Lua,
+QuickJS, SQLite, and SQLite debug. The remaining preprocessor investigation is
+in a separate subagent worktree; its builds/timings were gated until these
+frontend timings and samples completed.
+
+Normal-mode public compile medians are Lua 71.60 ms, QuickJS 158.15 ms, and
+SQLite 214.84 ms, excluding preprocessing and returned-module destruction.
+Staged lex / parse-and-types / IR generation / cleanup medians are respectively
+28.65 / 27.75 / 11.87 / 4.04 ms for Lua, 52.89 / 49.09 / 47.39 / 7.13 ms
+for QuickJS, and 53.74 / 57.93 / 92.42 / 10.14 ms for SQLite. Stage medians
+do not add exactly to the separately measured public API median.
+
+Three promising followups are the lexer's 48-entry linear punctuation matcher,
+parser token consumption that clones discarded strings, and SSA predecessor
+maintenance. Release disassembly ties 9.9–16.6% of total normal frontend samples
+to the punctuation matcher's memcmp callsite; other lexer comparisons are mostly
+file-name indexing. Parsing owns 3.2–6.8% of total samples under String::clone;
+`eat` currently calls `advance` and discards the returned clone. SQLite has
+16.8% of samples under SSA `seal_block`, whose inlined `find_preds` scans the
+built CFG for each block. The profile does not isolate that scan from parameter
+work. These are candidates, not promised speedups. Parser/token/AST cleanup is
+about 4–6%; broad arena conversion should not precede the concrete hot paths.
+
+The extra analysis assigns shared helper costs by pipeline entry frame rather
+than namespace. In particular, Tok::clone lives in lex.rs but is generally
+called by the parser; it should not inflate lexer attribution. Samples include
+returned-module destruction, unlike the timed compile boundary. Inclusive
+comparison, allocator, and clone percentages overlap. Debug mode changes local
+storage and SSA work, so its different timings compare different output modes.
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile
+mkdir -p target/frontend-profile/stages
+cp target/release/examples/profile target/frontend-profile/stages/profile
+python3 suite/profile_c_frontend.py \
+  --input-root target/frontend-profile/native-inputs \
+  --profiler target/frontend-profile/stages/profile \
+  --rounds 9 --sample-seconds 6 \
+  --output suite/reports/c-frontend-stages-20261015.json
+python3 suite/summarize_c_frontend.py \
+  suite/reports/c-frontend-stages-20261015.json \
+  --output suite/reports/c-frontend-stages-analysis-20261015.json
+python3 suite/analyze_frontend_stages.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --analysis suite/reports/c-frontend-stages-analysis-20261015.json
+python3 suite/render_frontend_stages.py
+```
