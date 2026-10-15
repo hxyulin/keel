@@ -1,5 +1,6 @@
 //! The two Advanced SIMD forms used by Keel's scalar popcount lowering.
 use super::count;
+use super::storage::{encode_named, lower};
 use crate::encode;
 
 fn number(text: &str, prefix: char) -> Result<u32, String> {
@@ -31,8 +32,8 @@ fn vector(text: &str) -> Result<(u32, &str, u32, u32), String> {
 }
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     count(args, 2, 2)?;
-    let d = args[0].to_ascii_lowercase();
-    let n = args[1].to_ascii_lowercase();
+    let d = lower(args[0]);
+    let n = lower(args[1]);
     let (rn, arrangement, q, size) = vector(&n)?;
     let rd = if op == "cnt" {
         let (rd, dest_arrangement, _, _) = vector(&d)?;
@@ -64,7 +65,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
 /// words, low-one MSL words, and one immediate bit per 00/FF byte in 64-bit lanes.
 pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
     count(args, 2, 3)?;
-    let dest = args[0].to_ascii_lowercase();
+    let dest = lower(args[0]);
     let (rd, arrangement, q) = if dest.starts_with('d') {
         (number(&dest, 'd')?, "d", 0)
     } else {
@@ -124,5 +125,5 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
     {
         fields.push((name, (imm >> (7 - i)) & 1));
     }
-    encode(&format!("MOVI_asimdimm_{form}"), &fields)
+    encode_named(format_args!("MOVI_asimdimm_{form}"), &fields)
 }

@@ -1,8 +1,9 @@
 //! Symbol expressions and Darwin instruction relocations. There is no
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
+use super::storage::{encode_named, upper};
 use super::{count, integer, is_integer, reg, symbol};
-use crate::{Relocation, RelocationKind, encode};
+use crate::{Relocation, RelocationKind};
 
 pub(super) struct Expression {
     pub name: String,
@@ -96,8 +97,8 @@ pub(super) fn address_word(op: &str, destination: &str, delta: i64) -> Result<u3
         return Err(format!("{op} displacement is out of range"));
     }
     let bits = (immediate as u32) & 0x1f_ffff;
-    encode(
-        &format!("{}_only_pcreladdr", op.to_ascii_uppercase()),
+    encode_named(
+        format_args!("{}_only_pcreladdr", upper(op)),
         &[("Rd", d.number), ("immlo", bits & 3), ("immhi", bits >> 2)],
     )
 }

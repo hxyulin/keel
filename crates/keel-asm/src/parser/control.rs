@@ -1,8 +1,9 @@
+use super::storage::{encode_named, lower, upper};
 use super::{count, reg, unsigned};
 use crate::encode;
 
 pub(super) fn condition(text: &str) -> Result<u32, String> {
-    match text.to_ascii_lowercase().as_str() {
+    match lower(text).as_ref() {
         "eq" => Ok(0),
         "ne" => Ok(1),
         "cs" | "hs" => Ok(2),
@@ -24,7 +25,7 @@ pub(super) fn condition(text: &str) -> Result<u32, String> {
 }
 
 pub(super) struct Branch {
-    pub encoding: String,
+    pub encoding: &'static str,
     pub field: &'static str,
     pub width: u32,
     pub fields: Vec<(&'static str, u32)>,
@@ -35,7 +36,11 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
     let (encoding, field, width, fields, target) = if op == "b" || op == "bl" {
         count(args, 1, 1)?;
         (
-            format!("{}_only_branch_imm", op.to_ascii_uppercase()),
+            if op == "bl" {
+                "BL_only_branch_imm"
+            } else {
+                "B_only_branch_imm"
+            },
             "imm26",
             26,
             vec![],
@@ -44,7 +49,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
     } else if let Some(cc) = op.strip_prefix("b.") {
         count(args, 1, 1)?;
         (
-            "B_only_condbranch".into(),
+            "B_only_condbranch",
             "imm19",
             19,
             vec![("cond", condition(cc)?)],
@@ -54,7 +59,12 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
         count(args, 2, 2)?;
         let r = reg(args[0], false, true)?;
         (
-            format!("{}_{}_compbranch", op.to_ascii_uppercase(), r.bits),
+            match (op, r.bits) {
+                ("cbz", 64) => "CBZ_64_compbranch",
+                ("cbz", _) => "CBZ_32_compbranch",
+                (_, 64) => "CBNZ_64_compbranch",
+                _ => "CBNZ_32_compbranch",
+            },
             "imm19",
             19,
             vec![("Rt", r.number)],
@@ -65,7 +75,11 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
         let r = reg(args[0], false, true)?;
         let bit = unsigned(args[1], i64::from(r.bits - 1))?;
         (
-            format!("{}_only_testbranch", op.to_ascii_uppercase()),
+            if op == "tbz" {
+                "TBZ_only_testbranch"
+            } else {
+                "TBNZ_only_testbranch"
+            },
             "imm14",
             14,
             vec![("Rt", r.number), ("b5", bit >> 5), ("b40", bit & 31)],
@@ -99,8 +113,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     if r.bits != 64 {
         return Err("indirect branches require an X register".into());
     }
-    encode(
-        &format!("{}_64_branch_reg", op.to_ascii_uppercase()),
+    encode_named(
+        format_args!("{}_64_branch_reg", upper(op)),
         &[("Rn", r.number)],
     )
 }

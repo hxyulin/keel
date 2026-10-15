@@ -1,9 +1,9 @@
 use super::control::condition;
+use super::storage::{encode_named, lower, upper};
 use super::{count, reg};
-use crate::encode;
 
 fn fp(text: &str) -> Result<(u32, &'static str), String> {
-    let text = text.to_ascii_lowercase();
+    let text = lower(text);
     let tag = match text.as_bytes().first() {
         Some(b's') => "S",
         Some(b'd') => "D",
@@ -59,8 +59,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             count(args, 2, 2)?;
             if args[1].starts_with('#') {
                 let (d, tag) = fp(args[0])?;
-                return encode(
-                    &format!("FMOV_{tag}_floatimm"),
+                return encode_named(
+                    format_args!("FMOV_{tag}_floatimm"),
                     &[("Rd", d), ("imm8", float_immediate(immediate(args[1])?)?)],
                 );
             }
@@ -69,8 +69,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     if d.1 != n.1 {
                         return Err("fmov FP register widths must match".into());
                     }
-                    encode(
-                        &format!("FMOV_{}_floatdp1", d.1),
+                    encode_named(
+                        format_args!("FMOV_{}_floatdp1", d.1),
                         &[("Rd", d.0), ("Rn", n.0)],
                     )
                 }
@@ -79,8 +79,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     if n.bits != if d.1 == "S" { 32 } else { 64 } {
                         return Err("fmov requires S/W or D/X register pairs".into());
                     }
-                    encode(
-                        &format!("FMOV_{}{}_float2int", d.1, n.bits),
+                    encode_named(
+                        format_args!("FMOV_{}{}_float2int", d.1, n.bits),
                         &[("Rd", d.0), ("Rn", n.number)],
                     )
                 }
@@ -89,8 +89,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     if d.bits != if n.1 == "S" { 32 } else { 64 } {
                         return Err("fmov requires S/W or D/X register pairs".into());
                     }
-                    encode(
-                        &format!("FMOV_{}{}_float2int", d.bits, n.1),
+                    encode_named(
+                        format_args!("FMOV_{}{}_float2int", d.bits, n.1),
                         &[("Rd", d.number), ("Rn", n.0)],
                     )
                 }
@@ -100,8 +100,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
         "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" => {
             count(args, 2, 2)?;
             let (r, tag) = registers(args)?;
-            encode(
-                &format!("{}_{tag}_floatdp1", op.to_ascii_uppercase()),
+            encode_named(
+                format_args!("{}_{tag}_floatdp1", upper(op)),
                 &[("Rd", r[0]), ("Rn", r[1])],
             )
         }
@@ -119,16 +119,13 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 "floatdp2"
             };
-            encode(
-                &format!("{}_{tag}_{form}", op.to_ascii_uppercase()),
-                &fields,
-            )
+            encode_named(format_args!("{}_{tag}_{form}", upper(op)), &fields)
         }
         "fmadd" | "fmsub" | "fnmadd" | "fnmsub" => {
             count(args, 4, 4)?;
             let (r, tag) = registers(args)?;
-            encode(
-                &format!("{}_{tag}_floatdp3", op.to_ascii_uppercase()),
+            encode_named(
+                format_args!("{}_{tag}_floatdp3", upper(op)),
                 &[("Rd", r[0]), ("Rn", r[1]), ("Rm", r[2]), ("Ra", r[3])],
             )
         }
@@ -149,10 +146,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 fields.push(("Rm", m.0));
                 ""
             };
-            encode(
-                &format!("{}_{tag}{zero}_floatcmp", op.to_ascii_uppercase()),
-                &fields,
-            )
+            encode_named(format_args!("{}_{tag}{zero}_floatcmp", upper(op)), &fields)
         }
         "fcvt" => {
             count(args, 2, 2)?;
@@ -161,8 +155,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             if d.1 == n.1 {
                 return Err("fcvt requires different FP widths".into());
             }
-            encode(
-                &format!("FCVT_{}{}_floatdp1", d.1, n.1),
+            encode_named(
+                format_args!("FCVT_{}{}_floatdp1", d.1, n.1),
                 &[("Rd", d.0), ("Rn", n.0)],
             )
         }
@@ -170,8 +164,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             count(args, 2, 2)?;
             let d = fp(args[0])?;
             let n = reg(args[1], false, true)?;
-            encode(
-                &format!("{}_{}{}_float2int", op.to_ascii_uppercase(), d.1, n.bits),
+            encode_named(
+                format_args!("{}_{}{}_float2int", upper(op), d.1, n.bits),
                 &[("Rd", d.0), ("Rn", n.number)],
             )
         }
@@ -179,8 +173,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             count(args, 2, 2)?;
             let d = reg(args[0], false, true)?;
             let n = fp(args[1])?;
-            encode(
-                &format!("{}_{}{}_float2int", op.to_ascii_uppercase(), d.bits, n.1),
+            encode_named(
+                format_args!("{}_{}{}_float2int", upper(op), d.bits, n.1),
                 &[("Rd", d.number), ("Rn", n.0)],
             )
         }

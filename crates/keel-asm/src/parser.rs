@@ -8,10 +8,12 @@ mod debug;
 mod float;
 mod memory;
 mod relocate;
+mod storage;
 mod vector;
 
 use super::{Assembly, Error, Symbol, encode};
 use std::collections::{BTreeMap, BTreeSet};
+use storage::{Operands, encode_named, lower, upper};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -27,8 +29,8 @@ struct Reg {
 }
 
 fn reg(s: &str, sp: bool, zero: bool) -> Result<Reg, String> {
-    let s = s.to_ascii_lowercase();
-    let r = match s.as_str() {
+    let s = lower(s);
+    let r = match s.as_ref() {
         "sp" | "wsp" => Reg {
             number: 31,
             bits: if s == "sp" { 64 } else { 32 },
@@ -160,8 +162,8 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                         .into(),
                 );
             }
-            encode(
-                &format!("{}_{}_movewide", op.to_ascii_uppercase(), d.bits),
+            encode_named(
+                format_args!("{}_{}_movewide", upper(op), d.bits),
                 &[("Rd", d.number), ("imm16", imm), ("hw", amount / 16)],
             )
         }
@@ -174,7 +176,7 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                     .iter()
                     .any(|s| s.eq_ignore_ascii_case("sp") || s.eq_ignore_ascii_case("wsp"))
                     || a.get(3).is_some_and(|s| {
-                        let s = s.to_ascii_lowercase();
+                        let s = lower(s);
                         s.starts_with("uxt") || s.starts_with("sxt")
                     }))
             {
@@ -193,10 +195,10 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 if kind != "lsl" || ![0, 12].contains(&amount) {
                     return Err("add/sub immediate shift must be lsl #0 or lsl #12".into());
                 }
-                encode(
-                    &format!(
+                encode_named(
+                    format_args!(
                         "{}_{}{}_addsub_imm",
-                        op.to_ascii_uppercase(),
+                        upper(op),
                         d.bits,
                         if flags { "S" } else { "" }
                     ),
@@ -224,8 +226,8 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 if amount >= d.bits {
                     return Err("shift exceeds register width".into());
                 }
-                encode(
-                    &format!("{}_{}_addsub_shift", op.to_ascii_uppercase(), d.bits),
+                encode_named(
+                    format_args!("{}_{}_addsub_shift", upper(op), d.bits),
                     &[
                         ("Rd", d.number),
                         ("Rn", n.number),
@@ -239,8 +241,11 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
         "cmp" | "cmn" => {
             count(a, 2, 3)?;
             let n = reg(a[0], true, true)?;
-            let mut args = vec![if n.bits == 64 { "xzr" } else { "wzr" }];
-            args.extend_from_slice(a);
+            let mut args = Operands::new();
+            args.push(if n.bits == 64 { "xzr" } else { "wzr" });
+            for arg in a {
+                args.push(arg);
+            }
             instruction(if op == "cmp" { "subs" } else { "adds" }, &args)
         }
         "mov" => {
@@ -254,8 +259,8 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             if d.kind == Kind::Sp || n.kind == Kind::Sp {
                 instruction("add", &[a[0], a[1], "#0"])
             } else {
-                encode(
-                    &format!("ORR_{}_log_shift", d.bits),
+                encode_named(
+                    format_args!("ORR_{}_log_shift", d.bits),
                     &[
                         ("Rd", d.number),
                         ("Rn", 31),
@@ -420,7 +425,7 @@ fn assemble_pass(
         }
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
         let operands = operands.trim();
-        let op = op.to_ascii_lowercase();
+        let op = lower(op);
         if debug
             .directive(
                 &op,
@@ -445,7 +450,7 @@ fn assemble_pass(
         if op == ".uleb128" || op == ".sleb128" {
             count(&args, 1, usize::MAX).map_err(err)?;
             let mut bytes = Vec::new();
-            for arg in args {
+            for arg in args.iter().copied() {
                 let expr = data::expression(arg).map_err(err)?;
                 let value = if let Some(add) = &expr.add {
                     symbolic_leb = true;
@@ -509,7 +514,7 @@ fn assemble_pass(
         }
         if let Some(width) = data::width(&op) {
             count(&args, 1, usize::MAX).map_err(err)?;
-            for argument in args {
+            for argument in args.iter().copied() {
                 let got = argument.contains("@GOT");
                 if let Some((_, suffix)) = argument.split_once("@GOT")
                     && suffix
@@ -550,7 +555,7 @@ fn assemble_pass(
             }
             continue;
         }
-        match op.as_str() {
+        match op.as_ref() {
             ".subsections_via_symbols" => {
                 count(&args, 0, 0).map_err(err)?;
                 result.subsections_via_symbols = true;
@@ -558,7 +563,7 @@ fn assemble_pass(
             }
             ".text" | ".data" | ".const" | ".const_data" | ".bss" => {
                 count(&args, 0, 0).map_err(err)?;
-                current = match op.as_str() {
+                current = match op.as_ref() {
                     ".text" => 0,
                     ".const" => {
                         data::select(&mut result, "__TEXT", "__const", crate::SectionKind::Data)
@@ -583,7 +588,7 @@ fn assemble_pass(
             }
             ".globl" | ".global" | ".extern" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
-                for name in args {
+                for name in args.iter().copied() {
                     symbol(name).map_err(err)?;
                     globals.insert(name.to_string(), line);
                 }
