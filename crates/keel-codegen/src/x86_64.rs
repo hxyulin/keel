@@ -144,6 +144,7 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
+    pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)

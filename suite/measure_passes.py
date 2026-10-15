@@ -58,6 +58,9 @@ def main():
     parser.add_argument("--compiler", type=pathlib.Path, required=True)
     parser.add_argument("--baseline-compiler", type=pathlib.Path)
     parser.add_argument("--baseline-passes", required=True)
+    parser.add_argument("--compiler-arg", action="append", default=[], help="extra argument for candidate compiler (repeatable)")
+    parser.add_argument("--baseline-arg", action="append", default=[], help="extra argument for baseline compiler (repeatable)")
+    parser.add_argument("--assembler", choices=["clang", "keel"], default="clang")
     parser.add_argument(
         "--variant",
         action="append",
@@ -71,6 +74,8 @@ def main():
     args = parser.parse_args()
     if min(args.pairs, args.compile_pairs) < 3 or args.warmups < 1:
         parser.error("use at least three paired samples and one warmup")
+    if args.assembler == "keel" and (platform.system() != "Darwin" or platform.machine() != "arm64"):
+        parser.error("Keel object assembly currently requires Apple arm64")
     compiler = str(args.compiler.resolve())
     baseline = str((args.baseline_compiler or args.compiler).resolve())
     configs = {"baseline": (baseline, args.baseline_passes)}
@@ -110,6 +115,8 @@ def main():
             name: hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
             for name, (binary, _) in configs.items()
         },
+        "assembler": args.assembler,
+        "compiler_arguments": {name: args.baseline_arg if name == "baseline" else args.compiler_arg for name in configs},
         "pipelines": {
             name: passes.split(",") if passes else []
             for name, (_, passes) in configs.items()
@@ -133,11 +140,16 @@ def main():
                 out = work / name / suite
                 out.mkdir(parents=True)
 
-                def build(source, out=out, driver=driver, passes=passes):
+                extra = args.baseline_arg if name == "baseline" else args.compiler_arg
+
+                def build(source, out=out, driver=driver, passes=passes, extra=extra):
                     asm = out / (source.stem + ".s")
                     obj = asm.with_suffix(".o")
-                    run([driver, "cc", "-p", passes, str(source), "-o", str(asm)])
-                    run(["clang", "-c", str(asm), "-o", str(obj)])
+                    run([driver, "cc", *extra, "-p", passes, str(source), "-o", str(asm)])
+                    if args.assembler == "keel":
+                        run([driver, "asm", str(asm), "-o", str(obj)])
+                    else:
+                        run(["clang", "-c", str(asm), "-o", str(obj)])
                     return obj
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
@@ -253,6 +265,7 @@ def main():
                                 [
                                     driver,
                                     "cc",
+                                    *(args.baseline_arg if config == "baseline" else args.compiler_arg),
                                     "-p",
                                     passes,
                                     str(source),

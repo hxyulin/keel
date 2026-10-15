@@ -10,6 +10,7 @@ mod parallel_copy;
 pub mod regalloc;
 pub mod select;
 mod sysv;
+pub mod tuning;
 pub mod x86_64;
 
 pub use regalloc::Pools;
@@ -66,9 +67,23 @@ pub struct CodegenPipeline<'a> {
     pub allocator: &'a dyn regalloc::RegisterAllocator,
 }
 
+impl CodegenPipeline<'_> {
+    pub(crate) fn validate_target(&self, target: Target) -> Result<(), CodegenError> {
+        self.selector
+            .validate_target(target)
+            .map_err(|message| CodegenError {
+                func: "<target>".into(),
+                message: message.into(),
+            })
+    }
+}
+
 /// Plan target instructions and the operands that remain live for allocation.
 /// `folds` describes operands encoded directly by the target emitter.
 pub trait InstructionSelector {
+    fn validate_target(&self, _target: Target) -> Result<(), &'static str> {
+        Ok(())
+    }
     fn name(&self) -> &'static str;
     fn select(
         &self,

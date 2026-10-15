@@ -130,3 +130,14 @@ flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm
 name = "keel-O-memory-select"
 compiler = "keel"
 flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,memory-forward,dce,gcm", "--isel", "all"]
+
+# Explicit M5 tuning: selection effort and ISA target remain independent.
+[[config]]
+name = "keel-m5"
+compiler = "keel"
+flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5"]
+
+[[config]]
+name = "keel-m5-fast"
+compiler = "keel"
+flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5", "--regalloc", "fast"]

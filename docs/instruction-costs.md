@@ -113,9 +113,8 @@ Use the reports first to diagnose measured hot regions and compare actual
 lowerings. Next wire calibrated target estimates into a specific profitability
 decision, such as rematerialization versus retaining a value or a strength
 reduction that changes register pressure. Require correctness tests and paired
-application benchmarks for that change. This commit adds measurement and
-comparison infrastructure; no live optimization pass is governed by these
-provisional timing tables yet.
+application benchmarks for that change. The provisional LLVM timing tables remain diagnostic. The native M5 tuning
+section below describes the first live decision based on hardware calibration.
 
 ## Validation
 
@@ -131,3 +130,59 @@ Parser/model tests use explicitly synthetic numbers. The optional integration
 check runs the real assembler and LLVM model, including rejection of an unknown
 CPU. Assembler tests check final branch fixups, text padding/data separation and
 unchanged object output for all examples.
+
+## Native Apple M5 tuning
+
+`--tune generic` is the default. `--tune apple-m5` selects measured profitability
+choices for Apple arm64 without changing the target, ABI, enabled ISA features,
+IR optimization tier or instruction-selection tier. For example:
+
+```sh
+keel cc -O --isel-tier full --tune apple-m5 input.i -o output.s
+```
+
+The first choice is deliberately small: i32/i64 multiplication by 3, 5 or 9
+can use `add r, r, r, lsl #k`. It requires tree selection (`--isel trees`,
+`--isel all`, or the corresponding tier). The selector preserves existing
+multiply-add covers, shared constants and wrapping integer semantics. Narrow
+integers, i128 and other constants retain their previous lowering. An M5 tuning
+request for the x86 target is rejected by both the driver and backend APIs.
+
+The [native calibration](../suite/reports/apple-m5-integer-2026-10-15.json)
+measures 32- and 64-bit dependency chains and eight independent streams on an
+Apple M5 Max. Keel assembles the generated kernels; a small C timing/checking
+harness uses the system toolchain. Neither LLVM timing data nor llvm-mca is
+needed. Nine randomized pairs after two warmups show about one-third lower
+elapsed time in dependency chains; independent-stream medians are neutral to
+slightly faster. Results are nanoseconds per operation, not inferred cycles.
+QoS is requested but cores and clock frequencies are not pinned. The report
+contains all samples, kernel sources, harness, tool hashes and independent
+correctness checks.
+
+`suite/generate_m5_tuning.py` emits the compact Rust cost table from this report.
+The rule requires the chain ratio's upper 95% bootstrap endpoint below 1.0 and
+a parallel-stream median ratio no greater than 1.0. It applies only to the six
+measured width/constant combinations and saves constant materialization where
+that constant has no other uses. No general instruction-latency model is
+inferred from these measurements. The earlier provisional LLVM catalog remains
+an offline diagnostic source; this tuning rule does not depend on it.
+
+Reproduce the calibration and check the generated costs:
+
+```sh
+python3 suite/measure_m5_integer.py --keel target/release/keel \
+  --output /tmp/m5-integer.json
+python3 suite/generate_m5_tuning.py --check
+```
+
+Compare application behavior using `keel-m5` and `keel-m5-fast` suite presets.
+The [application comparison](../suite/reports/apple-m5-tuning-aarch64-2026-10-15.json)
+uses identical IR passes and full instruction selection on both sides; the
+candidate adds only M5 tuning. Both sides use Keel's assembler, with system
+linking. The final application runtime geometric-mean ratio is 1.0013 (0.13% more
+time), compile-time ratio is 0.9981 (essentially neutral), and combined text
+shrinks by 160 bytes. QuickJS Fibonacci regresses 2.3%; QuickJS string improves
+1.9%, Lua sort/string about 0.9%. These local changes do not establish an
+overall application speedup. The cause of the Fibonacci regression has not
+been profiled. The rule remains experimental and opt-in; generic defaults
+are unchanged.

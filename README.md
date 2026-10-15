@@ -90,6 +90,12 @@ experiments. Selection produces the instruction plan consumed by the target
 lowering code and allocator; register hints are preferences, never constraints.
 The target emitters retain responsibility for ABI handling and assembly.
 
+CPU tuning is independent of these effort settings. `--tune generic` preserves
+the defaults; `--tune apple-m5` enables measured Apple M5 choices when tree
+selection is enabled, for example `-O --isel-tier full --tune apple-m5`.
+It does not enable additional ISA features. See [native M5 tuning](docs/instruction-costs.md#native-apple-m5-tuning)
+for calibration and application results.
+
 The `profiling` crate instruments passes, selection, allocation, lowering,
 and IR parsing/verification. Instrumentation is inactive in default builds.
 To capture with Tracy, build with `cargo build --release -p keel --features

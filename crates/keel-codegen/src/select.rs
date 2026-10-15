@@ -44,6 +44,48 @@ pub struct Selection {
     pub hints: HashMap<Value, Vec<Value>>,
 }
 impl Selection {
+    /// Choose only measured same-block scalar multiply alternatives.
+    pub(crate) fn tune_multiplications(&mut self, func: &Function, cpu: crate::tuning::TuningCpu) {
+        for (_, inst) in func.layout_insts() {
+            // Preserve existing larger covers, including multiply-add fusion.
+            if self.covered(inst) || self.matches.contains_key(&inst) {
+                continue;
+            }
+            let InstData::Binary {
+                op: BinaryOp::Imul,
+                args,
+            } = *func.inst_data(inst)
+            else {
+                continue;
+            };
+            let ty = func.value_type(func.resolve(args[0]));
+            let bits = match ty {
+                Type::I32 => 32,
+                Type::I64 => 64,
+                _ => continue,
+            };
+            for side in [1, 0] {
+                let Some(constant) = crate::fold::iconst(func, args[side]) else {
+                    continue;
+                };
+                let Some(shift) = cpu.multiply_shift(bits, constant) else {
+                    continue;
+                };
+                let value = func.resolve(args[1 - side]);
+                self.matches.insert(
+                    inst,
+                    Match {
+                        machine: Machine::ShiftAdd,
+                        args: vec![value, value],
+                        shift,
+                    },
+                );
+                self.allocation_operands.remove(&inst);
+                break;
+            }
+        }
+    }
+
     /// Suppress an instruction subsumed by a selected root. Custom selectors
     /// must preserve all side effects and every use of its results.
     pub fn cover(&mut self, inst: Inst) {

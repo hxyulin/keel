@@ -1,8 +1,8 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -27,8 +27,8 @@ use keel_ir::Module;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
+  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel asm <input.s> -o <output.o>
   keel asm-metrics <input.s> [-o <metrics.json>]
@@ -55,6 +55,7 @@ struct Options {
     optimization: keel_opt::OptimizationTier,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
+    tuning: keel_codegen::tuning::TuningCpu,
     ir_lines: bool,
     emit_ir: bool,
     passes: Option<Vec<String>>,
@@ -74,9 +75,13 @@ impl Options {
     }
 
     fn target(&self) -> Result<Target, String> {
-        self.target
-            .or_else(Target::host)
-            .ok_or_else(|| "keel does not run on this machine's target; pass `--target`".into())
+        let target = self.target.or_else(Target::host).ok_or_else(|| {
+            "keel does not run on this machine's target; pass `--target`".to_string()
+        })?;
+        self.tuning
+            .validate_target(target)
+            .map_err(str::to_string)?;
+        Ok(target)
     }
 }
 
@@ -138,6 +143,11 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                         }
                     }
                 }
+            }
+            "--tune" => {
+                let name = args.next().ok_or("`--tune` needs generic or apple-m5")?;
+                opts.tuning = keel_codegen::tuning::TuningCpu::from_name(name)
+                    .ok_or("unknown tuning CPU; expected generic or apple-m5")?;
             }
             "--target" => {
                 let triple = args.next().ok_or("`--target` needs a target triple")?;
@@ -215,6 +225,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-tier",
                     "--regalloc",
                     "--isel-tier",
+                    "--tune",
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
@@ -224,7 +235,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 &module,
                 opts.target()?,
                 &keel_codegen::CodegenPipeline {
-                    selector: &keel_codegen::OptionsSelector(opts.selection),
+                    selector: &keel_codegen::tuning::TunedSelector {
+                        options: opts.selection,
+                        cpu: opts.tuning,
+                    },
                     allocator: &opts.allocation,
                 },
             )
@@ -245,6 +259,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-tier",
                     "--regalloc",
                     "--isel-tier",
+                    "--tune",
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
@@ -274,7 +289,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 &module,
                 opts.target()?,
                 &keel_codegen::CodegenPipeline {
-                    selector: &keel_codegen::OptionsSelector(opts.selection),
+                    selector: &keel_codegen::tuning::TunedSelector {
+                        options: opts.selection,
+                        cpu: opts.tuning,
+                    },
                     allocator: &opts.allocation,
                 },
             )
@@ -423,5 +441,47 @@ mod tests {
             Err(keel_opt::OptError::UnknownPass(_))
         ));
         assert!(options(&["-p"]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod tuning_tests {
+    use super::*;
+
+    #[test]
+    fn tuning_is_explicit_independent_and_diagnoses_incompatible_targets() {
+        let allowed = ["--tune", "--target", "-O", "--isel-tier"];
+        let parse = |args: &[&str]| {
+            parse_options(
+                &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                &allowed,
+            )
+        };
+        for args in [
+            vec!["--tune", "apple-m5", "-O"],
+            vec!["-O", "--tune", "apple-m5"],
+        ] {
+            let opts = parse(&args).unwrap();
+            assert_eq!(opts.tuning, keel_codegen::tuning::TuningCpu::AppleM5);
+            assert!(
+                !opts.selection.trees,
+                "tuning must not change selection effort"
+            );
+        }
+        assert!(parse(&["--tune", "unrecognized"]).is_err());
+        assert!(parse(&["--tune"]).is_err());
+        assert!(
+            parse(&["--tune", "apple-m5", "--target", "x86_64-unknown-linux-gnu"])
+                .unwrap()
+                .target()
+                .is_err()
+        );
+        assert_eq!(
+            parse(&["--tune", "generic", "--target", "x86_64-unknown-linux-gnu"])
+                .unwrap()
+                .target()
+                .unwrap(),
+            Target::X86_64LinuxGnu
+        );
     }
 }

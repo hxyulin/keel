@@ -151,3 +151,23 @@ records both forwarding alone and a subsequent instcombine, plus static load
 counts on the same preprocessed inputs. Forwarding removes 1,758 static loads
 and 7,584 text bytes, but its 0.5% lower aggregate runtime is within the observed
 variation and compilation costs 2.4% more; it is not enabled by default.
+
+The `keel-m5` and `keel-m5-fast` configurations enable explicit Apple M5 tuning
+with full instruction selection, using the full and fast allocators respectively.
+`suite/measure_m5_integer.py` measures the first scalar profitability alternatives
+on actual M5 hardware, with kernels assembled by Keel and independently checked
+results. It records nanoseconds, not guessed cycle counts. The checked-in native
+report generates the Rust tuning data through `suite/generate_m5_tuning.py`.
+
+For comparisons with the same IR pipeline, `measure_passes.py` accepts repeated
+`--baseline-arg` and `--compiler-arg` options. Pass leading-dash arguments with
+`=`, for example `--compiler-arg=--tune --compiler-arg=apple-m5`. Both sets of
+arguments apply to application builds and compile-time samples. `--assembler
+keel` assembles both variants with their Keel driver; the default is `clang`.
+The selected assembler and compiler arguments are recorded in the report.
+
+The first [M5 application comparison](reports/apple-m5-tuning-aarch64-2026-10-15.json)
+is neutral overall (runtime ratio 1.0013), with a 2.3% QuickJS Fibonacci regression
+and 160 fewer text bytes. The isolated multiply dependency-chain improvement
+is about 33%, but this does not translate into a general application speedup.
+M5 tuning is experimental and remains explicit.
