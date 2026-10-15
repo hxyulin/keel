@@ -117,7 +117,8 @@ fn builtin(name: &str, target: Target) -> bool {
             )
         });
     };
-    if crate::expr::typed_overflow(base).is_some() {
+    if crate::expr::typed_overflow(base).is_some() || crate::expr::generic_overflow(base).is_some()
+    {
         return true;
     }
     if target == Target::X86_64LinuxGnu

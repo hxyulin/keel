@@ -155,13 +155,13 @@ int f(int n, ...) {
 #[test]
 fn feature_answers_describe_keel_and_unknown_features_are_false() {
     let pp = preprocess(r#"
-#if !__has_builtin(__builtin_expect) || !__has_builtin(__builtin_sadd_overflow)
+#if !__has_builtin(__builtin_expect) || !__has_builtin(__builtin_sadd_overflow) || !__has_builtin(__builtin_add_overflow) || !__has_builtin(__builtin_sub_overflow) || !__has_builtin(__builtin_mul_overflow)
 #error implemented builtin missing
 #endif
 #if !__has_feature(c_atomic) || !__has_attribute(packed)
 #error implemented feature missing
 #endif
-#if __has_builtin(__builtin_assume) || __has_builtin(__builtin_add_overflow) || __has_feature(bounds_safety) || __has_attribute(cleanup) || __has_feature(imaginary_future_feature)
+#if __has_builtin(__builtin_assume) || __has_builtin(__builtin_add_overflow_p) || __has_feature(bounds_safety) || __has_attribute(cleanup) || __has_feature(imaginary_future_feature)
 #error unsupported feature advertised
 #endif
 #if __has_feature(modules) || __building_module(anything)
