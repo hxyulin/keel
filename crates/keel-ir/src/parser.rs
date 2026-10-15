@@ -134,8 +134,9 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
             "decl" => {
                 let name = parser.global("a function name like `@putchar`")?;
                 let sig = parser.signature()?;
+                let attrs = parser.function_attrs()?;
                 parser.expect(Tok::Newline)?;
-                decls.push(FuncDecl { name, sig });
+                decls.push(FuncDecl { name, sig, attrs });
             }
             _ => {
                 return Err(error(
@@ -167,7 +168,7 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         .iter()
         .map(|func| build(func, &sigs, &data_names, ir_file))
         .collect::<Result<_, _>>()?;
-    Ok(Module {
+    let mut module = Module {
         decls,
         data,
         functions,
@@ -175,7 +176,9 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
         debug_types,
         debug_globals,
         debug_language,
-    })
+    };
+    module.sync_function_attrs();
+    Ok(module)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -473,6 +476,7 @@ type ParsedDebugVar = (
 
 /// A function as written, built once all signatures in the module are known.
 struct ParsedFunction {
+    attrs: crate::FunctionAttrs,
     name: String,
     sig: Signature,
     local: bool,
@@ -763,10 +767,45 @@ impl Parser {
         Ok(Layout::Scalar(self.ty()?))
     }
 
+    fn function_attrs(&mut self) -> Result<crate::FunctionAttrs, ParseError> {
+        let mut attrs = crate::FunctionAttrs::default();
+        loop {
+            let mut found = false;
+            for name in [
+                "inlinehint",
+                "alwaysinline",
+                "noinline",
+                "noreturn",
+                "nounwind",
+            ] {
+                if self.eat(&Tok::Ident(name.into())) {
+                    let flag = match name {
+                        "inlinehint" => &mut attrs.inlinehint,
+                        "alwaysinline" => &mut attrs.alwaysinline,
+                        "noinline" => &mut attrs.noinline,
+                        "noreturn" => &mut attrs.noreturn,
+                        _ => &mut attrs.nounwind,
+                    };
+                    if *flag {
+                        return Err(self.unexpected("a non-duplicate function attribute"));
+                    }
+                    *flag = true;
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                break;
+            }
+        }
+        Ok(attrs)
+    }
+
     /// Everything after `func`.
     fn function(&mut self) -> Result<ParsedFunction, ParseError> {
         let name = self.global("a function name like `@main`")?;
         let sig = self.signature()?;
+        let attrs = self.function_attrs()?;
         let local = self.eat(&Tok::Ident("local".into()));
         let personality = if self.eat(&Tok::Ident("personality".into())) {
             Some(self.global("a personality function like `@__gxx_personality_v0`")?)
@@ -844,6 +883,7 @@ impl Parser {
             self.skip_newlines();
         }
         Ok(ParsedFunction {
+            attrs,
             name,
             sig,
             local,
@@ -1883,6 +1923,7 @@ fn build(
     ir_file: Option<SourceFile>,
 ) -> Result<Function, ParseError> {
     let ParsedFunction {
+        attrs,
         name,
         sig,
         local,
@@ -2042,6 +2083,7 @@ fn build(
     let mut func = Function::new(name.clone(), sig.clone());
     func.personality = personality.clone();
     func.local = *local;
+    func.attrs = *attrs;
     // Slots and callees were numbered in declaration order, which is
     // creation order.
     for slot in slots {
