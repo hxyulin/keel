@@ -120,3 +120,61 @@ _initialized:
     );
     std::fs::remove_dir_all(temp).unwrap();
 }
+
+#[test]
+fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
+    let temp = std::env::temp_dir().join(format!("keel-link-debug-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let source = temp.join("memory.c");
+    let object = temp.join("original.o");
+    std::fs::write(&source, "int twice(int value) {\n int local = value * 2;\n return local;\n}\nint main(void) { return twice(21)!=42; }\n").unwrap();
+    checked(
+        Command::new("clang")
+            .args(["-g", "-O0", "-c"])
+            .arg(&source)
+            .arg("-o")
+            .arg(&object),
+    );
+    let bytes = std::fs::read(&object).unwrap();
+    std::fs::remove_file(object).unwrap();
+    let sdk = checked(Command::new("xcrun").arg("--show-sdk-path"));
+    let sdk = PathBuf::from(String::from_utf8(sdk.stdout).unwrap().trim());
+    let exe = keel_link::link(
+        &[Input {
+            name: "in-memory.o",
+            bytes: &bytes,
+        }],
+        Options {
+            dylibs: vec![Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), &sdk).unwrap()],
+            debug_directory: Some(temp.join("snapshots")),
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(exe.debug_objects.len(), 1);
+    assert_eq!(exe.debug_objects[0].bytes, bytes);
+    assert!(exe.warnings.is_empty());
+    let executable = temp.join("memory");
+    keel_link::write_signed(&exe, &executable).unwrap();
+    checked(&mut Command::new(&executable));
+    checked(Command::new("dsymutil").arg(&executable));
+    std::fs::remove_dir_all(temp.join("snapshots")).unwrap();
+    let lldb = checked(Command::new("lldb").arg("-b").arg(&executable).args([
+        "-o",
+        "breakpoint set --file memory.c --line 3",
+        "-o",
+        "run",
+        "-o",
+        "frame variable",
+        "-o",
+        "bt",
+        "-o",
+        "continue",
+    ]));
+    let output = String::from_utf8_lossy(&lldb.stdout);
+    assert!(
+        output.contains("local = 42") && output.contains("value = 21") && output.contains("`main"),
+        "{output}"
+    );
+    std::fs::remove_dir_all(temp).unwrap();
+}

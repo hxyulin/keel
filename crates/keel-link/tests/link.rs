@@ -5,6 +5,7 @@ fn options() -> Options {
         dylibs: vec![Dylib {
             install_name: "/usr/lib/libSystem.B.dylib".into(),
             exports: BTreeSet::from(["_puts".into()]),
+            weak_exports: BTreeSet::new(),
         }],
         ..Options::default()
     }
@@ -100,18 +101,16 @@ fn executable_layout_and_eager_imports_are_deterministic() {
 }
 
 #[test]
-fn tls_and_branch_overflow_are_explicit() {
+fn tls_zero_fill_is_accepted_and_branch_overflow_is_explicit() {
     let tls = object(".globl _main\n_main:\nret\n.tbss _thread,8,3\n");
-    assert!(
-        keel_link::link(
-            &[Input {
-                name: "tls.o",
-                bytes: &tls
-            }],
-            options()
-        )
-        .is_err()
-    );
+    keel_link::link(
+        &[Input {
+            name: "tls.o",
+            bytes: &tls,
+        }],
+        options(),
+    )
+    .unwrap();
     let mut branch =
         object(".subsections_via_symbols\n.globl _main\n_main:\nb _far\n.globl _far\n_far:\nret\n");
     // Make the branch destination an absolute address far below the PIE.
@@ -333,4 +332,116 @@ fn local_branch_target_can_share_an_imports_name() {
         options(),
     )
     .unwrap();
+}
+
+fn symbol_entry(bytes: &[u8], name: &str) -> usize {
+    let word = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 32;
+    while word(at) != 2 {
+        at += word(at + 4);
+    }
+    let (offset, count, strings) = (word(at + 8), word(at + 12), word(at + 16));
+    (0..count)
+        .map(|i| offset + i * 16)
+        .find(|&at| {
+            let start = strings + word(at);
+            bytes[start..].starts_with(format!("{name}\0").as_bytes())
+        })
+        .unwrap()
+}
+fn weak_symbol(bytes: &mut [u8], name: &str, desc: u16) {
+    let at = symbol_entry(bytes, name);
+    bytes[at + 6..at + 8].copy_from_slice(&desc.to_le_bytes());
+}
+#[test]
+fn strong_overrides_weak_in_both_orders_and_weak_keeps_first() {
+    let main = object(".globl _main\n_main:\nb _f\n");
+    let mut weak = object(".globl _f\n_f:\nmov w0,#17\nret\n");
+    weak_symbol(&mut weak, "_f", 0x80);
+    let strong = object(".globl _f\n_f:\nmov w0,#29\nret\n");
+    for objects in [
+        vec![&weak, &strong],
+        vec![&strong, &weak],
+        vec![&weak, &weak],
+    ] {
+        let mut inputs = vec![Input {
+            name: "main",
+            bytes: &main,
+        }];
+        inputs.extend(objects.iter().map(|bytes| Input {
+            name: "memory",
+            bytes,
+        }));
+        let exe = keel_link::link(&inputs, options()).unwrap();
+        let at = symbol_entry(&exe.bytes, "_f");
+        let address = u64::from_le_bytes(exe.bytes[at + 8..at + 16].try_into().unwrap());
+        let offset = (address - 0x1_0000_0000) as usize;
+        let word = u32::from_le_bytes(exe.bytes[offset..offset + 4].try_into().unwrap());
+        let expected = if std::ptr::eq(objects[0], objects[1]) {
+            17
+        } else {
+            29
+        };
+        assert_eq!((word >> 5) & 65535, expected);
+    }
+}
+#[test]
+fn missing_weak_import_is_permitted_but_a_strong_reference_still_fails() {
+    let mut main = object(
+        ".globl _main\n_main:\nadrp x0,_absent@GOTPAGE\nldr x0,[x0,_absent@GOTPAGEOFF]\nret\n",
+    );
+    weak_symbol(&mut main, "_absent", 0x40);
+    keel_link::link(
+        &[Input {
+            name: "weak",
+            bytes: &main,
+        }],
+        options(),
+    )
+    .unwrap();
+    let strong = object(".globl _other\n_other:\nb _absent\n");
+    assert!(
+        keel_link::link(
+            &[
+                Input {
+                    name: "weak",
+                    bytes: &main
+                },
+                Input {
+                    name: "strong",
+                    bytes: &strong
+                }
+            ],
+            options()
+        )
+        .err()
+        .unwrap()
+        .contains("undefined symbol `_absent`")
+    );
+}
+#[test]
+fn tlvp_requires_a_descriptor_and_debug_paths_are_explicit() {
+    let main = object(
+        ".globl _main\n_main:\nadrp x0,_ordinary@TLVPPAGE\nldr x0,[x0,_ordinary@TLVPPAGEOFF]\nret\n.data\n.globl _ordinary\n_ordinary:\n.quad 0\n",
+    );
+    assert!(
+        keel_link::link(
+            &[Input {
+                name: "memory",
+                bytes: &main
+            }],
+            options()
+        )
+        .err()
+        .unwrap()
+        .contains("TLS descriptor")
+    );
+    let mut opts = options();
+    opts.debug_directory = Some("relative".into());
+    assert!(
+        keel_link::link(&[], opts)
+            .err()
+            .unwrap()
+            .contains("absolute")
+    );
 }
