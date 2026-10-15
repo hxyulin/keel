@@ -109,7 +109,6 @@ fn invalid_operands_and_unsupported_syntax_are_diagnostics() {
         "L: nop\nL: ret",
         "b 1f",
         "1: ret",
-        "ld1 {v0.4s}, [x1]",
     ] {
         let error = assemble(&format!("\n{bad}")).expect_err(bad);
         assert!(error.line >= 2, "{bad}: {error}");

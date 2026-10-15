@@ -1,3 +1,7 @@
+# Baseline Advanced SIMD encoding names from Arm AARCHMRS 2025-12, schema 2.7.4.
+# Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.
+# Arm-derived data: BSD-3-Clause; see LICENSE-ARM.
+# Source URL and verified archive SHA-256 are retained in a64.json.
 ABS_asimdmisc_R
 ABS_asisdmisc_R
 ADDHN_asimddiff_N

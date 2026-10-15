@@ -16,116 +16,36 @@ fn number(text: &str, prefix: char) -> Result<u32, String> {
     }
     Ok(number)
 }
-fn vector(text: &str) -> Result<(u32, &str, u32, u32), String> {
-    let (name, arrangement) = text
-        .split_once('.')
-        .ok_or("vector register requires an arrangement")?;
-    let register = number(name, 'v')?;
-    let (q, size) = match arrangement {
-        "8b" => (0, 0),
-        "16b" => (1, 0),
-        "4h" => (0, 1),
-        "8h" => (1, 1),
-        "2s" => (0, 2),
-        "4s" => (1, 2),
-        "2d" => (1, 3),
-        _ => return Err("unsupported SIMD arrangement".into()),
-    };
-    Ok((register, arrangement, q, size))
-}
-pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
-    count(args, 2, 2)?;
-    let d = lower(args[0]);
-    let n = lower(args[1]);
-    let (rn, arrangement, q, size) = vector(&n)?;
-    let rd = if op == "cnt" {
-        let (rd, dest_arrangement, _, _) = vector(&d)?;
-        if size != 0 || arrangement != dest_arrangement {
-            return Err("cnt requires matching 8B or 16B arrangements".into());
-        }
-        rd
-    } else {
-        if size == 3 || (size == 2 && q == 0) {
-            return Err("invalid SIMD reduction arrangement".into());
-        }
-        number(
-            &d,
-            match size {
-                0 => 'b',
-                1 => 'h',
-                _ => 's',
-            },
-        )?
-    };
-    encode(
-        if op == "cnt" {
-            "CNT_asimdmisc_R"
-        } else {
-            "ADDV_asimdall_only"
-        },
-        &[
-            (FieldId::Rd, rd),
-            (FieldId::Rn, rn),
-            (FieldId::Q, q),
-            (FieldId::size, size),
-        ],
-    )
-}
+/// Bytewise register operations. MOV aliases of other arrangements are
+/// handled by the lane/permutation module using the same ORR record.
+fn logical(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
+    let unary = matches!(op, "not" | "mvn");
+    if !unary
+        && !matches!(
+            op,
+            "and" | "orr" | "orn" | "eor" | "bic" | "bsl" | "bit" | "bif"
+        )
+        || !args.first().is_some_and(|s| s.starts_with('v'))
+    {
 
-/// Register-only same-width forms. Restrict each family before encoding:
-/// the machine-readable bit layout alone does not exclude every reserved size.
-pub(super) fn arithmetic(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
-    if !args.first().is_some_and(|s| s.starts_with(['v', 'V'])) {
         return Ok(None);
     }
-    let (root, unary, kind) = match op {
-        "mov" => ("orr", true, "logical"),
-        "mvn" => ("not", true, "logical"),
-        "not" => (op, true, "logical"),
-        "and" | "orr" | "orn" | "eor" | "bic" | "bsl" | "bit" | "bif" => (op, false, "logical"),
-        "add" | "sub" | "cmeq" | "cmgt" | "cmge" | "cmhi" | "cmhs" => (op, false, "integer"),
-        "abs" | "neg" => (op, true, "integer"),
-        "mul" | "mla" | "mls" | "smax" | "smin" | "umax" | "umin" => (op, false, "small"),
-        "fadd" | "fsub" | "fmul" | "fdiv" | "fmla" | "fmls" | "fmin" | "fmax" | "fminnm"
-        | "fmaxnm" => (op, false, "fp"),
-        "fabs" | "fneg" | "fsqrt" => (op, true, "fp"),
-        _ => return Ok(None),
-    };
-    let arity = if unary { 2 } else { 3 };
-    count(args, arity, arity)?;
-    let dest = args[0].to_ascii_lowercase();
-    let (rd, arrangement, q, size) = vector(&dest)?;
-    match kind {
-        "logical" if size != 0 && op != "mov" => {
-            return Err("SIMD logical forms require 8B or 16B".into());
-        }
-        "small" if size == 3 => {
-            return Err("this SIMD arithmetic form does not support D lanes".into());
-        }
-        "fp" if !matches!(arrangement, "2s" | "4s" | "2d") => {
-            return Err("SIMD FP requires 2S, 4S, or 2D".into());
-        }
-        _ => {}
+    count(args, if unary { 2 } else { 3 }, if unary { 2 } else { 3 })?;
+    let d = Shape::parse(args[0])?;
+    let n = Shape::parse(args[1])?;
+    d.valid_vector()?;
+    d.same(n)?;
+    if d.size != 0 {
+        return Err("SIMD logical forms require 8B or 16B".into());
     }
-    let mut registers = Vec::new();
-    for arg in &args[1..] {
-        let text = arg.to_ascii_lowercase();
-        let (r, a, _, _) = vector(&text)?;
-        if a != arrangement {
-            return Err("SIMD operands require matching arrangements".into());
-        }
-        registers.push(r);
+    let mut fields = vec![("Rd", d.number), ("Rn", n.number), ("Q", d.q)];
+    if !unary {
+        let m = Shape::parse(args[2])?;
+        d.same(m)?;
+        fields.push(("Rm", m.number));
     }
-    let mut fields = vec![("Rd", rd), ("Rn", registers[0]), ("Q", q)];
-    if !unary || op == "mov" {
-        fields.push(("Rm", *registers.last().unwrap()));
-    }
-    if kind == "fp" {
-        fields.push(("sz", size - 2));
-    } else if kind != "logical" {
-        fields.push(("size", size));
-    }
-    let form = if unary && op != "mov" {
+    let root = if unary { "NOT" } else { op };
+    let form = if unary {
         "asimdmisc_R"
     } else {
         "asimdsame_only"
@@ -136,6 +56,9 @@ pub(super) fn arithmetic(op: &str, args: &[&str]) -> Result<Option<u32>, String>
 /// Advanced SIMD modified immediates: byte replication, shifted halfwords /
 /// words, low-one MSL words, and one immediate bit per 00/FF byte in 64-bit lanes.
 pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
+    modified_immediate("movi", args)
+}
+fn modified_immediate(op: &str, args: &[&str]) -> Result<u32, String> {
     count(args, 2, 3)?;
     let dest = lower(args[0]);
     let (rd, arrangement, q) = if dest.starts_with('d') {
@@ -184,7 +107,20 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
         ("2d", ("lsl", 0)) if args.len() == 2 => ("D2_d", None),
         _ => return Err("invalid movi shift for lane arrangement".into()),
     };
-    let mut fields = vec![(FieldId::Rd, rd)];
+    if op != "movi" && (wide || matches!(arrangement, "8b" | "16b"))
+        || matches!(op, "orr" | "bic") && form == "M_sm"
+    {
+        return Err("invalid modified-immediate arrangement or shift".into());
+    }
+    let cmode = cmode.map(|v| {
+        if matches!(op, "orr" | "bic") {
+            v | 1
+        } else {
+            v
+        }
+    });
+    let mut fields = vec![("Rd", rd)];
+
     if !wide {
         fields.push((FieldId::Q, q));
     }
@@ -206,10 +142,17 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
     {
         fields.push((name, (imm >> (7 - i)) & 1));
     }
-    encode_named(format_args!("MOVI_asimdimm_{form}"), &fields)
+    encode(
+        &format!("{}_asimdimm_{form}", op.to_ascii_uppercase()),
+        &fields,
+    )
+
 }
 
+mod fp;
+mod indexed;
 mod integer;
+mod memory;
 mod permute;
 
 #[derive(Debug, Clone, Copy)]
@@ -373,10 +316,31 @@ pub(super) fn extra(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     if let Some(word) = permute::instruction(op, &args)? {
         return Ok(Some(word));
     }
+    if let Some(word) = memory::instruction(op, &args)? {
+        return Ok(Some(word));
+    }
+    if let Some(word) = indexed::instruction(op, &args)? {
+        return Ok(Some(word));
+    }
     if let Some(word) = integer::shift(op, &args)? {
         return Ok(Some(word));
     }
-    integer::instruction(op, &args)
+    if let Some(word) = integer::instruction(op, &args)? {
+        return Ok(Some(word));
+    }
+    if let Some(word) = fp::reduction(op, &args)? {
+        return Ok(Some(word));
+    }
+    if matches!(op, "mvni" | "orr" | "bic")
+        && args.get(1).is_some_and(|s| s.starts_with('#'))
+        && args[0].starts_with('v')
+    {
+        return modified_immediate(op, &args).map(Some);
+    }
+    if let Some(word) = fp::instruction(op, &args)? {
+        return Ok(Some(word));
+    }
+    logical(op, &args)
 }
 
 /// Shared operand rules may describe fields fixed in the scalar variant.
@@ -390,4 +354,12 @@ fn finish(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
         .filter(|(n, _)| encoding.fields.iter().any(|f| f.name == *n))
         .collect();
     encode(name, &fields)
+}
+
+fn immediate_fields(imm: u32) -> Vec<(&'static str, u32)> {
+    ["a", "b", "c", "d", "e", "f", "g", "h"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, n)| (n, (imm >> (7 - i)) & 1))
+        .collect()
 }

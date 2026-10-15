@@ -52,7 +52,7 @@ fn lane_moves_and_permutations_match_clang() {
             }
         }
     }
-    s.push_str("tbl v0.16b, {v31.16b-v1.16b}, v2.16b\nmov d0, v31.d[1]\n");
+    s.push_str("tbl v0.16b, {v31.16b-v1.16b}, v2.16b\nmov d0, v31.d[1]\nmov b0,v1.b[15]\nmov h0,v1.h[7]\nmov s0,v1.s[3]\nmov v0.1d,v1.1d\nmov v0.4s,v1.4s\n");
     compare_clang(&s);
 }
 
@@ -351,6 +351,375 @@ int main(void){
     for(int i=0;i<16;++i){int v=b[i%8];if(c[i]!=(v< -128?-128:v>127?127:v))return 2;}
     int8_t d[8]={-128,-127,-1,0,1,63,126,127};int16_t e[8];widen(d,e);
     for(int i=0;i<8;++i)if(e[i]!=2*d[i])return 3;
+    return 0;
+}",
+    )
+    .unwrap();
+    run(Command::new("clang")
+        .args(["-O2"])
+        .arg(&driver)
+        .arg(&object)
+        .arg("-o")
+        .arg(&exe));
+    assert_eq!(execute(&exe).code(), Some(0));
+}
+
+#[test]
+fn reductions_fp_and_modified_immediates_match_clang() {
+    let mut s = String::new();
+    for (size, e) in ["b", "h", "s"].into_iter().enumerate() {
+        for q in 0..=1 {
+            if size == 2 && q == 0 {
+                continue;
+            }
+            let n = format!("v31.{}{e}", (8 << q) >> size);
+            for op in ["addv", "smaxv", "sminv", "umaxv", "uminv"] {
+                s.push_str(&format!("{op} {e}0,{n}\n"));
+            }
+            for op in ["saddlv", "uaddlv"] {
+                s.push_str(&format!("{op} {}0,{n}\n", ["h", "s", "d"][size]));
+            }
+        }
+    }
+    s.push_str("addp d0,v31.2d\n");
+    for op in ["fmaxv", "fminv", "fmaxnmv", "fminnmv"] {
+        s.push_str(&format!("{op} s0,v31.4s\n"));
+    }
+    for (size, e) in [(2, "s"), (3, "d")] {
+        for q in 0..=1 {
+            if size == 3 && q == 0 {
+                continue;
+            }
+            let arr = format!("{}{e}", (8 << q) >> size);
+            for op in [
+                "frintn", "frintm", "frintp", "frintz", "frinta", "frintx", "frinti", "fcvtns",
+                "fcvtms", "fcvtas", "fcvtps", "fcvtzs", "fcvtnu", "fcvtmu", "fcvtau", "fcvtpu",
+                "fcvtzu", "scvtf", "ucvtf", "frecpe", "frsqrte", "urecpe", "ursqrte",
+            ] {
+                if size == 3 && op.starts_with('u') && op != "ucvtf" {
+                    continue;
+                }
+                s.push_str(&format!("{op} v31.{arr},v0.{arr}\n"));
+            }
+            for op in [
+                "fmulx", "fcmeq", "fcmgt", "fcmge", "fcmlt", "fcmle", "facgt", "facge", "frecps",
+                "frsqrts", "fabd", "faddp", "fmaxp", "fminp", "fmaxnmp", "fminnmp",
+            ] {
+                s.push_str(&format!("{op} v31.{arr},v0.{arr},v30.{arr}\n"));
+            }
+            for op in ["fcmeq", "fcmgt", "fcmge", "fcmlt", "fcmle"] {
+                s.push_str(&format!("{op} v31.{arr},v0.{arr},#0.0\n"));
+            }
+            for op in ["scvtf", "ucvtf", "fcvtzs", "fcvtzu"] {
+                for amt in [1, 8 << size] {
+                    s.push_str(&format!("{op} v31.{arr},v0.{arr},#{amt}\n"));
+                }
+            }
+            for value in ["0.125", "1.0", "-31.0"] {
+                s.push_str(&format!("fmov v31.{arr},#{value}\n"));
+            }
+        }
+        for op in [
+            "fcvtns", "fcvtms", "fcvtas", "fcvtps", "fcvtzs", "fcvtnu", "fcvtmu", "fcvtau",
+            "fcvtpu", "fcvtzu", "scvtf", "ucvtf", "frecpe", "frsqrte", "frecpx",
+        ] {
+            s.push_str(&format!("{op} {e}0,{e}31\n"));
+        }
+        for op in [
+            "fmulx", "fcmeq", "fcmgt", "fcmge", "fcmlt", "fcmle", "facgt", "facge", "frecps",
+            "frsqrts", "fabd",
+        ] {
+            s.push_str(&format!("{op} {e}31,{e}0,{e}30\n"));
+        }
+        for op in ["fcmeq", "fcmgt", "fcmge", "fcmlt", "fcmle"] {
+            s.push_str(&format!("{op} {e}31,{e}0,#0.0\n"));
+        }
+        for op in ["faddp", "fmaxp", "fminp", "fmaxnmp", "fminnmp"] {
+            s.push_str(&format!("{op} {e}0,v31.2{e}\n"));
+        }
+        for op in ["scvtf", "ucvtf", "fcvtzs", "fcvtzu"] {
+            for amt in [1, 8 << size] {
+                s.push_str(&format!("{op} {e}31,{e}0,#{amt}\n"));
+            }
+        }
+    }
+    for high in [false, true] {
+        let suffix = if high { "2" } else { "" };
+        let q = usize::from(high);
+        for size in [1, 2] {
+            let e = ["b", "h", "s", "d"][size];
+            let w = ["b", "h", "s", "d"][size + 1];
+            s.push_str(&format!(
+                "fcvtn{suffix} v0.{}{e},v31.{}{w}\nfcvtl{suffix} v0.{}{w},v31.{}{e}\n",
+                (8 << q) >> size,
+                16 >> (size + 1),
+                16 >> (size + 1),
+                (8 << q) >> size
+            ));
+        }
+        s.push_str(&format!("fcvtxn{suffix} v0.{}s,v31.2d\n", 2 << q));
+    }
+    s.push_str("fcvtxn s0,d31\n");
+    for arr in ["4h", "8h", "2s", "4s"] {
+        for op in ["mvni", "orr", "bic"] {
+            for imm in [0, 255] {
+                for shift in if arr.ends_with('h') {
+                    vec![0, 8]
+                } else {
+                    vec![0, 8, 16, 24]
+                } {
+                    s.push_str(&format!("{op} v31.{arr},#{imm},lsl #{shift}\n"));
+                }
+            }
+        }
+        if arr.ends_with('s') {
+            for amt in [8, 16] {
+                s.push_str(&format!("mvni v0.{arr},#255,msl #{amt}\n"));
+            }
+        }
+    }
+    compare_clang(&s);
+}
+
+#[test]
+fn indexed_arithmetic_matches_clang() {
+    let mut s = String::new();
+    for size in [1, 2, 3] {
+        let e = ["b", "h", "s", "d"][size];
+        let lanes = 16 >> size;
+        for index in 0..lanes {
+            for rm in if size == 1 { vec![0, 15] } else { vec![0, 31] } {
+                let m = format!("v{rm}.{e}[{index}]");
+                for q in 0..=1 {
+                    if size == 3 && q == 0 {
+                        continue;
+                    }
+                    let arr = format!("{}{e}", (8 << q) >> size);
+                    let ops = if size < 3 {
+                        vec!["mul", "mla", "mls", "sqdmulh", "sqrdmulh"]
+                    } else {
+                        vec![]
+                    };
+                    for op in ops {
+                        s.push_str(&format!("{op} v31.{arr},v0.{arr},{m}\n"));
+                    }
+                    if size >= 2 {
+                        for op in ["fmla", "fmls", "fmul", "fmulx"] {
+                            s.push_str(&format!("{op} v31.{arr},v0.{arr},{m}\n"));
+                        }
+                    }
+                }
+                if size >= 2 {
+                    for op in ["fmla", "fmls", "fmul", "fmulx"] {
+                        s.push_str(&format!("{op} {e}31,{e}0,{m}\n"));
+                    }
+                }
+                if size < 3 {
+                    let w = ["s", "d"][size - 1];
+                    for high in [false, true] {
+                        let suffix = if high { "2" } else { "" };
+                        let q = usize::from(high);
+                        for op in [
+                            "smlal", "umlal", "smlsl", "umlsl", "smull", "umull", "sqdmlal",
+                            "sqdmlsl", "sqdmull",
+                        ] {
+                            s.push_str(&format!(
+                                "{op}{suffix} v31.{}{w},v0.{}{e},{m}\n",
+                                16 >> (size + 1),
+                                (8 << q) >> size
+                            ));
+                        }
+                    }
+                    for op in ["sqdmlal", "sqdmlsl", "sqdmull"] {
+                        s.push_str(&format!("{op} {w}31,{e}0,{m}\n"));
+                    }
+                    for op in ["sqdmulh", "sqrdmulh"] {
+                        s.push_str(&format!("{op} {e}31,{e}0,{m}\n"));
+                    }
+                }
+            }
+        }
+    }
+    compare_clang(&s);
+}
+
+#[test]
+fn structured_memory_forms_match_clang() {
+    let mut s = String::new();
+    for size in 0..4 {
+        let e = ["b", "h", "s", "d"][size];
+        for q in 0..=1 {
+            let arr = format!("{}{e}", (8 << q) >> size);
+            for len in 1..=4 {
+                let list = (0..len)
+                    .map(|i| format!("v{}.{arr}", (31 + i) % 32))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                for op in ["ld1", "st1"] {
+                    for post in [
+                        String::new(),
+                        format!(",#{}", (8 << q) * len),
+                        ",x30".into(),
+                    ] {
+                        s.push_str(&format!("{op} {{{list}}},[sp]{post}\n"));
+                    }
+                }
+                if len >= 2 && (size != 3 || q == 1) {
+                    for root in ["ld", "st"] {
+                        for post in [
+                            String::new(),
+                            format!(",#{}", (8 << q) * len),
+                            ",x30".into(),
+                        ] {
+                            s.push_str(&format!("{root}{len} {{{list}}},[x0]{post}\n"));
+                        }
+                    }
+                }
+                for post in [
+                    String::new(),
+                    format!(",#{}", (1 << size) * len),
+                    ",x30".into(),
+                ] {
+                    s.push_str(&format!("ld{len}r {{{list}}},[sp]{post}\n"));
+                }
+            }
+        }
+        for index in 0..16 >> size {
+            for len in 1..=4 {
+                let list = (0..len)
+                    .map(|i| format!("v{}.{e}", (31 + i) % 32))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                for root in ["ld", "st"] {
+                    for post in [
+                        String::new(),
+                        format!(",#{}", (1 << size) * len),
+                        ",x30".into(),
+                    ] {
+                        s.push_str(&format!("{root}{len} {{{list}}}[{index}],[x0]{post}\n"));
+                    }
+                }
+            }
+        }
+    }
+    s.push_str("ld1 {v0.16b-v3.16b},[sp],#64\nld4 {v31.h-v2.h}[7],[x0],x30\n");
+    compare_clang(&s);
+}
+
+#[test]
+fn every_baseline_neon_encoding_matches_clang() {
+    let source = include_str!("neon-cases.txt")
+        .lines()
+        .filter(|s| !s.starts_with('#'))
+        .map(|line| line.split_once('\t').unwrap().1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    compare_clang(&source);
+}
+
+#[test]
+fn invalid_fp_indexed_and_structure_operands_are_rejected() {
+    for s in [
+        "fmaxv d0,v1.2d",
+        "addp s0,v1.2s",
+        "saddlv h0,v1.4h",
+        "fcvtxn v0.4h,v1.4s",
+        "fcvtn2 v0.4h,v1.4s",
+        "fcvtl v0.2d,v1.4s",
+        "frecpx v0.4s,v1.4s",
+        "urecpe v0.2d,v1.2d",
+        "fcmeq v0.4s,v1.4s,#1.0",
+        "fcmgt d0,d1,#-0.0",
+        "scvtf v0.4s,v1.4s,#0",
+        "fcvtzs v0.4s,v1.4s,#33",
+        "fmov v0.2d,#0.0",
+        "mvni v0.16b,#1",
+        "orr v0.4s,#1,msl #8",
+        "mul v0.8h,v1.8h,v16.h[0]",
+        "fmla v0.4s,v1.4s,v2.s[4]",
+        "fmla v0.2d,v1.2d,v2.s[0]",
+        "smull2 v0.4s,v1.4h,v2.h[0]",
+        "mul h0,h1,v2.h[0]",
+        "sqdmulh2 v0.8h,v1.8h,v2.h[0]",
+        "ld2 {v0.1d,v1.1d},[x0]",
+        "ld3 {v0.16b,v1.16b},[x0]",
+        "ld1 {v0.16b},[x0],#8",
+        "ld2r {v0.4s,v1.4s},[x0],#32",
+        "st1 {v0.s}[4],[x0]",
+        "ld1 {v0.h}[8],[x0]",
+        "ld2 {v0.s,v2.s}[0],[x0]",
+        "ld1 {v0.s}[0],[x0],#16",
+        "ld1 {v0.16b},[x0],xzr",
+        "st2 {v0.16b,v1.16b},[x0],w1",
+        "ld1 {v0.16b},[x0,#1]",
+        "st1 {v0.16b},[x0]!",
+        "ld1r {v0.4s}[0],[x0]",
+        "ld1 {v0.s,v1.s}[0],[x0]",
+        "st1 {v0.16b},[xzr]",
+    ] {
+        let error = assemble(&format!("nop\n{s}")).expect_err(s);
+        assert_eq!(error.line, 2, "{s}");
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn structured_memory_fp_conversions_and_indexed_arithmetic_execute() {
+    use common::{Temp, execute, run};
+    use std::process::Command;
+    let source = "
+.text
+.globl _structures, _scale, _convert, _reduce
+_structures:
+    ld2 {v0.4s,v1.4s},[x0],#32
+    dup v2.4s,w2
+    add v0.4s,v0.4s,v2.4s
+    sub v1.4s,v1.4s,v2.4s
+    st2 {v0.4s,v1.4s},[x1],#32
+    ld1r {v2.4s},[x3]
+    st1 {v2.s}[3],[x1]
+    ret
+_scale:
+    ldr q0,[x0]
+    ldr s1,[x1]
+    fmul v0.4s,v0.4s,v1.s[0]
+    fmaxv s0,v0.4s
+    ret
+_convert:
+    ldr q0,[x0]
+    fcvtzs v1.4s,v0.4s
+    str q1,[x1]
+    scvtf v2.4s,v1.4s
+    faddp s0,v2.2s
+    ret
+_reduce:
+    ldr q0,[x0]
+    uaddlv d0,v0.4s
+    fmov x0,d0
+    ret
+";
+    compare_clang(source);
+    let temp = Temp::new();
+    let object = temp.0.join("neon-full.o");
+    let driver = temp.0.join("driver.c");
+    let exe = temp.0.join("neon-full");
+    std::fs::write(&object, keel_asm::assemble_object(source).unwrap()).unwrap();
+    std::fs::write(
+        &driver,
+        "
+#include <stdint.h>
+extern const uint32_t* structures(const uint32_t*,uint32_t*,unsigned,const uint32_t*);
+extern float scale(const float*,const float*),convert(const float*,int32_t*);
+extern uint64_t reduce(const uint32_t*);
+int main(void){
+    uint32_t a[8]={0,1,2,3,0xfffffffe,0xffffffff,9,10},b[9],v=0x12345678;
+    if(structures(a,b,7,&v)!=a+8)return 1;
+    for(int i=0;i<8;++i)if(b[i]!=((i&1)?a[i]-7:a[i]+7))return 2;
+    if(b[8]!=v)return 3;
+    float x[4]={-3.75f,2.5f,7.0f,-0.0f},factor=2;int32_t y[4];
+    if(scale(x,&factor)!=14.0f || convert(x,y)!=-1.0f)return 4;
+    for(int i=0;i<4;++i)if(y[i]!=(int32_t)x[i])return 5;
+    uint32_t z[4]={0xffffffff,0xffffffff,1,2};if(reduce(z)!=UINT64_C(0x200000001))return 6;
     return 0;
 }",
     )

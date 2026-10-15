@@ -180,9 +180,6 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
     if let Some(word) = vector::extra(op, a)? {
         return Ok(word);
     }
-    if let Some(word) = vector::arithmetic(op, a)? {
-        return Ok(word);
-    }
     if let Some(word) = atomic::instruction(op, a)? {
         return Ok(word);
     }
@@ -332,7 +329,6 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             count(a, 0, 0)?;
             encode("NOP_HI_hints", &[])
         }
-        "cnt" | "addv" => vector::instruction(op, a),
         "movi" => vector::move_immediate(a),
         "br" | "blr" | "brk" | "svc" => control::instruction(op, a),
         "fmov" | "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" | "fadd"

@@ -1271,7 +1271,7 @@ operands including zero registers.
 `fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
 `fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
 (register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
-and `fcvtzs/fcvtzu` convert W/X ↔ S/D. Fixed-point and half-precision forms
+and `fcvtzs/fcvtzu` convert W/X ↔ S/D. Fixed-point GPR conversions and half-precision arithmetic
 remain unsupported. `fmov` also supports S/W and D/X bitwise transfers and
 all 256 scalar FP immediate encodings (zero needs a register transfer).
 
@@ -1282,32 +1282,56 @@ words (2S/4S) with LSL #0/#8/#16/#24 or MSL #8/#16; scalar D and vector 2D
 64-bit masks whose bytes are each 00 or FF. Byte and 64-bit mask forms take
 no shift operand.
 
-General NEON register arithmetic supports matching 8B/16B, 4H/8H, 2S/4S,
-and 2D arrangements for `add/sub`, `abs/neg`, and register comparisons
-`cmeq/cmgt/cmge/cmhi/cmhs`. `mul/mla/mls` and `smax/smin/umax/umin`
-support B/H/S lanes. Bytewise 8B/16B logical operations include
-`and/orr/orn/eor/bic/bsl/bit/bif`, `not/mvn`, and register `mov` (ORR alias).
-Vector FP arithmetic supports 2S/4S/2D `fadd/fsub/fmul/fdiv`, `fmla/fmls`,
-`fmin/fmax/fminnm/fmaxnm`, and `fabs/fneg/fsqrt`. FP16, lane-indexed,
-widening/narrowing, saturating, and shift forms remain unsupported. The
-parser rejects reserved arrangements and mismatched operands before encoding.
-Differential tests cover every supported arrangement and native tests exercise
-integer selection and FP multiply-accumulate/square-root kernels.
+**Baseline NEON coverage.** `crates/keel-asm/isa/neon.txt` inventories all
+519 baseline Advanced SIMD encoding records in the pinned Arm archive:
+`asimd*`/`asisd*` classes whose feature predicates require only AdvSIMD.
+The checksum-verified importer checks that this inventory exactly matches the
+upstream records. Scalar SIMD and structured memory are included. This is
+the baseline NEON milestone; it does not claim optional M5 numeric, crypto,
+or scalable extensions.
 
-The baseline NEON inventory in `crates/keel-asm/isa/neon.txt` lists 519
-Advanced SIMD encoding forms from the pinned archive, including scalar SIMD
-and structured memory. Importing these records is distinct from implementing
-every operand form. The integer increment adds lane `dup/ins/smov/umov` and
-`mov` aliases; `zip/uzp/trn`, `ext`, and `tbl/tbx`; signed/unsigned saturating,
-halving, rounding, pairwise, and absolute-difference arithmetic; register and
-immediate shifts; widening/narrowing with high-half variants; pairwise
-widening; and polynomial byte multiply. Lane bounds, size restrictions,
-consecutive wrapping register lists, and shift ranges are checked.
-Differential tests cover arrangements and boundary fields; native tests check
-table lookups, signed widening/shifts, and saturating narrowing. The FP,
-reduction, indexed-arithmetic, and structured-memory remainder of this
-inventory is the next increment. Optional FP16 arithmetic, BF16, dot-product,
-and other numeric extensions remain a separate M5 capability phase.
+The parser implements all 519 records, including legal arrangements and
+high-half variants. Coverage includes:
+
+- Integer arithmetic, comparisons (register and zero), logical operations,
+  halving/rounding/saturating arithmetic, absolute differences, polynomial
+  byte multiplication, pairwise arithmetic, widening/narrowing, and reductions.
+- Register/immediate shifts, narrowing/widening shifts, lane-indexed
+  multiply/accumulate, lane duplication/insertion/extraction, MOV aliases,
+  ZIP/UZP/TRN permutations, EXT, and TBL/TBX register tables.
+- S/D vector FP arithmetic, comparisons, reciprocal estimates/refinement,
+  rounding, integer/fixed-point conversions, pairwise arithmetic/reductions,
+  indexed multiplication, precision widening/narrowing (including half-format
+  conversion), vector FP immediates, and MOVI/MVNI/ORR/BIC modified immediates.
+- Full-vector LD1/ST1 lists of 1..4 registers; interleaved LD2–LD4/ST2–ST4;
+  lane loads/stores; LD1R–LD4R replication. Each supports base-only and
+  immediate/register post-index forms. Lists are consecutive modulo 32 and
+  accept explicit lists or start-end ranges. Immediate post-index amounts
+  must match the number of bytes transferred; offsets/writeback-pre-index
+  are not valid structure forms.
+
+Operand validation rejects reserved sizes, scalar/vector mismatches, invalid
+lane indices, nonconsecutive lists, and invalid shift/multiplier registers.
+The polynomial widening form is restricted to baseline byte elements;
+64-bit polynomial multiplication requires the later crypto extension phase.
+Optional FP16 arithmetic, BF16, dot products, RDM, complex arithmetic, and
+other M5 numeric extensions remain separate, with default feature checks
+unchanged.
+
+`tests/neon-cases.txt` names one source case for every inventory entry. A unit
+test requires an exact inventory match and verifies each assembled word
+against that Arm record's fixed-bit mask. Clang independently checks all 519
+cases, while additional differential tests enumerate arrangements, lane
+indices, table/list lengths, high-half variants, and boundary shifts. Native
+tests check lookup/permutation, signed widening and shifts, saturating
+narrowing, structured memory, FP/integer conversions, indexed multiplication,
+and widening reductions. This establishes encoding-form coverage, not an
+exhaustive test of every operand combination. Regenerate the inventory cases:
+
+```sh
+python3 crates/keel-asm/tools/neon_cases.py
+python3 crates/keel-asm/tools/neon_cases.py --check
+```
 
 **Optional SVE/SME coverage and Apple availability (2026-10-15).** NEON
 (Advanced SIMD) uses fixed-width V registers; SVE uses scalable Z/P registers;
@@ -1357,10 +1381,9 @@ and an execution smoke test, without matrix-result verification yet.
 
 Remaining scalable coverage includes predicated arithmetic, scalable memory,
 vector shifts/conversions, ZA tile transfers and partial clearing, additional
-matrix types, and SME2/SVE2 instructions. Remaining ordinary coverage includes
-NEON widening/narrowing, saturating, indexed-lane, shuffle, and FP16 forms;
-optional Apple crypto, pointer-authentication, and newer scalar ISA are also
-outside this increment. These are explicit coverage boundaries, not complete
+matrix types, and SME2/SVE2 instructions. Remaining ordinary coverage includes optional NEON FP16 arithmetic and other
+M5 numeric extensions, Apple crypto, pointer authentication, and newer scalar
+ISA. These are explicit coverage boundaries, not complete
 A64/SVE/SME support.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked

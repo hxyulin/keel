@@ -406,6 +406,37 @@ mod tests {
     }
 
     #[test]
+    fn every_baseline_neon_record_has_a_matching_assembled_case() {
+        use std::collections::BTreeSet;
+        let expected: BTreeSet<_> = include_str!("../isa/neon.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+            .collect();
+        let mut covered = BTreeSet::new();
+        for line in include_str!("../tests/neon-cases.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+        {
+            let (name, source) = line.split_once('\t').unwrap();
+            assert!(covered.insert(name), "duplicate NEON case: {name}");
+            let bytes = assemble(source)
+                .unwrap_or_else(|e| panic!("{name}: {source}: {e}"))
+                .text;
+            assert_eq!(bytes.len(), 4, "{name}");
+            let word = u32::from_le_bytes(bytes.try_into().unwrap());
+            let encoding = generated::encoding(name).unwrap();
+            assert_eq!(
+                word & encoding.mask,
+                encoding.base,
+                "wrong encoding form for {name}: {source}"
+            );
+        }
+        assert_eq!(covered, expected);
+        assert_eq!(covered.len(), 519);
+
+    }
+
+    #[test]
     fn imported_alias_conditions_preserve_masks_negation_and_feature_checks() {
         let features = TargetFeatures::default().with_sme();
         for (name, bit) in [("SMSTART", 1), ("SMSTOP", 0)] {

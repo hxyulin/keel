@@ -76,7 +76,8 @@ SCALABLE_NAMES = ["SMSTART", "SMSTOP", "zero_za_i_", "ptrue_p_s_", "pfalse_p_", 
 SCALABLE_NAMES += [f"{op}_z_zz_" for op in ("add", "sub", "and", "orr", "eor", "fadd", "fsub", "fmul")]
 SCALABLE_NAMES += [f"{op}_r_s_" for op in ("cntb", "cnth", "cntw", "cntd")]
 SCALABLE_NAMES += [f"{op}_za_pp_zz_32" for op in ("fmopa", "fmops")]
-NEON_NAMES = (ROOT / "isa/neon.txt").read_text().splitlines()
+NEON_NAMES = [line for line in (ROOT / "isa/neon.txt").read_text().splitlines()
+              if line and not line.startswith("#")]
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
@@ -106,6 +107,22 @@ def import_archive(path):
     assert data["_meta"]["version"]["schema"] == "2.7.4"
     a64 = next(x for x in data["instructions"] if x["name"] == "A64")
     records = {x["name"]: x for x in walk(a64)}
+    def feature_names(node):
+        result = set()
+        if isinstance(node, dict):
+            if node.get("_type") == "AST.Identifier" and node["value"].startswith("FEAT_"):
+                result.add(node["value"])
+            for value in node.values():
+                result |= feature_names(value)
+        elif isinstance(node, list):
+            for value in node:
+                result |= feature_names(value)
+        return result
+    baseline_neon = sorted(name for name, record in records.items()
+                           if "_" in name and name.split("_")[1].startswith(("asimd", "asisd"))
+                           and feature_names(record["condition"]) == {"FEAT_AdvSIMD"})
+    assert NEON_NAMES == baseline_neon, "baseline NEON inventory differs from pinned Arm archive"
+
     subset = {
         "source_url": URL, "archive_sha256": SHA256, "_meta": data["_meta"],
         "instructions": [{k: records[name][k] for k in ("name", "condition", "encoding", "encoding_source") if k in records[name]} for name in NAMES],

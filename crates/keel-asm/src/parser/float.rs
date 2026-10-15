@@ -31,8 +31,9 @@ fn registers(args: &[&str]) -> Result<(Vec<u32>, &'static str), String> {
     }
     Ok((pairs.iter().map(|r| r.0).collect(), tag))
 }
-fn immediate(text: &str) -> Result<f64, String> {
+pub(super) fn immediate(text: &str) -> Result<f64, String> {
     text.trim_fast()
+
         .strip_prefix('#')
         .unwrap_or(text.trim_fast())
         .trim_fast()
@@ -42,7 +43,7 @@ fn immediate(text: &str) -> Result<f64, String> {
 
 /// VFPExpandImm: sign, an expanded exponent, and four mantissa bits. All
 /// representable S/D constants are exact in f64; reject approximation.
-fn float_immediate(value: f64) -> Result<u32, String> {
+pub(super) fn float_immediate(value: f64) -> Result<u32, String> {
     for imm in 0u32..256 {
         let b = (imm >> 6) & 1;
         let exponent = ((b ^ 1) << 10) | (if b == 1 { 0xff << 2 } else { 0 }) | ((imm >> 4) & 3);
