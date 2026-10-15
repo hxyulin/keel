@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 572 instruction forms. Generated requirements retain
+subset currently has 603 instruction forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, and `FEAT_LSE` availability checks; the fixed
 Apple arm64 target enables those features. Encoding conditions are distinct
 from feature requirements: for example, byte register-offset forms exclude
@@ -1337,9 +1337,22 @@ exactly as specified by Arm; no ordering bits are silently rewritten.
 DMB and DSB accept OSH/NSH/ISH load/store/full variants and LD/ST/SY. ISB
 accepts SY, its default when omitted. All three also accept a raw 4-bit
 numeric option. LSE requirements are retained in generated records and
-explicitly enabled for the fixed Apple Silicon target. Pair CAS, exclusive
-accesses, non-temporal pairs, unprivileged accesses, and literal loads remain
-unsupported. Symbolic page-offset memory operands are supported below.
+explicitly enabled for the fixed Apple Silicon target.
+
+Baseline exclusive accesses include `ldxr/ldaxr/stxr/stlxr` for W/X, B/H
+variants for W, paired `ldxp/ldaxp/stxp/stlxp` for W/X, and `clrex` (default
+option 15 or an explicit 4-bit immediate). Addresses allow only a base and
+optional #0. Store status is W and must not overlap a source or a non-SP
+base; repeated non-ZR load-pair destinations are rejected. Differential tests
+cover every width/order and native tests exercise contended exclusive loops.
+
+Literal `ldr` supports W/X/S/D/Q and `ldrsw` supports X, with numeric byte
+displacements or same-text-atom symbols plus addends. Displacements must be
+4-byte aligned and in -1048576..1048572. External, cross-section, and
+cross-atom references are rejected because Mach-O has no literal-load
+relocation. Automatic `ldr =constant` pools are unsupported. Pair CAS,
+non-temporal pairs, and unprivileged accesses remain unsupported. Symbolic
+page-offset memory operands are supported below.
 
 Named labels are case-sensitive; mnemonics and register names accept either
 case. Branches resolve forward or backward within text, or accept a numeric

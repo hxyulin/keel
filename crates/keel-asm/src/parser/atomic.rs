@@ -5,6 +5,14 @@ use super::{count, memory, reg, same_width, unsigned};
 use crate::FieldId;
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
+    if let Some(word) = exclusive(op, args)? {
+        return Ok(Some(word));
+    }
+    if op == "clrex" {
+        count(args, 0, 1)?;
+        let crm = args.first().map_or(Ok(15), |s| unsigned(s, 15))?;
+        return encode("CLREX_BN_barriers", &[("CRm", crm)]).map(Some);
+    }
     if matches!(op, "dmb" | "dsb" | "isb") {
         count(args, usize::from(op != "isb"), 1)?;
         let option = lower(args.first().copied().unwrap_or("sy"));
@@ -87,6 +95,78 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
             (FieldId::Rt, rt.number),
             (FieldId::Rn, rn.number),
         ],
+    )
+    .map(Some)
+}
+
+/// Exclusive accesses are baseline A64, independent of LSE.
+fn exclusive(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
+    let (root, suffix) = match [
+        "ldaxr", "ldxr", "stlxr", "stxr", "ldaxp", "ldxp", "stlxp", "stxp",
+    ]
+    .iter()
+    .find_map(|root| op.strip_prefix(root).map(|suffix| (*root, suffix)))
+    {
+        Some(pair) => pair,
+        None => return Ok(None),
+    };
+    let pair = root.ends_with('p');
+    if !matches!(suffix, "" | "b" | "h") || (pair && !suffix.is_empty()) {
+        return Err("invalid exclusive access width suffix".into());
+    }
+    let store = root.starts_with("st");
+    let arity = 2 + usize::from(pair) + usize::from(store);
+    count(args, arity, arity)?;
+    let status = if store {
+        let r = reg(args[0], false, true)?;
+        if r.bits != 32 {
+            return Err("exclusive store status requires a W register".into());
+        }
+        Some(r)
+    } else {
+        None
+    };
+    let t = reg(args[usize::from(store)], false, true)?;
+    if !suffix.is_empty() && t.bits != 32 {
+        return Err("byte/halfword exclusive access requires W registers".into());
+    }
+    let n = memory::atomic_base(args[arity - 1])?;
+    let mut fields = vec![("Rt", t.number), ("Rn", n.number)];
+    let t2 = if pair {
+        let t2 = reg(args[usize::from(store) + 1], false, true)?;
+        same_width(t, t2)?;
+        if !store && t.number == t2.number && t.number != 31 {
+            return Err("exclusive load-pair destinations must differ".into());
+        }
+        fields.push(("Rt2", t2.number));
+        Some(t2)
+    } else {
+        None
+    };
+    if let Some(s) = status {
+        if s.number == t.number
+            || t2.is_some_and(|r| r.number == s.number)
+            || (n.number != 31 && s.number == n.number)
+        {
+            return Err("exclusive store status overlaps a source register".into());
+        }
+        fields.push(("Rs", s.number));
+    }
+    let role = match (store, pair) {
+        (false, false) => "LR",
+        (true, false) => "SR",
+        (false, true) => "LP",
+        (true, true) => "SP",
+    };
+    encode(
+        &format!(
+            "{}{}_{role}{}_{}",
+            root.to_ascii_uppercase(),
+            suffix.to_ascii_uppercase(),
+            t.bits,
+            if pair { "ldstexclp" } else { "ldstexclr" }
+        ),
+        &fields,
     )
     .map(Some)
 }

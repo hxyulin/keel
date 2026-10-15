@@ -66,7 +66,7 @@ fn address(args: &[&str]) -> Result<Address, String> {
     let inner = text
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
-        .ok_or("expected bracketed memory address; literal loads are not supported yet")?;
+        .ok_or("expected bracketed memory address")?;
     let args_inner = Operands::collect(inner.split(',').map(str::trim));
     count(&args_inner, 1, 3)?;
     let base = reg(args_inner[0], true, false)?;
@@ -418,4 +418,24 @@ pub(super) fn atomic_base(text: &str) -> Result<Reg, String> {
         return Err("atomic addresses require [base] or [base, #0], without writeback".into());
     }
     Ok(a.base)
+}
+
+/// Literal loads share signed imm19 PC-relative fixups with conditional branches.
+/// Mach-O has no relocation for these forms, so symbols must stay in one atom.
+pub(super) fn literal(op: &str, args: &[&str]) -> Result<Option<super::control::Branch>, String> {
+    if !matches!(op, "ldr" | "ldrsw") || !args.get(1).is_some_and(|s| !s.starts_with('[')) {
+        return Ok(None);
+    }
+    count(args, 2, 2)?;
+    let t = transfer(args[0])?;
+    if t.bits < 32 || (op == "ldrsw" && (t.class != Class::Gpr || t.bits != 64)) {
+        return Err("literal loads require W/X/S/D/Q (X for ldrsw)".into());
+    }
+    Ok(Some(super::control::Branch {
+        encoding: format!("{}_{}_loadlit", op.to_ascii_uppercase(), t.tag),
+        field: "imm19",
+        width: 19,
+        fields: vec![("Rt", t.number)],
+        target: args[1].into(),
+    }))
 }

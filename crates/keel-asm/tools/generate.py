@@ -32,7 +32,14 @@ MEMORY_NAMES += [f"{op}{suffix}_{order}32_ldstord" for op, order in (("LDAR", "L
 ATOMIC_NAMES = [f"{op}{order}{suffix}_{'C' if op == 'CAS' else ''}{bits}_{'comswap' if op == 'CAS' else 'memop'}"
                 for op in ("LDADD", "LDCLR", "LDSET", "LDEOR", "LDSMIN", "LDSMAX", "LDUMIN", "LDUMAX", "SWP", "CAS")
                 for order in ("", "A", "L", "AL") for suffix, bits in (("B",32),("H",32),("",32),("",64))]
-BARRIER_NAMES = ["DMB_BO_barriers", "DSB_BO_barriers", "ISB_BI_barriers"]
+EXCLUSIVE_NAMES = [f"{op}{suffix}_{role}{bits}_ldstexclr"
+                   for op, role in (("LDXR", "LR"), ("LDAXR", "LR"), ("STXR", "SR"), ("STLXR", "SR"))
+                   for suffix, bits in (("B", 32), ("H", 32), ("", 32), ("", 64))]
+EXCLUSIVE_NAMES += [f"{op}_{role}{bits}_ldstexclp"
+                    for op, role in (("LDXP", "LP"), ("LDAXP", "LP"), ("STXP", "SP"), ("STLXP", "SP"))
+                    for bits in (32, 64)]
+LITERAL_NAMES = [f"LDR_{tag}_loadlit" for tag in ("32", "64", "S", "D", "Q")] + ["LDRSW_64_loadlit"]
+BARRIER_NAMES = ["CLREX_BN_barriers", "DMB_BO_barriers", "DSB_BO_barriers", "ISB_BI_barriers"]
 ARITHMETIC_NAMES = []
 for bits in (32, 64):
     ARITHMETIC_NAMES += [f"{op}_{bits}_log_shift" for op in ("AND", "ANDS", "ORR", "EOR", "BIC", "BICS", "ORN", "EON")]
@@ -71,7 +78,7 @@ NAMES = sorted(set(
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 

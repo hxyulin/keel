@@ -371,7 +371,6 @@ fn invalid_memory_operands_have_line_diagnostics() {
         "ldar d0, [x1]",
         "ldar x0, [x1, #0]!",
         "ldar x0, [x1, x2]",
-        "ldxp x0, x2, [x1]",
         "ldnp x0, x2, [x1]",
         "prfm pldl1keep, [x1]",
     ] {

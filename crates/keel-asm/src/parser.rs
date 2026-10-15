@@ -777,6 +777,11 @@ fn assemble_pass(
     }
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
+        let kind = if branch.spec.encoding.ends_with("_loadlit") {
+            "literal load"
+        } else {
+            "branch"
+        };
         let delta = if is_integer(branch.spec.target) {
             integer(branch.spec.target).map_err(err)?
         } else {
@@ -816,9 +821,9 @@ fn assemble_pass(
                 0
             } else {
                 let target = target
-                    .ok_or_else(|| err(format!("undefined local branch target `{}`", expr.name)))?;
+                    .ok_or_else(|| err(format!("undefined local {kind} target `{}`", expr.name)))?;
                 if target.section != 0 {
-                    return Err(err("conditional branches require targets in __text".into()));
+                    return Err(err(format!("{kind} targets must be in __text")));
                 }
                 if result.subsections_via_symbols
                     && !atoms.contains(
@@ -829,9 +834,9 @@ fn assemble_pass(
                         (expr.name, *target),
                     )
                 {
-                    return Err(err(
-                        "conditional branches require a target in the same linker atom".into(),
-                    ));
+                    return Err(err(format!(
+                        "{kind} requires a target in the same linker atom"
+                    )));
                 }
                 target.offset as i64 + expr.addend - branch.offset as i64
             }
@@ -839,7 +844,7 @@ fn assemble_pass(
         let bound = 1i64 << (branch.spec.width + 1);
         if delta % 4 != 0 || !(-bound..bound).contains(&delta) {
             return Err(err(format!(
-                "branch displacement must be 4-byte aligned and in {}..={} bytes",
+                "{kind} displacement must be 4-byte aligned and in {}..={} bytes",
                 -bound,
                 bound - 4
             )));
