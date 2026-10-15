@@ -19,6 +19,13 @@ width cannot be inferred. `#` and `//` introduce comments; semicolons separate
 statements. Quote symbols that collide with register names or contain punctuation.
 AArch64 remains the standalone command's default for compatibility.
 
+Optional ISA features are explicit: pass `--target-features avx,bmi1,bmi2` to
+`compile`, `cc`, or `asm`. The default stays baseline x86-64. API callers use
+`x86::Features` with the `_with_features` assembler APIs and wrap their codegen
+selector in `keel_codegen::x86_features::FeatureSelector`. BMI gates are independent
+of AVX even where their instructions use VEX prefixes. See the [AVX subset](x86-avx-subset.md)
+and [BMI coverage](x86-bmi.md) for instruction forms, lowering choices and limits.
+
 ## Boundary audit and design
 
 The existing `keel-asm-ir::Instruction`, generated `Opcode`/`FieldId`, symbolic
@@ -39,7 +46,7 @@ fragments retain the source parser. The x86 compiler still rejects inline
 assembly. The assembler borrows structured items across layout passes instead
 of cloning the complete program.
 
-The encoder implements REX, legacy prefixes, ModRM, SIB, immediate and displacement
+The encoder implements REX, legacy and VEX prefixes, ModRM, SIB, immediate and displacement
 sizing. The `object` crate serializes ELF64 section headers, string tables,
 ordered symbol tables and RELA records; Keel owns assembly layout, symbol
 expressions, relocation selection and instruction encoding.
@@ -97,7 +104,8 @@ Resolved displacements outside signed 32 bits are diagnosed. Keel does not
 synthesize large-code-model thunks.
 
 This is a backend-oriented assembler, not a replacement for all GNU assembler
-syntax. AVX/AVX-512, x87, arbitrary vector instructions, AT&T syntax, macros,
+syntax. AVX forms beyond the documented XMM subset, AVX2/AVX-512, x87,
+arbitrary vector instructions, AT&T syntax, macros,
 preprocessing, include files, numeric directional labels, non-COMDAT section groups,
 arbitrary expression arithmetic, symbolic LEB128,
 exception personality/LSDA directives and general-dynamic TLS are not implemented.
