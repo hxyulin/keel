@@ -1296,15 +1296,17 @@ and SQLite 1.8–2.1 times. These ranges use ratios of absolute medians; the rep
 also retains same-round ratios and intervals. Compare compiler variants within
 each host, since the installed Clang versions differ.
 
-The proposed next feature is a bounded direct-call inliner, followed by cleanup
-of temporary aggregate copies and ordinary per-function optimization. Start
+The next feature proposed at the time of this comparison was a bounded
+direct-call inliner, followed by cleanup of temporary aggregate copies and
+ordinary per-function optimization. Start
 with small same-module helpers, reject recursion and unsupported call semantics,
 and cap total code growth. Clone callee blocks, values and stack slots; map
 arguments to parameters and route returns to a continuation. Preserve memory
 and call contracts. Aggregate cleanup must respect aliasing and escaping
 addresses. The QuickJS source-expansion probe motivates this work, but does
-not predict the gain from an IR implementation. This proposal has not been
-implemented or selected for the next development phase.
+not predict the gain from an IR implementation. The proposal had not been
+implemented at that stage. The compiler implementation and its separate
+measurements are described in the following section.
 
 To reproduce using retained profiles and diagnostic probe builds:
 
@@ -1315,3 +1317,66 @@ python3 suite/compare_app_clang.py \
   --divide-probe target/app-loop-divide-probe/probe.json \
   --work-dir target/clang-comparison
 ```
+
+## Compiler inlining and bounded scans (2026-10-16)
+
+Full optimization now runs a bounded module-level `inline` pass and
+`stack-forward` cleanup. The inliner clones small private direct-call functions,
+preserving SSA, control flow, stack objects, aggregate argument snapshots,
+return values, and lexical debug scopes. It limits each callee to 64 instructions,
+eight blocks, and 512 bytes of fixed stack storage, and each caller to 128
+expanded sites and 2,048 added IR instructions. Newly cloned calls wait until a
+later explicit inlining invocation. Recursion, variadic definitions, dynamic
+frame operations, exception handling and returns-twice semantics are excluded.
+Public definitions remain calls. `always_inline`/`noinline` attributes are still
+not represented. Basic and unoptimized tiers remain unchanged.
+
+`stack-forward` reconstructs ordinary integer loads from prior writes to
+nonescaping fixed stack objects within a block, including overlapping writes
+to aggregate/union temporaries. Unknown bytes, escaping objects and volatile or
+atomic accesses remain conservative. Debugger-visible homes retain both loads
+and stores so debugger edits continue to take effect with `-g -O`.
+
+The existing `loop-vectorize` pass additionally recognizes bounded ASCII prefix
+scans such as QuickJS's original `JS_NewStringLen` loop. It peels scalar bytes to
+sixteen-byte alignment, then tests chunks only within the bound. Aligned loads
+cannot cross a protection granule on these targets, even when an early-exit scan
+has a bound beyond an inaccessible page. Chunk failures and tails resume the
+original scalar loop to produce the exact exit pointer. Both backends lower
+the required `i64x2` lane extraction natively. Short runs and early failures
+can pay extra guard overhead; microbenchmark improvements do not establish
+whole-application benefit.
+
+The compiler-only matrix uses original prepared inputs throughout:
+
+```sh
+python3 suite/bench_profile_guided.py \
+  --compiler target/release/keel \
+  --work-dir target/profile-guided-benchmark
+```
+
+It builds four explicit Keel pipelines (base, vectorization only, inlining plus
+cleanup only, and both), plus Clang `-O2 -ffp-contract=off`. All configurations
+run Lua's portable suite, all nine QuickJS tests, and SQLite's query checks
+before timing. Two warmups and seven measured rounds retain output checks, raw
+times, paired bootstrap intervals, code sizes, source/binary hashes, remaining
+helper calls, and scan recognition. Linux timings pin CPU 0. The scan control
+separately measures empty/short/full ASCII inputs and early exits. No application
+source expansion or decimal-division rewrite is used.
+
+The three-host results are retained in
+[`reports/profile-guided-compiler-20261016.json`](reports/profile-guided-compiler-20261016.json)
+and an interactive [comparison](reports/profile-guided-compiler-20261016.html).
+Adding inlining and cleanup with vectorization enabled reduces QuickJS runtime
+by 17–26% on MacHost, 30–40% on LinuxHost, and 18–29% on the NUC in this run. QuickJS
+native code grows about 9–15%. Long ASCII control scans are about 5–9 times
+faster than Keel's scalar control; short runs and early failures regress.
+The whole-application scan benefit remains unestablished. Small application
+changes should be interpreted with their intervals and code-layout sensitivity,
+not extrapolated to general workload improvements. Hosts were not reserved for
+exclusive use.
+
+Validation also caught and fixed both a protected-page early-exit case and
+debugger edits to forwarded stack homes. The final debugger fix changes debug
+slots only; all 44 native application objects per host were recompiled with
+the final compiler and matched the measured combined objects byte-for-byte.
