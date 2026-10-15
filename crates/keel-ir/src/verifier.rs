@@ -50,7 +50,12 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for decl in &module.decls {
-        for message in check_signature(&decl.sig) {
+        for message in check_signature(&decl.sig).into_iter().chain(
+            decl.attrs
+                .validate(decl.sig.returns_twice)
+                .err()
+                .map(str::to_owned),
+        ) {
             errors.push(VerifierError {
                 location: format!("@{}", decl.name),
                 message,
@@ -117,6 +122,15 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             }));
         }
         for (_, callee) in func.callees() {
+            if module
+                .function_attrs(&callee.name)
+                .is_some_and(|a| a != callee.attrs)
+            {
+                errors.push(VerifierError {
+                    location: format!("@{}", func.name),
+                    message: format!("callee @{} attributes disagree with module", callee.name),
+                });
+            }
             let message = match module.signature(&callee.name) {
                 None => format!("calls @{}, which is not declared", callee.name),
                 Some(sig) if *sig != callee.sig => {
@@ -418,6 +432,14 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
         domtree,
         errors: Vec::new(),
     };
+    if let Err(message) = func.attrs.validate(func.sig.returns_twice) {
+        v.error("attributes".into(), message.into());
+    }
+    for (_, decl) in func.callees() {
+        if let Err(message) = decl.attrs.validate(decl.sig.returns_twice) {
+            v.error(format!("callee @{}", decl.name), message.into());
+        }
+    }
     v.run();
     if v.errors.is_empty() {
         Ok(())

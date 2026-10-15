@@ -77,6 +77,7 @@ pub struct Attrs {
     pub packed: bool,
     pub returns_twice: bool,
     pub noreturn: bool,
+    pub function_attrs: keel_ir::FunctionAttrs,
 }
 
 impl Attrs {
@@ -90,6 +91,7 @@ impl Attrs {
         self.packed |= other.packed;
         self.returns_twice |= other.returns_twice;
         self.noreturn |= other.noreturn;
+        self.function_attrs.merge(other.function_attrs);
     }
     fn alignment(self) -> Option<u64> {
         self.aligned
@@ -662,6 +664,7 @@ impl<'a> Parser<'a> {
             thread_local: false,
             returns_twice: false,
             noreturn: false,
+            function_attrs: keel_ir::FunctionAttrs::default(),
             func: None,
         });
         self.globals.len() - 1
@@ -815,7 +818,9 @@ impl<'a> Parser<'a> {
                         "function alignment attributes are not supported",
                     ));
                 }
-                let g = self.declare_function(&name, label, fty.clone(), &spec, attrs, file_scope);
+                let g = self
+                    .declare_function(&name, label, fty.clone(), &spec, attrs, file_scope)
+                    .map_err(|message| Error::new(name_loc, message))?;
                 self.globals[g].sugar = d.sugar.clone();
                 if file_scope && self.is("{") {
                     self.function_body(g, fty.clone(), name_loc)?;
@@ -921,6 +926,7 @@ impl<'a> Parser<'a> {
                 thread_local: spec.thread_local,
                 returns_twice: false,
                 noreturn: false,
+                function_attrs: keel_ir::FunctionAttrs::default(),
                 func: None,
             });
             let g = self.globals.len() - 1;
@@ -1001,6 +1007,7 @@ impl<'a> Parser<'a> {
                     thread_local: false,
                     returns_twice: false,
                     noreturn: false,
+                    function_attrs: keel_ir::FunctionAttrs::default(),
                     func: None,
                 });
                 let g = self.globals.len() - 1;
@@ -1028,7 +1035,7 @@ impl<'a> Parser<'a> {
         spec: &DeclSpec,
         attrs: Attrs,
         file_scope: bool,
-    ) -> usize {
+    ) -> Result<usize, &'static str> {
         let g = self.global(name, label, Ty::Func(fty));
         if spec.storage == Storage::Static {
             self.globals[g].internal = true;
@@ -1043,7 +1050,14 @@ impl<'a> Parser<'a> {
             );
         self.globals[g].returns_twice |= returns_twice;
         self.globals[g].noreturn |= attrs.noreturn;
-        g
+        let mut policies = attrs.function_attrs;
+        policies.inlinehint |= spec.inline;
+        policies.noreturn |= attrs.noreturn;
+        self.globals[g].function_attrs.merge(policies);
+        self.globals[g]
+            .function_attrs
+            .validate(self.globals[g].returns_twice)?;
+        Ok(g)
     }
 
     fn function_body(&mut self, g: usize, fty: Rc<FuncTy>, loc: Loc) -> R<()> {
@@ -1159,9 +1173,22 @@ impl<'a> Parser<'a> {
                             "packed" => attrs.packed = true,
                             "returns_twice" => attrs.returns_twice = true,
                             "noreturn" => attrs.noreturn = true,
+                            "always_inline" => attrs.function_attrs.alwaysinline = true,
+                            "noinline" => attrs.function_attrs.noinline = true,
+                            "nothrow" => attrs.function_attrs.nounwind = true,
                             _ => {}
                         }
                         if self.eat("(") {
+                            if matches!(
+                                name,
+                                "returns_twice"
+                                    | "noreturn"
+                                    | "always_inline"
+                                    | "noinline"
+                                    | "nothrow"
+                            ) {
+                                return Err(self.unexpected("an attribute without arguments"));
+                            }
                             self.skip_parens()?;
                         }
                     }
