@@ -202,3 +202,13 @@ fn oversized_local_objects_are_diagnosed_instead_of_truncated() {
     .unwrap_err();
     assert!(error.to_string().contains("stack-slot size limit"));
 }
+
+#[test]
+fn literal_casts_still_fold_without_enabling_ir_optimization() {
+    let module = compile(
+        "unsigned char f(void) { return (unsigned char)257; }",
+        Target::Aarch64AppleDarwin,
+    );
+    assert!(!module.to_string().contains("trunc"));
+    assert!(module.to_string().contains("iconst.i8 1"));
+}

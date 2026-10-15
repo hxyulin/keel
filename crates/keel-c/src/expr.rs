@@ -411,6 +411,11 @@ impl Parser {
             if !ok {
                 return Err(Error::new(loc, "invalid cast"));
             }
+            // Literal conversion cannot hide a qualified memory read;
+            // retain the frontend's existing constant normalization.
+            if matches!(e.kind, ExprKind::Int(_)) {
+                return Ok(self.cast(e, ty).with_sugar(sugar));
+            }
             // Keep a distinct value conversion even when the unqualified
             // types match: changing result qualifiers must not rewrite the
             // qualifiers on the operand's actual memory read.
