@@ -478,6 +478,7 @@ impl InstData {
 
     /// Memory effects are distinct from scheduling: even a non-trapping,
     /// ordinary load remains pinned until a memory-aware pass proves a move.
+    /// Keep classification exhaustive: new opcodes must declare their effects.
     pub fn memory_effects(&self) -> MemoryEffects {
         use MemoryEffects::*;
         match self {
@@ -506,7 +507,25 @@ impl InstData {
                 | Intrinsic::StackRestore
                 | Intrinsic::Debugtrap => Barrier,
             },
-            _ => None,
+            Self::Iconst { .. }
+            | Self::Fconst { .. }
+            | Self::Unary { .. }
+            | Self::Overflow { .. }
+            | Self::Fma { .. }
+            | Self::Select { .. }
+            | Self::Convert { .. }
+            | Self::Icmp { .. }
+            | Self::Fcmp { .. }
+            | Self::StackAddr { .. }
+            | Self::SymbolAddr { .. }
+            | Self::EhTypeid { .. }
+            | Self::Jump { .. }
+            | Self::Brif { .. }
+            | Self::Switch { .. }
+            | Self::Return { .. }
+            | Self::LandingPad { .. }
+            | Self::Binary { .. }
+            | Self::Trap => None,
         }
     }
 
@@ -532,7 +551,24 @@ impl InstData {
             Self::Intrinsic { id, .. } => {
                 !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
             }
-            _ => false,
+            Self::Iconst { .. }
+            | Self::Fconst { .. }
+            | Self::Unary { .. }
+            | Self::Overflow { .. }
+            | Self::Fma { .. }
+            | Self::Select { .. }
+            | Self::Convert { .. }
+            | Self::Icmp { .. }
+            | Self::Fcmp { .. }
+            | Self::StackAddr { .. }
+            | Self::SymbolAddr { .. }
+            | Self::EhTypeid { .. }
+            | Self::Jump { .. }
+            | Self::Brif { .. }
+            | Self::Switch { .. }
+            | Self::Return { .. }
+            | Self::LandingPad { .. }
+            | Self::Fence { .. } => false,
         }
     }
 

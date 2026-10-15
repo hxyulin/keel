@@ -852,6 +852,17 @@ With these choices, `-O` output is never larger than the unoptimized output on t
 test programs, and programs whose checks are all constants fold away
 entirely, which checks constant folding against results from the hardware.
 
+The [IR contract audit](../suite/reports/ir-contract-audit-2026-10-15.json)
+records the memory contracts, qualifier propagation, rewrite-verifier and
+index/size checks, plus the aggregate-copy/ABI regression (previously 9,
+now 3, matching Clang). Validation covers parser round-trips, both target
+code generators, native execution and spills, workspace tests, four
+application-suite configurations, Clippy and the Tracy feature build.
+Debugger integration tests were excluded. This is a correctness/enabling
+change; memory optimizations remain separate passes and no runtime speedup
+is claimed. Effect/trap classification is exhaustive so future opcodes
+cannot silently inherit memory-free or non-trapping behavior.
+
 ## Frontend
 
 `keel-frontend`'s `FunctionBuilder` builds SSA from mutable variables
