@@ -1,5 +1,6 @@
 use super::super::{integer, reg};
 use super::{Lane, count, finish, register_list};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     if !matches!(
@@ -163,14 +164,23 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             tag,
         )
     };
-    let mut fields = vec![("Rt", rt), ("Rn", base.number), ("Q", q), ("size", size)];
+    let mut fields = vec![
+        (FieldId::Rt, rt),
+        (FieldId::Rn, base.number),
+        (FieldId::Q, q),
+        (FieldId::size, size),
+    ];
     if let Some(index) = lane {
         let i = index
             .parse::<u32>()
             .map_err(|_| "invalid structure lane index")?;
         let packed = i << size;
-        fields.push(("S", (packed >> 2) & 1));
-        fields.iter_mut().find(|(n, _)| *n == "size").unwrap().1 = match size {
+        fields.push((FieldId::S, (packed >> 2) & 1));
+        fields
+            .iter_mut()
+            .find(|(n, _)| *n == FieldId::size)
+            .unwrap()
+            .1 = match size {
             0 => packed & 3,
             1 => packed & 2,
             2 | 3 => size - 2,
@@ -178,7 +188,7 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         };
     }
     if let Some(Some(m)) = post {
-        fields.push(("Rm", m));
+        fields.push((FieldId::Rm, m));
     }
     let root = if replicate {
         format!("LD{structures}R")

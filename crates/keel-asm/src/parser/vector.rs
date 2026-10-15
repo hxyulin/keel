@@ -1,6 +1,6 @@
 //! Advanced SIMD register arithmetic, reductions, and modified immediates.
 use super::count;
-use super::storage::{encode_named, lower};
+use super::storage::{encode_named, lower, upper};
 use crate::FieldId;
 use crate::encode;
 
@@ -27,7 +27,6 @@ fn logical(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
         )
         || !args.first().is_some_and(|s| s.starts_with('v'))
     {
-
         return Ok(None);
     }
     count(args, if unary { 2 } else { 3 }, if unary { 2 } else { 3 })?;
@@ -38,11 +37,15 @@ fn logical(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     if d.size != 0 {
         return Err("SIMD logical forms require 8B or 16B".into());
     }
-    let mut fields = vec![("Rd", d.number), ("Rn", n.number), ("Q", d.q)];
+    let mut fields = vec![
+        (FieldId::Rd, d.number),
+        (FieldId::Rn, n.number),
+        (FieldId::Q, d.q),
+    ];
     if !unary {
         let m = Shape::parse(args[2])?;
         d.same(m)?;
-        fields.push(("Rm", m.number));
+        fields.push((FieldId::Rm, m.number));
     }
     let root = if unary { "NOT" } else { op };
     let form = if unary {
@@ -119,7 +122,7 @@ fn modified_immediate(op: &str, args: &[&str]) -> Result<u32, String> {
             v
         }
     });
-    let mut fields = vec![("Rd", rd)];
+    let mut fields = vec![(FieldId::Rd, rd)];
 
     if !wide {
         fields.push((FieldId::Q, q));
@@ -142,11 +145,7 @@ fn modified_immediate(op: &str, args: &[&str]) -> Result<u32, String> {
     {
         fields.push((name, (imm >> (7 - i)) & 1));
     }
-    encode(
-        &format!("{}_asimdimm_{form}", op.to_ascii_uppercase()),
-        &fields,
-    )
-
+    encode_named(format_args!("{}_asimdimm_{form}", upper(op)), &fields)
 }
 
 mod fp;
@@ -354,12 +353,12 @@ pub(super) fn numeric(
 
 /// Shared operand rules may describe fields fixed in the scalar variant.
 /// Each caller validates legal shapes before omitting those fixed fields.
-fn finish(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
+fn finish(name: &str, values: &[(FieldId, u32)]) -> Result<u32, String> {
     finish_with_features(name, values, crate::TargetFeatures::default())
 }
 fn finish_with_features(
     name: &str,
-    values: &[(&str, u32)],
+    values: &[(FieldId, u32)],
     features: crate::TargetFeatures,
 ) -> Result<u32, String> {
     let encoding = crate::generated::encoding(name)
@@ -367,15 +366,24 @@ fn finish_with_features(
     let fields: Vec<_> = values
         .iter()
         .copied()
-        .filter(|(n, _)| encoding.fields.iter().any(|f| f.name == *n))
+        .filter(|(n, _)| encoding.fields.iter().any(|f| f.id == *n))
         .collect();
     crate::encode_with_features(name, &fields, features)
 }
 
-fn immediate_fields(imm: u32) -> Vec<(&'static str, u32)> {
-    ["a", "b", "c", "d", "e", "f", "g", "h"]
-        .into_iter()
-        .enumerate()
-        .map(|(i, n)| (n, (imm >> (7 - i)) & 1))
-        .collect()
+fn immediate_fields(imm: u32) -> Vec<(FieldId, u32)> {
+    [
+        FieldId::a,
+        FieldId::b,
+        FieldId::c,
+        FieldId::d,
+        FieldId::e,
+        FieldId::f,
+        FieldId::g,
+        FieldId::h,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, n)| (n, (imm >> (7 - i)) & 1))
+    .collect()
 }

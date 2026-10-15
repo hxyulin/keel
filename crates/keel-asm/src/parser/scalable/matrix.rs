@@ -1,12 +1,13 @@
 //! SME tile operands. Opcode bits and feature predicates come only from the
 //! pinned generated Arm records; these helpers validate assembly operand roles.
 use super::{lane, number, predicate};
+use crate::FieldId;
 use crate::parser::{count, integer, reg, unsigned};
 use crate::{TargetFeatures, encode_with_features};
 
 mod grouped;
 
-type Fields = Vec<(&'static str, u32)>;
+type Fields = Vec<(FieldId, u32)>;
 
 fn element(s: &str) -> Result<u32, String> {
     match s {
@@ -62,13 +63,16 @@ fn slice(s: &str) -> Result<Slice, String> {
         offset,
     })
 }
-fn slice_fields(s: &Slice, role: &'static str) -> Fields {
-    let mut f = vec![("V", s.vertical), ("Rs", s.selector)];
+fn slice_fields(s: &Slice, role: FieldId) -> Fields {
+    let mut f = vec![(FieldId::V, s.vertical), (FieldId::Rs, s.selector)];
     if s.size != 0 {
         f.push((role, s.tile));
     }
     if s.size != 4 {
-        f.push((["off4", "off3", "off2", "o1"][s.size as usize], s.offset));
+        f.push((
+            [FieldId::off4, FieldId::off3, FieldId::off2, FieldId::o1][s.size as usize],
+            s.offset,
+        ));
     }
     f
 }
@@ -169,9 +173,12 @@ pub(super) fn instruction(
             if rd.bits != 64 {
                 return Err("streaming length requires X registers".into());
             }
-            let mut f = vec![("Rd", rd.number), ("imm6", signed6(a[a.len() - 1])?)];
+            let mut f = vec![
+                (FieldId::Rd, rd.number),
+                (FieldId::imm6, signed6(a[a.len() - 1])?),
+            ];
             if op == "addsvl" {
-                f.push(("Rn", base(a[1])?));
+                f.push((FieldId::Rn, base(a[1])?));
             }
             (
                 if op == "rdsvl" {
@@ -209,7 +216,7 @@ pub(super) fn instruction(
                     }
                 }
             }
-            ("zero_za_i_".into(), vec![("imm8", mask)])
+            ("zero_za_i_".into(), vec![(FieldId::imm8, mask)])
         }
         "mov" | "mova" => {
             count(&a, 3, 3)?;
@@ -221,10 +228,10 @@ pub(super) fn instruction(
             if element(size)? != s.size {
                 return Err("tile and vector element sizes must match".into());
             }
-            let mut f = slice_fields(&s, if insert { "ZAd" } else { "ZAn" });
+            let mut f = slice_fields(&s, if insert { FieldId::ZAd } else { FieldId::ZAn });
             f.extend([
-                ("Pg", predicate(a[1])?),
-                (if insert { "Zn" } else { "Zd" }, z),
+                (FieldId::Pg, predicate(a[1])?),
+                (if insert { FieldId::Zn } else { FieldId::Zd }, z),
             ]);
             (
                 format!(
@@ -259,7 +266,11 @@ pub(super) fn instruction(
             }
             (
                 format!("{op}_za_ri_"),
-                vec![("Rv", rv - 12), ("Rn", base(addr[0])?), ("off4", off)],
+                vec![
+                    (FieldId::Rv, rv - 12),
+                    (FieldId::Rn, base(addr[0])?),
+                    (FieldId::off4, off),
+                ],
             )
         }
         "ld1b" | "ld1h" | "ld1w" | "ld1d" | "ld1q" | "st1b" | "st1h" | "st1w" | "st1d" | "st1q" => {
@@ -300,8 +311,12 @@ pub(super) fn instruction(
             } else {
                 31
             };
-            let mut f = slice_fields(&s, "ZAt");
-            f.extend([("Pg", pg), ("Rn", base(addr[0])?), ("Rm", rm)]);
+            let mut f = slice_fields(&s, FieldId::ZAt);
+            f.extend([
+                (FieldId::Pg, pg),
+                (FieldId::Rn, base(addr[0])?),
+                (FieldId::Rm, rm),
+            ]);
             (format!("{op}_za_p_rrr_"), f)
         }
         _ => {
@@ -346,13 +361,13 @@ pub(super) fn instruction(
                 }
             };
             let mut f = vec![
-                ("ZAda", za),
-                ("Pn", predicate(a[1])?),
-                ("Pm", predicate(a[2])?),
-                ("Zn", zn),
+                (FieldId::ZAda, za),
+                (FieldId::Pn, predicate(a[1])?),
+                (FieldId::Pm, predicate(a[2])?),
+                (FieldId::Zn, zn),
             ];
             if !add {
-                f.push(("Zm", zm));
+                f.push((FieldId::Zm, zm));
             }
             (name, f)
         }

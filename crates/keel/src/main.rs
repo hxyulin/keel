@@ -6,7 +6,6 @@
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
-
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -34,11 +33,9 @@ const USAGE: &str = "usage:
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
   keel asm-metrics <input.s> [-o <metrics.json>]
-
   keel passes
 
   Input files must remain unchanged during parsing.";
-
 
 fn main() -> ExitCode {
     #[cfg(feature = "profile-with-tracy")]
@@ -229,10 +226,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .ok_or("`asm` requires `-o <output.o>`")?;
             let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-            let object = keel_asm::assemble_object_with_features(text, opts.asm_features).map_err(|e| format!("{input}: {e}"))?;
+            let object = keel_asm::assemble_object_with_features(text, opts.asm_features)
+                .map_err(|e| format!("{input}: {e}"))?;
             // Release the mapping before opening output, including in-place output.
             drop(src);
-
             std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
         }
         "compile" => {
@@ -459,7 +456,6 @@ mod tests {
                 .unwrap_err()
                 .contains("unknown flag")
         );
-
     }
 
     #[test]

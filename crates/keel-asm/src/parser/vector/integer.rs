@@ -1,5 +1,6 @@
 use super::super::{integer, unsigned};
 use super::{Shape, count, finish};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     if !a
@@ -89,10 +90,10 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             return Err("invalid widening arrangements".into());
         }
         let mut fields = vec![
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("size", size),
-            ("Q", if pairwide { d.q } else { u32::from(high) }),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::size, size),
+            (FieldId::Q, if pairwide { d.q } else { u32::from(high) }),
         ];
         if !unary {
             let m = Shape::parse(a[2])?;
@@ -102,7 +103,7 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             {
                 return Err("invalid third operand arrangement".into());
             }
-            fields.push(("Rm", m.number));
+            fields.push((FieldId::Rm, m.number));
         }
         let class = if pairwide {
             "asimdmisc_P"
@@ -281,13 +282,13 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         std::mem::swap(&mut n, m.as_mut().unwrap());
     }
     let mut fields = vec![
-        ("Rd", d.number),
-        ("Rn", n.number),
-        ("size", d.size),
-        ("Q", d.q),
+        (FieldId::Rd, d.number),
+        (FieldId::Rn, n.number),
+        (FieldId::size, d.size),
+        (FieldId::Q, d.q),
     ];
     if let Some(m) = m {
-        fields.push(("Rm", m.number));
+        fields.push((FieldId::Rm, m.number));
     }
     let class = match (d.scalar, unary || zero) {
         (true, true) => "asisdmisc",
@@ -408,12 +409,15 @@ pub(super) fn shift(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     finish(
         &format!("{}_{class}", actual.to_ascii_uppercase()),
         &[
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("Q", if narrow || wide { u32::from(high) } else { d.q }),
-            ("size", size),
-            ("immh", imm >> 3),
-            ("immb", imm & 7),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (
+                FieldId::Q,
+                if narrow || wide { u32::from(high) } else { d.q },
+            ),
+            (FieldId::size, size),
+            (FieldId::immh, imm >> 3),
+            (FieldId::immb, imm & 7),
         ],
     )
     .map(Some)

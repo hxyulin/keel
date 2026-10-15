@@ -3,6 +3,7 @@
 use super::storage::{encode_named, lower, upper};
 use super::{count, memory, reg, same_width, unsigned};
 use crate::FieldId;
+use crate::encode;
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     if let Some(word) = exclusive(op, args)? {
@@ -11,7 +12,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
     if op == "clrex" {
         count(args, 0, 1)?;
         let crm = args.first().map_or(Ok(15), |s| unsigned(s, 15))?;
-        return encode("CLREX_BN_barriers", &[("CRm", crm)]).map(Some);
+        return encode("CLREX_BN_barriers", &[(FieldId::CRm, crm)]).map(Some);
     }
     if matches!(op, "dmb" | "dsb" | "isb") {
         count(args, usize::from(op != "isb"), 1)?;
@@ -131,14 +132,14 @@ fn exclusive(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
         return Err("byte/halfword exclusive access requires W registers".into());
     }
     let n = memory::atomic_base(args[arity - 1])?;
-    let mut fields = vec![("Rt", t.number), ("Rn", n.number)];
+    let mut fields = vec![(FieldId::Rt, t.number), (FieldId::Rn, n.number)];
     let t2 = if pair {
         let t2 = reg(args[usize::from(store) + 1], false, true)?;
         same_width(t, t2)?;
         if !store && t.number == t2.number && t.number != 31 {
             return Err("exclusive load-pair destinations must differ".into());
         }
-        fields.push(("Rt2", t2.number));
+        fields.push((FieldId::Rt2, t2.number));
         Some(t2)
     } else {
         None
@@ -150,7 +151,7 @@ fn exclusive(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
         {
             return Err("exclusive store status overlaps a source register".into());
         }
-        fields.push(("Rs", s.number));
+        fields.push((FieldId::Rs, s.number));
     }
     let role = match (store, pair) {
         (false, false) => "LR",

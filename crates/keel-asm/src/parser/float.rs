@@ -33,7 +33,6 @@ fn registers(args: &[&str]) -> Result<(Vec<u32>, &'static str), String> {
 }
 pub(super) fn immediate(text: &str) -> Result<f64, String> {
     text.trim_fast()
-
         .strip_prefix('#')
         .unwrap_or(text.trim_fast())
         .trim_fast()

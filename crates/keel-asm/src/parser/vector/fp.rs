@@ -1,4 +1,5 @@
 use super::{Shape, count, finish};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     if !a
@@ -43,11 +44,11 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         return finish(
             &format!("{}_{class}", root.to_ascii_uppercase()),
             &[
-                ("Rd", d.number),
-                ("Rn", n.number),
-                ("Q", u32::from(high)),
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Q, u32::from(high)),
                 (
-                    "sz",
+                    FieldId::sz,
                     if root == "fcvtl" {
                         n.size - 1
                     } else {
@@ -70,7 +71,7 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         }
         let imm = super::super::float::float_immediate(super::super::float::immediate(a[1])?)?;
         let mut fields = super::immediate_fields(imm);
-        fields.extend_from_slice(&[("Rd", d.number), ("Q", d.q)]);
+        fields.extend_from_slice(&[(FieldId::Rd, d.number), (FieldId::Q, d.q)]);
         return finish(
             if d.size == 2 {
                 "FMOV_asimdimm_S_s"
@@ -227,13 +228,13 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         "only"
     };
     let mut fields = vec![
-        ("Rd", d.number),
-        ("Rn", n.number),
-        ("Q", d.q),
-        ("sz", d.size - 2),
+        (FieldId::Rd, d.number),
+        (FieldId::Rn, n.number),
+        (FieldId::Q, d.q),
+        (FieldId::sz, d.size - 2),
     ];
     if let Some(m) = m {
-        fields.push(("Rm", m.number));
+        fields.push((FieldId::Rm, m.number));
     }
     finish(
         &format!("{}_{class}_{tag}", actual.to_ascii_uppercase()),
@@ -303,11 +304,11 @@ pub(super) fn reduction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     finish(
         &format!("{}_{class}", op.to_ascii_uppercase()),
         &[
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("Q", n.q),
-            ("size", n.size),
-            ("sz", n.size.saturating_sub(2)),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::Q, n.q),
+            (FieldId::size, n.size),
+            (FieldId::sz, n.size.saturating_sub(2)),
         ],
     )
     .map(Some)

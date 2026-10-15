@@ -1,5 +1,6 @@
 //! SME2 register groups and multi-vector ZA arrays.
 use super::*;
+use crate::FieldId;
 
 struct Group {
     first: u32,
@@ -80,7 +81,7 @@ fn array(s: &str, len: u32) -> Result<Array, String> {
     })
 }
 fn array_fields(a: &Array) -> Fields {
-    vec![("Rv", a.selector), ("off3", a.offset)]
+    vec![(FieldId::Rv, a.selector), (FieldId::off3, a.offset)]
 }
 fn require_f64(features: TargetFeatures) -> Result<(), String> {
     if !features.supports("FEAT_SME_F64F64") {
@@ -134,13 +135,16 @@ fn grouped_move(a: &[&str], features: TargetFeatures) -> Result<u32, String> {
         {
             return Err("tile slice range must align with group length and element size".into());
         }
-        let mut fields = vec![("V", s.vertical), ("Rs", s.selector)];
+        let mut fields = vec![(FieldId::V, s.vertical), (FieldId::Rs, s.selector)];
         if s.size != 0 {
-            fields.push((if insert { "ZAd" } else { "ZAn" }, s.tile));
+            fields.push((if insert { FieldId::ZAd } else { FieldId::ZAn }, s.tile));
         }
         let bits = (4 - s.size).saturating_sub(g.len.ilog2());
         if bits != 0 {
-            fields.push((["", "o1", "off2", "off3"][bits as usize], start / g.len));
+            fields.push((
+                [FieldId::o1, FieldId::off2, FieldId::off3][bits as usize - 1],
+                start / g.len,
+            ));
         }
         (
             format!(
@@ -156,7 +160,10 @@ fn grouped_move(a: &[&str], features: TargetFeatures) -> Result<u32, String> {
             fields,
         )
     };
-    fields.push((if insert { "Zn" } else { "Zd" }, g.first / g.len));
+    fields.push((
+        if insert { FieldId::Zn } else { FieldId::Zd },
+        g.first / g.len,
+    ));
     encode_with_features(&name, &fields, features)
 }
 
@@ -188,8 +195,12 @@ pub(super) fn instruction(
         count(a, 2, 2)?;
         let addr = address(a[1])?;
         count(&addr, 1, 1)?;
-        return encode_with_features(&format!("{op}_zt_br_"), &[("Rn", base(addr[0])?)], features)
-            .map(Some);
+        return encode_with_features(
+            &format!("{op}_zt_br_"),
+            &[(FieldId::Rn, base(addr[0])?)],
+            features,
+        )
+        .map(Some);
     }
     if !matches!(op, "add" | "sub" | "fmla" | "fmls")
         || !a.first().is_some_and(|s| s.starts_with("za."))
@@ -218,7 +229,7 @@ pub(super) fn instruction(
     if a.len() == 2 {
         aligned(&n)?;
         name = format!("{op}_za_zw_{}x{}", n.len, n.len);
-        f.push(("Zm", n.first / n.len));
+        f.push((FieldId::Zm, n.first / n.len));
     } else if a[2].starts_with('{') {
         let m = group(a[2])?;
         aligned(&n)?;
@@ -232,7 +243,10 @@ pub(super) fn instruction(
             n.len,
             if half { "_16" } else { "" }
         );
-        f.extend([("Zn", n.first / n.len), ("Zm", m.first / m.len)]);
+        f.extend([
+            (FieldId::Zn, n.first / n.len),
+            (FieldId::Zm, m.first / m.len),
+        ]);
     } else if a[2].contains('[') {
         if !fp {
             return Err("indexed ZA form requires fmla/fmls".into());
@@ -252,11 +266,11 @@ pub(super) fn instruction(
             ["b", "h", "s", "d"][size as usize],
             n.len
         );
-        f.extend([("Zn", n.first / n.len), ("Zm", m)]);
+        f.extend([(FieldId::Zn, n.first / n.len), (FieldId::Zm, m)]);
         if size == 1 {
-            f.extend([("i3h", index >> 1), ("i3l", index & 1)]);
+            f.extend([(FieldId::i3h, index >> 1), (FieldId::i3l, index & 1)]);
         } else {
-            f.push((if size == 2 { "i2" } else { "i1" }, index));
+            f.push((if size == 2 { FieldId::i2 } else { FieldId::i1 }, index));
         }
         return encode_with_features(&name, &f, features).map(Some);
     } else {
@@ -265,10 +279,10 @@ pub(super) fn instruction(
             return Err("ZA arithmetic scalar vector element must match".into());
         }
         name = format!("{op}_za_zzv_{}x1{}", n.len, if half { "_16" } else { "" });
-        f.extend([("Zn", n.first), ("Zm", m)]);
+        f.extend([(FieldId::Zn, n.first), (FieldId::Zm, m)]);
     }
     if !half {
-        f.push(("sz", ar.size - 2));
+        f.push((FieldId::sz, ar.size - 2));
     }
     encode_with_features(&name, &f, features).map(Some)
 }

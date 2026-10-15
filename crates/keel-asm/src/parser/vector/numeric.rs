@@ -4,6 +4,7 @@ mod half;
 
 use super::super::{reg, unsigned};
 use super::{Lane, Shape, count, finish_with_features, number};
+use crate::FieldId;
 use crate::TargetFeatures;
 
 fn require(features: TargetFeatures, feature: &str) -> Result<(), String> {
@@ -30,7 +31,7 @@ fn grouped_lane(text: &str, element: &str) -> Result<Lane, String> {
         index,
     })
 }
-fn lane_fields(m: Lane) -> Result<Vec<(&'static str, u32)>, String> {
+fn lane_fields(m: Lane) -> Result<Vec<(FieldId, u32)>, String> {
     if m.size == 1 && m.number >= 16 {
         return Err("H multiplier requires V0..V15".into());
     }
@@ -39,7 +40,12 @@ fn lane_fields(m: Lane) -> Result<Vec<(&'static str, u32)>, String> {
     } else {
         (m.index & 1, m.number >> 4, m.index >> 1)
     };
-    Ok(vec![("Rm", m.number & 15), ("L", l), ("M", mb), ("H", h)])
+    Ok(vec![
+        (FieldId::Rm, m.number & 15),
+        (FieldId::L, l),
+        (FieldId::M, mb),
+        (FieldId::H, h),
+    ])
 }
 
 fn mentions_half(args: &[&str]) -> bool {
@@ -110,7 +116,11 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
         count(a, if complex { 4 } else { 3 }, if complex { 4 } else { 3 })?;
         let d = Shape::parse(a[0])?;
         let indexed = a[2].contains('[');
-        let mut fields = vec![("Rd", d.number), ("Q", d.q), ("size", d.size)];
+        let mut fields = vec![
+            (FieldId::Rd, d.number),
+            (FieldId::Q, d.q),
+            (FieldId::size, d.size),
+        ];
         let name = if fhm {
             d.valid_vector()?;
             if d.size != 2 {
@@ -124,7 +134,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                 }
                 number(name, 'v')
             };
-            fields.push(("Rn", parse_source(a[1])?));
+            fields.push((FieldId::Rn, parse_source(a[1])?));
             if indexed {
                 let m = Lane::parse(a[2])?;
                 if m.size != 1 {
@@ -132,7 +142,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                 }
                 fields.extend(lane_fields(m)?);
             } else {
-                fields.push(("Rm", parse_source(a[2])?));
+                fields.push((FieldId::Rm, parse_source(a[2])?));
             }
             format!(
                 "{}_{}",
@@ -145,7 +155,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
             )
         } else {
             let n = Shape::parse(a[1])?;
-            fields.push(("Rn", n.number));
+            fields.push((FieldId::Rn, n.number));
             if rdm {
                 d.same(n)?;
                 if !matches!(d.size, 1 | 2) {
@@ -163,7 +173,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                 } else {
                     let m = Shape::parse(a[2])?;
                     d.same(m)?;
-                    fields.push(("Rm", m.number));
+                    fields.push((FieldId::Rm, m.number));
                 }
                 format!(
                     "{}_{}_{}",
@@ -191,7 +201,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                     return Err("invalid complex rotation".into());
                 }
                 fields.push((
-                    "rot",
+                    FieldId::rot,
                     if op == "fcadd" {
                         (rot - 90) / 180
                     } else {
@@ -207,16 +217,16 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                         return Err("invalid complex multiplier lane".into());
                     }
                     fields.extend_from_slice(&[
-                        ("Rm", m.number & 15),
-                        ("M", m.number >> 4),
-                        ("L", if d.size == 1 { m.index & 1 } else { 0 }),
-                        ("H", if d.size == 1 { m.index >> 1 } else { m.index }),
+                        (FieldId::Rm, m.number & 15),
+                        (FieldId::M, m.number >> 4),
+                        (FieldId::L, if d.size == 1 { m.index & 1 } else { 0 }),
+                        (FieldId::H, if d.size == 1 { m.index >> 1 } else { m.index }),
                     ]);
                     "FCMLA_advsimd_elt".into()
                 } else {
                     let m = Shape::parse(a[2])?;
                     d.same(m)?;
-                    fields.push(("Rm", m.number));
+                    fields.push((FieldId::Rm, m.number));
                     format!("{}_asimdsame2_C", op.to_ascii_uppercase())
                 }
             } else {
@@ -228,7 +238,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                     if d.q != 1 || n.size != 1 || n.q != 1 {
                         return Err("BFMLAL requires 4S destination and 8H source".into());
                     }
-                    fields.iter_mut().find(|(n, _)| *n == "Q").unwrap().1 =
+                    fields.iter_mut().find(|(n, _)| *n == FieldId::Q).unwrap().1 =
                         u32::from(op == "bfmlalt");
                     if indexed {
                         let m = Lane::parse(a[2])?;
@@ -239,7 +249,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                     } else {
                         let m = Shape::parse(a[2])?;
                         n.same(m)?;
-                        fields.push(("Rm", m.number));
+                        fields.push((FieldId::Rm, m.number));
                     }
                     format!(
                         "BFMLAL_{}",
@@ -269,7 +279,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                         }
                         let m = Shape::parse(a[2])?;
                         n.same(m)?;
-                        fields.push(("Rm", m.number));
+                        fields.push((FieldId::Rm, m.number));
                     }
                     let tag = if bfloat {
                         if indexed || matrix { "E" } else { "D" }
@@ -311,7 +321,11 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
         };
         return finish_with_features(
             name,
-            &[("Rd", d.number), ("Rn", n.number), ("Q", d.q)],
+            &[
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Q, d.q),
+            ],
             features,
         )
         .map(Some);
@@ -325,7 +339,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
         }
         return finish_with_features(
             "FJCVTZS_32D_float2int",
-            &[("Rd", d.number), ("Rn", n.number)],
+            &[(FieldId::Rd, d.number), (FieldId::Rn, n.number)],
             features,
         )
         .map(Some);
@@ -353,10 +367,10 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
         return finish_with_features(
             &format!("{}_{tag}", op.to_ascii_uppercase()),
             &[
-                ("Rd", d.number),
-                ("Rn", n.number),
-                ("sz", d.size - 2),
-                ("Q", d.q),
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::sz, d.size - 2),
+                (FieldId::Q, d.q),
             ],
             features,
         )

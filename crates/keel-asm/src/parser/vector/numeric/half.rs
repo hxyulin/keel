@@ -2,6 +2,7 @@
 use super::super::super::{reg, unsigned};
 use super::super::{Lane, Shape, count, finish_with_features, number};
 use super::{lane_fields, mentions_half, require};
+use crate::FieldId;
 use crate::TargetFeatures;
 
 pub(super) fn instruction(
@@ -98,7 +99,7 @@ pub(super) fn instruction(
         };
         return finish_with_features(
             &format!("FCVT_{}{}_floatdp1", tag(d.size), tag(n.size)),
-            &[("Rd", d.number), ("Rn", n.number)],
+            &[(FieldId::Rd, d.number), (FieldId::Rn, n.number)],
             features,
         )
         .map(Some);
@@ -149,13 +150,13 @@ pub(super) fn instruction(
         } else {
             (h.number, g.number)
         };
-        let mut fields = vec![("Rd", rd), ("Rn", rn)];
+        let mut fields = vec![(FieldId::Rd, rd), (FieldId::Rn, rn)];
         let form = if a.len() == 3 {
             let fbits = unsigned(a[2], i64::from(g.bits))?;
             if fbits == 0 {
                 return Err("fixed-point scale must be 1..GPR width".into());
             }
-            fields.push(("scale", 64 - fbits));
+            fields.push((FieldId::scale, 64 - fbits));
             "float2fix"
         } else {
             "float2int"
@@ -206,7 +207,7 @@ pub(super) fn instruction(
                     "asimdall_only_H"
                 }
             ),
-            &[("Rd", d.number), ("Rn", rn), ("Q", q)],
+            &[(FieldId::Rd, d.number), (FieldId::Rn, rn), (FieldId::Q, q)],
             features,
         )
         .map(Some);
@@ -215,11 +216,11 @@ pub(super) fn instruction(
         count(a, 2, 2)?;
         let imm = float_immediate(immediate(a[1])?)?;
         let mut fields = if d.scalar {
-            vec![("imm8", imm)]
+            vec![(FieldId::imm8, imm)]
         } else {
             super::super::immediate_fields(imm)
         };
-        fields.extend_from_slice(&[("Rd", d.number), ("Q", d.q)]);
+        fields.extend_from_slice(&[(FieldId::Rd, d.number), (FieldId::Q, d.q)]);
         return finish_with_features(
             if d.scalar {
                 "FMOV_H_floatimm"
@@ -249,11 +250,11 @@ pub(super) fn instruction(
                 if d.scalar { "asisdshf" } else { "asimdshf" }
             ),
             &[
-                ("Rd", d.number),
-                ("Rn", n.number),
-                ("Q", d.q),
-                ("immh", imm >> 3),
-                ("immb", imm & 7),
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Q, d.q),
+                (FieldId::immh, imm >> 3),
+                (FieldId::immb, imm & 7),
             ],
             features,
         )
@@ -271,7 +272,11 @@ pub(super) fn instruction(
             return Err("half multiplier requires H lane".into());
         }
         let mut fields = lane_fields(m)?;
-        fields.extend_from_slice(&[("Rd", d.number), ("Rn", n.number), ("Q", d.q)]);
+        fields.extend_from_slice(&[
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::Q, d.q),
+        ]);
         return finish_with_features(
             &format!(
                 "{}_{}_RH_H",
@@ -336,7 +341,11 @@ pub(super) fn instruction(
         3
     };
     count(a, arity, arity)?;
-    let mut fields = vec![("Rd", d.number), ("Rn", d.number), ("Q", d.q)];
+    let mut fields = vec![
+        (FieldId::Rd, d.number),
+        (FieldId::Rn, d.number),
+        (FieldId::Q, d.q),
+    ];
     let mut actual = op;
     let name = if compare {
         if !d.scalar {
@@ -350,7 +359,7 @@ pub(super) fn instruction(
         } else {
             let m = Shape::parse(a[1])?;
             d.same(m)?;
-            fields.push(("Rm", m.number));
+            fields.push((FieldId::Rm, m.number));
         }
         format!(
             "{}_H{}_floatcmp",
@@ -378,15 +387,22 @@ pub(super) fn instruction(
             std::mem::swap(&mut n, m.as_mut().unwrap());
             actual = if op == "fcmlt" { "fcmgt" } else { "fcmge" };
         }
-        fields.iter_mut().find(|(n, _)| *n == "Rn").unwrap().1 = n.number;
+        fields
+            .iter_mut()
+            .find(|(n, _)| *n == FieldId::Rn)
+            .unwrap()
+            .1 = n.number;
         if let Some(m) = m {
-            fields.push(("Rm", m.number));
+            fields.push((FieldId::Rm, m.number));
         }
         if conditional_compare {
             if !d.scalar {
                 return Err("conditional comparison requires scalar H".into());
             }
-            fields.extend_from_slice(&[("nzcv", unsigned(a[2], 15)?), ("cond", condition(a[3])?)]);
+            fields.extend_from_slice(&[
+                (FieldId::nzcv, unsigned(a[2], 15)?),
+                (FieldId::cond, condition(a[3])?),
+            ]);
             format!("{}_H_floatccmp", actual.to_ascii_uppercase())
         } else if scalar_three {
             if !d.scalar {
@@ -394,13 +410,13 @@ pub(super) fn instruction(
             }
             let ra = Shape::parse(a[3])?;
             d.same(ra)?;
-            fields.push(("Ra", ra.number));
+            fields.push((FieldId::Ra, ra.number));
             format!("{}_H_floatdp3", actual.to_ascii_uppercase())
         } else if op == "fcsel" {
             if !d.scalar {
                 return Err("fcsel requires scalar H".into());
             }
-            fields.push(("cond", condition(a[3])?));
+            fields.push((FieldId::cond, condition(a[3])?));
             "FCSEL_H_floatsel".into()
         } else if d.scalar && (scalar_one || scalar_two) {
             format!(

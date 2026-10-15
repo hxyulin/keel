@@ -189,7 +189,6 @@ pub struct InstructionLocation {
 /// Words must be read from the final text after branch/address fixups.
 pub fn assemble_with_metrics(source: &str) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
     parser::assemble(source, true, TargetFeatures::default())
-
 }
 
 /// Assemble source directly into an Apple arm64 `.o` file.
@@ -353,7 +352,6 @@ pub fn assemble_object_with_features(
     assemble_with_features(source, features)?.to_macho()
 }
 
-
 struct Field {
     id: FieldId,
     name: &'static str,
@@ -413,7 +411,6 @@ impl Requirement {
             Self::Not(term) => !term.satisfied(values, features),
         }
     }
-
 }
 
 const NUMERIC_FEATURES: &[&str] = &[
@@ -450,7 +447,6 @@ fn encode_with_features(
     values: &[(FieldId, u32)],
     features: TargetFeatures,
 ) -> Result<u32, String> {
-
     let encoding =
         generated::encoding(name).ok_or_else(|| format!("unsupported encoding `{name}`"))?;
     let name = encoding.name;
@@ -613,7 +609,6 @@ mod tests {
         }
         assert_eq!(covered, expected);
         assert_eq!(covered.len(), 217);
-
     }
 
     #[test]
@@ -644,7 +639,6 @@ mod tests {
         }
         assert_eq!(covered, expected);
         assert_eq!(covered.len(), 519);
-
     }
 
     #[test]
@@ -653,7 +647,11 @@ mod tests {
         for (name, bit) in [("SMSTART", 1), ("SMSTOP", 0)] {
             for op1 in 0..8 {
                 for op2 in 0..8 {
-                    let fields = [("op1", op1), ("op2", op2), ("CRm", 6 | bit)];
+                    let fields = [
+                        (FieldId::op1, op1),
+                        (FieldId::op2, op2),
+                        (FieldId::CRm, 6 | bit),
+                    ];
                     // The first alias requirement is the parent's exclusion
                     // of MSR encodings belonging to other instruction classes.
                     let parent = &generated::encoding(name).unwrap().requirements[0];
@@ -666,14 +664,13 @@ mod tests {
                 }
             }
             for crm in 0..16 {
-                let fields = [("op1", 3), ("op2", 3), ("CRm", crm)];
+                let fields = [(FieldId::op1, 3), (FieldId::op2, 3), (FieldId::CRm, crm)];
                 assert_eq!(
                     encode_with_features(name, &fields, features).is_ok(),
                     crm < 8 && crm & 1 == bit
                 );
             }
         }
-
     }
 
     #[test]

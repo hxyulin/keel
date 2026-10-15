@@ -92,7 +92,7 @@ pub(super) fn branch<'a>(
             args[2],
         )
     } else {
-        return super::memory::literal(op, args);
+        return super::memory::literal(op, args, arena);
     };
     Ok(Some(Branch {
         encoding,

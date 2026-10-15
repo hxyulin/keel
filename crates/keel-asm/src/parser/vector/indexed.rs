@@ -1,4 +1,5 @@
 use super::{Lane, Shape, count, finish};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     if !a
@@ -90,15 +91,15 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     finish(
         &format!("{}_{class}_{tag}", root.to_ascii_uppercase()),
         &[
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("Rm", m.number & 15),
-            ("L", l),
-            ("M", mbit),
-            ("H", h),
-            ("Q", if wide { u32::from(high) } else { d.q }),
-            ("size", n.size),
-            ("sz", n.size.saturating_sub(2)),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::Rm, m.number & 15),
+            (FieldId::L, l),
+            (FieldId::M, mbit),
+            (FieldId::H, h),
+            (FieldId::Q, if wide { u32::from(high) } else { d.q }),
+            (FieldId::size, n.size),
+            (FieldId::sz, n.size.saturating_sub(2)),
         ],
     )
     .map(Some)

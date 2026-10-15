@@ -34,8 +34,11 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
             _ => {}
         }
     }
-    if bracket || brace {
-        return Err("unclosed operand bracket or brace".into());
+    if bracket {
+        return Err("unclosed memory bracket".into());
+    }
+    if brace {
+        return Err("unclosed register-list brace".into());
     }
     result.push(text[start..].trim_fast());
     Ok(result)
@@ -428,7 +431,11 @@ pub(super) fn atomic_base(text: &str) -> Result<Reg, String> {
 
 /// Literal loads share signed imm19 PC-relative fixups with conditional branches.
 /// Mach-O has no relocation for these forms, so symbols must stay in one atom.
-pub(super) fn literal(op: &str, args: &[&str]) -> Result<Option<super::control::Branch>, String> {
+pub(super) fn literal<'a>(
+    op: &str,
+    args: &[&'a str],
+    arena: &'a bumpalo::Bump,
+) -> Result<Option<super::control::Branch<'a>>, String> {
     if !matches!(op, "ldr" | "ldrsw") || !args.get(1).is_some_and(|s| !s.starts_with('[')) {
         return Ok(None);
     }
@@ -438,10 +445,18 @@ pub(super) fn literal(op: &str, args: &[&str]) -> Result<Option<super::control::
         return Err("literal loads require W/X/S/D/Q (X for ldrsw)".into());
     }
     Ok(Some(super::control::Branch {
-        encoding: format!("{}_{}_loadlit", op.to_ascii_uppercase(), t.tag),
-        field: "imm19",
+        encoding: match (op, t.tag) {
+            ("ldrsw", _) => "LDRSW_64_loadlit",
+            (_, "32") => "LDR_32_loadlit",
+            (_, "64") => "LDR_64_loadlit",
+            (_, "S") => "LDR_S_loadlit",
+            (_, "D") => "LDR_D_loadlit",
+            (_, "Q") => "LDR_Q_loadlit",
+            _ => return Err("unsupported literal load register".into()),
+        },
+        field: FieldId::imm19,
         width: 19,
-        fields: vec![("Rt", t.number)],
-        target: args[1].into(),
+        fields: bumpalo::vec![in arena; (FieldId::Rt, t.number)],
+        target: args[1],
     }))
 }

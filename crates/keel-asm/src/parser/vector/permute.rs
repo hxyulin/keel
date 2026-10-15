@@ -1,5 +1,6 @@
 use super::super::{reg, unsigned};
 use super::{Lane, Shape, count, encode, register_list};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
     let is_lane = a.iter().any(|s| s.starts_with('v') && s.contains('['));
@@ -11,10 +12,10 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         return encode(
             "ORR_asimdsame_only",
             &[
-                ("Rd", d.number),
-                ("Rn", n.number),
-                ("Rm", n.number),
-                ("Q", d.q),
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Rm, n.number),
+                (FieldId::Q, d.q),
             ],
         )
         .map(Some);
@@ -30,19 +31,19 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             d.same(n)?;
             d.same(m)?;
             let mut fields = vec![
-                ("Rd", d.number),
-                ("Rn", n.number),
-                ("Rm", m.number),
-                ("Q", d.q),
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Rm, m.number),
+                (FieldId::Q, d.q),
             ];
             let class = if op == "ext" {
                 if d.size != 0 {
                     return Err("ext requires byte arrangements".into());
                 }
-                fields.push(("imm4", unsigned(a[3], i64::from(d.lanes() - 1))?));
+                fields.push((FieldId::imm4, unsigned(a[3], i64::from(d.lanes() - 1))?));
                 "asimdext"
             } else {
-                fields.push(("size", d.size));
+                fields.push((FieldId::size, d.size));
                 "asimdperm"
             };
             encode(
@@ -68,10 +69,10 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             encode(
                 &format!("{}_asimdtbl_L{len}_{len}", op.to_ascii_uppercase()),
                 &[
-                    ("Rd", d.number),
-                    ("Rn", table[0].number),
-                    ("Rm", m.number),
-                    ("Q", d.q),
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, table[0].number),
+                    (FieldId::Rm, m.number),
+                    (FieldId::Q, d.q),
                 ],
             )
             .map(Some)
@@ -110,29 +111,36 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
                 }
                 ("DUP_asimdins_DR_r", n.number, 1 << d.size)
             };
-            let mut fields = vec![("Rd", d.number), ("Rn", rn), ("imm5", imm5)];
+            let mut fields = vec![
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, rn),
+                (FieldId::imm5, imm5),
+            ];
             if !d.scalar {
-                fields.push(("Q", d.q));
+                fields.push((FieldId::Q, d.q));
             }
             encode(name, &fields).map(Some)
         }
         "ins" | "mov" if is_lane && a.first().is_some_and(|s| s.starts_with('v')) => {
             count(a, 2, 2)?;
             let d = Lane::parse(a[0])?;
-            let mut fields = vec![("Rd", d.number), ("imm5", d.imm5())];
+            let mut fields = vec![(FieldId::Rd, d.number), (FieldId::imm5, d.imm5())];
             let name = if a[1].contains('[') {
                 let n = Lane::parse(a[1])?;
                 if d.size != n.size {
                     return Err("inserted lane sizes must match".into());
                 }
-                fields.extend_from_slice(&[("Rn", n.number), ("imm4", n.index << d.size)]);
+                fields.extend_from_slice(&[
+                    (FieldId::Rn, n.number),
+                    (FieldId::imm4, n.index << d.size),
+                ]);
                 "INS_asimdins_IV_v"
             } else {
                 let n = reg(a[1], false, true)?;
                 if n.bits != if d.size == 3 { 64 } else { 32 } {
                     return Err("ins requires W for B/H/S or X for D".into());
                 }
-                fields.push(("Rn", n.number));
+                fields.push((FieldId::Rn, n.number));
                 "INS_asimdins_IR_r"
             };
             encode(name, &fields).map(Some)
@@ -161,7 +169,11 @@ pub(super) fn instruction(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
             let tag = if d.bits == 64 { "X_x" } else { "W_w" };
             encode(
                 &format!("{root}_asimdins_{tag}"),
-                &[("Rd", d.number), ("Rn", n.number), ("imm5", n.imm5())],
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n.number),
+                    (FieldId::imm5, n.imm5()),
+                ],
             )
             .map(Some)
         }

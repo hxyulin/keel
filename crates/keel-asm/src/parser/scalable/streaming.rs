@@ -1,6 +1,7 @@
 //! Streaming-compatible Z memory and predicates. Gather/scatter and fault-first
 //! forms are deliberately outside this contiguous-memory increment.
 use super::{lane, number};
+use crate::FieldId;
 use crate::parser::{count, integer, reg, shift};
 use crate::{TargetFeatures, encode_with_features};
 
@@ -48,11 +49,11 @@ pub(super) fn instruction(
         (
             format!("{op}_p_p_rr_"),
             vec![
-                ("Pd", pd),
-                ("size", size),
-                ("Rn", rn.number),
-                ("Rm", rm.number),
-                ("sf", u32::from(rn.bits == 64)),
+                (FieldId::Pd, pd),
+                (FieldId::size, size),
+                (FieldId::Rn, rn.number),
+                (FieldId::Rm, rm.number),
+                (FieldId::sf, u32::from(rn.bits == 64)),
             ],
         )
     } else if op == "addvl" {
@@ -66,9 +67,9 @@ pub(super) fn instruction(
         (
             "addvl_r_ri_".into(),
             vec![
-                ("Rd", rd.number),
-                ("Rn", rn.number),
-                ("imm6", imm as u32 & 63),
+                (FieldId::Rd, rd.number),
+                (FieldId::Rn, rn.number),
+                (FieldId::imm6, imm as u32 & 63),
             ],
         )
     } else {
@@ -109,7 +110,11 @@ pub(super) fn instruction(
         if rn.bits != 64 {
             return Err("Z memory base must be X or SP".into());
         }
-        let mut fields = vec![("Zt", zt), ("Pg", pg), ("Rn", rn.number)];
+        let mut fields = vec![
+            (FieldId::Zt, zt),
+            (FieldId::Pg, pg),
+            (FieldId::Rn, rn.number),
+        ];
         let mode = if addr.len() == 1 || addr[1].starts_with('#') {
             let imm = if addr.len() == 1 {
                 0
@@ -122,7 +127,7 @@ pub(super) fn instruction(
             if !(-8..=7).contains(&imm) {
                 return Err("Z memory vector-length offset must be -8..7".into());
             }
-            fields.push(("imm4", imm as u32 & 15));
+            fields.push((FieldId::imm4, imm as u32 & 15));
             "bi"
         } else {
             let rm = reg(addr[1], false, false)?;
@@ -140,7 +145,7 @@ pub(super) fn instruction(
             if amount != width {
                 return Err("Z memory index shift must match transfer width".into());
             }
-            fields.push(("Rm", rm.number));
+            fields.push((FieldId::Rm, rm.number));
             "br"
         };
         let name = if load {
@@ -151,9 +156,9 @@ pub(super) fn instruction(
             )
         } else {
             if width < 2 {
-                fields.push(("size", size));
+                fields.push((FieldId::size, size));
             } else if width == 2 {
-                fields.push(("sz", size - 2));
+                fields.push((FieldId::sz, size - 2));
             }
             format!("{op}_z_p_{mode}_")
         };

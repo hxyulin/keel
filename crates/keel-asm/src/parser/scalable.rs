@@ -4,6 +4,7 @@ mod matrix;
 mod streaming;
 
 use super::{count, integer, reg, shift, unsigned};
+use crate::FieldId;
 use crate::{TargetFeatures, encode_with_features};
 
 fn number(text: &str, prefix: &str, max: u32) -> Result<u32, String> {
@@ -110,9 +111,9 @@ pub(super) fn instruction(
             (
                 op.to_ascii_uppercase(),
                 vec![
-                    ("op1", 3),
-                    ("op2", 3),
-                    ("CRm", target | u32::from(op == "smstart")),
+                    (FieldId::op1, 3),
+                    (FieldId::op2, 3),
+                    (FieldId::CRm, target | u32::from(op == "smstart")),
                 ],
             )
         }
@@ -122,9 +123,12 @@ pub(super) fn instruction(
             (
                 "ptrue_p_s_".into(),
                 vec![
-                    ("Pd", pd),
-                    ("size", size),
-                    ("pattern", pattern(a.get(1).copied().unwrap_or("all"))?),
+                    (FieldId::Pd, pd),
+                    (FieldId::size, size),
+                    (
+                        FieldId::pattern,
+                        pattern(a.get(1).copied().unwrap_or("all"))?,
+                    ),
                 ],
             )
         }
@@ -134,7 +138,7 @@ pub(super) fn instruction(
             if size != 0 {
                 return Err("pfalse requires .b".into());
             }
-            ("pfalse_p_".into(), vec![("Pd", pd)])
+            ("pfalse_p_".into(), vec![(FieldId::Pd, pd)])
         }
         "rdvl" => {
             count(&a, 2, 2)?;
@@ -145,7 +149,7 @@ pub(super) fn instruction(
             }
             (
                 "rdvl_r_i_".into(),
-                vec![("Rd", rd.number), ("imm6", (imm as u32) & 63)],
+                vec![(FieldId::Rd, rd.number), (FieldId::imm6, (imm as u32) & 63)],
             )
         }
         "cntb" | "cnth" | "cntw" | "cntd" => {
@@ -169,9 +173,12 @@ pub(super) fn instruction(
             (
                 format!("{op}_r_s_"),
                 vec![
-                    ("Rd", rd.number),
-                    ("pattern", pattern(a.get(1).copied().unwrap_or("all"))?),
-                    ("imm4", multiplier - 1),
+                    (FieldId::Rd, rd.number),
+                    (
+                        FieldId::pattern,
+                        pattern(a.get(1).copied().unwrap_or("all"))?,
+                    ),
+                    (FieldId::imm4, multiplier - 1),
                 ],
             )
         }
@@ -185,7 +192,11 @@ pub(super) fn instruction(
                 }
                 return encode_with_features(
                     "dup_z_r_",
-                    &[("Zd", zd), ("size", size), ("Rn", rn.number)],
+                    &[
+                        (FieldId::Zd, zd),
+                        (FieldId::size, size),
+                        (FieldId::Rn, rn.number),
+                    ],
                     features,
                 )
                 .map(Some);
@@ -209,10 +220,10 @@ pub(super) fn instruction(
             (
                 "dup_z_i_".into(),
                 vec![
-                    ("Zd", zd),
-                    ("size", size),
-                    ("sh", sh),
-                    ("imm8", (imm as u32) & 255),
+                    (FieldId::Zd, zd),
+                    (FieldId::size, size),
+                    (FieldId::sh, sh),
+                    (FieldId::imm8, (imm as u32) & 255),
                 ],
             )
         }
@@ -226,7 +237,12 @@ pub(super) fn instruction(
             }
             (
                 "lastb_r_p_z_".into(),
-                vec![("Rd", rd.number), ("Pg", pg), ("Zn", zn), ("size", size)],
+                vec![
+                    (FieldId::Rd, rd.number),
+                    (FieldId::Pg, pg),
+                    (FieldId::Zn, zn),
+                    (FieldId::size, size),
+                ],
             )
         }
         _ => {
@@ -241,9 +257,9 @@ pub(super) fn instruction(
             if logical && size != 3 {
                 return Err("unpredicated scalable logical forms require .d".into());
             }
-            let mut fields = vec![("Zd", zd), ("Zn", zn), ("Zm", zm)];
+            let mut fields = vec![(FieldId::Zd, zd), (FieldId::Zn, zn), (FieldId::Zm, zm)];
             if !logical {
-                fields.push(("size", size));
+                fields.push((FieldId::size, size));
             }
             (format!("{op}_z_zz_"), fields)
         }

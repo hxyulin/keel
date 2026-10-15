@@ -42,11 +42,10 @@ mod debug;
 mod float;
 mod memory;
 mod relocate;
+mod scalable;
 mod scanning;
 mod storage;
 mod text;
-mod scalable;
-
 mod vector;
 
 use super::{Assembly, Error, InstructionLocation, Symbol, encode};
@@ -374,7 +373,6 @@ pub(super) fn assemble(
     for _ in 0..32 {
         let (assembly, symbolic_leb, locations) =
             assemble_pass(source, previous.as_ref(), metrics, features)?;
-
         if !symbolic_leb {
             return Ok((assembly, locations));
         }
@@ -408,7 +406,6 @@ fn assemble_pass(
     features: crate::TargetFeatures,
 ) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
     let mut locations = Vec::new();
-
     // Declare scratch first so every collection (including nested owners) drops
     // before its backing arena, on success and on every early error return.
     // Each symbolic LEB pass gets a fresh arena; `previous` is independently owned.
