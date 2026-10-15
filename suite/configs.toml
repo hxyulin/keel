@@ -3,7 +3,7 @@
 # Benchmark ratios are against this configuration.
 baseline = "clang-O0"
 # What `keel-suite test` builds when no `--config` is given.
-test = ["keel", "keel-O"]
+test = ["keel", "keel-O", "keel-select", "keel-O-select"]
 
 [[config]]
 name = "clang-O0"
@@ -43,3 +43,79 @@ flags = ["-g"]
 name = "keel-O"
 compiler = "keel"
 flags = ["-O"]
+
+# Optional target selection; individual passes support ablation measurements.
+[[config]]
+name = "keel-select"
+compiler = "keel"
+flags = ["--isel", "all"]
+
+[[config]]
+name = "keel-O-select"
+compiler = "keel"
+flags = ["-O", "--isel", "all"]
+
+[[config]]
+name = "keel-O-trees"
+compiler = "keel"
+flags = ["-O", "--isel", "trees"]
+
+[[config]]
+name = "keel-O-folds"
+compiler = "keel"
+flags = ["-O", "--isel", "folds"]
+
+[[config]]
+name = "keel-O-hints"
+compiler = "keel"
+flags = ["-O", "--isel", "hints"]
+
+# Independently selectable effort presets; opt-in for benchmark comparisons.
+[[config]]
+name = "keel-basic"
+compiler = "keel"
+flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
+
+[[config]]
+name = "keel-fast"
+compiler = "keel"
+flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
+
+[[config]]
+name = "keel-full"
+compiler = "keel"
+flags = ["--opt-tier", "full", "--isel-tier", "full", "--regalloc", "full"]
+
+# SCCP adds propagation before instruction combining.
+# Opt-in until measurements justify changing the default pipelines.
+[[config]]
+name = "keel-basic-sccp"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,dce"]
+
+[[config]]
+name = "keel-O-sccp"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,sccp,instcombine,simplify-cfg,gvn,dce,gcm"]
+
+[[config]]
+name = "keel-O-combine"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm"]
+
+[[config]]
+name = "keel-O-phi"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,phi-simplify,simplify-cfg,gvn,phi-simplify,dce,gcm"]
+
+# Historical numeric-fold-only Full pipeline, retained for comparisons.
+[[config]]
+name = "keel-O-legacy"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,const-fold,simplify-cfg,gvn,dce,gcm"]
+
+# Cleanup after code motion avoids the early phi/GVN/GCM runtime regression.
+[[config]]
+name = "keel-O-phi-late"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,dce,gcm,phi-simplify"]

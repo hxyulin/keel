@@ -2,24 +2,13 @@
 //! `f32` through the `at_width!` macro: f32 arithmetic must round to f32 at
 //! every step, so computing in f64 and narrowing at the end would be wrong.
 
-use keel_ir::{BinaryOp, FloatCC, Function, InstData, Type, UnaryOp, Value, ValueDef};
+use keel_ir::{BinaryOp, FloatCC, Type, UnaryOp};
 
 /// A float constant: its type and its bits (`f32` in the low 32).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Float {
     pub ty: Type,
     pub bits: u64,
-}
-
-/// The value of `v` if it is an `fconst`.
-pub(crate) fn constant(func: &Function, v: Value) -> Option<Float> {
-    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
-        return None;
-    };
-    match *func.inst_data(inst) {
-        InstData::Fconst { ty, bits } => Some(Float { ty, bits }),
-        _ => None,
-    }
 }
 
 /// Runs `$body` with `$x...` bound to the operands as native floats of

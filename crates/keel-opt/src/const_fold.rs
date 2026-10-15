@@ -6,10 +6,8 @@
 //! operation that would trap (division by zero, `sdiv MIN, -1`) is left
 //! alone, so it still traps at run time.
 //!
-//! Blocks are visited in reverse postorder and definitions dominate their
-//! uses, so a chain `v1 = iadd v0, v0; v2 = imul v1, v1` folds in one pass.
-//! A `select` with a constant condition is replaced by the chosen arm,
-//! constant or not.
+//! The direct pass visits definitions before uses in reverse postorder.
+//! `sccp` also uses this numerical kernel with a data-flow constant lookup.
 //!
 //! Floats fold with the host's IEEE 754 arithmetic, which rounds like the
 //! target's. Which NaN an operation produces is unspecified in the IR, so
@@ -17,7 +15,10 @@
 
 use fp::Float;
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-use keel_ir::{BinaryOp, ConvertOp, Function, InstData, IntCC, Type, UnaryOp, Value, ValueDef};
+use keel_ir::{
+    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, OverflowOp, Type, UnaryOp,
+    Value, ValueDef,
+};
 
 mod fp;
 
@@ -27,6 +28,12 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for &block in domtree.rpo() {
         for inst in func.block_insts(block).to_vec() {
+            if let Some(constants) = fold_overflow(func.inst_data(inst), |v| constant_data(func, v))
+            {
+                replace_with_constants(func, inst, &constants);
+                changed = true;
+                continue;
+            }
             if let InstData::Select { args } = *func.inst_data(inst) {
                 if let Some(c) = constant(func, args[0]) {
                     let chosen = if c.is_zero() { args[2] } else { args[1] };
@@ -37,7 +44,13 @@ pub fn run(func: &mut Function) -> bool {
                 }
                 continue;
             }
-            if let Some(folded) = fold(func, func.inst_data(inst)) {
+            if matches!(
+                func.inst_data(inst),
+                InstData::Iconst { .. } | InstData::Fconst { .. }
+            ) {
+                continue;
+            }
+            if let Some(folded) = fold(func.inst_data(inst), |v| constant_data(func, v)) {
                 *func.inst_data_mut(inst) = folded;
                 changed = true;
             }
@@ -46,11 +59,99 @@ pub fn run(func: &mut Function) -> bool {
     changed
 }
 
-/// The constant instruction `data` computes, if its operands are constants.
-fn fold(func: &Function, data: &InstData) -> Option<InstData> {
-    let int = |v: Value| constant(func, v);
-    let float = |v: Value| fp::constant(func, v);
+/// Fold both results of checked arithmetic. i128 operands stay unfolded:
+/// their full result cannot generally be represented by an i64 immediate.
+pub(crate) fn fold_overflow(
+    data: &InstData,
+    lookup: impl Fn(Value) -> Option<InstData>,
+) -> Option<[InstData; 2]> {
+    let InstData::Overflow { op, args } = *data else {
+        return None;
+    };
+    let get = |v| match lookup(v)? {
+        InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
+            Some(Const::new(ty, imm as u64))
+        }
+        _ => None,
+    };
+    let (a, b) = (get(args[0])?, get(args[1])?);
+    let width = a.width();
+    let unsigned_max = (1u128 << width) - 1;
+    let (wrapped, overflow) = match op {
+        OverflowOp::Uadd | OverflowOp::Umul => {
+            let exact = if op == OverflowOp::Uadd {
+                u128::from(a.bits) + u128::from(b.bits)
+            } else {
+                u128::from(a.bits) * u128::from(b.bits)
+            };
+            (exact as u64, exact > unsigned_max)
+        }
+        OverflowOp::Usub => (a.bits.wrapping_sub(b.bits), a.bits < b.bits),
+        OverflowOp::Sadd | OverflowOp::Ssub | OverflowOp::Smul => {
+            let (a, b) = (i128::from(a.signed()), i128::from(b.signed()));
+            let exact = match op {
+                OverflowOp::Sadd => a + b,
+                OverflowOp::Ssub => a - b,
+                _ => a * b,
+            };
+            let low = -(1i128 << (width - 1));
+            let high = (1i128 << (width - 1)) - 1;
+            (exact as u64, exact < low || exact > high)
+        }
+    };
+    Some([
+        InstData::Iconst {
+            ty: a.ty,
+            imm: Const::new(a.ty, wrapped).signed(),
+        },
+        InstData::Iconst {
+            ty: Type::I8,
+            imm: i64::from(overflow),
+        },
+    ])
+}
+
+pub(crate) fn constant_data(func: &Function, value: Value) -> Option<InstData> {
+    let ValueDef::Result(inst, _) = func.value_def(func.resolve(value)) else {
+        return None;
+    };
+    match func.inst_data(inst) {
+        data @ (InstData::Iconst { .. } | InstData::Fconst { .. }) => Some(data.clone()),
+        _ => None,
+    }
+}
+
+/// Materialize a multi-result fold without changing any result's type or
+/// dropping an independently used overflow flag.
+pub(crate) fn replace_with_constants(func: &mut Function, inst: Inst, constants: &[InstData]) {
+    let results = func.inst_results(inst).to_vec();
+    assert_eq!(results.len(), constants.len());
+    for (result, constant) in results.into_iter().zip(constants) {
+        let copy = func.insert_inst(InsertPoint::Before(inst), constant.clone());
+        func.set_inst_loc(copy, func.inst_loc(inst));
+        func.replace_all_uses(result, func.first_result(copy));
+    }
+    func.remove_inst(inst);
+}
+
+/// Evaluate using constants supplied by the data-flow solver. The numerical
+/// kernel is shared with the direct constant queries used by CFG cleanup.
+pub(crate) fn fold(
+    data: &InstData,
+    lookup: impl Fn(Value) -> Option<InstData>,
+) -> Option<InstData> {
+    let int = |v: Value| match lookup(v)? {
+        InstData::Iconst { ty, imm } if ty.is_int() && ty != Type::I128 => {
+            Some(Const::new(ty, imm as u64))
+        }
+        _ => None,
+    };
+    let float = |v: Value| match lookup(v)? {
+        InstData::Fconst { ty, bits } => Some(Float { ty, bits }),
+        _ => None,
+    };
     let folded = match *data {
+        InstData::Iconst { .. } | InstData::Fconst { .. } => return Some(data.clone()),
         InstData::Binary { op, args } if op.is_float() => {
             Folded::Float(fp::binary(op, float(args[0])?, float(args[1])?))
         }
@@ -64,10 +165,10 @@ fn fold(func: &Function, data: &InstData) -> Option<InstData> {
         InstData::Convert { ty: Type::I128, .. } => return None,
         InstData::Convert { op, ty, arg } => match op {
             ConvertOp::Fpext | ConvertOp::Fptrunc => Folded::Float(fp::convert(ty, float(arg)?)),
-            ConvertOp::Fptosi | ConvertOp::Fptoui => {
-                let n = fp::to_int(float(arg)?, op == ConvertOp::Fptosi, ty);
-                Folded::Int(Const::new(ty, n))
-            }
+            ConvertOp::Fptosi | ConvertOp::Fptoui => Folded::Int(Const::new(
+                ty,
+                fp::to_int(float(arg)?, op == ConvertOp::Fptosi, ty),
+            )),
             ConvertOp::Sitofp => Folded::Float(fp::from_int(int(arg)?.signed().into(), ty)),
             ConvertOp::Uitofp => Folded::Float(fp::from_int(int(arg)?.bits.into(), ty)),
             ConvertOp::Bitcast if ty.is_float() => Folded::Float(Float {
@@ -332,5 +433,57 @@ mod tests {
         );
         assert!(icmp(IntCC::Ult, c(Type::I8, 1), c(Type::I8, -1)));
         assert!(!icmp(IntCC::Slt, c(Type::I8, 1), c(Type::I8, -1)));
+    }
+    #[test]
+    fn checked_arithmetic_matches_rust_for_every_pair_of_i8_values() {
+        use keel_ir::EntityRef;
+        let (a, b) = (Value::new(0), Value::new(1));
+        for op in [
+            OverflowOp::Uadd,
+            OverflowOp::Usub,
+            OverflowOp::Umul,
+            OverflowOp::Sadd,
+            OverflowOp::Ssub,
+            OverflowOp::Smul,
+        ] {
+            for x in 0u16..256 {
+                for y in 0u16..256 {
+                    let (result, overflow) = match op {
+                        OverflowOp::Uadd => (x as u8).overflowing_add(y as u8),
+                        OverflowOp::Usub => (x as u8).overflowing_sub(y as u8),
+                        OverflowOp::Umul => (x as u8).overflowing_mul(y as u8),
+                        _ => {
+                            let (r, o) = match op {
+                                OverflowOp::Sadd => (x as i8).overflowing_add(y as i8),
+                                OverflowOp::Ssub => (x as i8).overflowing_sub(y as i8),
+                                _ => (x as i8).overflowing_mul(y as i8),
+                            };
+                            (r as u8, o)
+                        }
+                    };
+                    let folded = fold_overflow(&InstData::Overflow { op, args: [a, b] }, |v| {
+                        Some(InstData::Iconst {
+                            ty: Type::I8,
+                            imm: i64::from(if v == a { x } else { y }),
+                        })
+                    })
+                    .unwrap();
+                    assert_eq!(
+                        folded,
+                        [
+                            InstData::Iconst {
+                                ty: Type::I8,
+                                imm: i64::from(result as i8)
+                            },
+                            InstData::Iconst {
+                                ty: Type::I8,
+                                imm: i64::from(overflow)
+                            }
+                        ],
+                        "{op:?}, {x}, {y}"
+                    );
+                }
+            }
+        }
     }
 }

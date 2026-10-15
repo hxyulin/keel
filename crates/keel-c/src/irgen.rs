@@ -25,8 +25,8 @@ use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
     DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic,
-    Language, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc, StackSlot,
-    Symbol, Type, Value,
+    Language, MemoryFlags, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc,
+    StackSlot, Symbol, Type, Value,
 };
 use std::collections::HashMap;
 
@@ -205,7 +205,7 @@ impl<'p> Gen<'p> {
             Ty::Struct(_) => AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
-                purpose: Purpose::ByVal(self.types().abi_layout(ty)),
+                purpose: Purpose::ByVal(self.aggregate_layout(ty)?),
             },
             Ty::Int(k) if k.size() < 4 => AbiParam {
                 ty: ty.ir(),
@@ -220,6 +220,18 @@ impl<'p> Gen<'p> {
         })
     }
 
+    fn aggregate_layout(&self, ty: &Ty) -> Result<keel_ir::Layout, &'static str> {
+        if self.types().align(ty) > 16 {
+            return Err("aggregates aligned above 16 bytes passed by value");
+        }
+        if self.p.target == keel_ir::Target::X86_64LinuxGnu
+            && self.types().has_unaligned_fields(ty, 0)
+        {
+            return Err("aggregates with unaligned fields passed by value on x86-64");
+        }
+        Ok(self.types().abi_layout(ty))
+    }
+
     /// The keel signature of a C function type. A struct result becomes a
     /// leading `sret` parameter. `g` is the function, if known by name.
     fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
@@ -228,7 +240,10 @@ impl<'p> Gen<'p> {
             sig.params.push(AbiParam {
                 ty: Type::Ptr,
                 ext: ArgExt::None,
-                purpose: Purpose::Sret(self.types().abi_layout(&fty.ret)),
+                purpose: Purpose::Sret(
+                    self.aggregate_layout(&fty.ret)
+                        .map_err(|t| self.unsupported(g, t))?,
+                ),
             });
         } else if fty.ret != Ty::Void {
             sig.returns.push(
@@ -290,12 +305,31 @@ impl<'p> Gen<'p> {
                 Storage::Var(fg.b.declare_var(local.ty.ir()))
             } else {
                 let types = fg.g.types();
-                let size = types.size(&local.ty).max(1) as u32;
-                let align = types.align(&local.ty) as u32;
-                if align > 16 {
-                    return Err(Error::new(def.loc, "alignment above 16 is not supported"));
+                let size = types.size(&local.ty).max(1);
+                let align = local.align.max(types.align(&local.ty));
+                let reserve = size
+                    .checked_add(if align > 16 { align - 1 } else { 0 })
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| Error::new(def.loc, "local object exceeds the IR stack-slot size limit (including alignment padding)"))?;
+                let slot = fg.b.func.create_stack_slot(reserve, align.min(16) as u32);
+                if align <= 16 {
+                    Storage::Slot(slot)
+                } else {
+                    let base = fg.b.ins().stack_addr(slot);
+                    let bits = fg.b.ins().convert(ConvertOp::PtrToInt, Type::I64, base);
+                    let padding = fg.b.ins().iconst(Type::I64, (align - 1) as i64);
+                    let upper = fg.b.ins().iadd(bits, padding);
+                    let mask = fg.b.ins().iconst(Type::I64, -(align as i64));
+                    let rounded = fg.b.ins().and(upper, mask);
+                    let addr = fg.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, rounded);
+                    let debug_slot = fg.g.debug.then(|| {
+                        let pointer = fg.b.func.create_stack_slot(8, 8);
+                        let at = fg.b.ins().stack_addr(pointer);
+                        fg.b.ins().store(addr, at);
+                        pointer
+                    });
+                    Storage::Aligned { addr, debug_slot }
                 }
-                Storage::Slot(fg.b.func.create_stack_slot(size, align))
             };
             fg.locals.push(storage);
         }
@@ -321,7 +355,15 @@ impl<'p> Gen<'p> {
                 fg.scopes.push(own.or(parent));
             }
             for (id, local) in def.locals.iter().enumerate() {
-                if let Storage::Slot(slot) = fg.locals[id]
+                let location = match fg.locals[id] {
+                    Storage::Slot(slot) => Some((slot, false)),
+                    Storage::Aligned {
+                        debug_slot: Some(slot),
+                        ..
+                    } => Some((slot, true)),
+                    _ => None,
+                };
+                if let Some((slot, indirect)) = location
                     && named(&local)
                 {
                     let ty =
@@ -331,6 +373,7 @@ impl<'p> Gen<'p> {
                         name: local.name.clone(),
                         ty,
                         slot,
+                        indirect,
                         param: def.params.contains(&id),
                         scope: local.scope.and_then(|s| fg.scopes[s]),
                     });
@@ -357,7 +400,16 @@ impl<'p> Gen<'p> {
                 }
                 Storage::Slot(slot) => {
                     let addr = fg.b.ins().stack_addr(slot);
-                    fg.b.ins().store(value, addr);
+                    let flags = fg.object_flags(&def.locals[id].ty, &def.locals[id].sugar);
+                    fg.b.ins().store_with_flags(value, addr, flags);
+                }
+                Storage::Aligned { addr, .. } => {
+                    if def.locals[id].ty.is_struct() {
+                        fg.copy(addr, value, &def.locals[id].ty);
+                    } else {
+                        let flags = fg.object_flags(&def.locals[id].ty, &def.locals[id].sugar);
+                        fg.b.ins().store_with_flags(value, addr, flags);
+                    }
                 }
                 Storage::Addr(_) => unreachable!(),
             }
@@ -383,7 +435,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
-        let align = types.align(&global.ty).max(1) as u32;
+        let align = global.align.max(types.align(&global.ty)).max(1) as u32;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
         let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
@@ -447,6 +499,12 @@ impl<'p> Gen<'p> {
         let mut items = Vec::new();
         let mut pos = 0;
         for (offset, symbol, addend) in relocs {
+            if !offset.is_multiple_of(8) {
+                return Err(Error::new(
+                    Loc::default(),
+                    "unaligned pointer relocations are not supported",
+                ));
+            }
             push_bytes(&mut items, &bytes[pos..offset]);
             let Ok(addend) = u32::try_from(addend) else {
                 return Err(Error::new(
@@ -516,19 +574,31 @@ enum Storage {
     Slot(StackSlot),
     /// A struct parameter: the address of the callee's copy.
     Addr(Value),
+    /// An object aligned within a larger fixed slot. In debug builds a
+    /// second slot holds its address for a DW_OP_deref location.
+    Aligned {
+        addr: Value,
+        debug_slot: Option<StackSlot>,
+    },
 }
 
 /// Where an assignment goes.
 enum Place {
     Var(Variable),
-    Mem(Value, Type),
+    Mem(Value, Type, MemoryFlags),
     Bits {
+        flags: MemoryFlags,
         addr: Value,
         unit: Type,
         field: BitField,
         signed: bool,
     },
-    Aggregate(Value),
+    Aggregate {
+        addr: Value,
+        size: u32,
+        align: u32,
+        flags: MemoryFlags,
+    },
 }
 
 struct FnGen<'g, 'p, 'f> {
@@ -1066,11 +1136,11 @@ impl FnGen<'_, '_, '_> {
             ExprKind::Assign(lhs, rhs) => {
                 let place = self.place(lhs)?.unwrap();
                 let v = self.val(rhs)?;
-                self.store_place(&place, v, &lhs.ty);
-                match place {
-                    Place::Aggregate(addr) => addr,
-                    _ => v,
-                }
+                self.store_place(&place, v);
+                // The assignment expression yields the value written;
+                // reading its destination again can observe a later mutation
+                // (or perform an extra read of volatile destination storage).
+                v
             }
             ExprKind::OpAssign { op, ty, lhs, rhs } => {
                 let place = self.place(lhs)?.unwrap();
@@ -1079,7 +1149,7 @@ impl FnGen<'_, '_, '_> {
                 let r = self.val(rhs)?;
                 let new = self.arith(*op, ty, old, r, e.loc)?;
                 let new = self.convert(new, ty, &lhs.ty, e.loc)?;
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 new
             }
             ExprKind::PtrOpAssign { lhs, rhs, size } => {
@@ -1087,7 +1157,7 @@ impl FnGen<'_, '_, '_> {
                 let old = self.load_place(&place);
                 let offset = self.scaled(rhs, *size)?;
                 let new = self.b.ins().ptradd(old, offset);
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 new
             }
             ExprKind::IncDec { lhs, inc, prefix } => {
@@ -1131,7 +1201,7 @@ impl FnGen<'_, '_, '_> {
                         }
                     }
                 };
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 if *prefix { new } else { old }
             }
             ExprKind::Cond(c, a, b) => {
@@ -1383,6 +1453,39 @@ impl FnGen<'_, '_, '_> {
 
     // ---- places ----
 
+    /// Conservatively retain volatile subobjects during aggregate copies.
+    /// Pointer pointee qualifiers do not qualify the pointer object itself.
+    fn object_flags(&self, ty: &Ty, sugar: &Sugar) -> MemoryFlags {
+        let volatile = sugar.is_volatile(&self.g.p.typedefs)
+            || match ty {
+                Ty::Array(elem, _) => {
+                    self.object_flags(elem, &sugar.pointee(&self.g.p.typedefs))
+                        .volatile
+                }
+                Ty::Struct(id) => self.g.p.structs[*id]
+                    .members
+                    .iter()
+                    .any(|m| self.object_flags(&m.ty, &m.sugar).volatile),
+                _ => false,
+            };
+        MemoryFlags {
+            volatile,
+            ..MemoryFlags::default()
+        }
+    }
+
+    fn aggregate_place(&self, addr: Value, ty: &Ty, flags: MemoryFlags, loc: Loc) -> R<Place> {
+        let size = u32::try_from(self.size(ty)).map_err(|_| {
+            Error::new(loc, "aggregate access exceeds the IR stack-slot size limit")
+        })?;
+        Ok(Place::Aggregate {
+            addr,
+            size,
+            align: self.g.types().align(ty) as u32,
+            flags,
+        })
+    }
+
     /// Where an lvalue lives. `None` for a void-typed dereference.
     fn place(&mut self, e: &Expr) -> R<Option<Place>> {
         if e.ty == Ty::Void {
@@ -1397,11 +1500,13 @@ impl FnGen<'_, '_, '_> {
             base,
             offset,
             bits: Some(field),
+            ..
         } = &e.kind
         {
             let base = self.addr(base)?;
             let addr = self.offset(base, *offset);
             return Ok(Some(Place::Bits {
+                flags: self.object_flags(&e.ty, &e.sugar),
                 addr,
                 unit: e.ty.ir(),
                 field: *field,
@@ -1409,29 +1514,53 @@ impl FnGen<'_, '_, '_> {
             }));
         }
         let addr = self.addr(e)?;
+        let flags = self.object_flags(&e.ty, &e.sugar);
         Ok(Some(if Self::is_aggregate(&e.ty) {
-            Place::Aggregate(addr)
+            self.aggregate_place(addr, &e.ty, flags, e.loc)?
         } else {
             if let Some(name) = e.ty.unusable() {
                 return Err(Error::new(e.loc, format!("`{name}` is not supported")));
             }
-            Place::Mem(addr, e.ty.ir())
+            Place::Mem(addr, e.ty.ir(), flags)
         }))
     }
 
     fn load_place(&mut self, place: &Place) -> Value {
         match *place {
             Place::Var(var) => self.b.use_var(var),
-            Place::Mem(addr, ty) => self.b.ins().load(ty, addr),
-            Place::Aggregate(addr) => addr,
+            Place::Mem(addr, ty, flags) => self.b.ins().load_with_flags(ty, addr, flags),
+            Place::Aggregate {
+                addr,
+                size,
+                align,
+                flags,
+            } => {
+                if !flags.volatile {
+                    return addr;
+                }
+                // Materialize a volatile aggregate read now, before an
+                // assignment, return or by-value ABI copy loses the lvalue.
+                // This private byte snapshot is never exposed as an aligned C object.
+                let slot = self.b.func.create_stack_slot(size, align.min(16));
+                let copy = self.b.ins().stack_addr(slot);
+                self.copy_bytes_with_flags(
+                    copy,
+                    addr,
+                    u64::from(size),
+                    MemoryFlags::default(),
+                    flags,
+                );
+                copy
+            }
             Place::Bits {
+                flags,
                 addr,
                 unit,
                 field,
                 signed,
             } => {
                 let bits = i64::from(unit.bytes().unwrap() * 8);
-                let word = self.b.ins().load(unit, addr);
+                let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let left = bits - i64::from(field.shift) - i64::from(field.width);
                 let l = self.b.ins().iconst(unit, left);
                 let up = self.b.ins().shl(word, l);
@@ -1445,18 +1574,26 @@ impl FnGen<'_, '_, '_> {
         }
     }
 
-    fn store_place(&mut self, place: &Place, v: Value, ty: &Ty) {
+    fn store_place(&mut self, place: &Place, v: Value) {
         match *place {
             Place::Var(var) => self.b.def_var(var, v),
-            Place::Mem(addr, _) => {
-                self.b.ins().store(v, addr);
+            Place::Mem(addr, _, flags) => {
+                self.b.ins().store_with_flags(v, addr, flags);
             }
-            Place::Aggregate(addr) => self.copy(addr, v, ty),
+            Place::Aggregate {
+                addr, size, flags, ..
+            } => {
+                self.copy_bytes_with_flags(addr, v, u64::from(size), flags, MemoryFlags::default())
+            }
             Place::Bits {
-                addr, unit, field, ..
+                flags,
+                addr,
+                unit,
+                field,
+                ..
             } => {
                 let mask = ((1u128 << field.width) - 1) << field.shift;
-                let word = self.b.ins().load(unit, addr);
+                let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let keep = self.b.ins().iconst(unit, !mask as i64);
                 let kept = self.b.ins().and(word, keep);
                 let shift = self.b.ins().iconst(unit, i64::from(field.shift));
@@ -1464,7 +1601,7 @@ impl FnGen<'_, '_, '_> {
                 let m = self.b.ins().iconst(unit, mask as i64);
                 let new = self.b.ins().and(moved, m);
                 let merged = self.b.ins().or(kept, new);
-                self.b.ins().store(merged, addr);
+                self.b.ins().store_with_flags(merged, addr, flags);
             }
         }
     }
@@ -1482,7 +1619,7 @@ impl FnGen<'_, '_, '_> {
         Ok(match &e.kind {
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Slot(slot) => self.b.ins().stack_addr(slot),
-                Storage::Addr(v) => v,
+                Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
                 Storage::Var(_) => {
                     return Err(Error::new(e.loc, "internal error: address of a register"));
                 }
@@ -1510,10 +1647,11 @@ impl FnGen<'_, '_, '_> {
             }
             ExprKind::CompoundLit(id, init) => {
                 self.init_local(*id, init)?;
-                let Storage::Slot(slot) = self.locals[*id] else {
-                    unreachable!()
-                };
-                self.b.ins().stack_addr(slot)
+                match self.locals[*id] {
+                    Storage::Slot(slot) => self.b.ins().stack_addr(slot),
+                    Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
+                    Storage::Var(_) => unreachable!(),
+                }
             }
             // Struct-valued calls, assignments, conditionals: their value
             // is already an address.
@@ -1536,6 +1674,37 @@ impl FnGen<'_, '_, '_> {
         Ok(sig)
     }
 
+    /// Proof used only to defer ordinary aggregate argument copying. Any
+    /// unknown effect, volatile access, call or initialization is a barrier.
+    fn may_change_memory(&self, e: &Expr) -> bool {
+        if self.object_flags(&e.ty, &e.sugar).volatile {
+            return true;
+        }
+        match &e.kind {
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::LabelAddr(_)
+            | ExprKind::Local(_)
+            | ExprKind::Global(_) => false,
+            ExprKind::Unary(_, a)
+            | ExprKind::Cast(a)
+            | ExprKind::Deref(a)
+            | ExprKind::Addr(a)
+            | ExprKind::Member { base: a, .. } => self.may_change_memory(a),
+            ExprKind::Binary(_, a, b)
+            | ExprKind::PtrAdd(a, b, _)
+            | ExprKind::PtrDiff(a, b, _)
+            | ExprKind::LogAnd(a, b)
+            | ExprKind::LogOr(a, b)
+            | ExprKind::Comma(a, b) => self.may_change_memory(a) || self.may_change_memory(b),
+            ExprKind::Cond(a, b, c) => {
+                self.may_change_memory(a) || self.may_change_memory(b) || self.may_change_memory(c)
+            }
+            _ => true,
+        }
+    }
+
     fn call(&mut self, f: &Expr, args: &[Expr], e: &Expr) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap().clone();
         self.set_loc(e.loc);
@@ -1551,7 +1720,19 @@ impl FnGen<'_, '_, '_> {
         } else {
             None
         };
-        for arg in args {
+        // The ABI consumes aggregate addresses at the call instruction.
+        // Freeze an argument's bytes now when later evaluation could change
+        // them. With no intervening effects, immediate ABI copying suffices.
+        let mut snapshots = Vec::new();
+        if args.iter().any(|arg| arg.ty.is_struct()) {
+            snapshots.resize(args.len(), false);
+            let mut later_effect = self.may_change_memory(f);
+            for (index, arg) in args.iter().enumerate().rev() {
+                snapshots[index] = later_effect;
+                later_effect |= self.may_change_memory(arg);
+            }
+        }
+        for (index, arg) in args.iter().enumerate() {
             if !fty.prototyped && arg.ty.is_struct() {
                 return Err(Error::new(arg.loc, "struct argument without a prototype"));
             }
@@ -1563,7 +1744,19 @@ impl FnGen<'_, '_, '_> {
                     "this variadic argument type is not supported",
                 ));
             }
-            vals.push(self.val(arg)?);
+            let mut value = self.val(arg)?;
+            if arg.ty.is_struct() && snapshots[index] {
+                let layout =
+                    self.aggregate_place(value, &arg.ty, MemoryFlags::default(), arg.loc)?;
+                let Place::Aggregate { size, align, .. } = layout else {
+                    unreachable!()
+                };
+                let slot = self.b.func.create_stack_slot(size.max(1), align);
+                let copy = self.b.ins().stack_addr(slot);
+                self.copy(copy, value, &arg.ty);
+                value = copy;
+            }
+            vals.push(value);
         }
         let extra: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         self.set_loc(e.loc);
@@ -1605,6 +1798,16 @@ impl FnGen<'_, '_, '_> {
         Ok(Some(match op {
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
+            Builtin::Overflow(op) => {
+                let (value, overflow) = ins.overflow(op, vals[0], vals[1]);
+                let flags = self.object_flags(
+                    args[2].ty.pointee().unwrap(),
+                    &args[2].sugar.pointee(&self.g.p.typedefs),
+                );
+                self.b.ins().store_with_flags(value, vals[2], flags);
+                overflow
+            }
+            Builtin::Hint => vals[0],
             Builtin::Signbit => {
                 let (int, bits) = match args[0].ty {
                     Ty::Float => (Type::I32, 31),
@@ -1694,13 +1897,20 @@ impl FnGen<'_, '_, '_> {
                     }
                     Builtin::AtomicCompareExchange => {
                         let ty = args[2].ty.ir();
-                        let expected = ins.load(ty, vals[1]);
+                        let flags = MemoryFlags {
+                            volatile: args[1]
+                                .sugar
+                                .pointee(&self.g.p.typedefs)
+                                .is_volatile(&self.g.p.typedefs),
+                            ..MemoryFlags::default()
+                        };
+                        let expected = ins.load_with_flags(ty, vals[1], flags);
                         let old = self
                             .b
                             .ins()
                             .atomic_cas(ordering, vals[0], expected, vals[2]);
                         // Unconditionally: on success it is the same value.
-                        self.b.ins().store(old, vals[1]);
+                        self.b.ins().store_with_flags(old, vals[1], flags);
                         self.b.ins().icmp(IntCC::Eq, old, expected)
                     }
                     _ => {
@@ -1710,6 +1920,10 @@ impl FnGen<'_, '_, '_> {
                         return Ok(None);
                     }
                 }
+            }
+            Builtin::Debugtrap => {
+                ins.intrinsic(Intrinsic::Debugtrap, &[]);
+                return Ok(None);
             }
             Builtin::Trap => {
                 ins.trap();
@@ -1723,16 +1937,29 @@ impl FnGen<'_, '_, '_> {
     // ---- memory ----
 
     /// Copies an object of type `ty` from `src` to `dst`: small ones with
-    /// loads and stores, big ones with `memcpy`.
+    /// loads and stores, big ones with `memmove` (self-assignment is valid).
     fn copy(&mut self, dst: Value, src: Value, ty: &Ty) {
         let size = self.size(ty);
-        self.copy_bytes(dst, src, size);
+        self.copy_bytes_with_flags(
+            dst,
+            src,
+            size,
+            MemoryFlags::default(),
+            MemoryFlags::default(),
+        );
     }
 
-    fn copy_bytes(&mut self, dst: Value, src: Value, size: u64) {
-        if size > 64 {
+    fn copy_bytes_with_flags(
+        &mut self,
+        dst: Value,
+        src: Value,
+        size: u64,
+        dst_flags: MemoryFlags,
+        src_flags: MemoryFlags,
+    ) {
+        if size > 64 && !dst_flags.volatile && !src_flags.volatile {
             let n = self.b.ins().iconst(Type::I64, size as i64);
-            self.b.ins().intrinsic(Intrinsic::Memcpy, &[dst, src, n]);
+            self.b.ins().intrinsic(Intrinsic::Memmove, &[dst, src, n]);
             return;
         }
         // aarch64 allows unaligned loads and stores, so use wide ones.
@@ -1746,15 +1973,15 @@ impl FnGen<'_, '_, '_> {
             while size - off >= chunk {
                 let s = self.offset(src, off);
                 let d = self.offset(dst, off);
-                let v = self.b.ins().load(ty, s);
-                self.b.ins().store(v, d);
+                let v = self.b.ins().load_with_flags(ty, s, src_flags);
+                self.b.ins().store_with_flags(v, d, dst_flags);
                 off += chunk;
             }
         }
     }
 
-    fn zero_bytes(&mut self, dst: Value, size: u64) {
-        if size > 64 {
+    fn zero_bytes_with_flags(&mut self, dst: Value, size: u64, flags: MemoryFlags) {
+        if size > 64 && !flags.volatile {
             let z = self.b.ins().iconst(Type::I8, 0);
             let n = self.b.ins().iconst(Type::I64, size as i64);
             self.b.ins().intrinsic(Intrinsic::Memset, &[dst, z, n]);
@@ -1770,7 +1997,7 @@ impl FnGen<'_, '_, '_> {
             while size - off >= chunk {
                 let d = self.offset(dst, off);
                 let z = self.b.ins().iconst(ty, 0);
-                self.b.ins().store(z, d);
+                self.b.ins().store_with_flags(z, d, flags);
                 off += chunk;
             }
         }
@@ -1779,6 +2006,7 @@ impl FnGen<'_, '_, '_> {
     /// Runs a local's initializer.
     fn init_local(&mut self, id: LocalId, init: &Init) -> R<()> {
         let ty = self.def.locals[id].ty.clone();
+        let flags = self.object_flags(&ty, &self.def.locals[id].sugar);
         if let Storage::Var(var) = self.locals[id] {
             let v = match init.items.first() {
                 Some(InitItem::Expr { expr, .. }) => self.val(expr)?,
@@ -1789,13 +2017,13 @@ impl FnGen<'_, '_, '_> {
         }
         let base = match self.locals[id] {
             Storage::Slot(slot) => self.b.ins().stack_addr(slot),
-            Storage::Addr(v) => v,
+            Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
             Storage::Var(_) => unreachable!(),
         };
         let whole = matches!(init.items.as_slice(), [InitItem::Expr { offset: 0, expr, bits: None }] if expr.ty == ty);
         if !whole {
             let size = self.size(&ty);
-            self.zero_bytes(base, size);
+            self.zero_bytes_with_flags(base, size, flags);
         }
         for item in &init.items {
             match item {
@@ -1804,15 +2032,18 @@ impl FnGen<'_, '_, '_> {
                     let addr = self.offset(base, *offset);
                     let place = match bits {
                         Some(field) => Place::Bits {
+                            flags,
                             addr,
                             unit: expr.ty.ir(),
                             field: *field,
                             signed: false,
                         },
-                        None if Self::is_aggregate(&expr.ty) => Place::Aggregate(addr),
-                        None => Place::Mem(addr, expr.ty.ir()),
+                        None if Self::is_aggregate(&expr.ty) => {
+                            self.aggregate_place(addr, &expr.ty, flags, expr.loc)?
+                        }
+                        None => Place::Mem(addr, expr.ty.ir(), flags),
                     };
-                    self.store_place(&place, v, &expr.ty);
+                    self.store_place(&place, v);
                 }
                 InitItem::Bytes { offset, bytes } => {
                     let size = (self.size(&ty) - offset).min(bytes.len() as u64);
@@ -1820,7 +2051,7 @@ impl FnGen<'_, '_, '_> {
                     let data = self.b.func.import_data(&name);
                     let src = self.b.ins().symbol_addr(Symbol::Data(data));
                     let dst = self.offset(base, *offset);
-                    self.copy_bytes(dst, src, size);
+                    self.copy_bytes_with_flags(dst, src, size, flags, MemoryFlags::default());
                 }
             }
         }

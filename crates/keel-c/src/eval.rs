@@ -2,7 +2,7 @@
 //! and enumerators, and the arithmetic and address constants that
 //! initialize objects with static storage.
 
-use crate::ast::{BinOp, Expr, ExprKind, UnOp};
+use crate::ast::{BinOp, Builtin, Expr, ExprKind, UnOp};
 use crate::types::{IntKind, Ty};
 
 /// What an address constant points into.
@@ -70,10 +70,57 @@ fn truthy(c: Const) -> bool {
     }
 }
 
+/// Evaluate an expression only when its evaluated operands are constant.
+/// `eval` alone may ignore the left side of a comma; hint arguments must
+/// not turn an expression with runtime side effects into a constant.
+/// Integer alignment expressions exclude commas, while GNU constant
+/// floating expressions for probabilities may include constant commas.
+pub fn eval_constant(e: &Expr, allow_comma: bool) -> Option<Const> {
+    match &e.kind {
+        ExprKind::Cast(a) | ExprKind::Unary(_, a) => {
+            eval_constant(a, allow_comma)?;
+        }
+        ExprKind::Binary(_, a, b) | ExprKind::PtrAdd(a, b, _) | ExprKind::PtrDiff(a, b, _) => {
+            eval_constant(a, allow_comma)?;
+            eval_constant(b, allow_comma)?;
+        }
+        ExprKind::Comma(a, b) => {
+            if !allow_comma {
+                return None;
+            }
+            eval_constant(a, allow_comma)?;
+            eval_constant(b, allow_comma)?;
+        }
+        ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
+            let first = truthy(eval_constant(a, allow_comma)?);
+            if first == matches!(e.kind, ExprKind::LogAnd(..)) {
+                eval_constant(b, allow_comma)?;
+            }
+        }
+        ExprKind::Cond(c, a, b) => {
+            let selected = if truthy(eval_constant(c, allow_comma)?) {
+                a
+            } else {
+                b
+            };
+            eval_constant(selected, allow_comma)?;
+        }
+        _ => {}
+    }
+    eval(e)
+}
+
 pub fn eval(e: &Expr) -> Option<Const> {
     Some(match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
+        ExprKind::Builtin(Builtin::Hint, args) => {
+            let value = eval_constant(&args[0], true)?;
+            for arg in &args[1..] {
+                eval_constant(arg, true)?;
+            }
+            value
+        }
         ExprKind::LabelAddr(n) => Const::Int(*n as i64),
         ExprKind::Addr(inner) => eval_addr(inner)?,
         ExprKind::Cast(inner) => cast(eval(inner)?, &inner.ty, &e.ty)?,

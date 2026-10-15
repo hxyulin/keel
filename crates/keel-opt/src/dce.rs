@@ -29,29 +29,32 @@ pub fn run(func: &mut Function) -> bool {
         let data = func.inst_data(inst);
         if data.is_pinned() {
             live_inst[inst.index()] = true;
-            uses_except_branch_args(func, inst, &mut worklist);
+            uses_except_branch_args(func, inst, |value| {
+                enqueue(func, value, &mut live_value, &mut worklist);
+            });
         }
     }
     // Entry parameters are the function's arguments, so they stay.
     if let Some(entry) = func.entry_block() {
-        worklist.extend(func.block_params(entry));
+        for &value in func.block_params(entry) {
+            enqueue(func, value, &mut live_value, &mut worklist);
+        }
     }
 
     while let Some(value) = worklist.pop() {
-        let value = func.resolve(value);
-        if std::mem::replace(&mut live_value[value.index()], true) {
-            continue;
-        }
         match func.value_def(value) {
             ValueDef::Result(inst, _) => {
                 if !std::mem::replace(&mut live_inst[inst.index()], true) {
-                    uses_except_branch_args(func, inst, &mut worklist);
+                    uses_except_branch_args(func, inst, |value| {
+                        enqueue(func, value, &mut live_value, &mut worklist);
+                    });
                 }
             }
             // A needed parameter needs the argument every branch passes it.
             ValueDef::Param(block, n) => {
                 for &(branch, i) in &incoming[block.index()] {
-                    worklist.push(func.inst_data(branch).branch_dests()[i].args[n as usize]);
+                    let arg = func.inst_data(branch).branch_dests()[i].args[n as usize];
+                    enqueue(func, arg, &mut live_value, &mut worklist);
                 }
             }
             ValueDef::Alias(_) => unreachable!("resolved"),
@@ -88,12 +91,21 @@ pub fn run(func: &mut Function) -> bool {
     changed
 }
 
-/// Pushes the operands of `inst` that are not block-call arguments.
-fn uses_except_branch_args(func: &Function, inst: Inst, out: &mut Vec<Value>) {
+/// A resolved value enters the worklist once, even when many live roots or
+/// incoming edges need it. Liveness is monotone throughout the analysis.
+fn enqueue(func: &Function, value: Value, live: &mut [bool], work: &mut Vec<Value>) {
+    let value = func.resolve(value);
+    if !std::mem::replace(&mut live[value.index()], true) {
+        work.push(value);
+    }
+}
+
+/// Visits operands that are not block-call arguments.
+fn uses_except_branch_args(func: &Function, inst: Inst, mut visit: impl FnMut(Value)) {
     match func.inst_data(inst) {
         InstData::Jump { .. } => {}
-        InstData::Brif { cond, .. } => out.push(*cond),
-        InstData::Switch { arg, .. } => out.push(*arg),
-        data => data.for_each_operand(|v| out.push(v)),
+        InstData::Brif { cond, .. } => visit(*cond),
+        InstData::Switch { arg, .. } => visit(*arg),
+        data => data.for_each_operand(visit),
     }
 }

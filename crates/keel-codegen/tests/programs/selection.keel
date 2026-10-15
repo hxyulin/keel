@@ -1,0 +1,135 @@
+; expect: exit 0
+
+decl @selection_clobber()
+
+func @tree_iadd32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 34
+ v3 = shl v1, v2
+ v4 = iadd v0, v3
+ return v4
+}
+
+func @tree_isub32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 34
+ v3 = shl v1, v2
+ v4 = isub v0, v3
+ return v4
+}
+
+func @tree_and32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 34
+ v3 = shl v1, v2
+ v4 = and v0, v3
+ return v4
+}
+
+func @tree_or32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 34
+ v3 = shl v1, v2
+ v4 = or v0, v3
+ return v4
+}
+
+func @tree_xor32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+ v2 = iconst.i32 34
+ v3 = shl v1, v2
+ v4 = xor v0, v3
+ return v4
+}
+
+func @tree_muladd32(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+ v3 = imul v0, v1
+ v4 = iadd v3, v2
+ return v4
+}
+
+func @tree_mulsub32(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+ v3 = imul v0, v1
+ v4 = isub v2, v3
+ return v4
+}
+
+func @tree_iadd64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 66
+ v3 = shl v1, v2
+ v4 = iadd v0, v3
+ return v4
+}
+
+func @tree_isub64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 66
+ v3 = shl v1, v2
+ v4 = isub v0, v3
+ return v4
+}
+
+func @tree_and64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 66
+ v3 = shl v1, v2
+ v4 = and v0, v3
+ return v4
+}
+
+func @tree_or64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 66
+ v3 = shl v1, v2
+ v4 = or v0, v3
+ return v4
+}
+
+func @tree_xor64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 66
+ v3 = shl v1, v2
+ v4 = xor v0, v3
+ return v4
+}
+
+func @tree_muladd64(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = imul v0, v1
+ v4 = iadd v3, v2
+ return v4
+}
+
+func @tree_mulsub64(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = imul v0, v1
+ v4 = isub v2, v3
+ return v4
+}
+
+func @tree_across_call(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = imul v0, v1
+ call @selection_clobber()
+ v4 = iadd v3, v2
+ return v4
+}
+
+func @tree_shared(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = imul v0, v1
+ v4 = iadd v3, v2
+ v5 = xor v4, v3
+ return v5
+}
+
+func @tree_constant(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 7
+ v3 = imul v0, v2
+ v4 = iadd v3, v1
+ return v4
+}

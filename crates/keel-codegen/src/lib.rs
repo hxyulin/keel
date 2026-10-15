@@ -7,7 +7,8 @@ mod data;
 mod dwarf;
 mod fold;
 mod parallel_copy;
-mod regalloc;
+pub mod regalloc;
+pub mod select;
 mod sysv;
 pub mod x86_64;
 
@@ -18,11 +19,135 @@ use regalloc::Loc;
 use keel_ir::Module;
 pub use keel_ir::Target;
 
+/// Optional target instruction-selection passes. They preserve IR semantics,
+/// but may trade instruction count against register pressure and scheduling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SelectionOptions {
+    /// Fuse eligible single-use binary trees into target instructions.
+    pub trees: bool,
+    /// Omit operands already encoded as immediates/addresses from liveness.
+    pub folded_operands: bool,
+    /// Prefer generated operand affinities among free permitted registers.
+    pub register_hints: bool,
+}
+impl SelectionOptions {
+    pub const ALL: Self = Self {
+        trees: true,
+        folded_operands: true,
+        register_hints: true,
+    };
+}
+
 /// Compiles a module into one assembly file for `target`.
 pub fn compile(module: &Module, target: Target) -> Result<String, CodegenError> {
+    compile_with_options(module, target, SelectionOptions::default())
+}
+
+/// Compile with explicit optional instruction-selection passes.
+pub fn compile_with_options(
+    module: &Module,
+    target: Target,
+    options: SelectionOptions,
+) -> Result<String, CodegenError> {
+    let selector = OptionsSelector(options);
+    compile_with_pipeline(
+        module,
+        target,
+        &CodegenPipeline {
+            selector: &selector,
+            allocator: &regalloc::AllocationTier::Full,
+        },
+    )
+}
+
+/// Independently replaceable selection and allocation stages.
+pub struct CodegenPipeline<'a> {
+    pub selector: &'a dyn InstructionSelector,
+    pub allocator: &'a dyn regalloc::RegisterAllocator,
+}
+
+/// Plan target instructions and the operands that remain live for allocation.
+/// `folds` describes operands encoded directly by the target emitter.
+pub trait InstructionSelector {
+    fn name(&self) -> &'static str;
+    fn select(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+    ) -> select::Selection;
+}
+
+pub struct OptionsSelector(pub SelectionOptions);
+impl InstructionSelector for OptionsSelector {
+    fn name(&self) -> &'static str {
+        "options"
+    }
+    fn select(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+    ) -> select::Selection {
+        profiling::scope!("instruction-selection");
+        let mut selection = select::Selection::compute_with_options(func, target, self.0);
+        if self.0.folded_operands {
+            selection.fold_operands(func, folds);
+        }
+        selection
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectionTier {
+    #[default]
+    Baseline,
+    Trees,
+    Full,
+}
+impl SelectionTier {
+    pub fn options(self) -> SelectionOptions {
+        match self {
+            Self::Baseline => SelectionOptions::default(),
+            Self::Trees => SelectionOptions {
+                trees: true,
+                ..SelectionOptions::default()
+            },
+            Self::Full => SelectionOptions::ALL,
+        }
+    }
+}
+impl InstructionSelector for SelectionTier {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Trees => "trees",
+            Self::Full => "full",
+        }
+    }
+    fn select(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+    ) -> select::Selection {
+        OptionsSelector(self.options()).select(func, target, folds)
+    }
+}
+
+pub fn compile_with_pipeline(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+) -> Result<String, CodegenError> {
+    profiling::scope!("codegen", target.triple());
     match target {
-        Target::Aarch64AppleDarwin => aarch64::compile(module),
-        Target::X86_64LinuxGnu => x86_64::compile(module),
+        Target::Aarch64AppleDarwin => {
+            aarch64::compile_with_pipeline(module, &aarch64::REGISTERS, pipeline)
+        }
+        Target::X86_64LinuxGnu => {
+            x86_64::compile_with_pipeline(module, &x86_64::REGISTERS, pipeline)
+        }
     }
 }
 

@@ -1,0 +1,17 @@
+; expect: exit 0
+func @compare(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = icmp.slt v0, v1
+    v3 = icmp.sgt v1, v0
+    v4 = icmp.ult v0, v1
+    v5 = icmp.ugt v1, v0
+    v6 = uext.i64 v2
+    v7 = uext.i64 v3
+    v8 = uext.i64 v4
+    v9 = uext.i64 v5
+    v10 = iadd v6, v7
+    v11 = iadd v8, v9
+    v12 = iadd v11, v11
+    v13 = iadd v10, v12
+    return v13
+}

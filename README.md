@@ -30,19 +30,91 @@ cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
 
 Both commands take `--target aarch64-apple-darwin` or
 `--target x86_64-unknown-linux-gnu`; the default is the host.
+
+Target instruction selection is an optional codegen pass, independent of
+`-O`. `--isel all` enables generated tree patterns, allocation of folded
+operands, and register hints. `--isel trees,folds,hints` selects individual
+passes; `--isel none` (the default) keeps the existing selection. `folds`
+removes already folded operands from allocation; ordinary immediate and
+address folding remain active in every mode. For example:
+
+```sh
+cargo run -p keel -- cc -O --isel all hello.i -o hello.s
+cargo suite run -c keel-O,keel-O-select
+```
+
+Fewer instructions can still cost more registers or change scheduling, so
+selection remains opt-in while its profitability rules are developed.
 For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
+
+## Compiler tiers and profiling
+
+The stages can be tuned independently:
+
+- `--opt-tier none|basic|full`: no IR passes; CFG simplification, constant
+  folding, instruction combining and DCE; or the full pipeline including
+  GVN and GCM.
+  `-O` remains an alias for `full`; the default is `none`.
+- `--isel-tier baseline|trees|full`: existing per-instruction lowering;
+  generated tree selection; or trees plus folded operand liveness and
+  register affinities. The default is `baseline`. `--isel` still allows
+  individual features. When flags overlap, the last one wins.
+- `--regalloc fast|full`: contiguous live intervals without affinities;
+  or lifetime holes and register affinities. The default is `full`.
+  Both use linear scan with the same ABI and spill handling. These are
+  effort choices whose performance needs to be measured per workload.
+
+```sh
+cargo run -p keel -- compile --opt-tier basic --isel-tier trees --regalloc fast input.keel -o out.s
+cargo suite run -c keel-basic,keel-fast,keel-full
+cargo suite run -c keel-basic,keel-basic-sccp,keel-O,keel-O-sccp
+```
+
+`keel compile -p pass,pass,...` and `keel cc -p pass,pass,...` select an
+explicit IR pipeline, overriding `-O` and `--opt-tier` regardless of flag
+order. The opt-in `sccp` pass propagates constants through executable edges
+and block parameters. Basic and Full use `instcombine` for numeric folding,
+integer identities and power-of-two strength reduction. SCCP suite presets
+add propagation before combining. `phi-simplify` also remains opt-in: use
+`keel-O-phi-late` to try cleanup after code motion. Early phi cleanup caused
+large application regressions. Pipeline choices and raw measurements are in
+[suite/README.md](suite/README.md#paired-pass-measurements).
+
+Library users can implement `keel_opt::Pass` and use `run_pipeline` (which
+verifies after every pass), or provide an `InstructionSelector` and
+`RegisterAllocator` through `CodegenPipeline`. Target-specific
+`compile_with_pipeline` also accepts restricted register pools for spill
+experiments. Selection produces the instruction plan consumed by the target
+lowering code and allocator; register hints are preferences, never constraints.
+The target emitters retain responsibility for ABI handling and assembly.
+
+The `profiling` crate instruments passes, selection, allocation, lowering,
+and IR parsing/verification. Instrumentation is inactive in default builds.
+To capture with Tracy, build with `cargo build --release -p keel --features
+profile-with-tracy` and connect a compatible Tracy profiler before running
+compilation. The driver starts and retains the client for the invocation.
+Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
+crates and manage the Tracy client themselves. Benchmark uninstrumented
+release builds for final timings; use instrumented builds to locate costs.
 
 ## Current scope
 
 - SSA IR with integer and floating-point operations, globals, thread-local
   storage, atomics, calls, C ABIs and debug information.
-- Five optimization passes: constant folding, CFG simplification, global
-  value numbering, dead-code elimination and global code motion.
+- Eight optimization passes: constant folding, CFG simplification, global
+  value numbering, dead-code elimination, global code motion and opt-in
+  sparse conditional constant propagation (`sccp`), plus instruction combining
+  and integer strength reduction (`instcombine`) and trivial block-parameter
+  elimination (`phi-simplify`).
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
-  Atomic pointer prefix/postfix `++` and `--` are supported.
+  Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
+  builtins, alignment/branch hints and resumable `__builtin_debugtrap`
+  are supported, along with GNU member packing and GNU/C11 object
+  alignment. Hints preserve values and side effects but do not
+  currently guide optimization.
 - C variable-length arrays, complex arithmetic, nested functions and
   inline assembly statements are not supported. The ARM64 IR backend
   supports inline assembly and exceptions; the x86-64 backend does not.
@@ -110,9 +182,12 @@ source provenance, licensing, and regeneration instructions.
   rewrites the expected `.out` files.
 - Codegen tests live in `crates/keel-codegen/tests/programs/`: each `.keel`
   file has an `; expect: exit N` or `; expect: trap` line and may have a
-  same-named `.c` driver that it is linked with. Each program is compiled
-  three times: with the full register set, with a tiny one that forces
-  spills, and after the default optimization pipeline. A program that runs
+  same-named `.c` driver that it is linked with. A `; opt-passes: a, b`
+  line selects the pipeline for its optimized configurations. Each program is compiled
+  with the full register set, with a tiny one that forces spills, and
+  after the default optimization pipeline, both with optional selection
+  disabled and with every selection pass enabled, plus the fast allocator
+  with ordinary and forced-spill register pools (eight builds). A program that runs
   for more than 10 seconds fails.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.

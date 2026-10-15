@@ -142,12 +142,22 @@ resumed by a debugger, so it is an intrinsic.
 - Out-of-bounds memory access cannot be defined at this level; memory safety
   is the job of a higher-level IR.
 
+Instruction construction and verification share the opcode's result signature.
+An in-place rewrite must retain its result count and types; changing either
+requires a new instruction plus value replacement. Verification checks raw
+value/block/callee/signature/slot/symbol references before CFG construction
+or operand resolution, so invalid pass output produces diagnostics instead
+of indexing panics. Result/parameter indices use u32, matching value handles;
+they do not wrap at 65,536 entries.
+
 ## Memory
 
 - Stack memory is declared per function, not allocated by an instruction:
   `ss0 = stack_slot 16, align 4` (alignment a power of two up to 16), and
   `stack_addr ss0` gives its address. Sizes are fixed, so the frame layout is
-  known before codegen.
+  known before codegen. The C frontend implements object alignment above
+  16 bytes by reserving extra space in a fixed slot and rounding the
+  object address up within it.
 - Dynamic stack memory, for `alloca` and VLAs, comes from intrinsics:
   `intrinsic stack_alloc(v0)` gives `v0` bytes, 16-byte aligned, until the
   function returns; `stack_save()` and `stack_restore(mark)` free
@@ -159,13 +169,46 @@ resumed by a debugger, so it is an intrinsic.
   is no stack probing yet: an allocation larger than the guard page can
   skip past it.
 - Memory operations are ordered by CFG order.
-- There is no `volatile` flag: every load and store is pinned, and no pass
-  removes, merges or moves one, so C's `volatile` accesses are plain loads
-  and stores. The flag comes with the first pass that optimizes memory
-  (store-to-load forwarding, dead-store elimination), which must leave
-  volatile accesses alone.
-- Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
-  promise disjointness between classes.
+- Ordinary, non-atomic accesses follow program memory effects; a conflicting
+  unsynchronized non-atomic access is outside the IR's defined behavior.
+  Volatile is required for externally observable accesses, not synchronization.
+- Non-atomic loads/stores have explicit access properties:
+  `load.i32 volatile align 4 notrap v0` and
+  `store volatile align 4 notrap v1, v0`. Each flag is optional; default
+  alignment is 1 and accesses may fault. `align` promises a nonzero power
+  of two. `notrap` promises only that this access cannot fault, not that
+  it can cross a write or an object-lifetime change. Volatile accesses
+  must execute as written; they are neither atomic nor hardware fences.
+- `memory_effects()` distinguishes reads, writes, read/write operations and
+  conservative barriers; `may_trap()` separately describes exceptional exits.
+  Unknown calls, inline assembly, atomic operations and stack-lifetime
+  changes invalidate memory facts. A compiler barrier here is conservative
+  analysis behavior, not a hardware-fence instruction.
+- C expression qualifier shapes now survive pointer arithmetic, dereferences,
+  casts, array/function decay, members, typedefs, `typeof`, `__auto_type`,
+  conditional pointers and function returns. A volatile pointer object and
+  a pointer to volatile data qualify different accesses. Parameter and local
+  initialization writes retain object qualification; volatile bitfield reads
+  and writes retain it on their storage-unit accesses.
+- Volatile aggregate reads are materialized with explicit qualified accesses
+  before passing a value to assignment, return or the by-value ABI. Copies
+  involving volatile storage cannot become ordinary `memcpy`/`memset` calls.
+  Aggregate copies/initializers containing volatile subobjects conservatively
+  retain volatility on the whole accessed region. Local objects too large
+  for the IR's u32 stack-slot sizes are diagnosed rather than truncated.
+- Aggregate assignment copies permit self-aliasing: large copies use
+  `memmove`, not an unjustified `memcpy` non-overlap promise. The value of an
+  aggregate assignment comes from its source, without rereading its destination.
+  The by-value ABI reads argument bytes at the call instruction; the C frontend
+  freezes them earlier when later arguments or callee evaluation may change
+  memory. It can defer copying across expressions proven free of writes and
+  volatile accesses. A regression previously returned 9 instead of 3 after a
+  later argument mutated the assignment destination.
+- All loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
+  Explicit properties enable later memory-aware passes without silently
+  changing current scheduling or fault behavior. Alias classes and call
+  read/write summaries are not implemented; the old alias-class design
+  note described future metadata, not fields present in the IR.
 - **Atomics** follow the C11/C++11 memory model, with the ordering written
   after the opcode: `atomic_load.i32 acquire v0`, `atomic_store release v1,
   v0`, `atomic_rmw.add seq_cst v0, v1` (also `sub and or xor xchg umin umax
@@ -487,7 +530,9 @@ from Apple arm64 that matter to a frontend:
   variables, each in one of its stack slots (`dvar "x" dt0 ss1`, `dparam`
   for parameters). Codegen turns them into DIEs: the subprogram's frame
   base is `x29`, which stays put even when dynamic allocations move `sp`,
-  and a variable is at a fixed `DW_OP_fbreg` offset from it. lldb then
+  and a variable is at a fixed `DW_OP_fbreg` offset from it. An
+  over-aligned local instead stores its address in a pointer-sized slot:
+  `dvar "x" dt0 ss1 indirect` adds `DW_OP_deref` to that location. lldb then
   prints, changes and passes them (`p x`, `expr x = 3`, `p f(x)`,
   `finish` showing the return value).
 - **Lexical scopes**, so that a variable is only shown in its block: a
@@ -531,6 +576,14 @@ It runs in one pass over sorted intervals, needs no interference graph, and
 is easy to follow, which matters more here than the last few percent that
 graph colouring would give. The first backend spilled every value to the
 stack; it was replaced once it had served as the baseline.
+
+Allocation is selected through `RegisterAllocator`, independently of
+`InstructionSelector` and IR optimization tiers. The default `Full` tier
+uses the algorithm below with lifetime holes and optional selection
+register affinities. `Fast` collapses each interval to its first and last
+points and skips affinities; it uses the same liveness, ABI constraints,
+and spill machinery. Both tiers can be compared with the same selected
+instruction plan and register pools through `CodegenPipeline`.
 
 1. **Linearize.** Reachable blocks in reverse postorder, which is also the
    emission order. Unreachable blocks are not emitted. Each instruction has
@@ -628,24 +681,49 @@ registers, so it does not depend on the size of the rest of the frame.
 
 Known gaps: no interval splitting (a value spilled anywhere is spilled
 everywhere; the next step would be Wimmer & Franz's splitting, which
-needs code generation to follow a value between locations), no hints to place values in x0–x7 or to coalesce copies,
+needs code generation to follow a value between locations), no hints to place values in x0–x7,
 and blocks are laid out in reverse postorder only.
 
-**Folding into instructions.** Instruction selection is one instruction at
-a time, with three peepholes that make `-O0` code close to clang's
-`-O0`, where every variable lives in a stack slot:
+**Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
+binary root/child patterns and register affinities; `build.rs` generates
+the rule table and affinity matcher. These target codegen passes are
+opt-in: `--isel all` enables them, `--isel trees,folds,hints` chooses passes
+independently, and `--isel none` is the default. They run after any IR
+optimization and before allocation,
+visiting consumers first. A rule consumes a pure, single-use child in the
+same block, preserving distinct source lines when debug locations exist.
+Shared DAG nodes stay materialized, and unmatched instructions
+use the existing target lowerings. The initial patterns cover 32/64-bit
+multiply/add and multiply/subtract and shifted arithmetic/logic on aarch64,
+and add/ptradd with a scaled shift (`lea`) on x86. Narrow integer and float
+patterns retain their original semantics; floating multiply/add is never
+implicitly fused because that changes rounding.
+
+Allocation sees the selected instruction's leaf operands at the root,
+rather than the intermediate result. This both removes the consumed
+result's interval and keeps its inputs live until the fused instruction,
+including across intervening calls. Register hints are preferences among
+free, permitted registers: they never override interference, register
+classes, or call preservation. Generated hints prefer the destructive
+input of x86 binary instructions and the source of integer bit-preserving
+conversions on both targets.
+
+Immediate and address folding remain target-specific:
 
 - a `stack_addr` used only as the address of loads and stores is not
-  computed: they address the slot as `[sp, #off]` (or `[x29, #off]`)
-  directly, when the offset fits the scaled 12-bit immediate;
-- an `iconst` used only as an `add`/`sub`/`cmp` immediate (0..4095), a
-  shift amount, or a stored zero (`str wzr`) is not materialized;
+  computed when the target can address the slot directly;
+- constants encodable as immediates, shift amounts, or stored zeroes are
+  not materialized if every selected use folds them;
 - an `icmp`/`fcmp` used only by the `brif` right after it branches on its
-  flags, `cmp` + `b.cond`, instead of `cset`, `tst` and `b.eq`.
+  flags, instead of materializing and testing a boolean.
 
-An instruction whose value is folded into every use emits no code; one
-with any other use is computed as usual. A breakpoint on a folded
-constant's line therefore stops at the instruction using it.
+With the `folds` pass, immediate operands are omitted from the allocation
+graph. x86 stack addresses are omitted too; aarch64 stack offsets depend on the spill frame,
+so address folding is finalized after allocation. A constant formerly
+folded into a consumed multiply must be materialized if the fused
+multiply/add reads it in a register. A breakpoint on a folded constant's
+line stops at the instruction using it. Compare/branch fusion retains its
+existing flag lowering.
 
 ## Optimizer
 
@@ -656,14 +734,95 @@ analyses they need; there is no analysis cache yet.
 
 | Pass | What it does |
 |---|---|
-| `simplify-cfg` | constant `brif` → `jump`, skip forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
+| `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
-| `gvn` | scoped hash table over the dominator tree: an identical pure instruction that dominates wins. Commutative operands are sorted. Loads are never merged. |
-| `dce` | mark from pinned instructions; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
+| `instcombine` | fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
+| `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
+| `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
+| `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
+| `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 
-The default pipeline (`-O`) is `simplify-cfg, const-fold, simplify-cfg, gvn,
-dce, gcm`.
+The default pipeline (`-O`) is `simplify-cfg, instcombine, simplify-cfg, gvn,
+dce, gcm`. Basic uses `simplify-cfg, instcombine, simplify-cfg, dce`.
+`const-fold` stays available for isolated numeric folding and historical
+comparisons; the defaults use the broader combining pass once. The paired
+[pass ablation matrix](../suite/reports/pass-ablations-aarch64-2026-10-15.json)
+supports retaining CFG cleanup, GVN, DCE and GCM. Removing GCM regresses runtime
+by 4.2% overall; removing GVN grows aggregate text by 5.1%, with mixed runtime
+effects. Late phi cleanup avoids the early regression but adds compiler cost
+without an established runtime gain. SCCP also adds compiler cost for neutral
+runtime in these applications, so both remain opt-in.
+
+Instruction combining uses a consumer worklist, so substitutions expose
+further folds even when block layout differs from definition order. Integer
+rules follow wrapping arithmetic; division identities require a known nonzero
+divisor, and floating-point identities are excluded. The power-of-two rules
+are exhaustively checked for i8 and at wide integer boundaries, with a
+64-subset pass matrix and native spill/selector checks. The first paired
+application measurement (Apple M5 Max) gives runtime ratio 0.973 and compiler
+ratio 1.011 versus the historical Full pipeline; 38/44 translation units
+change assembly. Raw samples and intervals are in
+[`instcombine-aarch64-2026-10-15.json`](../suite/reports/instcombine-aarch64-2026-10-15.json).
+
+The final default-pipeline confirmation reproduces the runtime improvement
+(2.7% geometric mean), with 1.5% extra compiler cost and 25,052 bytes less
+aggregate text (0.85%). The `-O` and explicit combining-preset assembly match
+in all 44 application files. Workspace/native tests, six application suite
+configurations, Clippy, and the Tracy feature build pass. Debugger/debug-info
+integration tests were excluded from the workspace run. Raw samples,
+compiler/source hashes and commands are in
+[`default-pipeline-aarch64-2026-10-15.json`](../suite/reports/default-pipeline-aarch64-2026-10-15.json).
+
+Trivial-phi elimination checks every incoming edge, ignoring a parameter's
+own backedge value only when another incoming value anchors it. Replacement
+requires a value defined in a strictly dominating block, so values defined
+inside the loop and unanchored cycles cannot become copies. A block worklist
+revisits consumers after substitution. Entry ABI parameters remain; removing
+other parameters preserves existing aliases while renumbering the remainder.
+Tests cover distinct edges, loop induction, SCCP aliases, reverse layout,
+128 pass subsets, and native execution with restricted register pools.
+The pass remains opt-in: placing it before GVN/GCM regressed Lua fib by
+2.21× and QuickJS fib/sort by 1.20×/1.16× in paired application measurements.
+See [`phi-simplify-aarch64-2026-10-15.json`](../suite/reports/phi-simplify-aarch64-2026-10-15.json).
+
+Forwarding composes the incoming argument tuple with the outgoing jump,
+including permutations and repeated arguments. A forwarding block whose
+parameter is used outside its own jump stays: bypassing it would lose the
+definition dominating that external use. One forwarding step per cleanup
+round also lets closed forwarding cycles collapse to self-loops without
+changing nontermination.
+
+**SCCP** uses the monotone value lattice from
+[Wegman and Zadeck](https://cs.brown.edu/research/pubs/techreports/reports/CS-89-36.html):
+unknown, a typed bit-exact constant, or overdefined. A worklist revisits
+users when values change and activates branch edges as conditions become
+known. Block parameters meet arguments from executable edges; two arms
+from the same predecessor remain distinct. Backedges can invalidate an
+initial constant, while unchanged loop arguments remain constant. Unknown
+values remaining in executable code are conservatively made overdefined.
+Analysis converges before rewriting; parameter constants are materialized
+in their own block so they dominate uses even with untaken predecessors.
+`simplify-cfg` and `dce` retain responsibility for CFG and parameter cleanup.
+`sccp` remains opt-in: the initial paired Lua, QuickJS and SQLite measurements
+showed roughly neutral application runtime and extra compiler cost. The
+`keel-basic-sccp` and `keel-O-sccp` suite configurations add `sccp` before
+`instcombine` while preserving the other stages. `keel compile -p ...` and
+`keel cc -p ...` select explicit pipelines, overriding optimization tiers.
+The numeric folding kernel is shared with `const-fold` and `instcombine`.
+All three also fold both results of signed/unsigned checked add, subtract
+and multiply at widths through i64. SCCP tracks the wrapped value and
+overflow flag independently, allowing checked results to drive branches.
+Every i8 operand pair is checked against Rust overflow operations, with
+wide-boundary and native regressions. i128 folds remain conservative because
+the constant immediate cannot represent general i128 results. Application
+assembly was identical in all 44 files and compile timing was neutral; see
+[`checked-fold-aarch64-2026-10-15.json`](../suite/reports/checked-fold-aarch64-2026-10-15.json).
+Regression tests
+compare SCCP followed by all 32 subsets of the original five passes against
+an independent execution model, and
+native codegen tests exercise constant loop parameters with ordinary and
+restricted register pools. Tracy has separate analysis and rewrite scopes.
 
 **GCM** places each pure instruction between its *early* block (the deepest
 block defining an operand) and its *late* block (the common dominator of its
@@ -689,9 +848,26 @@ it. Three choices made after measuring the end-to-end programs:
   most of its `-O` slowdown. Pointer arithmetic on incoming pointers still
   gets ordinary loop-invariant code motion.
 
+GCM deduplicates consecutive uses while scanning each instruction, uses
+producer IDs as generation markers for user membership, and groups constant
+users by block. This avoids repeated scans of high-fanout use lists without
+changing placement decisions or within-block order. A constant used in one
+block needs no grouping or copies.
+
 With these choices, `-O` output is never larger than the unoptimized output on the
 test programs, and programs whose checks are all constants fold away
 entirely, which checks constant folding against results from the hardware.
+
+The [IR contract audit](../suite/reports/ir-contract-audit-2026-10-15.json)
+records the memory contracts, qualifier propagation, rewrite-verifier and
+index/size checks, plus the aggregate-copy/ABI regression (previously 9,
+now 3, matching Clang). Validation covers parser round-trips, both target
+code generators, native execution and spills, workspace tests, four
+application-suite configurations, Clippy and the Tracy feature build.
+Debugger integration tests were excluded. This is a correctness/enabling
+change; memory optimizations remain separate passes and no runtime speedup
+is claimed. Effect/trap classification is exhaustive so future opcodes
+cannot silently inherit memory-free or non-trapping behavior.
 
 ## Frontend
 
@@ -785,15 +961,23 @@ operations and `_Generic`. `setjmp` and friends are marked `returns_twice`.
 Supported builtins include `offsetof`, `types_compatible_p`, `choose_expr`,
 `constant_p`, variadic access, `bswap16/32/64`, `clz/ctz/popcount` and their
 `l`/`ll` forms, floating-point classification, `fabs`, `alloca` and
-`frame_address(0)`. GCC/Clang atomic builtin families are supported for
-selected scalar operations, with the limits below. A `__builtin_` name
+`frame_address(0)` and `debugtrap`. The fixed-type overflow and hint
+builtins are described below. GCC/Clang atomic builtin families are
+supported for selected scalar operations, with the limits below. A `__builtin_` name
 with a declared library equivalent can also resolve to that function;
 this is not blanket support for every builtin.
 
 Some accepted extensions have deliberately limited behavior:
 
-- `__builtin_expect` returns its first operand converted to `long`; no
-  branch-likelihood information is retained.
+- `__builtin_expect` and `__builtin_expect_with_probability` return their
+  first operand converted to `long`, evaluating both runtime operands
+  once. Probability must be a finite constant expression between 0 and
+  1 inclusive; it carries no runtime effects. No branch-likelihood
+  information is retained.
+- `__builtin_assume_aligned` returns its pointer as `void *` without
+  adjusting it or checking alignment at runtime. Alignment must be a
+  nonzero power-of-two integer constant. The optional integer offset is
+  evaluated once, but no alignment information is retained by the IR.
 - `__builtin_constant_p` recognizes integer expressions the frontend can
   evaluate, rather than asking the optimizer whether a value is constant.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` always
@@ -802,11 +986,24 @@ Some accepted extensions have deliberately limited behavior:
   not retain the supplied bounds check.
 - `__builtin_unreachable` lowers to a trap, as `__builtin_trap` does;
   it does not introduce an optimizer assumption.
-- Attribute syntax is accepted broadly, but `packed`/`aligned` affect
-  struct layout and `returns_twice` affects calls. Explicit alignment on
-  ordinary variables is not implemented. Other attributes are ignored,
-  including `cleanup`, `weak`, `alias`, `visibility`, `constructor` and
-  `vector_size`; their runtime, linkage or type behavior is not supported.
+- GNU `packed` and `aligned` control aggregate and member layout.
+  GNU `aligned` and C11 `_Alignas` also control local, static, global and
+  thread-local object alignment, with power-of-two requests up to 4096.
+  `_Alignas(0)` has no effect; nonzero `_Alignas` cannot weaken natural
+  alignment. Expression `__alignof__` queries retain object/member
+  alignment without changing type compatibility. Explicit member alignment
+  overrides packing; `#pragma pack` caps member alignment.
+- Alignment-changing typedef attributes, alignment attributes on functions,
+  parameters and type names, and by-value aggregates aligned above 16 bytes
+  are diagnosed. On x86-64, by-value aggregates with unaligned fields are
+  also diagnosed because their SysV MEMORY classification cannot be
+  represented by the current IR signature. Packed bit-fields requiring
+  partial or crossing storage-container accesses, unaligned atomic members
+  and unaligned pointer relocations are diagnosed rather than emitted.
+- Attribute syntax is accepted broadly, and `returns_twice` affects calls.
+  Other attributes are ignored, including `cleanup`, `weak`, `alias`,
+  `visibility`, `constructor` and `vector_size`; their runtime, linkage or
+  type behavior is not supported.
 - `inline` affects which definitions are emitted, but there is no
   function-inlining optimization. Block-pointer declarators (`^`) are
   parsed as pointers; block literals and the Blocks runtime are not
@@ -823,6 +1020,19 @@ compared against Clang.
 
 ### Implementation details
 
+- **Debugger entry.** `__builtin_debugtrap()` emits the resumable
+  `debugtrap` intrinsic (`brk #0xf000` on Apple ARM64, `int3` on x86-64).
+  Instructions after it remain reachable, including with `-O`. A
+  debugger or signal handler can resume execution; without one it normally
+  raises SIGTRAP. This differs from the terminating `__builtin_trap`.
+  See [Clang's builtin documentation](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
+- **Checked arithmetic.** The fixed-type `__builtin_sadd/ssub/smul_*` and
+  `__builtin_uadd/usub/umul_*` overflow families are supported for `int`,
+  `long` and `long long` (the `l` and `ll` suffixes). Operands are converted
+  as for the builtin's prototype; the wrapped result is stored through
+  the third argument and the overflow flag is returned as `_Bool`. Every
+  operand is evaluated once, and the store remains even when the flag is
+  unused. Generic mixed-type and `_overflow_p` forms are not implemented.
 - **Computed goto** without an indirect branch in the IR: `&&label` is
   the label's number in its function (from 1), and every `goto *p` jumps
   to one shared dispatch block, passing that number as a block argument.
@@ -872,19 +1082,14 @@ not pass it through, and the x86-64 backend does not support it yet.
 
 Useful candidates for small follow-up patches, rather than current support:
 
-- **Overflow-checking builtins:** start with the fixed-type signed and
-  unsigned `add/sub/mul` families, using the IR's result-plus-flag
-  instructions. The generic forms permit mixed operand and destination
-  types and need more than casting the operands to the destination type.
+- **Generic overflow-checking builtins:** the generic forms permit mixed
+  operand and destination types and need more than casting the operands
+  to the destination type. The fixed-type forms are implemented above.
   See [GCC's overflow builtin semantics](https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html).
-- **Alignment and branch hints:** `__builtin_assume_aligned` and
-  `__builtin_expect_with_probability` can initially preserve their defined
-  value behavior without optimizing from the hints. Argument evaluation
-  and constant-argument constraints still need tests. See
-  [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html).
-- **Debugger entry:** Clang's `__builtin_debugtrap` can use the existing
-  resumable `debugtrap` IR intrinsic. It differs from the terminating
-  `__builtin_trap`; see [Clang's language extensions](https://clang.llvm.org/docs/LanguageExtensions.html#builtin-debugtrap).
+- **Hint optimization:** the alignment and branch builtins preserve their
+  value and argument-evaluation behavior, but optimization from their
+  metadata would require additional IR and optimizer support. See
+  [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc/Other-Builtins.html).
 
 Linkage attributes (`weak`, `alias`, `visibility`), scope-exit `cleanup`
 and C inline assembly are useful larger additions. Attributes whose
@@ -893,6 +1098,12 @@ silently parsing them does not establish compatibility.
 
 **Testing.** Test programs are built by clang and by keel and must behave
 the same, so they print what they compute instead of hard-coding answers.
+The overflow fixture checks all 18 fixed-type forms at integer boundaries,
+the hint fixture checks argument side effects and returned values, and the
+debugtrap fixture catches SIGTRAP and resumes twice. Separate frontend
+tests verify and generate assembly for both targets, before and after
+optimization. The signal-based breakpoint test does not require LLDB;
+debug information is checked by the separate debugger tests.
 The suite in `suite/` (run by `cargo suite`, see
 [suite/README.md](../suite/README.md)) builds Lua 5.4.7 with POSIX extras
 and computed gotos and runs its portable test mode, builds thread-safe
@@ -1299,7 +1510,7 @@ assembler tests run the atomic driver (including multithreaded increments and
 CAS locks), 128-bit arithmetic, and inline assembly containing SVC and MOVI.
 Differential tests cover all scalar LSE ordering/width forms, store aliases,
 barrier options, and all modified-immediate MOVI values for supported lane
-arrangements. The fixture matrix currently contains 170 configurations; an
-end-to-end coverage audit assembles, links, and runs those configurations,
-with DWARF verification for the 22 C debug configurations. Fixture coverage
+arrangements. The initial end-to-end coverage audit assembled, linked, and ran 170
+configurations, with DWARF verification for the 22 C debug configurations;
+the automated assembly checks discover newly added fixtures as the suite grows. Fixture coverage
 does not imply complete A64 ISA or GNU assembler syntax coverage.

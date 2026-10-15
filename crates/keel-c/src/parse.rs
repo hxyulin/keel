@@ -67,11 +67,31 @@ struct DeclSpec {
     attrs: Attrs,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub struct Attrs {
     pub aligned: Option<u64>,
+    pub alignas: Option<u64>,
     pub packed: bool,
     pub returns_twice: bool,
+}
+
+impl Attrs {
+    fn merge(&mut self, other: Self) {
+        if let Some(a) = other.aligned {
+            self.aligned = Some(self.aligned.unwrap_or(1).max(a));
+        }
+        if let Some(a) = other.alignas {
+            self.alignas = Some(self.alignas.unwrap_or(0).max(a));
+        }
+        self.packed |= other.packed;
+        self.returns_twice |= other.returns_twice;
+    }
+    fn alignment(self) -> Option<u64> {
+        self.aligned
+            .into_iter()
+            .chain(self.alignas.filter(|a| *a != 0))
+            .max()
+    }
 }
 
 /// A parsed declarator: the name (if not abstract) and the full type.
@@ -82,6 +102,7 @@ pub struct Declarator {
     /// `const` or `volatile` on the declared object itself.
     pub is_const: bool,
     pub is_volatile: bool,
+    pub attrs: Attrs,
 }
 
 pub(crate) struct SwitchCtx {
@@ -228,6 +249,7 @@ impl Parser {
         }
         let id = *self.va_list_tag.get_or_insert_with(|| {
             let member = |name: &str, ty: Ty, offset| Member {
+                align: ty.ir().bytes().unwrap() as u64,
                 name: Some(name.into()),
                 ty,
                 sugar: Sugar::Plain,
@@ -394,6 +416,31 @@ impl Parser {
         self.types().align(ty)
     }
 
+    fn object_alignment(&self, ty: &Ty, attrs: Attrs, loc: Loc) -> R<u64> {
+        let natural = self.align_of(ty);
+        if let Some(a) = attrs.alignas
+            && a != 0
+            && a < natural
+        {
+            return Err(Error::new(
+                loc,
+                "`_Alignas` cannot weaken natural alignment",
+            ));
+        }
+        Ok(natural.max(attrs.alignment().unwrap_or(1)))
+    }
+
+    pub(crate) fn expr_alignment(&self, e: &Expr) -> u64 {
+        match &e.kind {
+            ExprKind::Local(id) | ExprKind::CompoundLit(id, _) => {
+                self.fs.as_ref().unwrap().locals[*id].align
+            }
+            ExprKind::Global(g) => self.globals[*g].align.max(self.align_of(&e.ty)),
+            ExprKind::Member { align, .. } => *align,
+            _ => self.align_of(&e.ty),
+        }
+    }
+
     pub(crate) fn typedef_type(&self, name: &str) -> Option<Ty> {
         match self.lookup(name) {
             Some(Sym::Typedef(i)) => Some(self.typedefs[*i].ty.clone()),
@@ -416,17 +463,20 @@ impl Parser {
                 let ty = self.fs.as_ref().unwrap().locals[id].ty.clone();
                 Ok(Expr {
                     kind: ExprKind::Local(id),
+                    sugar: self.fs.as_ref().unwrap().locals[id].sugar.clone(),
                     ty,
                     loc,
                 })
             }
             Some(Sym::Global(g)) => Ok(Expr {
                 kind: ExprKind::Global(g),
+                sugar: self.globals[g].sugar.clone(),
                 ty: self.globals[g].ty.clone(),
                 loc,
             }),
             Some(Sym::Enum(v)) => Ok(Expr {
                 kind: ExprKind::Int(v),
+                sugar: Sugar::Plain,
                 ty: INT,
                 loc,
             }),
@@ -446,12 +496,14 @@ impl Parser {
         sugar: Sugar,
         volatile: bool,
     ) -> LocalId {
-        let in_memory = volatile || !ty.is_scalar();
+        let in_memory = volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar();
+        let align = self.align_of(&ty);
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
             name: name.clone(),
             ty,
             sugar,
+            align,
             scope: fs.scope,
             in_memory,
         });
@@ -469,11 +521,13 @@ impl Parser {
     /// Adds an unnamed object with static storage, like a file-scope
     /// compound literal.
     pub(crate) fn add_static(&mut self, name: String, ty: Ty, init: Init, is_const: bool) -> usize {
+        let align = self.align_of(&ty);
         self.globals.push(Global {
             symbol: name.clone(),
             name,
             ty,
             sugar: Sugar::Plain,
+            align,
             internal: true,
             defined: true,
             init: Some(init),
@@ -537,12 +591,15 @@ impl Parser {
                     sugar: spec.sugar.clone(),
                     is_const: false,
                     is_volatile: false,
+                    attrs: Attrs::default(),
                 }
             } else {
                 self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?
             };
             let mut attrs = spec.attrs;
+            attrs.merge(d.attrs);
             let label = self.asm_label_and_attrs(&mut attrs)?;
+            d.attrs = attrs;
             let Some((name, name_loc)) = d.name.clone() else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
@@ -574,6 +631,17 @@ impl Parser {
                 } else {
                     expr.ty.clone()
                 };
+                // Inference drops top-level object qualifiers but retains
+                // qualified pointees. Explicit qualifiers remain outermost.
+                let inferred = expr.sugar.unqualified(&self.typedefs).clone();
+                d.sugar = if spec.is_volatile {
+                    Sugar::Volatile(Rc::new(inferred))
+                } else {
+                    inferred
+                };
+                if spec.is_const {
+                    d.sugar = Sugar::Const(Rc::new(d.sugar));
+                }
                 Some(Init {
                     items: vec![InitItem::Expr {
                         offset: 0,
@@ -603,6 +671,14 @@ impl Parser {
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
+                if attrs.alignas.is_some()
+                    || attrs.aligned.is_some_and(|a| a != self.align_of(&d.ty))
+                {
+                    return Err(Error::new(
+                        name_loc,
+                        "alignment-changing typedef attributes are not supported",
+                    ));
+                }
                 self.typedefs.push(TypedefDef {
                     name: name.clone(),
                     ty: d.ty,
@@ -610,6 +686,12 @@ impl Parser {
                 });
                 self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
             } else if let Ty::Func(fty) = &d.ty {
+                if attrs.alignment().is_some() || attrs.alignas.is_some() {
+                    return Err(Error::new(
+                        name_loc,
+                        "function alignment attributes are not supported",
+                    ));
+                }
                 let g = self.declare_function(&name, label, fty.clone(), &spec, attrs, file_scope);
                 self.globals[g].sugar = d.sugar.clone();
                 if file_scope && self.is("{") {
@@ -620,6 +702,8 @@ impl Parser {
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
                 let id = self.new_local(name.clone(), d.ty.clone(), d.sugar.clone(), is_volatile);
+                let align = self.object_alignment(&d.ty, attrs, name_loc)?;
+                self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
                 let mut init = inferred_init;
                 if init.is_none() && self.eat("=") {
@@ -691,6 +775,7 @@ impl Parser {
         inferred_init: Option<Init>,
     ) -> R<()> {
         let name = d.name.as_ref().unwrap().0.clone();
+        let align = self.object_alignment(&d.ty, d.attrs, d.name.as_ref().unwrap().1)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
             let func = &self.fs.as_ref().unwrap().name;
@@ -705,6 +790,7 @@ impl Parser {
                 symbol,
                 ty: d.ty.clone(),
                 sugar: d.sugar.clone(),
+                align,
                 internal: true,
                 defined: true,
                 init: None,
@@ -731,6 +817,7 @@ impl Parser {
             }
             g
         };
+        self.globals[g].align = self.globals[g].align.max(align);
         if inferred_init.is_some() || self.eat("=") {
             let loc = self.loc();
             if !file_scope && !local_static {
@@ -778,6 +865,7 @@ impl Parser {
                     symbol: name.to_string(),
                     ty,
                     sugar: Sugar::Plain,
+                    align: 1,
                     internal: false,
                     defined: false,
                     init: None,
@@ -931,7 +1019,7 @@ impl Parser {
                 let name = name.trim_matches('_');
                 match name {
                     "aligned" if self.eat("(") => {
-                        let n = self.const_int()? as u64;
+                        let n = self.alignment_constant(false)?;
                         attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(n));
                         self.expect(")")?;
                     }
@@ -958,6 +1046,25 @@ impl Parser {
     }
 
     // ---- types ----
+
+    fn alignment_constant(&mut self, allow_zero: bool) -> R<u64> {
+        let loc = self.loc();
+        let e = self.conditional()?;
+        let Some(crate::eval::Const::Int(n)) = crate::eval::eval_constant(&e, false) else {
+            return Err(Error::new(loc, "alignment must be an integer constant"));
+        };
+        if !e.ty.is_integer()
+            || n < 0
+            || (n == 0 && !allow_zero)
+            || (n != 0 && !(n as u64).is_power_of_two())
+        {
+            return Err(Error::new(loc, "alignment must be a power of two"));
+        }
+        if n > 4096 {
+            return Err(Error::new(loc, "alignment above 4096 is not supported"));
+        }
+        Ok(n as u64)
+    }
 
     fn decl_spec(&mut self) -> R<DeclSpec> {
         const VOID: u32 = 1;
@@ -1026,10 +1133,10 @@ impl Parser {
                         let ty = self.type_name()?;
                         self.align_of(&ty)
                     } else {
-                        self.const_int()? as u64
+                        self.alignment_constant(true)?
                     };
                     self.expect(")")?;
-                    spec.attrs.aligned = Some(spec.attrs.aligned.unwrap_or(1).max(n));
+                    spec.attrs.alignas = Some(spec.attrs.alignas.unwrap_or(0).max(n));
                     continue;
                 }
                 _ => {
@@ -1050,18 +1157,21 @@ impl Parser {
                         "_Atomic" => {
                             self.advance();
                             self.expect("(")?;
-                            let ty = self.type_name()?;
+                            let (ty, sugar) = self.type_name_sugar()?;
+                            spec.sugar = sugar;
                             self.expect(")")?;
                             Some(self.atomic_type(ty, loc)?)
                         }
                         "typeof" | "__typeof__" | "__typeof" => {
                             self.advance();
                             self.expect("(")?;
-                            let ty = if self.is_typename() {
-                                self.type_name()?
+                            let (ty, sugar) = if self.is_typename() {
+                                self.type_name_sugar()?
                             } else {
-                                self.expr()?.ty
+                                let e = self.expr()?;
+                                (e.ty, e.sugar)
                             };
+                            spec.sugar = sugar;
                             self.expect(")")?;
                             Some(ty)
                         }
@@ -1212,6 +1322,10 @@ impl Parser {
     /// A type name, as in casts and `sizeof`: specifiers and an abstract
     /// declarator.
     pub(crate) fn type_name(&mut self) -> R<Ty> {
+        Ok(self.type_name_sugar()?.0)
+    }
+
+    pub(crate) fn type_name_sugar(&mut self) -> R<(Ty, Sugar)> {
         let spec = self.decl_spec()?;
         if spec.infer {
             return Err(Error::new(
@@ -1219,7 +1333,18 @@ impl Parser {
                 "`__auto_type` is only allowed in variable declarations",
             ));
         }
-        Ok(self.declarator(spec.ty)?.ty)
+        let d = self.declarator_sugar(spec.ty, spec.sugar)?;
+        if spec.attrs.alignment().is_some()
+            || d.attrs.alignment().is_some()
+            || spec.attrs.alignas.is_some()
+            || d.attrs.alignas.is_some()
+        {
+            return Err(Error::new(
+                self.loc(),
+                "alignment attributes on type names are not supported",
+            ));
+        }
+        Ok((d.ty, d.sugar))
     }
 
     /// `_Atomic(ty)`, which keel supports for integers and pointers.
@@ -1235,7 +1360,7 @@ impl Parser {
     }
 
     /// Pointer qualifiers after a `*`. Returns (const, volatile, atomic).
-    fn qualifiers(&mut self) -> R<(bool, bool, bool)> {
+    fn qualifiers(&mut self, attrs: &mut Attrs) -> R<(bool, bool, bool)> {
         let (mut c, mut v, mut a) = (false, false, false);
         loop {
             match self.peek() {
@@ -1246,7 +1371,7 @@ impl Parser {
                 }
                 Tok::Ident(w) if IGNORED_QUALIFIERS.contains(&w.as_str()) => {}
                 Tok::Ident(w) if w == "__attribute__" || w == "__attribute" => {
-                    self.attributes(&mut Attrs::default())?;
+                    self.attributes(attrs)?;
                     continue;
                 }
                 _ => return Ok((c, v, a)),
@@ -1255,14 +1380,10 @@ impl Parser {
         }
     }
 
-    /// A declarator, possibly abstract, applied to the specifiers' type.
-    pub(crate) fn declarator(&mut self, ty: Ty) -> R<Declarator> {
-        self.declarator_sugar(ty, Sugar::Plain)
-    }
-
     /// A declarator applied to the specifiers' type and its sugar.
     fn declarator_sugar(&mut self, mut ty: Ty, mut sugar: Sugar) -> R<Declarator> {
         let (mut is_const, mut is_volatile) = (false, false);
+        let mut attrs = Attrs::default();
         // `^` is a block pointer (Apple's closures, in headers when
         // `__BLOCKS__` is defined); as a value it is just a pointer.
         while self.eat("*") || self.eat("^") {
@@ -1270,7 +1391,7 @@ impl Parser {
             ty = Ty::ptr_to(ty);
             sugar = sugar.wrap(Sugar::Ptr);
             let is_atomic;
-            (is_const, is_volatile, is_atomic) = self.qualifiers()?;
+            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut attrs)?;
             if is_atomic {
                 ty = self.atomic_type(ty, loc)?;
             }
@@ -1281,7 +1402,7 @@ impl Parser {
                 sugar = Sugar::Const(Rc::new(sugar));
             }
         }
-        self.attributes(&mut Attrs::default())?;
+        self.attributes(&mut attrs)?;
         if self.is("(") && self.nested_declarator_follows() {
             // `(*name)[3]`: the suffix after the parentheses applies first,
             // so skip the inner declarator, read the suffix, and come back.
@@ -1291,7 +1412,8 @@ impl Parser {
             let (ty, sugar) = self.type_suffix(ty, sugar)?;
             let end = self.pos;
             self.pos = start;
-            let d = self.declarator_sugar(ty, sugar)?;
+            let mut d = self.declarator_sugar(ty, sugar)?;
+            d.attrs.merge(attrs);
             self.expect(")")?;
             self.pos = end;
             return Ok(d);
@@ -1317,6 +1439,7 @@ impl Parser {
             sugar,
             is_const,
             is_volatile,
+            attrs,
         })
     }
 
@@ -1338,7 +1461,14 @@ impl Parser {
             return Ok((Ty::Func(Rc::new(fty)), sugar.wrap(Sugar::Func)));
         }
         if self.eat("[") {
-            while self.eat("static") || self.qualifiers()? != (false, false, false) {}
+            let mut attrs = Attrs::default();
+            while self.eat("static") || self.qualifiers(&mut attrs)? != (false, false, false) {}
+            if attrs.alignment().is_some() || attrs.alignas.is_some() {
+                return Err(Error::new(
+                    self.loc(),
+                    "alignment attributes in array declarators are not supported",
+                ));
+            }
             let loc = self.loc();
             let len = if self.is("]") {
                 None
@@ -1398,11 +1528,19 @@ impl Parser {
                 return Err(Error::new(loc, "`__auto_type` cannot declare a parameter"));
             }
             let d = self.declarator_sugar(spec.ty, spec.sugar)?;
-            self.attributes(&mut Attrs::default())?;
+            let mut attrs = spec.attrs;
+            attrs.merge(d.attrs);
+            self.attributes(&mut attrs)?;
+            if attrs.alignment().is_some() || attrs.alignas.is_some() {
+                return Err(Error::new(
+                    loc,
+                    "alignment attributes on parameters are not supported",
+                ));
+            }
             // Arrays and functions are passed as pointers.
             let sugar = match (&d.ty, d.sugar) {
                 (Ty::Func(_), s) => s.wrap(Sugar::Ptr),
-                (_, Sugar::Array(elem)) => Sugar::Ptr(elem),
+                (Ty::Array(_, _), s) => Sugar::Ptr(Rc::new(s.pointee(&self.typedefs))),
                 (_, s) => s,
             };
             let ty = match d.ty {
@@ -1491,15 +1629,25 @@ impl Parser {
             if self.eat(";") {
                 // An anonymous struct or union member.
                 if matches!(spec.ty, Ty::Struct(_)) {
-                    fields.push((None, spec.ty, Sugar::Plain, None));
+                    self.object_alignment(&spec.ty, spec.attrs, floc)?;
+                    fields.push((
+                        None,
+                        spec.ty,
+                        spec.sugar,
+                        None,
+                        spec.attrs.alignment(),
+                        spec.attrs.packed,
+                    ));
                 }
                 continue;
             }
             loop {
+                let mut member_attrs = spec.attrs;
                 let (name, ty, sugar) = if self.is(":") {
                     (None, spec.ty.clone(), spec.sugar.clone())
                 } else {
                     let d = self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?;
+                    member_attrs.merge(d.attrs);
                     (d.name.map(|(n, _)| n), d.ty, d.sugar)
                 };
                 let width = if self.eat(":") {
@@ -1514,14 +1662,19 @@ impl Parser {
                     }
                     None
                 };
-                let mut member_attrs = Attrs::default();
                 self.attributes(&mut member_attrs)?;
-                if let Some(a) = member_attrs.aligned {
-                    // Only alignment on struct members is supported through
-                    // the struct's own alignment.
-                    attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(a));
+                self.object_alignment(&ty, member_attrs, floc)?;
+                if width.is_some() && member_attrs.alignas.is_some() {
+                    return Err(Error::new(floc, "`_Alignas` cannot apply to a bit-field"));
                 }
-                fields.push((name, ty, sugar, width));
+                fields.push((
+                    name,
+                    ty,
+                    sugar,
+                    width,
+                    member_attrs.alignment(),
+                    member_attrs.packed,
+                ));
                 if !self.eat(",") {
                     break;
                 }
@@ -1529,12 +1682,11 @@ impl Parser {
             self.expect(";")?;
         }
         self.attributes(&mut attrs)?;
-        let (members, mut size, mut align) = layout_struct(
-            &self.types(),
-            is_union,
-            fields,
-            if attrs.packed { Some(1) } else { pack },
-        );
+        for field in &mut fields {
+            field.5 |= attrs.packed;
+        }
+        let (members, mut size, mut align) = layout_struct(&self.types(), is_union, fields, pack)
+            .map_err(|message| Error::new(loc, message))?;
         if let Some(a) = attrs.aligned {
             align = align.max(a);
             size = size.next_multiple_of(align);

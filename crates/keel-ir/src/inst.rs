@@ -5,7 +5,10 @@
 //! passes do not match on formats; they use [`InstData::for_each_operand`]
 //! and friends.
 
-use crate::{Block, DataRef, FuncRef, InlineAsm, Intrinsic, SigRef, StackSlot, Type, Value};
+use crate::{
+    Block, DataRef, FuncRef, InlineAsm, Intrinsic, MemoryEffects, MemoryFlags, SigRef, StackSlot,
+    Type, Value,
+};
 use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -62,10 +65,12 @@ pub enum InstData {
         args: [Value; 2],
     },
     Load {
+        flags: MemoryFlags,
         ty: Type,
         addr: Value,
     },
     Store {
+        flags: MemoryFlags,
         value: Value,
         addr: Value,
     },
@@ -471,6 +476,102 @@ impl InstData {
         }
     }
 
+    /// Memory effects are distinct from scheduling: even a non-trapping,
+    /// ordinary load remains pinned until a memory-aware pass proves a move.
+    /// Keep classification exhaustive: new opcodes must declare their effects.
+    pub fn memory_effects(&self) -> MemoryEffects {
+        use MemoryEffects::*;
+        match self {
+            Self::Load { flags, .. } if !flags.volatile => Read,
+            Self::Store { flags, .. } if !flags.volatile => Write,
+            Self::Load { .. }
+            | Self::Store { .. }
+            | Self::AtomicLoad { .. }
+            | Self::AtomicStore { .. }
+            | Self::AtomicRmw { .. }
+            | Self::AtomicCas { .. }
+            | Self::Fence { .. }
+            | Self::Call { .. }
+            | Self::CallIndirect { .. }
+            | Self::Invoke { .. }
+            | Self::ReturnCall { .. }
+            | Self::ReturnCallIndirect { .. }
+            | Self::InlineAsm { .. } => Barrier,
+            Self::VaArg { .. } => ReadWrite,
+            Self::Intrinsic { id, .. } => match id {
+                Intrinsic::Memcpy | Intrinsic::Memmove => ReadWrite,
+                Intrinsic::Memset | Intrinsic::VaStart => Write,
+                Intrinsic::FrameAddress => None,
+                Intrinsic::StackAlloc
+                | Intrinsic::StackSave
+                | Intrinsic::StackRestore
+                | Intrinsic::Debugtrap => Barrier,
+            },
+            Self::Iconst { .. }
+            | Self::Fconst { .. }
+            | Self::Unary { .. }
+            | Self::Overflow { .. }
+            | Self::Fma { .. }
+            | Self::Select { .. }
+            | Self::Convert { .. }
+            | Self::Icmp { .. }
+            | Self::Fcmp { .. }
+            | Self::StackAddr { .. }
+            | Self::SymbolAddr { .. }
+            | Self::EhTypeid { .. }
+            | Self::Jump { .. }
+            | Self::Brif { .. }
+            | Self::Switch { .. }
+            | Self::Return { .. }
+            | Self::LandingPad { .. }
+            | Self::Binary { .. }
+            | Self::Trap => None,
+        }
+    }
+
+    /// Conservative possibility of a fault, trap, or exceptional exit.
+    /// `false` alone permits neither deletion of side effects nor motion
+    /// across memory writes, barriers, or lifetime changes.
+    pub fn may_trap(&self) -> bool {
+        match self {
+            Self::Binary { op, .. } => op.can_trap(),
+            Self::Load { flags, .. } | Self::Store { flags, .. } => !flags.notrap,
+            Self::AtomicLoad { .. }
+            | Self::AtomicStore { .. }
+            | Self::AtomicRmw { .. }
+            | Self::AtomicCas { .. }
+            | Self::VaArg { .. }
+            | Self::Call { .. }
+            | Self::CallIndirect { .. }
+            | Self::Invoke { .. }
+            | Self::ReturnCall { .. }
+            | Self::ReturnCallIndirect { .. }
+            | Self::InlineAsm { .. }
+            | Self::Trap => true,
+            Self::Intrinsic { id, .. } => {
+                !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
+            }
+            Self::Iconst { .. }
+            | Self::Fconst { .. }
+            | Self::Unary { .. }
+            | Self::Overflow { .. }
+            | Self::Fma { .. }
+            | Self::Select { .. }
+            | Self::Convert { .. }
+            | Self::Icmp { .. }
+            | Self::Fcmp { .. }
+            | Self::StackAddr { .. }
+            | Self::SymbolAddr { .. }
+            | Self::EhTypeid { .. }
+            | Self::Jump { .. }
+            | Self::Brif { .. }
+            | Self::Switch { .. }
+            | Self::Return { .. }
+            | Self::LandingPad { .. }
+            | Self::Fence { .. } => false,
+        }
+    }
+
     pub fn is_terminator(&self) -> bool {
         matches!(
             self,
@@ -541,7 +642,7 @@ impl InstData {
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
             InstData::VaArg { list, .. } => f(*list),
-            InstData::Store { value, addr } => {
+            InstData::Store { value, addr, .. } => {
                 f(*value);
                 f(*addr);
             }
@@ -597,7 +698,7 @@ impl InstData {
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
             InstData::VaArg { list, .. } => f(list),
-            InstData::Store { value, addr } => {
+            InstData::Store { value, addr, .. } => {
                 f(value);
                 f(addr);
             }

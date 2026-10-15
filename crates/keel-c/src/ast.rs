@@ -6,7 +6,7 @@
 
 use crate::Loc;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
-use keel_ir::RmwOp;
+use keel_ir::{OverflowOp, RmwOp};
 use std::rc::Rc;
 
 pub type LocalId = usize;
@@ -14,8 +14,17 @@ pub type LocalId = usize;
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
+    /// Qualifier/type shape retained through lvalues and pointer values.
+    pub sugar: Sugar,
     pub ty: Ty,
     pub loc: Loc,
+}
+
+impl Expr {
+    pub fn with_sugar(mut self, sugar: Sugar) -> Self {
+        self.sugar = sugar;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +96,7 @@ pub enum ExprKind {
         base: Box<Expr>,
         offset: u64,
         bits: Option<BitField>,
+        align: u64,
     },
     /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
     /// the address of the `va_list` object. `va_copy` is an assignment, of
@@ -145,8 +155,15 @@ pub enum Builtin {
     Clz,
     Ctz,
     Popcount,
+    /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
+    Overflow(OverflowOp),
+    /// Evaluates its arguments once and returns the first value. Branch
+    /// and alignment metadata are validated by the parser, then ignored.
+    Hint,
     Alloca,
     Trap,
+    /// A resumable debugger breakpoint, unlike the terminating `Trap`.
+    Debugtrap,
     /// `__builtin_frame_address(0)`.
     FrameAddress,
     /// The atomic builtins (`__atomic_*`, `__sync_*`, `__c11_atomic_*`),
@@ -242,6 +259,7 @@ pub struct Local {
     pub name: String,
     pub ty: Ty,
     pub sugar: Sugar,
+    pub align: u64,
     /// The block scope it is declared in, `None` for the function's
     /// outermost one.
     pub scope: Option<usize>,
@@ -275,6 +293,7 @@ pub struct Global {
     pub ty: Ty,
     /// From the last declaration.
     pub sugar: Sugar,
+    pub align: u64,
     /// `static`, or a C99 `inline` definition without `extern`.
     pub internal: bool,
     /// Defined in this file: a function body, an initializer, or a

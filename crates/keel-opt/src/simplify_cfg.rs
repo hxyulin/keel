@@ -2,17 +2,16 @@
 //!
 //! 1. A `brif` or `switch` on a constant, or whose targets are all the
 //!    same, becomes a `jump`.
-//! 2. A branch to a block that only jumps on (no parameters, one `jump`)
-//!    goes straight to that jump's target. The jump's arguments are defined
-//!    in blocks dominating the skipped block, so they dominate every
-//!    branch into it too.
+//! 2. Bypass jump-only blocks, substituting incoming arguments for their
+//!    parameters. A parameter used outside the forwarding block prevents
+//!    bypassing it: that definition must still dominate its external uses.
 //! 3. Unreachable blocks are removed.
 //! 4. A block whose only predecessor ends in a `jump` to it is merged into
 //!    that predecessor: its parameters become the jump's arguments.
 
 use crate::const_fold::constant;
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
-use keel_ir::{Block, BlockCall, EntityRef, Function, InstData};
+use keel_ir::{Block, BlockCall, EntityRef, Function, InstData, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
@@ -71,14 +70,24 @@ fn same_call(func: &Function, a: &BlockCall, b: &BlockCall) -> bool {
             .all(|(&x, &y)| func.resolve(x) == func.resolve(y))
 }
 
-/// The jump a block consists of, if it has no parameters and nothing else.
-fn forwarding_target(func: &Function, block: Block) -> Option<BlockCall> {
-    if !func.block_params(block).is_empty() {
-        return None;
-    }
+/// Compose one incoming block call with a jump-only block's outgoing call.
+/// Substitution is simultaneous, so permutations and repeated arguments work.
+fn forwarding_target(func: &Function, incoming: &BlockCall) -> Option<BlockCall> {
+    let block = incoming.block;
     match func.block_insts(block) {
         [only] => match func.inst_data(*only) {
-            InstData::Jump { dest } if dest.block != block => Some(dest.clone()),
+            InstData::Jump { dest } if dest.block != block => {
+                let mut target = dest.clone();
+                for arg in &mut target.args {
+                    *arg = func.resolve(*arg);
+                    if let ValueDef::Param(def, n) = func.value_def(*arg)
+                        && def == block
+                    {
+                        *arg = incoming.args[n as usize];
+                    }
+                }
+                Some(target)
+            }
             _ => None,
         },
         _ => None,
@@ -86,6 +95,18 @@ fn forwarding_target(func: &Function, block: Block) -> Option<BlockCall> {
 }
 
 fn skip_forwarding_blocks(func: &mut Function) -> bool {
+    // Removing a forwarding block's parameters is only legal when all
+    // their uses are in that block's jump. Resolve aliases before checking.
+    let mut escaping = vec![false; func.num_blocks()];
+    for (block, inst) in func.layout_insts() {
+        func.inst_data(inst).for_each_operand(|value| {
+            if let ValueDef::Param(def, _) = func.value_def(func.resolve(value))
+                && def != block
+            {
+                escaping[def.index()] = true;
+            }
+        });
+    }
     let mut changed = false;
     let blocks: Vec<Block> = func.blocks().collect();
     for block in blocks {
@@ -93,10 +114,10 @@ fn skip_forwarding_blocks(func: &mut Function) -> bool {
             continue;
         };
         for i in 0..func.inst_data(term).branch_dests().len() {
-            let dest = func.inst_data(term).branch_dests()[i].block;
+            let dest = &func.inst_data(term).branch_dests()[i];
             // A block that forwards to itself through others would loop
             // forever here; one step per round is enough.
-            if dest == block {
+            if dest.block == block || escaping[dest.block.index()] {
                 continue;
             }
             // An invoke's destinations take no arguments.

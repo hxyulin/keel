@@ -1,0 +1,13 @@
+; expect: exit 0
+; opt-passes: simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
+func @strength(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 8
+    v2 = udiv v0, v1
+    v3 = urem v0, v1
+    v4 = imul v2, v1
+    v5 = iadd v4, v3
+    v6 = iconst.i64 0
+    v7 = iadd v5, v6
+    return v7
+}

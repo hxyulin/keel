@@ -5,5 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+profile-with-tracy = ["profiling/profile-with-tracy"]
+
 [dependencies]
+profiling.workspace = true
 keel-ir = { path = "../keel-ir" }

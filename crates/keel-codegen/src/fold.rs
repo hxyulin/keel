@@ -23,6 +23,7 @@ pub(crate) fn iconst(func: &Function, v: Value) -> Option<i64> {
 /// instruction folds (each once per operand position).
 pub(crate) fn folded_values(
     func: &Function,
+    selection: &crate::select::Selection,
     folds: impl Fn(&InstData) -> Vec<Value>,
 ) -> HashSet<Value> {
     let mut values = HashSet::new();
@@ -32,8 +33,12 @@ pub(crate) fn folded_values(
         if let InstData::StackAddr { .. } | InstData::Iconst { .. } = data {
             values.extend(func.inst_results(inst).iter().copied());
         }
-        let mut folds: Vec<Value> = folds(data).into_iter().map(|v| func.resolve(v)).collect();
-        data.for_each_operand(|v| {
+        let mut folds: Vec<Value> = if selection.matches.contains_key(&inst) {
+            vec![]
+        } else {
+            folds(data).into_iter().map(|v| func.resolve(v)).collect()
+        };
+        selection.for_each_operand(func, inst, |v| {
             let v = func.resolve(v);
             match folds.iter().position(|&f| f == v) {
                 Some(i) => {

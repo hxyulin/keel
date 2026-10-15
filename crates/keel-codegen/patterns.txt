@@ -1,0 +1,34 @@
+# target root child machine commutative-root
+Aarch64 Iadd Imul Madd true
+Aarch64 Isub Imul Msub false
+Aarch64 Iadd Shl ShiftAdd true
+Aarch64 Isub Shl ShiftSub false
+Aarch64 And Shl ShiftAnd true
+Aarch64 Or Shl ShiftOr true
+Aarch64 Xor Shl ShiftXor true
+X86 Iadd Shl Lea true
+X86 Ptradd Shl Lea false
+
+# Register preferences for fallback instructions: target format opcode operand.
+hint X86 binary Iadd 0
+hint X86 binary Ptradd 0
+hint X86 binary Isub 0
+hint X86 binary Imul 0
+hint X86 binary And 0
+hint X86 binary Or 0
+hint X86 binary Xor 0
+hint X86 binary Shl 0
+hint X86 binary Ushr 0
+hint X86 binary Sshr 0
+hint X86 binary Rotl 0
+hint X86 binary Rotr 0
+hint X86 binary Fadd 0
+hint X86 binary Fsub 0
+hint X86 binary Fmul 0
+hint X86 binary Fdiv 0
+hint X86 convert Trunc 0
+hint X86 convert PtrToInt 0
+hint X86 convert IntToPtr 0
+hint Aarch64 convert Trunc 0
+hint Aarch64 convert PtrToInt 0
+hint Aarch64 convert IntToPtr 0

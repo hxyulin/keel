@@ -118,6 +118,32 @@ pub fn compile(module: &Module) -> Result<String, CodegenError> {
 /// Like [`compile`], allocating only from `pools`, which must be drawn from
 /// [`REGISTERS`]. Tests use a tiny set to force spills.
 pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenError> {
+    compile_with_options(module, pools, crate::SelectionOptions::default())
+}
+
+/// Like [`compile_with`], with optional target selection passes enabled.
+pub fn compile_with_options(
+    module: &Module,
+    pools: &Pools,
+    options: crate::SelectionOptions,
+) -> Result<String, CodegenError> {
+    let selector = crate::OptionsSelector(options);
+    compile_with_pipeline(
+        module,
+        pools,
+        &crate::CodegenPipeline {
+            selector: &selector,
+            allocator: &regalloc::AllocationTier::Full,
+        },
+    )
+}
+
+/// Compile using independently replaceable selection and allocation stages.
+pub fn compile_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<String, CodegenError> {
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
         subset(pools.caller_saved, REGISTERS.caller_saved)
@@ -135,7 +161,7 @@ pub fn compile_with(module: &Module, pools: &Pools) -> Result<String, CodegenErr
     }
     let mut frames = Vec::new();
     for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools)?;
+        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -261,8 +287,8 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 fn folds(func: &Function, data: &InstData) -> Vec<Value> {
     let wide = |v: Value| func.value_type(func.resolve(v)) == Type::I128;
     let addr = match *data {
-        InstData::Load { ty, addr } if ty != Type::I128 => Some(addr),
-        InstData::Store { value, addr } if !wide(value) => Some(addr),
+        InstData::Load { ty, addr, .. } if ty != Type::I128 => Some(addr),
+        InstData::Store { value, addr, .. } if !wide(value) => Some(addr),
         _ => None,
     }
     .filter(|&addr| stack_slot(func, addr).is_some());
@@ -286,6 +312,7 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    selection: crate::select::Selection,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
     /// `stack_addr` and `iconst` results folded into every use, which
@@ -344,7 +371,12 @@ impl<'a> FunctionCompiler<'a> {
             .collect()
     }
 
-    fn new(func: &'a Function, module: &'a Module, pools: &Pools) -> Result<Self, CodegenError> {
+    fn new(
+        func: &'a Function,
+        module: &'a Module,
+        pools: &Pools,
+        pipeline: &crate::CodegenPipeline<'_>,
+    ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -463,11 +495,15 @@ impl<'a> FunctionCompiler<'a> {
             offset - 176
         });
 
-        let alloc = regalloc::allocate(
+        let selection = pipeline
+            .selector
+            .select(func, crate::select::Target::X86, &|data| folds(func, data));
+        let alloc = pipeline.allocator.allocate(
             func,
             pools,
-            |data| is_call(func, data),
-            |data| returns_twice(func, data),
+            &|data| is_call(func, data),
+            &|data| returns_twice(func, data),
+            &selection,
         );
         let spill_base = offset.next_multiple_of(8);
         let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
@@ -488,8 +524,9 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
-            folded_values: fold::folded_values(func, |data| folds(func, data)),
+            folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
             fused_compares: fold::fused_compares(func),
+            selection,
             stack_slot_offsets,
             outgoing,
             spill_base,
@@ -514,6 +551,7 @@ impl<'a> FunctionCompiler<'a> {
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
     fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
+        profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
         out.push_str("\t.text\n");
@@ -711,9 +749,31 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
+        let ty = self.ty(matched.args[0]);
+        let a = self.use_reg(matched.args[0], S0);
+        let b = self.use_reg(matched.args[1], S1);
+        let d = self.def_reg(result);
+        self.emit(format!(
+            "lea\t{}, [{} + {} * {}]",
+            wide(d, ty),
+            r64(a),
+            r64(b),
+            1u8 << matched.shift
+        ));
+        self.def_done(result, d);
+    }
+
     fn inst(&mut self, inst: Inst) {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
+        if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(matched) = self.selection.matches.get(&inst).cloned() {
+            self.selected(result, matched);
+            return;
+        }
         if self.lower_i128(inst, func.inst_data(inst), result) {
             return;
         }
@@ -892,7 +952,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("set{cc}\t{}", r8(d)));
                 self.def_done(result, d);
             }
-            InstData::Load { ty, addr } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
                 self.emit(format!("{}\t{}, {a}", movs(ty), xmm(d)));
@@ -900,7 +960,7 @@ impl<'a> FunctionCompiler<'a> {
             }
             // A narrow load zero-extends to 32 bits, which avoids writing
             // part of a register (and depending on its old value).
-            InstData::Load { ty, addr } => {
+            InstData::Load { ty, addr, .. } => {
                 let d = self.def_reg(result);
                 let a = self.mem(addr, S0, ty);
                 match ty {
@@ -909,13 +969,13 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
                 self.emit(format!("{}\t{a}, {}", movs(ty), xmm(v)));
             }
-            InstData::Store { value, addr } => {
+            InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
                     Some((_, k)) => k.to_string(),
@@ -1271,13 +1331,14 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Load {
                 ty: Type::I128,
                 addr,
+                ..
             } => {
                 let a = r64(self.use_reg(addr, S1));
                 self.emit(format!("mov\trax, qword ptr [{a}]"));
                 self.emit(format!("mov\trdx, qword ptr [{a} + 8]"));
                 self.pair_out(result);
             }
-            InstData::Store { value, addr } if wide(self, value) => {
+            InstData::Store { value, addr, .. } if wide(self, value) => {
                 let [v0, v1] = self.halves(value);
                 let a = r64(self.use_reg(addr, S1));
                 self.emit(format!("mov\trax, {v0}"));

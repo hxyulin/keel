@@ -12,6 +12,7 @@ pub mod inst;
 pub mod intrinsic;
 pub mod layout;
 pub mod loops;
+pub mod memory;
 pub mod module;
 pub mod parser;
 pub mod target;
@@ -36,6 +37,7 @@ pub use inst::{
 };
 pub use intrinsic::{Intrinsic, IntrinsicInfo};
 pub use layout::Layout;
+pub use memory::{MemoryEffects, MemoryFlags};
 pub use module::Module;
 pub use parser::{ParseError, parse, parse_with_ir_lines};
 pub use target::Target;

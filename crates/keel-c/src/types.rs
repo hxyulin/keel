@@ -111,7 +111,7 @@ pub struct FuncTy {
 }
 
 /// What a declaration says about a type that [`Ty`] does not keep, for
-/// debuggers: typedef names, enums and qualifiers. It has the shape of
+/// debuggers and access semantics: typedef names, enums and qualifiers. It has the shape of
 /// the `Ty` it goes with, down to where it stops saying more (`Plain`).
 /// Type checking only looks at the `Ty`.
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -131,6 +131,59 @@ pub enum Sugar {
 }
 
 impl Sugar {
+    /// The outer type constructor, resolving typedefs and qualifiers.
+    pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef]) -> &'a Sugar {
+        match self {
+            Self::Typedef(i) => defs[*i].sugar.unqualified(defs),
+            Self::Const(inner) | Self::Volatile(inner) => inner.unqualified(defs),
+            other => other,
+        }
+    }
+
+    pub fn is_volatile(&self, defs: &[TypedefDef]) -> bool {
+        match self {
+            Self::Volatile(_) => true,
+            Self::Const(inner) | Self::Array(inner) => inner.is_volatile(defs),
+            Self::Typedef(i) => defs[*i].sugar.is_volatile(defs),
+            _ => false,
+        }
+    }
+
+    pub fn pointee(&self, defs: &[TypedefDef]) -> Sugar {
+        match self.unqualified(defs) {
+            Self::Ptr(inner) => inner.as_ref().clone(),
+            Self::Array(inner) if self.is_volatile(defs) => Self::Volatile(inner.clone()),
+            Self::Array(inner) => inner.as_ref().clone(),
+            _ => Self::Plain,
+        }
+    }
+
+    pub fn function_return(&self, defs: &[TypedefDef]) -> Sugar {
+        let target = self.pointee(defs);
+        match target.unqualified(defs) {
+            Self::Func(ret) => ret.as_ref().clone(),
+            _ => Self::Plain,
+        }
+    }
+
+    /// Conditional pointers carry qualifiers from both operands. Expand
+    /// aliases here so nested pointer/array qualifications merge by depth.
+    pub fn merge(&self, other: &Sugar, defs: &[TypedefDef]) -> Sugar {
+        let volatile = self.is_volatile(defs) || other.is_volatile(defs);
+        let merged = match (self.unqualified(defs), other.unqualified(defs)) {
+            (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(Rc::new(a.merge(b, defs))),
+            (Self::Array(a), Self::Array(b)) => Self::Array(Rc::new(a.merge(b, defs))),
+            (Self::Func(a), Self::Func(b)) => Self::Func(Rc::new(a.merge(b, defs))),
+            (Self::Plain, b) => b.clone(),
+            (a, _) => a.clone(),
+        };
+        if volatile {
+            Self::Volatile(Rc::new(merged))
+        } else {
+            merged
+        }
+    }
+
     /// `Plain` when nothing is known, else `wrap` of `self`.
     pub fn wrap(self, wrap: fn(Rc<Sugar>) -> Sugar) -> Sugar {
         match self {
@@ -173,6 +226,7 @@ pub struct Member {
     pub ty: Ty,
     pub sugar: Sugar,
     pub offset: u64,
+    pub align: u64,
     pub bits: Option<BitField>,
 }
 
@@ -284,14 +338,22 @@ impl Ty {
 impl StructDef {
     /// The member called `name`, looking inside anonymous members; gives
     /// the path of members to it, and its offset.
-    pub fn find(&self, name: &str, structs: &[StructDef]) -> Option<(u64, Member)> {
+    pub fn find(
+        &self,
+        name: &str,
+        structs: &[StructDef],
+        defs: &[TypedefDef],
+    ) -> Option<(u64, Member)> {
         for m in &self.members {
             match &m.name {
                 Some(n) if n == name => return Some((m.offset, m.clone())),
                 None if m.bits.is_none() => {
                     if let Ty::Struct(id) = m.ty
-                        && let Some((off, found)) = structs[id].find(name, structs)
+                        && let Some((off, mut found)) = structs[id].find(name, structs, defs)
                     {
+                        if m.sugar.is_volatile(defs) {
+                            found.sugar = Sugar::Volatile(Rc::new(found.sugar));
+                        }
                         return Some((m.offset + off, found));
                     }
                 }
@@ -354,6 +416,31 @@ impl Types<'_> {
         Layout::Array(Box::new(Layout::Scalar(unit)), n as u32)
     }
 
+    /// SysV classifies aggregates with unaligned scalar fields as MEMORY.
+    /// The current IR layouts cannot express those explicit field offsets.
+    pub fn has_unaligned_fields(&self, ty: &Ty, base: u64) -> bool {
+        match ty {
+            Ty::Struct(id) => self.0[*id]
+                .members
+                .iter()
+                .any(|m| m.bits.is_none() && self.has_unaligned_fields(&m.ty, base + m.offset)),
+            Ty::Array(elem, _) => self.has_unaligned_fields(elem, base),
+            _ => !base.is_multiple_of(self.align(ty)),
+        }
+    }
+
+    pub fn contains_atomic(&self, ty: &Ty) -> bool {
+        match ty {
+            Ty::Atomic(_) => true,
+            Ty::Struct(id) => self.0[*id]
+                .members
+                .iter()
+                .any(|m| self.contains_atomic(&m.ty)),
+            Ty::Array(elem, _) => self.contains_atomic(elem),
+            _ => false,
+        }
+    }
+
     /// The float type and count if `ty` is made only of floats of one type.
     fn hfa(&self, ty: &Ty) -> Option<(Type, u64)> {
         match ty {
@@ -387,43 +474,63 @@ impl Types<'_> {
     }
 }
 
-/// Lays out a struct or union's members (name, type, bit-field width),
+pub type StructField = (Option<String>, Ty, Sugar, Option<u32>, Option<u64>, bool);
+
+/// Lays out a struct or union's members, including alignment and packing,
 /// returning the members with their offsets, the size and the alignment.
-/// `max_align` caps member alignment (`packed` is 1, `#pragma pack(n)` n).
+/// `max_align` caps member alignment for `#pragma pack(n)`.
 /// Bit-fields follow AAPCS64: a bit-field goes in the next bits that do not
 /// cross a boundary of its declared type's size, and a zero-width one
 /// aligns the next to its type.
 pub fn layout_struct(
     types: &Types,
     is_union: bool,
-    fields: Vec<(Option<String>, Ty, Sugar, Option<u32>)>,
+    fields: Vec<StructField>,
     max_align: Option<u64>,
-) -> (Vec<Member>, u64, u64) {
+) -> Result<(Vec<Member>, u64, u64), &'static str> {
     let mut members = Vec::new();
     let mut bit: u64 = 0;
     let mut size: u64 = 0;
     let mut align: u64 = 1;
-    for (name, ty, sugar, width) in fields {
-        let falign = types.align(&ty).min(max_align.unwrap_or(u64::MAX));
+    let mut packed_accesses = Vec::new();
+    for (name, ty, sugar, width, requested_align, packed) in fields {
+        let natural = types.align(&ty);
+        // Explicit GNU alignment overrides packed layout, but pragma pack
+        // caps even an explicitly aligned member.
+        let falign = if packed { 1 } else { natural }
+            .max(requested_align.unwrap_or(1))
+            .min(max_align.unwrap_or(u64::MAX));
         let fsize = types.size(&ty);
         if is_union {
             bit = 0;
         }
         match width {
             Some(0) => {
-                bit = bit.next_multiple_of(falign * 8);
+                bit = bit.next_multiple_of(natural * 8);
             }
             Some(w) => {
+                if requested_align.is_some() {
+                    bit = bit.next_multiple_of(falign * 8);
+                }
                 let unit_bits = fsize * 8;
                 if bit / unit_bits != (bit + u64::from(w) - 1) / unit_bits {
+                    if packed {
+                        return Err(
+                            "packed bit-fields requiring cross-container accesses are not supported",
+                        );
+                    }
                     bit = bit.next_multiple_of(unit_bits);
                 }
                 let offset = bit / unit_bits * fsize;
+                if packed {
+                    packed_accesses.push((offset, fsize));
+                }
                 members.push(Member {
                     name,
                     ty,
                     sugar,
                     offset,
+                    align: falign,
                     bits: Some(BitField {
                         shift: (bit - offset * 8) as u32,
                         width: w,
@@ -439,6 +546,7 @@ pub fn layout_struct(
                     ty,
                     sugar,
                     offset: bit / 8,
+                    align: falign,
                     bits: None,
                 });
                 bit += fsize * 8;
@@ -447,5 +555,19 @@ pub fn layout_struct(
         }
         size = size.max(bit.div_ceil(8));
     }
-    (members, size.next_multiple_of(align), align)
+    let size = size.next_multiple_of(align);
+    if packed_accesses
+        .iter()
+        .any(|(offset, width)| offset + width > size)
+    {
+        return Err("packed bit-fields requiring partial-container accesses are not supported");
+    }
+    for m in &members {
+        let natural = types.align(&m.ty);
+        if types.contains_atomic(&m.ty) && (m.align < natural || !m.offset.is_multiple_of(natural))
+        {
+            return Err("unaligned atomic members are not supported");
+        }
+    }
+    Ok((members, size, align))
 }

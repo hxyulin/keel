@@ -436,6 +436,257 @@ fn unused_internal_definitions_are_dropped() {
     assert_eq!(decls, ["puts"]);
 }
 
+/// All fixed-type overflow families preserve the result store on both
+/// backends, even when optimization runs.
+#[test]
+fn overflow_builtins_compile_on_both_targets() {
+    let mut src = String::new();
+    for (prefix, signed) in [("s", true), ("u", false)] {
+        for (suffix, width) in [("", "int"), ("l", "long"), ("ll", "long long")] {
+            let ty = if signed {
+                width.to_string()
+            } else {
+                format!("unsigned {width}")
+            };
+            for operation in ["add", "sub", "mul"] {
+                src.push_str(&format!(
+                    "_Bool {prefix}{operation}{suffix}({ty} a, {ty} b, {ty} *r) {{ \
+                     return __builtin_{prefix}{operation}{suffix}_overflow(a, b, r); }}\n"
+                ));
+            }
+        }
+    }
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            &src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+            let text = module.to_string();
+            for operation in ["sadd", "uadd", "ssub", "usub", "smul", "umul"] {
+                assert_eq!(
+                    text.matches(&format!("{operation}_overflow")).count(),
+                    3,
+                    "{text}"
+                );
+            }
+            assert_eq!(text.matches("store ").count(), 18, "{text}");
+        }
+    }
+}
+
+/// Erasing hint metadata must preserve calls in every runtime argument.
+#[test]
+fn hint_argument_calls_survive_optimization() {
+    let src = "long value(void); long expected(void); void *pointer(void); unsigned long offset(void);\n\
+               long plain(void) { return __builtin_expect(value(), expected()); }\n\
+               long probability(void) { return __builtin_expect_with_probability(value(), expected(), 0.75); }\n\
+               void *aligned(void) { return __builtin_assume_aligned(pointer(), 8, offset()); }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+            let text = module.to_string();
+            for (name, count) in [("value", 2), ("expected", 2), ("pointer", 1), ("offset", 1)] {
+                assert_eq!(
+                    text.matches(&format!("call @{name}(")).count(),
+                    count,
+                    "{text}"
+                );
+            }
+        }
+    }
+}
+
+/// A debugger trap is pinned but permits later instructions and return.
+#[test]
+fn debugtrap_preserves_continuation_on_both_targets() {
+    let src = "int f(void) { __builtin_debugtrap(); return 42; }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "test.c",
+            keel_c::Options {
+                target,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            let text = module.to_string();
+            assert_eq!(text.matches("intrinsic debugtrap()").count(), 1, "{text}");
+            assert!(text.contains("return "), "{text}");
+            let asm = keel_codegen::compile(&module, target).unwrap();
+            let breakpoint = match target {
+                keel_ir::Target::Aarch64AppleDarwin => "brk\t#0xf000",
+                keel_ir::Target::X86_64LinuxGnu => "int3",
+            };
+            assert!(asm.contains(breakpoint), "{asm}");
+        }
+    }
+}
+
+/// Aligned debug locations survive optimization and textual IR round trips.
+#[test]
+fn alignment_and_indirect_debug_locations_round_trip() {
+    let src = "_Alignas(64) long global;\n\
+               struct S { char c; int x __attribute__((aligned(16))); };\n\
+               int f(int value) { _Alignas(32) int x = value; struct S s = { 0 };\n\
+               s.x = x; return ((unsigned long)&x & 31) + __alignof__(x) + s.x; }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "alignment.c",
+            keel_c::Options {
+                target,
+                debug_info: true,
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            assert!(
+                module.functions[0]
+                    .debug_vars
+                    .iter()
+                    .any(|v| v.name == "x" && v.indirect)
+            );
+            let text = module.to_string();
+            assert!(text.contains("align 64"), "{text}");
+            let reparsed = keel_ir::parse(&text).unwrap();
+            keel_ir::verify_module(&reparsed).unwrap();
+            let canonical = reparsed.to_string();
+            assert_eq!(keel_ir::parse(&canonical).unwrap().to_string(), canonical);
+            keel_codegen::compile(&reparsed, target).unwrap();
+        }
+        // A location that dereferences a partial pointer must be rejected.
+        let func = &mut module.functions[0];
+        let too_small = func.create_stack_slot(4, 4);
+        func.debug_vars
+            .iter_mut()
+            .find(|v| v.indirect)
+            .unwrap()
+            .slot = too_small;
+        let errors = keel_ir::verify_module(&module).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("pointer-sized stack slot")),
+            "{errors:?}"
+        );
+    }
+}
+
+/// Debug metadata must not change the actual addresses or values of
+/// over-aligned objects. Linking also checks that dsymutil accepts it.
+#[test]
+fn aligned_objects_with_debug_info() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/alignment.c");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("alignment-debug");
+    std::fs::create_dir_all(&dir).unwrap();
+    let reference = dir.join("clang");
+    run(Command::new("clang")
+        .args(["-std=c11", "-w", "-o"])
+        .arg(&reference)
+        .arg(&source));
+    let expected = Command::new(reference).output().unwrap();
+    let input = dir.join("alignment.i");
+    run(Command::new("clang")
+        .args(["-E", "-std=c11", "-o"])
+        .arg(&input)
+        .arg(&source));
+    for optimize in [false, true] {
+        let exe = dir.join(if optimize { "keel-opt-g" } else { "keel-g" });
+        build(
+            &input,
+            &exe,
+            optimize,
+            keel_c::Options {
+                debug_info: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let actual = Command::new(exe).output().unwrap();
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+    }
+}
+
+/// Unsupported by-value layouts must fail rather than lose their size or
+/// SysV MEMORY classification when translated into the IR layout.
+#[test]
+fn alignment_abi_limits_are_diagnosed() {
+    for target in keel_ir::Target::ALL {
+        for src in [
+            "struct __attribute__((aligned(32))) S { int x; }; int f(struct S s) { return s.x; }",
+            "struct __attribute__((aligned(32))) S { int x; }; struct S f(void) { return (struct S){ 1 }; }",
+        ] {
+            let error = keel_c::compile(
+                src,
+                "test.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("aligned above 16 bytes passed by value"),
+                "{error}"
+            );
+        }
+    }
+    let src =
+        "struct S { char c; int x __attribute__((packed)); }; int f(struct S s) { return s.x; }";
+    let error = keel_c::compile(
+        src,
+        "test.c",
+        keel_c::Options {
+            target: keel_ir::Target::X86_64LinuxGnu,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("unaligned fields passed by value on x86-64"),
+        "{error}"
+    );
+}
+
 /// Programs keel-c does not compile get an error at the right place.
 #[test]
 fn rejected() {
@@ -531,6 +782,138 @@ fn rejected() {
         (
             "void f(void) { unsigned __auto_type x = 1; }",
             "error: invalid combination of type specifiers",
+        ),
+        (
+            "int f(void) { return __builtin_sadd_overflow(1, 2, 3); }",
+            "error: overflow result must be a pointer",
+        ),
+        (
+            "int f(double *r) { return __builtin_sadd_overflow(1, 2, r); }",
+            "error: overflow result pointer has an incompatible type",
+        ),
+        (
+            "int f(int *a, int *r) { return __builtin_sadd_overflow(a, 2, r); }",
+            "error: overflow operands must be arithmetic values",
+        ),
+        (
+            "long f(int x, double p) { return __builtin_expect_with_probability(x, 1, p); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, 1.5); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, -0.1); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "long f(int x) { return __builtin_expect_with_probability(x, 1, __builtin_nan(\"\")); }",
+            "error: probability must be between 0 and 1",
+        ),
+        (
+            "int g(void); long f(int x) { return __builtin_expect_with_probability(x, 1, (g(), 0.5)); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "int g(void); long f(int x) { return __builtin_expect_with_probability(x, 1, 0.5 + (g(), 0.0)); }",
+            "error: probability must be a constant floating-point expression",
+        ),
+        (
+            "void *f(void *p, int n) { return __builtin_assume_aligned(p, n); }",
+            "error: alignment must be a constant integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 0); }",
+            "error: alignment must be a nonzero power of two",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 3); }",
+            "error: alignment must be a nonzero power of two",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8.0); }",
+            "error: alignment must be a constant integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8, p); }",
+            "error: alignment offset must be an integer",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p); }",
+            "error: `__builtin_assume_aligned` takes 2 or 3 arguments",
+        ),
+        (
+            "void *f(void *p) { return __builtin_assume_aligned(p, 8, 0, 0); }",
+            "error: `__builtin_assume_aligned` takes 2 or 3 arguments",
+        ),
+        (
+            "void *f(void) { return __builtin_assume_aligned(3, 8); }",
+            "error: alignment hint needs a pointer",
+        ),
+        (
+            "int g(void); void *f(void *p) { return __builtin_assume_aligned(p, (g(), 8)); }",
+            "error: alignment must be a constant integer",
+        ),
+        (
+            "void f(void) { __builtin_debugtrap(1); }",
+            "error: builtin takes 0 argument(s)",
+        ),
+        (
+            "struct __attribute__((packed)) S { unsigned x:3; };",
+            "error: packed bit-fields requiring partial-container accesses are not supported",
+        ),
+        (
+            "struct __attribute__((packed)) S { unsigned x:31; unsigned y:2; };",
+            "error: packed bit-fields requiring cross-container accesses are not supported",
+        ),
+        (
+            "struct __attribute__((packed)) S { char c; _Atomic int x; };",
+            "error: unaligned atomic members are not supported",
+        ),
+        (
+            "int x; struct __attribute__((packed)) S { char c; int *p; } s = { 0, &x };",
+            "unaligned pointer relocations are not supported",
+        ),
+        (
+            "_Alignas(0) int f(void);",
+            "error: function alignment attributes are not supported",
+        ),
+        (
+            "_Alignas(1) int x;",
+            "error: `_Alignas` cannot weaken natural alignment",
+        ),
+        (
+            "int x __attribute__((aligned(3)));",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "int x __attribute__((aligned(0)));",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "_Alignas(-16) int x;",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "_Alignas(8192) int x;",
+            "error: alignment above 4096 is not supported",
+        ),
+        (
+            "int n; _Alignas(n) int x;",
+            "error: alignment must be an integer constant",
+        ),
+        (
+            "typedef int I __attribute__((aligned(16)));",
+            "error: alignment-changing typedef attributes are not supported",
+        ),
+        (
+            "int f(void) __attribute__((aligned(32)));",
+            "error: function alignment attributes are not supported",
+        ),
+        (
+            "struct S { _Alignas(16) unsigned x:3; };",
+            "error: `_Alignas` cannot apply to a bit-field",
         ),
     ];
     let mut failures = Vec::new();
