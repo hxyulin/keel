@@ -220,6 +220,24 @@ stress inputs. Allocation reduction was retained; the SIMD comment-scanning
 experiment remains on `perf/simd-source-scanning` (`ac18b71`) because its
 strong stress-input gains did not improve ordinary Lua parsing.
 
+A subsequent scanner fuses line splitting and comment removal, reusing NEON
+delimiter masks across ordinary instruction lines and using a scalar fallback
+on other targets. Combined with per-pass bump scratch and borrowed symbol
+names, the [second candidate run](suite/reports/assembler-arena-simd-aarch64-2026-10-15.json)
+reduced Lua's in-process assembly time by about 15% and summed CLI time by
+about 5%, relative to the allocation-reduced baseline. All 37 inputs produced
+identical objects. Arena scratch covers fixup queues, label order, debug rows,
+frames and CFI data; independently owned outputs, ordered-map nodes, and some
+parser/writer buffers remain heap allocated. The allocation audit is at the
+top of `crates/keel-asm/src/parser.rs`. Separate
+[memory measurements](suite/reports/assembler-arena-memory-aarch64-2026-10-15.json)
+show the debug-heavy input's peak RSS increasing by about 0.6 MiB.
+
+The [mapped-input comparison](suite/reports/assembler-mmap-aarch64-2026-10-15.json)
+found no clear overall warm-cache speedup before these parser changes; use
+`--mmap` explicitly when experimenting with stable inputs. These measurements
+do not establish cold-storage behavior or benefits on larger applications.
+
 ## Development
 
 - `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,
