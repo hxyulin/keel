@@ -106,7 +106,7 @@ fn reverse(cond: IntCC) -> IntCC {
     }
 }
 
-fn is_commutative(op: BinaryOp) -> bool {
+pub(crate) fn is_commutative(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::Iadd

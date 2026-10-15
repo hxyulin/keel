@@ -35,6 +35,23 @@ fn zero(ty: Type) -> Fold {
 fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     data.for_each_operand_mut(|v| *v = func.resolve(*v));
+    // A stable normal form lets target lowering and later rules find integer
+    // immediates on the right. Do not reorder noncommutative or FP operations.
+    let canonicalized = if let InstData::Binary { op, args } = &mut data {
+        if !op.is_float()
+            && crate::gvn::is_commutative(*op)
+            && constant(func, args[0]).is_some()
+            && constant(func, args[1]).is_none()
+        {
+            args.swap(0, 1);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
         return Some(Fold::Multi(constants));
     }
@@ -91,7 +108,11 @@ fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
                 BinaryOp::Ptradd if y == Some(0) => return Some(Fold::Value(a)),
                 _ => {}
             }
-            let power = if op == BinaryOp::Imul { y.or(x) } else { y };
+            let power = match op {
+                BinaryOp::Imul => y.or(x),
+                BinaryOp::Udiv | BinaryOp::Urem => y,
+                _ => None,
+            };
             if let Some(power) = power.filter(|n| n.is_power_of_two()) {
                 let shift = power.trailing_zeros();
                 let operand = if op == BinaryOp::Imul && y.is_none() {
@@ -187,7 +208,7 @@ fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
         }
         _ => {}
     }
-    None
+    canonicalized.then_some(Fold::Data(data))
 }
 
 pub fn run(func: &mut Function) -> bool {

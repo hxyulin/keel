@@ -1,0 +1,10 @@
+; expect: exit 0
+; opt-passes: simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
+func @canonical_constants(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 37
+    v2 = iadd v1, v0
+    v3 = iconst.i64 63
+    v4 = xor v3, v2
+    return v4
+}

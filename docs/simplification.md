@@ -15,7 +15,7 @@ preconditions.
 | CFG | Constant branches/switches, unreachable removal, forwarding and block merging | Branch threading using path facts, richer switch simplification, additional merge/selection forms |
 | SSA parameters | Simple uniform/dominating and anchored self-loop parameters via opt-in `phi-simplify` | General mutually recursive redundant parameter components |
 | Memory | Exact-address local forwarding, explicit access/effect contracts | Escape-aware stack promotion, aggregate scalar replacement, alias-disambiguated forwarding and dead stores |
-| Normal forms | GVN normalizes commutative keys and reversed comparisons | Consistent emitted-IR operand forms that all consumers can rely on |
+| Normal forms | Integer commutative literals now canonicalize to the right; GVN normalizes commutative keys and reversed comparisons | Broader Boolean, cast and comparison normal forms; maintaining useful forms as later stages expose facts |
 
 These are not all profitability transformations. Proving a comparison constant,
 removing a redundant mask, or replacing a trivial parameter simplifies the
@@ -106,3 +106,30 @@ machine code: CFG/layout, placement and allocation still affect the output.
 The cause of the text growth has not been isolated. Known-bit reasoning and
 these recipes remain opt-in; the default pipeline is unchanged. The next
 canonical operand-placement change is measured separately.
+
+
+## Integer operand canonicalization
+
+A separate change makes `instcombine` put integer literals on the right of
+commutative binary operations, sharing GVN's commutativity classification.
+Noncommutative operations and floating-point operand order are unchanged.
+The form is stable on repetition and needs no extra pipeline stage. It avoids
+requiring every consumer to handle both `constant + x` and `x + constant`.
+For example, the existing AArch64 emitter folds its right operand into an
+immediate: canonicalizing `37 + x` removes a materialized constant register.
+
+The [isolated comparison](../suite/reports/canonical-constants-aarch64-2026-10-15.json)
+uses saved pre-change and candidate compilers with identical Full pipelines and
+Keel assembly. It reduces literal-left cases from 518 to zero across the corpus,
+with exactly the same static IR instruction and block counts. Generated text
+shrinks by 80 bytes in Lua, 448 in QuickJS and 728 in SQLite (1,256 total).
+The runtime ratio is 1.0019 and compile-time ratio 0.9989, both essentially
+neutral; no application speedup is claimed. This normal form is retained in
+Basic/Full's existing combining pass. Known-bit analysis and the extra cleanup
+recipes remain opt-in.
+
+This illustrates two different needs: fact analysis discovers missing proofs,
+while canonicalization makes existing rules and lowering easier to apply.
+Repeated passes cannot substitute for either one. The next simplification
+families are Boolean absorption/cancellation, broader integer cast chains,
+integer algebraic cancellation, and conditional range facts for CFG cleanup.

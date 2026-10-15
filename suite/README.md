@@ -178,3 +178,10 @@ analysis placement, and repetition. Their [ordering sweep](reports/simplificatio
 compares runtime/code size/compile cost on identical preprocessed inputs with
 Keel assembly. See the [simplification audit](../docs/simplification.md) for
 proof tests and the remaining gaps.
+
+The [integer canonicalization comparison](reports/canonical-constants-aarch64-2026-10-15.json)
+uses separate immutable compiler binaries with the same pipeline. Literal-left
+integer forms fall from 518 to zero; IR instruction counts are unchanged but
+text shrinks by 1,256 bytes, with neutral aggregate runtime and compile cost.
+`measure_ir_counts.py` accepts `--baseline-compiler` for version comparisons and
+verifies each binary and source hash against the report before adding counts.

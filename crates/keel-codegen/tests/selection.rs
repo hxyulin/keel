@@ -168,3 +168,22 @@ fn tree_selection_is_opt_in_and_independent_from_other_passes() {
     assert!(output.contains("\tmadd\t"), "{output}");
     assert!(!output.contains("\tmul\t"), "{output}");
 }
+
+#[test]
+fn scalar_canonicalization_exposes_aarch64_immediate_operands() {
+    let mut module = keel_ir::parse(
+        "func @f(i64) -> i64 {
+block0(v0: i64):
+ v1 = iconst.i64 37
+ v2 = iadd v1, v0
+ return v2
+}",
+    )
+    .unwrap();
+    let before = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    assert!(before.contains("\tmovz\t"), "{before}");
+    keel_opt::run_passes(&mut module, &["instcombine"]).unwrap();
+    let after = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+    assert!(after.contains("#37"), "{after}");
+    assert!(!after.contains("\tmovz\t"), "{after}");
+}
