@@ -50,7 +50,7 @@ impl Parser {
             let r = self.assign()?;
             let r = self.rvalue(r);
             let ty = r.ty.clone();
-            let sugar = r.sugar.clone();
+            let sugar = r.sugar.unqualified(&self.typedefs).clone();
             e = mk(ExprKind::Comma(Box::new(e), Box::new(r)), ty, loc).with_sugar(sugar);
         }
         Ok(e)
@@ -100,7 +100,7 @@ impl Parser {
                 None => Builtin::AtomicStore,
                 Some(op) => Builtin::AtomicRmw { op, new: true },
             };
-            let sugar = lhs.sugar.clone();
+            let sugar = lhs.sugar.unqualified(&self.typedefs).clone();
             let args = vec![
                 self.address_of_atomic(lhs),
                 rhs,
@@ -109,10 +109,10 @@ impl Parser {
             return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc).with_sugar(sugar));
         }
         let ty = lhs.ty.clone();
-        let result_sugar = lhs.sugar.clone();
+        let result_sugar = lhs.sugar.unqualified(&self.typedefs).clone();
         if op == "=" {
             let rhs = self.convert_for_assign(rhs, &ty)?;
-            let sugar = lhs.sugar.clone();
+            let sugar = lhs.sugar.unqualified(&self.typedefs).clone();
             return Ok(
                 mk(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), ty, loc).with_sugar(sugar)
             );
@@ -254,7 +254,9 @@ impl Parser {
             (self.cast(a, ty.clone()), self.cast(b, ty.clone()))
         };
         let sugar = if ty.is_ptr() {
-            a.sugar.merge(&b.sugar, &self.typedefs)
+            a.sugar
+                .unqualified(&self.typedefs)
+                .merge(b.sugar.unqualified(&self.typedefs), &self.typedefs)
         } else {
             Sugar::Plain
         };
@@ -367,7 +369,7 @@ impl Parser {
             n = mk(ExprKind::Unary(UnOp::Neg, Box::new(n)), LONG, loc);
         }
         let ty = ptr.ty.clone();
-        let sugar = ptr.sugar.clone();
+        let sugar = ptr.sugar.unqualified(&self.typedefs).clone();
         Ok(mk(ExprKind::PtrAdd(Box::new(ptr), Box::new(n), size), ty, loc).with_sugar(sugar))
     }
 
@@ -400,6 +402,7 @@ impl Parser {
                 }
                 return self.postfix_ops(lit);
             }
+            let sugar = sugar.unqualified(&self.typedefs).clone();
             let e = self.cast_expr()?;
             let e = self.rvalue(e);
             let ok = ty == Ty::Void
@@ -584,7 +587,7 @@ impl Parser {
             let step = mk(ExprKind::Int(step), LONG, loc);
             let step = self.cast(step, rmw_ty.clone());
             let op = if inc { RmwOp::Add } else { RmwOp::Sub };
-            let sugar = e.sugar.clone();
+            let sugar = e.sugar.unqualified(&self.typedefs).clone();
             let args = vec![
                 self.address_of_atomic(e),
                 step,
@@ -601,7 +604,7 @@ impl Parser {
             self.elem_size(&e.ty, loc)?;
         }
         let ty = e.ty.clone();
-        let sugar = e.sugar.clone();
+        let sugar = e.sugar.unqualified(&self.typedefs).clone();
         Ok(mk(
             ExprKind::IncDec {
                 lhs: Box::new(e),
@@ -716,7 +719,8 @@ impl Parser {
         {
             return Err(Error::new(loc, "call returns an incomplete type"));
         }
-        let sugar = f.sugar.function_return(&self.typedefs);
+        let returned = f.sugar.function_return(&self.typedefs);
+        let sugar = returned.unqualified(&self.typedefs).clone();
         Ok(mk(ExprKind::Call(Box::new(f), args), fty.ret.clone(), loc).with_sugar(sugar))
     }
 
@@ -794,7 +798,9 @@ impl Parser {
                     None => None,
                 };
                 let ty = value.as_ref().map_or(Ty::Void, |v| v.ty.clone());
-                let sugar = value.as_ref().map_or(Sugar::Plain, |v| v.sugar.clone());
+                let sugar = value.as_ref().map_or(Sugar::Plain, |v| {
+                    v.sugar.unqualified(&self.typedefs).clone()
+                });
                 Ok(mk(
                     ExprKind::StmtExpr {
                         scope,

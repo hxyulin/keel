@@ -44,6 +44,26 @@ fn qualifiers_reach_actual_memory_operations_at_each_pointer_depth() {
         ),
         ("int f(volatile int **p) { return **p; }", &[false, true]),
         (
+            "int f(int *volatile p) { typeof(p + 0) q = p; return *q; }",
+            &[true, false],
+        ),
+        (
+            "int f(int c, int *volatile p, int *q) { typeof(c ? p : q) r = p; return *r; }",
+            &[true, false],
+        ),
+        (
+            "int f(int *volatile p) { typeof((0, p)) q = p; return *q; }",
+            &[true, false],
+        ),
+        (
+            "int f(int *volatile p) { typeof(({p;})) q = p; return *q; }",
+            &[true, false],
+        ),
+        (
+            "int f(int *volatile p) { typeof((p = p)) q = p; return *q; }",
+            &[true, false],
+        ),
+        (
             "typedef volatile int V; int f(V *p) { return *p; }",
             &[true],
         ),
@@ -163,7 +183,7 @@ fn volatile_writes_bitfields_and_large_aggregate_copies_stay_explicit() {
                 let f = module.functions.iter().find(|f| f.name == "f").unwrap();
                 for (_, inst) in f.layout_insts() {
                     if let InstData::Intrinsic {
-                        id: keel_ir::Intrinsic::Memcpy,
+                        id: keel_ir::Intrinsic::Memcpy | keel_ir::Intrinsic::Memmove,
                         args,
                     } = f.inst_data(inst)
                     {
@@ -211,4 +231,50 @@ fn literal_casts_still_fold_without_enabling_ir_optimization() {
     );
     assert!(!module.to_string().contains("trunc"));
     assert!(module.to_string().contains("iconst.i8 1"));
+}
+
+#[test]
+fn large_aggregate_assignment_does_not_assume_disjoint_regions() {
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let module = compile(
+            "struct S { long x[10]; }; void f(struct S *d, struct S *s) { *d = *s; }",
+            target,
+        );
+        assert!(module.to_string().contains("intrinsic memmove"));
+        assert!(!module.to_string().contains("intrinsic memcpy"));
+    }
+}
+
+#[test]
+fn byval_arguments_are_snapshotted_before_later_effects() {
+    let source = "struct S { long x, y; }; int mutate(void); int use(struct S, int); int f(struct S *p) { return use(*p, mutate()); }";
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let mut module = compile(source, target);
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            let f = module.functions.iter().find(|f| f.name == "f").unwrap();
+            let mut passed_effect = false;
+            let mut copied_before_effect = 0;
+            for (_, inst) in f.layout_insts() {
+                match f.inst_data(inst) {
+                    InstData::Call { func, .. } if f.callee(*func).name == "mutate" => {
+                        passed_effect = true
+                    }
+                    InstData::Store { .. } if !passed_effect => copied_before_effect += 1,
+                    InstData::Call { func, args } if f.callee(*func).name == "use" => {
+                        let keel_ir::ValueDef::Result(def, _) = f.value_def(f.resolve(args[0]))
+                        else {
+                            panic!("no byval snapshot");
+                        };
+                        assert!(matches!(f.inst_data(def), InstData::StackAddr { .. }));
+                    }
+                    _ => {}
+                }
+            }
+            assert!(passed_effect && copied_before_effect >= 2, "{module}");
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
 }

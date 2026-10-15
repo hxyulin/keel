@@ -194,6 +194,14 @@ they do not wrap at 65,536 entries.
   Aggregate copies/initializers containing volatile subobjects conservatively
   retain volatility on the whole accessed region. Local objects too large
   for the IR's u32 stack-slot sizes are diagnosed rather than truncated.
+- Aggregate assignment copies permit self-aliasing: large copies use
+  `memmove`, not an unjustified `memcpy` non-overlap promise. The value of an
+  aggregate assignment comes from its source, without rereading its destination.
+  The by-value ABI reads argument bytes at the call instruction; the C frontend
+  freezes them earlier when later arguments or callee evaluation may change
+  memory. It can defer copying across expressions proven free of writes and
+  volatile accesses. A regression previously returned 9 instead of 3 after a
+  later argument mutated the assignment destination.
 - All loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
   Explicit properties enable later memory-aware passes without silently
   changing current scheduling or fault behavior. Alias classes and call

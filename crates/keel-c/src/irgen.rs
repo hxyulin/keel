@@ -1076,10 +1076,10 @@ impl FnGen<'_, '_, '_> {
                 let place = self.place(lhs)?.unwrap();
                 let v = self.val(rhs)?;
                 self.store_place(&place, v);
-                match place {
-                    Place::Aggregate { addr, .. } => addr,
-                    _ => v,
-                }
+                // The assignment expression yields the value written;
+                // reading its destination again can observe a later mutation
+                // (or perform an extra read of volatile destination storage).
+                v
             }
             ExprKind::OpAssign { op, ty, lhs, rhs } => {
                 let place = self.place(lhs)?.unwrap();
@@ -1610,6 +1610,37 @@ impl FnGen<'_, '_, '_> {
         Ok(sig)
     }
 
+    /// Proof used only to defer ordinary aggregate argument copying. Any
+    /// unknown effect, volatile access, call or initialization is a barrier.
+    fn may_change_memory(&self, e: &Expr) -> bool {
+        if self.object_flags(&e.ty, &e.sugar).volatile {
+            return true;
+        }
+        match &e.kind {
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::LabelAddr(_)
+            | ExprKind::Local(_)
+            | ExprKind::Global(_) => false,
+            ExprKind::Unary(_, a)
+            | ExprKind::Cast(a)
+            | ExprKind::Deref(a)
+            | ExprKind::Addr(a)
+            | ExprKind::Member { base: a, .. } => self.may_change_memory(a),
+            ExprKind::Binary(_, a, b)
+            | ExprKind::PtrAdd(a, b, _)
+            | ExprKind::PtrDiff(a, b, _)
+            | ExprKind::LogAnd(a, b)
+            | ExprKind::LogOr(a, b)
+            | ExprKind::Comma(a, b) => self.may_change_memory(a) || self.may_change_memory(b),
+            ExprKind::Cond(a, b, c) => {
+                self.may_change_memory(a) || self.may_change_memory(b) || self.may_change_memory(c)
+            }
+            _ => true,
+        }
+    }
+
     fn call(&mut self, f: &Expr, args: &[Expr], e: &Expr) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap().clone();
         self.set_loc(e.loc);
@@ -1625,7 +1656,19 @@ impl FnGen<'_, '_, '_> {
         } else {
             None
         };
-        for arg in args {
+        // The ABI consumes aggregate addresses at the call instruction.
+        // Freeze an argument's bytes now when later evaluation could change
+        // them. With no intervening effects, immediate ABI copying suffices.
+        let mut snapshots = Vec::new();
+        if args.iter().any(|arg| arg.ty.is_struct()) {
+            snapshots.resize(args.len(), false);
+            let mut later_effect = self.may_change_memory(f);
+            for (index, arg) in args.iter().enumerate().rev() {
+                snapshots[index] = later_effect;
+                later_effect |= self.may_change_memory(arg);
+            }
+        }
+        for (index, arg) in args.iter().enumerate() {
             if !fty.prototyped && arg.ty.is_struct() {
                 return Err(Error::new(arg.loc, "struct argument without a prototype"));
             }
@@ -1637,7 +1680,19 @@ impl FnGen<'_, '_, '_> {
                     "this variadic argument type is not supported",
                 ));
             }
-            vals.push(self.val(arg)?);
+            let mut value = self.val(arg)?;
+            if arg.ty.is_struct() && snapshots[index] {
+                let layout =
+                    self.aggregate_place(value, &arg.ty, MemoryFlags::default(), arg.loc)?;
+                let Place::Aggregate { size, align, .. } = layout else {
+                    unreachable!()
+                };
+                let slot = self.b.func.create_stack_slot(size.max(1), align);
+                let copy = self.b.ins().stack_addr(slot);
+                self.copy(copy, value, &arg.ty);
+                value = copy;
+            }
+            vals.push(value);
         }
         let extra: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
         self.set_loc(e.loc);
@@ -1818,7 +1873,7 @@ impl FnGen<'_, '_, '_> {
     // ---- memory ----
 
     /// Copies an object of type `ty` from `src` to `dst`: small ones with
-    /// loads and stores, big ones with `memcpy`.
+    /// loads and stores, big ones with `memmove` (self-assignment is valid).
     fn copy(&mut self, dst: Value, src: Value, ty: &Ty) {
         let size = self.size(ty);
         self.copy_bytes_with_flags(
@@ -1840,7 +1895,7 @@ impl FnGen<'_, '_, '_> {
     ) {
         if size > 64 && !dst_flags.volatile && !src_flags.volatile {
             let n = self.b.ins().iconst(Type::I64, size as i64);
-            self.b.ins().intrinsic(Intrinsic::Memcpy, &[dst, src, n]);
+            self.b.ins().intrinsic(Intrinsic::Memmove, &[dst, src, n]);
             return;
         }
         // aarch64 allows unaligned loads and stores, so use wide ones.

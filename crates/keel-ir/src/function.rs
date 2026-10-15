@@ -39,7 +39,9 @@ pub enum Purpose {
     /// An ordinary value.
     Normal,
     /// The caller passes the address of a struct; the callee receives the
-    /// address of its own copy, which it may change.
+    /// address of its own copy, which it may change. The bytes are read at
+    /// the call instruction. A frontend requiring an earlier value snapshot
+    /// must copy them before intervening memory effects during evaluation.
     ByVal(Layout),
     /// The caller passes the address of memory for the struct result, which
     /// the callee fills in. Only as the first parameter of a function that
