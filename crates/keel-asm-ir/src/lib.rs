@@ -4,10 +4,14 @@
 //! encoder. IDs are Rust API identities, not a stable serialized wire format.
 //! An instruction selects an exact encoding, with numeric field values. The
 //! assembler still validates field ranges, reserved bits and CPU requirements.
-//! Explicit text fragments permit incremental emitter migration and inline asm.
+//! Explicit text fragments support user-authored inline assembly.
+mod directive;
 mod generated;
+pub use directive::{Cfi, Directive, Expression, SectionKind};
+mod symbolic;
 pub use generated::{FieldId, Opcode};
 use smallvec::SmallVec;
+pub use symbolic::{PageKind, SymbolicInstruction};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Instruction {
@@ -26,13 +30,15 @@ impl Instruction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     Instruction(Instruction),
+    Symbolic(SymbolicInstruction),
+    Directive(Directive),
     /// A symbolic B/BL; the assembler owns displacement and relocation handling.
     Branch {
         link: bool,
         target: String,
     },
     Label(String),
-    /// An explicit source fragment, scanned only when consumed by an assembler.
+    /// An explicit user source fragment, scanned only when consumed by an assembler.
     /// Statement boundaries do not continue across item boundaries.
     Text(String),
 }
@@ -47,6 +53,12 @@ impl Program {
     }
     pub fn instruction(&mut self, instruction: Instruction) {
         self.items.push(Item::Instruction(instruction));
+    }
+    pub fn directive(&mut self, directive: Directive) {
+        self.items.push(Item::Directive(directive));
+    }
+    pub fn symbolic(&mut self, instruction: SymbolicInstruction) {
+        self.items.push(Item::Symbolic(instruction));
     }
     pub fn label(&mut self, name: impl Into<String>) {
         self.items.push(Item::Label(name.into()));
@@ -75,9 +87,10 @@ impl Program {
         let mut stats = ProgramStats::default();
         for item in &self.items {
             match item {
-                Item::Instruction(_) => stats.instructions += 1,
+                Item::Instruction(_) | Item::Symbolic(_) => stats.instructions += 1,
                 Item::Branch { .. } => stats.instructions += 1,
                 Item::Label(_) => stats.labels += 1,
+                Item::Directive(_) => {}
                 Item::Text(text) => stats.text_bytes += text.len(),
             }
         }
@@ -89,6 +102,6 @@ impl Program {
 pub struct ProgramStats {
     pub instructions: usize,
     pub labels: usize,
-    /// Remaining explicitly textual source, including metadata and inline asm.
+    /// Explicitly textual source, normally user inline assembly.
     pub text_bytes: usize,
 }

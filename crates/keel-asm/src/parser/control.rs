@@ -27,7 +27,7 @@ pub(super) fn condition(text: &str) -> Result<u32, String> {
 }
 
 pub(super) struct Branch<'a> {
-    pub encoding: &'static str,
+    pub encoding: keel_asm_ir::Opcode,
     pub field: FieldId,
     pub width: u32,
     pub fields: BumpVec<'a, (FieldId, u32)>,
@@ -43,9 +43,9 @@ pub(super) fn branch<'a>(
         count(args, 1, 1)?;
         (
             if op == "bl" {
-                "BL_only_branch_imm"
+                keel_asm_ir::Opcode::BL_only_branch_imm
             } else {
-                "B_only_branch_imm"
+                keel_asm_ir::Opcode::B_only_branch_imm
             },
             FieldId::imm26,
             26,
@@ -55,7 +55,7 @@ pub(super) fn branch<'a>(
     } else if let Some(cc) = op.strip_prefix("b.") {
         count(args, 1, 1)?;
         (
-            "B_only_condbranch",
+            keel_asm_ir::Opcode::B_only_condbranch,
             FieldId::imm19,
             19,
             bumpalo::vec![in arena; (FieldId::cond, condition(cc)?)],
@@ -66,10 +66,10 @@ pub(super) fn branch<'a>(
         let r = reg(args[0], false, true)?;
         (
             match (op, r.bits) {
-                ("cbz", 64) => "CBZ_64_compbranch",
-                ("cbz", _) => "CBZ_32_compbranch",
-                (_, 64) => "CBNZ_64_compbranch",
-                _ => "CBNZ_32_compbranch",
+                ("cbz", 64) => keel_asm_ir::Opcode::CBZ_64_compbranch,
+                ("cbz", _) => keel_asm_ir::Opcode::CBZ_32_compbranch,
+                (_, 64) => keel_asm_ir::Opcode::CBNZ_64_compbranch,
+                _ => keel_asm_ir::Opcode::CBNZ_32_compbranch,
             },
             FieldId::imm19,
             19,
@@ -82,9 +82,9 @@ pub(super) fn branch<'a>(
         let bit = unsigned(args[1], i64::from(r.bits - 1))?;
         (
             if op == "tbz" {
-                "TBZ_only_testbranch"
+                keel_asm_ir::Opcode::TBZ_only_testbranch
             } else {
-                "TBNZ_only_testbranch"
+                keel_asm_ir::Opcode::TBNZ_only_testbranch
             },
             FieldId::imm14,
             14,

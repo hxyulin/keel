@@ -450,7 +450,7 @@ pub(super) fn literal<'a>(
     if op == "prfm" && args.get(1).is_some_and(|s| !s.starts_with('[')) {
         count(args, 2, 2)?;
         return Ok(Some(super::control::Branch {
-            encoding: "PRFM_P_loadlit",
+            encoding: keel_asm_ir::Opcode::PRFM_P_loadlit,
             field: FieldId::imm19,
             width: 19,
             fields: bumpalo::vec![in arena; (FieldId::Rt, prefetch_op(args[0])?)],
@@ -467,12 +467,12 @@ pub(super) fn literal<'a>(
     }
     Ok(Some(super::control::Branch {
         encoding: match (op, t.tag) {
-            ("ldrsw", _) => "LDRSW_64_loadlit",
-            (_, "32") => "LDR_32_loadlit",
-            (_, "64") => "LDR_64_loadlit",
-            (_, "S") => "LDR_S_loadlit",
-            (_, "D") => "LDR_D_loadlit",
-            (_, "Q") => "LDR_Q_loadlit",
+            ("ldrsw", _) => keel_asm_ir::Opcode::LDRSW_64_loadlit,
+            (_, "32") => keel_asm_ir::Opcode::LDR_32_loadlit,
+            (_, "64") => keel_asm_ir::Opcode::LDR_64_loadlit,
+            (_, "S") => keel_asm_ir::Opcode::LDR_S_loadlit,
+            (_, "D") => keel_asm_ir::Opcode::LDR_D_loadlit,
+            (_, "Q") => keel_asm_ir::Opcode::LDR_Q_loadlit,
             _ => return Err("unsupported literal load register".into()),
         },
         field: FieldId::imm19,

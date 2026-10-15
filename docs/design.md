@@ -1242,18 +1242,30 @@ path directly indexes the encoding table and does not parse operands. Small
 field lists live inline. The APIs use ordinary owned values with no global
 state, so a caller can keep the entire toolchain in one process.
 
-Native labels and symbolic B/BL items share source assembly's layout, fixup,
-relocation, linker-atom and unwind machinery. Text items explicitly preserve
-unmigrated lowering and user inline assembly; their statements do not continue
-across item boundaries. The initial codegen migration covers materialized
-constants, common integer ALU operations, register/FP moves, spills, frame
-operations, returns and direct branches. Other instructions and data/debug/CFI
-directives still use text. Text emission uses the original human-readable
-syntax; the native path does not render it. Instruction/allocation comments
-are omitted from native programs. A function at least 1 MiB in estimated code
-size is re-emitted through the existing textual far-branch relaxation path.
-Inline assembly requiring macro expansion similarly uses an explicit validated
-text fallback. This is not yet a completely text-free backend.
+Native labels and symbolic instructions share source assembly's layout, fixup,
+relocation, linker-atom and unwind machinery. `SymbolicInstruction` carries
+conditional/compare branches, local ADR references and page/GOT/TLVP references;
+`Directive` carries sections, alignment, symbols, bytes, integer expressions,
+LEB128, zero-fill, source locations and CFI. Expressions own their symbols and
+numeric addends. Symbol differences and symbolic LEB128 use the same fixups and
+iterative layout as source assembly. Typed CFI and source CFI apply the same
+frame rules. Data/DWARF emission uses a common metadata sink for text and native
+output; the x86 text backends retain their ELF behavior.
+
+The AArch64 compiler now emits every generated instruction and metadata directive
+through these typed paths. Register widths and memory operands are numeric before
+encoding selection; no instruction text is formatted or reparsed on the native
+path. Instruction/allocation comments are omitted. Functions at least 1 MiB in
+estimated code size expand conditional branches into inverse-condition skips
+and B instructions without re-emitting the function as text. Text emission
+retains the equivalent source relaxation rule.
+
+Only user inline assembly creates text items, whose statements do not continue
+across item boundaries. The compiler's generic formatting sink rejects writes in
+structured mode, and fixture tests require zero text bytes when the input has no
+inline assembly. Inline assembly requiring macro expansion uses an explicit
+validated source fallback; generated words, symbols and metadata are validated
+before materialization. This fallback preserves the existing macro workflow.
 
 `compile` and `cc --emit-object -o output.o` compose these stages without
 intermediate assembly files. Existing assembly output remains the default;

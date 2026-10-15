@@ -6,6 +6,7 @@ mod abi;
 mod data;
 mod dwarf;
 mod fold;
+mod metadata;
 mod parallel_copy;
 pub mod regalloc;
 pub mod select;

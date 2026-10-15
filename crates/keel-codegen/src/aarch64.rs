@@ -97,9 +97,10 @@
 //! variables, which are in stack slots at fixed offsets from x29.
 
 use crate::abi::{self, ArgKind, ArgLoc, Slot, StructClass};
-use crate::data::{self, asm_string};
+use crate::data;
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
+use crate::metadata::{Cfi, Directive, Expression, SectionKind, Sink};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::{CodegenError, Format, loc_reg, pieces};
@@ -111,8 +112,11 @@ use keel_ir::{
 };
 use std::collections::HashSet;
 use std::fmt::Write;
+mod native;
 mod output;
 use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
+use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
+use native::{Address, Arg, Reg};
 use output::Output;
 
 /// The registers values are allocated to.
@@ -214,11 +218,14 @@ fn compile_output(
         "register pools must be subsets of REGISTERS"
     );
     let mut out = Output::new(structured);
-    out.push_str("\t.section\t__TEXT,__text,regular,pure_instructions\n");
+    out.section("__TEXT", "__text", SectionKind::Data);
     let debug = !module.files.is_empty() && !module.functions.is_empty();
     if debug {
         for (i, path) in module.files.iter().enumerate() {
-            writeln!(out, "\t.file\t{} {}", i + 1, asm_string(path)).unwrap();
+            out.directive(Directive::File {
+                index: (i + 1) as u32,
+                path: path.as_bytes().to_vec(),
+            });
         }
     }
     let mut frames = Vec::new();
@@ -226,46 +233,19 @@ fn compile_output(
         let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
-        let scope_marks = if !structured {
-            compiler.compile(&mut out)
-        } else {
-            let mut function_out = Output::new(true);
-            let mut scope_marks = compiler.compile(&mut function_out);
-            if function_out.needs_relaxation() {
-                // Existing far-branch relaxation operates on text. Re-emit only
-                // oversized functions through that path until it is migrated.
-                let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, false)?;
-                compiler.debug = debug;
-                function_out = Output::new(false);
-                scope_marks = compiler.compile(&mut function_out);
-            }
-            out.append(function_out);
-            scope_marks
-        };
+        let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
     }
     for data in &module.data {
         if let Some(init) = &data.init {
-            if let Output::Text(text) = &mut out {
-                data::emit_data(text, Format::MachO, data, init);
-            } else {
-                let mut text = String::new();
-                data::emit_data(&mut text, Format::MachO, data, init);
-                out.push_str(&text);
-            }
+            data::emit_macho(&mut out, data, init);
         }
     }
     if debug {
         // x29 is DWARF register 29.
-        if let Output::Text(text) = &mut out {
-            dwarf::emit_debug_info(text, Format::MachO, 29, module, &frames);
-        } else {
-            let mut text = String::new();
-            dwarf::emit_debug_info(&mut text, Format::MachO, 29, module, &frames);
-            out.push_str(&text);
-        }
+        dwarf::emit_debug_info(&mut out, Format::MachO, 29, module, &frames);
     }
-    out.push_str("\t.subsections_via_symbols\n");
+    out.directive(Directive::SubsectionsViaSymbols);
     Ok(out)
 }
 
@@ -289,8 +269,10 @@ fn relax_branches(out: &mut String, name: &str) {
     if size < COND_BRANCH_RANGE {
         return;
     }
+    relax_text(out, name, &mut 0);
+}
+fn relax_text(out: &mut String, name: &str, n: &mut usize) {
     let mut relaxed = String::with_capacity(out.len() + out.len() / 8);
-    let mut n = 0;
     for line in out.lines() {
         // The inverted branch up to its target, which skips the `b`.
         let far = |inverse: String, target: &str| {
@@ -314,7 +296,7 @@ fn relax_branches(out: &mut String, name: &str) {
         match rewritten {
             Some(code) => {
                 relaxed.push_str(&code);
-                n += 1;
+                *n += 1;
             }
             None => {
                 relaxed.push_str(line);
@@ -817,9 +799,9 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let name = &func.name;
         if !func.local {
-            writeln!(out, "\t.globl\t_{name}").unwrap();
+            out.directive(Directive::Global(format!("_{name}")));
         }
-        writeln!(out, "\t.p2align\t2").unwrap();
+        out.align(2);
         out.label(format!("_{name}"));
         out.label(format!("L{name}_begin"));
         self.allocation_comment();
@@ -839,12 +821,14 @@ impl<'a> FunctionCompiler<'a> {
             }));
             self.prologue_end = true;
         }
-        self.emit(".cfi_startproc");
+        self.out.directive(Directive::Cfi(Cfi::Start));
         // 155 is an indirect, pc-relative 4-byte pointer (through the GOT,
         // as the personality may be in a dylib), 16 a pc-relative one.
         if let Some(personality) = &func.personality {
-            self.emit(format!(".cfi_personality 155, _{personality}"));
-            self.emit(format!(".cfi_lsda 16, L{name}_lsda"));
+            self.out
+                .directive(Directive::Cfi(Cfi::Personality(format!("_{personality}"))));
+            self.out
+                .directive(Directive::Cfi(Cfi::Lsda(format!("L{name}_lsda"))));
         }
         self.native(
             Opcode::STP_64_ldstpair_pre,
@@ -866,9 +850,18 @@ impl<'a> FunctionCompiler<'a> {
             ],
             || "mov\tx29, sp".into(),
         );
-        self.emit(".cfi_def_cfa x29, 16");
-        self.emit(".cfi_offset x30, -8");
-        self.emit(".cfi_offset x29, -16");
+        self.out.directive(Directive::Cfi(Cfi::DefCfa {
+            register: 29,
+            offset: 16,
+        }));
+        self.out.directive(Directive::Cfi(Cfi::Offset {
+            register: 30,
+            offset: -8,
+        }));
+        self.out.directive(Directive::Cfi(Cfi::Offset {
+            register: 29,
+            offset: -16,
+        }));
         // Push the callee-saved registers in pairs, keeping `sp` 16-byte
         // aligned; an odd one out still takes 16 bytes. Pair `k` is at
         // `x29 - 16 * (k + 1)`, which is 16 bytes further from the CFA.
@@ -894,8 +887,14 @@ impl<'a> FunctionCompiler<'a> {
                         ],
                         || format!("stp\t{class}{a}, {class}{b}, [sp, #-16]!"),
                     );
-                    self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
-                    self.emit(format!(".cfi_offset {class}{b}, -{}", offset - 8));
+                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                        register: *a + if class == 'd' { 64 } else { 0 },
+                        offset: -(offset as i64),
+                    }));
+                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                        register: *b + if class == 'd' { 64 } else { 0 },
+                        offset: -((offset - 8) as i64),
+                    }));
                 }
                 [a] => {
                     self.native(
@@ -911,7 +910,10 @@ impl<'a> FunctionCompiler<'a> {
                         ],
                         || format!("str\t{class}{a}, [sp, #-16]!"),
                     );
-                    self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
+                    self.out.directive(Directive::Cfi(Cfi::Offset {
+                        register: *a + if class == 'd' { 64 } else { 0 },
+                        offset: -(offset as i64),
+                    }));
                 }
                 _ => unreachable!(),
             }
@@ -920,7 +922,7 @@ impl<'a> FunctionCompiler<'a> {
             self.sub_sp(self.frame_size);
         }
         if self.base != "sp" {
-            self.emit(format!("mov\t{}, sp", self.base));
+            self.mach("mov", [(self.base).into(), (Reg::SP).into()]);
         }
         // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
         // so this copy has no cycles; it may still store to spill slots.
@@ -998,14 +1000,10 @@ impl<'a> FunctionCompiler<'a> {
             });
         }
         self.out.label(format!("L{name}_end"));
-        if let Output::Text(text) = &mut self.out {
-            relax_branches(text, name);
-        }
-        self.emit(".cfi_endproc");
+        self.out.relax(name);
+        self.out.directive(Directive::Cfi(Cfi::End));
         if func.personality.is_some() {
-            let mut text = String::new();
-            self.eh.emit(&mut text, name);
-            self.out.push_str(&text);
+            self.eh.emit(&mut self.out, name);
         }
         out.append(self.out);
         self.scope_marks
@@ -1018,7 +1016,7 @@ impl<'a> FunctionCompiler<'a> {
         let Some(loc) = loc else { return };
         if loc.scope != self.scope {
             let label = format!("L{}_ds{}", self.func.name, self.scope_marks.len());
-            writeln!(self.out, "{label}:").unwrap();
+            self.out.label(label.clone());
             self.scope_marks.push((label, loc.scope));
             self.scope = loc.scope;
         }
@@ -1032,12 +1030,12 @@ impl<'a> FunctionCompiler<'a> {
         let SourceLoc {
             file, line, col, ..
         } = loc;
-        let flag = if self.prologue_end {
-            " prologue_end"
-        } else {
-            ""
-        };
-        self.emit(format!(".loc\t{} {line} {col}{flag}", file.index() + 1));
+        self.out.directive(Directive::Loc {
+            file: (file.index() + 1) as u32,
+            line,
+            column: col,
+            prologue_end: self.prologue_end,
+        });
         self.srcloc = Some(loc);
         self.prologue_end = false;
     }
@@ -1076,7 +1074,7 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     "msub"
                 };
-                self.emit(format!("{op}\t{rd}, {rb}, {rc}, {ra}"));
+                self.mach(op, [(rd).into(), (rb).into(), (rc).into(), (ra).into()]);
             }
             machine => {
                 let op = match machine {
@@ -1087,7 +1085,15 @@ impl<'a> FunctionCompiler<'a> {
                     Machine::ShiftXor => "eor",
                     _ => unreachable!(),
                 };
-                self.emit(format!("{op}\t{rd}, {ra}, {rb}, lsl #{}", matched.shift));
+                self.mach(
+                    op,
+                    [
+                        (rd).into(),
+                        (ra).into(),
+                        (rb).into(),
+                        Arg::shift("lsl", matched.shift),
+                    ],
+                );
             }
         }
         self.def_done(result, d);
@@ -1121,16 +1127,12 @@ impl<'a> FunctionCompiler<'a> {
                 let fd = freg(d, ty);
                 if bits == 0 {
                     let zero = if ty == Type::F32 { "wzr" } else { "xzr" };
-                    self.emit(format!("fmov\t{fd}, {zero}"));
+                    self.mach("fmov", [(fd).into(), (zero).into()]);
                 } else {
                     let is64 = ty == Type::F64;
                     self.materialize(S0, bits, is64);
-                    let src = if is64 {
-                        format!("x{S0}")
-                    } else {
-                        format!("w{S0}")
-                    };
-                    self.emit(format!("fmov\t{fd}, {src}"));
+                    let src = if is64 { Reg::x(S0) } else { Reg::w(S0) };
+                    self.mach("fmov", [(fd).into(), (src).into()]);
                 }
                 self.def_done(result, d);
             }
@@ -1150,9 +1152,9 @@ impl<'a> FunctionCompiler<'a> {
                 let decl = func.callee(callee);
                 let sret = self.move_args(&args, &decl.sig.params);
                 let site = format!("L{}_{inst}", func.name);
-                writeln!(self.out, "{site}_begin:").unwrap();
+                self.out.label(format!("{site}_begin"));
                 self.out.branch(true, format!("_{}", decl.name));
-                writeln!(self.out, "{site}_end:").unwrap();
+                self.out.label(format!("{site}_end"));
                 let pad = self.label(dests[1].block);
                 self.eh.sites.push((site, pad, dests[1].block));
                 self.call_result(result, sret);
@@ -1191,7 +1193,7 @@ impl<'a> FunctionCompiler<'a> {
                 let target = self.use_reg(callee, S0);
                 self.move_gp(S0, target, true);
                 self.epilogue();
-                self.emit(format!("br\tx{S0}"));
+                self.mach("br", [(Reg::x(S0)).into()]);
             }
             InstData::CallIndirect { sig, callee, args } => {
                 let sret = self.move_args(&args, &func.signature(sig).params);
@@ -1199,7 +1201,7 @@ impl<'a> FunctionCompiler<'a> {
                 // moves leave alone (they write x0–x8, x16 and x17), or in a
                 // spill slot, reloaded after the moves so x16 is free.
                 let target = self.use_reg(callee, S0);
-                self.emit(format!("blr\tx{target}"));
+                self.mach("blr", [(Reg::x(target)).into()]);
                 self.call_result(result, sret);
             }
             InstData::SymbolAddr { symbol } => {
@@ -1214,17 +1216,50 @@ impl<'a> FunctionCompiler<'a> {
                     // getter with the descriptor in x0 returns the address
                     // in x0. The getter preserves every register but x0,
                     // x16, x17 and x30, none of which hold values.
-                    self.emit(format!("adrp\tx0, _{name}@TLVPPAGE"));
-                    self.emit(format!("ldr\tx0, [x0, _{name}@TLVPPAGEOFF]"));
-                    self.emit(format!("ldr\tx{S0}, [x0]"));
-                    self.emit(format!("blr\tx{S0}"));
-                    self.emit(format!("mov\tx{d}, x0"));
+                    self.out.symbolic(Symbolic::PageAddress {
+                        register: 0,
+                        kind: PageKind::ThreadLocal,
+                        target: format!("_{name}"),
+                    });
+                    self.out.symbolic(Symbolic::PageOffset {
+                        register: 0,
+                        base: 0,
+                        load: true,
+                        kind: PageKind::ThreadLocal,
+                        target: format!("_{name}"),
+                    });
+                    self.mach(
+                        "ldr",
+                        [(Reg::x(S0)).into(), Address::base(Reg::x(0)).into()],
+                    );
+                    self.mach("blr", [(Reg::x(S0)).into()]);
+                    self.mach("mov", [(Reg::x(d)).into(), (Reg::x(0)).into()]);
                 } else if self.module.defines(name) {
-                    self.emit(format!("adrp\tx{d}, _{name}@PAGE"));
-                    self.emit(format!("add\tx{d}, x{d}, _{name}@PAGEOFF"));
+                    self.out.symbolic(Symbolic::PageAddress {
+                        register: d,
+                        kind: PageKind::Direct,
+                        target: format!("_{name}"),
+                    });
+                    self.out.symbolic(Symbolic::PageOffset {
+                        register: d,
+                        base: d,
+                        load: false,
+                        kind: PageKind::Direct,
+                        target: format!("_{name}"),
+                    });
                 } else {
-                    self.emit(format!("adrp\tx{d}, _{name}@GOTPAGE"));
-                    self.emit(format!("ldr\tx{d}, [x{d}, _{name}@GOTPAGEOFF]"));
+                    self.out.symbolic(Symbolic::PageAddress {
+                        register: d,
+                        kind: PageKind::Got,
+                        target: format!("_{name}"),
+                    });
+                    self.out.symbolic(Symbolic::PageOffset {
+                        register: d,
+                        base: d,
+                        load: true,
+                        kind: PageKind::Got,
+                        target: format!("_{name}"),
+                    });
                 }
                 self.def_done(result, d);
             }
@@ -1232,9 +1267,24 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let offset = self.stack_slot_offsets[slot.index()];
                 // `add` takes a 12-bit immediate, optionally shifted by 12.
-                self.emit(format!("add\tx{d}, {}, #{}", self.base, offset & 0xfff));
+                self.mach(
+                    "add",
+                    [
+                        (Reg::x(d)).into(),
+                        (self.base).into(),
+                        Arg::imm(offset & 0xfff),
+                    ],
+                );
                 if offset >> 12 != 0 {
-                    self.emit(format!("add\tx{d}, x{d}, #{}, lsl #12", offset >> 12));
+                    self.mach(
+                        "add",
+                        [
+                            (Reg::x(d)).into(),
+                            (Reg::x(d)).into(),
+                            Arg::imm(offset >> 12),
+                            Arg::shift("lsl", 12),
+                        ],
+                    );
                 }
                 self.def_done(result, d);
             }
@@ -1252,7 +1302,7 @@ impl<'a> FunctionCompiler<'a> {
                     UnaryOp::Fnearest => "frintn",
                     _ => unreachable!("integer operation"),
                 };
-                self.emit(format!("{mnemonic}\t{}, {}", freg(d, ty), freg(a, ty)));
+                self.mach(mnemonic, [(freg(d, ty)).into(), (freg(a, ty)).into()]);
                 self.def_done(result, d);
             }
             InstData::Unary { op, arg } => {
@@ -1271,14 +1321,17 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);
                 let (bits, ra, rb) = if ty == Type::F32 {
-                    (31, format!("w{S0}"), format!("w{S1}"))
+                    (31, Reg::w(S0), Reg::w(S1))
                 } else {
-                    (63, format!("x{S0}"), format!("x{S1}"))
+                    (63, Reg::x(S0), Reg::x(S1))
                 };
-                self.emit(format!("fmov\t{ra}, {}", freg(a, ty)));
-                self.emit(format!("fmov\t{rb}, {}", freg(b, ty)));
-                self.emit(format!("bfxil\t{rb}, {ra}, #0, #{bits}"));
-                self.emit(format!("fmov\t{}, {rb}", freg(d, ty)));
+                self.mach("fmov", [(ra).into(), (freg(a, ty)).into()]);
+                self.mach("fmov", [(rb).into(), (freg(b, ty)).into()]);
+                self.mach(
+                    "bfxil",
+                    [(rb).into(), (ra).into(), Arg::imm(0), Arg::imm(bits)],
+                );
+                self.mach("fmov", [(freg(d, ty)).into(), (rb).into()]);
                 self.def_done(result, d);
             }
             InstData::Fma { args } => {
@@ -1288,7 +1341,10 @@ impl<'a> FunctionCompiler<'a> {
                 let b = self.use_freg(args[1], FS1);
                 let c = self.use_freg(args[2], FS2);
                 let [fa, fb, fc, fd] = [a, b, c, d].map(|r| freg(r, ty));
-                self.emit(format!("fmadd\t{fd}, {fa}, {fb}, {fc}"));
+                self.mach(
+                    "fmadd",
+                    [(fd).into(), (fa).into(), (fb).into(), (fc).into()],
+                );
                 self.def_done(result, d);
             }
             InstData::Overflow { op, args } => self.overflow(inst, op, args),
@@ -1307,7 +1363,7 @@ impl<'a> FunctionCompiler<'a> {
                     _ => unreachable!("integer operation"),
                 };
                 let (fa, fb, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
-                self.emit(format!("{mnemonic}\t{fd}, {fa}, {fb}"));
+                self.mach(mnemonic, [(fd).into(), (fa).into(), (fb).into()]);
                 self.def_done(result, d);
             }
             InstData::Binary { op, args } => {
@@ -1322,7 +1378,10 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);
                 let (a, b, fd) = (freg(a, ty), freg(b, ty), freg(d, ty));
-                self.emit(format!("fcsel\t{fd}, {a}, {b}, ne"));
+                self.mach(
+                    "fcsel",
+                    [(fd).into(), (a).into(), (b).into(), Arg::from("ne")],
+                );
                 self.def_done(result, d);
             }
             InstData::Select { args } => {
@@ -1332,7 +1391,10 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
                 let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
-                self.emit(format!("csel\t{rd}, {a}, {b}, ne"));
+                self.mach(
+                    "csel",
+                    [(rd).into(), (a).into(), (b).into(), Arg::from("ne")],
+                );
                 self.def_done(result, d);
             }
             InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
@@ -1344,14 +1406,14 @@ impl<'a> FunctionCompiler<'a> {
                 let from = self.ty(arg);
                 match op {
                     ConvertOp::Sext => match from {
-                        Type::I8 => self.emit(format!("sxtb\t{}, w{a}", reg(d, ty))),
-                        Type::I16 => self.emit(format!("sxth\t{}, w{a}", reg(d, ty))),
-                        _ => self.emit(format!("sxtw\tx{d}, w{a}")),
+                        Type::I8 => self.mach("sxtb", [(reg(d, ty)).into(), (Reg::w(a)).into()]),
+                        Type::I16 => self.mach("sxth", [(reg(d, ty)).into(), (Reg::w(a)).into()]),
+                        _ => self.mach("sxtw", [(Reg::x(d)).into(), (Reg::w(a)).into()]),
                     },
                     // Writing a w register clears the upper 32 bits.
                     ConvertOp::Uext => match from {
-                        Type::I8 => self.emit(format!("uxtb\tw{d}, w{a}")),
-                        Type::I16 => self.emit(format!("uxth\tw{d}, w{a}")),
+                        Type::I8 => self.mach("uxtb", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
+                        Type::I16 => self.mach("uxth", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
                         _ => self.move_gp(d, a, false),
                     },
                     // The low bits are already right; upper bits are
@@ -1369,30 +1431,45 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Icmp { .. } | InstData::Fcmp { .. } => {
                 let d = self.def_reg(result);
                 let cc = self.compare(inst);
-                self.emit(format!("cset\tw{d}, {cc}"));
+                self.mach("cset", [(Reg::w(d)).into(), (cc).into()]);
                 self.def_done(result, d);
             }
             // Load the pointer, store it advanced by a slot, then read the
             // argument: the result may share the list's register.
             InstData::VaArg { ty, list } => {
                 let a = self.use_reg(list, S2);
-                self.emit(format!("ldr\tx{S0}, [x{a}]"));
-                self.emit(format!("add\tx{S1}, x{S0}, #8"));
-                self.emit(format!("str\tx{S1}, [x{a}]"));
+                self.mach(
+                    "ldr",
+                    [(Reg::x(S0)).into(), Address::base(Reg::x(a)).into()],
+                );
+                self.mach(
+                    "add",
+                    [(Reg::x(S1)).into(), (Reg::x(S0)).into(), Arg::imm(8)],
+                );
+                self.mach(
+                    "str",
+                    [(Reg::x(S1)).into(), Address::base(Reg::x(a)).into()],
+                );
                 if ty.is_float() {
                     let d = self.def_freg(result);
-                    self.emit(format!("ldr\t{}, [x{S0}]", freg(d, ty)));
+                    self.mach(
+                        "ldr",
+                        [(freg(d, ty)).into(), Address::base(Reg::x(S0)).into()],
+                    );
                     self.def_done(result, d);
                 } else {
                     let d = self.def_reg(result);
-                    self.emit(format!("ldr\t{}, [x{S0}]", reg(d, ty)));
+                    self.mach(
+                        "ldr",
+                        [(reg(d, ty)).into(), Address::base(Reg::x(S0)).into()],
+                    );
                     self.def_done(result, d);
                 }
             }
             InstData::Load { ty, addr, .. } if ty.is_float() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
-                self.emit(format!("ldr\t{}, {a}", freg(d, ty)));
+                self.mach("ldr", [(freg(d, ty)).into(), (a).into()]);
                 self.def_done(result, d);
             }
             InstData::Load { ty, addr, .. } => {
@@ -1403,20 +1480,20 @@ impl<'a> FunctionCompiler<'a> {
                     Type::I16 => "ldrh",
                     _ => "ldr",
                 };
-                self.emit(format!("{op}\t{}, {a}", reg(d, ty)));
+                self.mach(op, [(reg(d, ty)).into(), (a).into()]);
                 self.def_done(result, d);
             }
             InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
-                self.emit(format!("str\t{}, {a}", freg(v, ty)));
+                self.mach("str", [(freg(v, ty)).into(), (a).into()]);
             }
             InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some(_) if ty == Type::I64 => "xzr".to_string(),
-                    Some(_) => "wzr".to_string(),
+                    Some(_) if ty == Type::I64 => Reg::XZR,
+                    Some(_) => Reg::WZR,
                     None => reg(self.use_reg(value, S0), ty),
                 };
                 let a = self.mem(addr, S1, ty);
@@ -1425,7 +1502,7 @@ impl<'a> FunctionCompiler<'a> {
                     Type::I16 => "strh",
                     _ => "str",
                 };
-                self.emit(format!("{op}\t{v}, {a}"));
+                self.mach(op, [(v).into(), (a).into()]);
             }
             InstData::AtomicLoad { ty, ordering, addr } => {
                 let d = self.def_reg(result);
@@ -1435,7 +1512,12 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     "ldar"
                 };
-                self.emit(format!("{op}{}\t{}, [x{a}]", width_suffix(ty), reg(d, ty)));
+                self.atomic(
+                    op,
+                    "",
+                    ty,
+                    [reg(d, ty).into(), Address::base(Reg::x(a)).into()],
+                );
                 self.def_done(result, d);
             }
             InstData::AtomicStore {
@@ -1451,7 +1533,12 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     "stlr"
                 };
-                self.emit(format!("{op}{}\t{}, [x{a}]", width_suffix(ty), reg(v, ty)));
+                self.atomic(
+                    op,
+                    "",
+                    ty,
+                    [reg(v, ty).into(), Address::base(Reg::x(a)).into()],
+                );
             }
             InstData::AtomicRmw { op, ordering, args } => {
                 let ty = self.ty(args[1]);
@@ -1461,12 +1548,12 @@ impl<'a> FunctionCompiler<'a> {
                 // complement.
                 let mnemonic = match op {
                     RmwOp::Sub => {
-                        self.emit(format!("neg\t{}, {}", reg(S1, ty), reg(v, ty)));
+                        self.mach("neg", [(reg(S1, ty)).into(), (reg(v, ty)).into()]);
                         v = S1;
                         "ldadd"
                     }
                     RmwOp::And => {
-                        self.emit(format!("mvn\t{}, {}", reg(S1, ty), reg(v, ty)));
+                        self.mach("mvn", [(reg(S1, ty)).into(), (reg(v, ty)).into()]);
                         v = S1;
                         "ldclr"
                     }
@@ -1483,10 +1570,12 @@ impl<'a> FunctionCompiler<'a> {
                 // shares one with the operands.
                 let order = ordering_suffix(ordering);
                 let (rv, rd) = (reg(v, ty), reg(S2, ty));
-                self.emit(format!(
-                    "{mnemonic}{order}{}\t{rv}, {rd}, [x{a}]",
-                    width_suffix(ty)
-                ));
+                self.atomic(
+                    mnemonic,
+                    order,
+                    ty,
+                    [rv.into(), rd.into(), Address::base(Reg::x(a)).into()],
+                );
                 if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
                     self.emit_move(loc, Loc::Reg(S2));
                 }
@@ -1502,21 +1591,23 @@ impl<'a> FunctionCompiler<'a> {
                 let new = self.use_reg(args[2], S1);
                 let order = ordering_suffix(ordering);
                 let (rs, rt) = (reg(S2, ty), reg(new, ty));
-                self.emit(format!(
-                    "cas{order}{}\t{rs}, {rt}, [x{a}]",
-                    width_suffix(ty)
-                ));
+                self.atomic(
+                    "cas",
+                    order,
+                    ty,
+                    [rs.into(), rt.into(), Address::base(Reg::x(a)).into()],
+                );
                 if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
                     self.emit_move(loc, Loc::Reg(S2));
                 }
             }
             InstData::Fence { ordering } => {
                 let barrier = if ordering == Ordering::Acquire {
-                    "dmb\tishld"
+                    Arg::Barrier(9)
                 } else {
-                    "dmb\tish"
+                    Arg::Barrier(11)
                 };
-                self.emit(barrier);
+                self.mach("dmb", [barrier]);
             }
             InstData::Jump { dest } => {
                 self.block_args(&dest);
@@ -1543,15 +1634,15 @@ impl<'a> FunctionCompiler<'a> {
                 // else-arguments needs its own landing pad. The copies only
                 // move data, so the flags survive them.
                 if else_dest.args.is_empty() {
-                    self.emit(format!("b.{not}\t{}", self.label(else_dest.block)));
+                    self.conditional(not, self.label(else_dest.block));
                     self.block_args(&then_dest);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!("L{}_{inst}_else", func.name);
-                    self.emit(format!("b.{not}\t{pad}"));
+                    self.conditional(not, pad.clone());
                     self.block_args(&then_dest);
-                    self.emit(format!("b\t{}", self.label(then_dest.block)));
-                    writeln!(self.out, "{pad}:").unwrap();
+                    self.out.branch(false, self.label(then_dest.block));
+                    self.out.label(pad.clone());
                     self.block_args(&else_dest);
                     self.branch_unless_next(else_dest.block);
                 }
@@ -1569,41 +1660,67 @@ impl<'a> FunctionCompiler<'a> {
                         .map(|&ty| AbiParam::new(ty))
                         .collect();
                     self.move_args(&args, &params);
-                    self.emit(format!("bl\t_{id}"));
+                    self.out.branch(true, format!("_{id}"));
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.
-                Intrinsic::Debugtrap => self.emit("brk\t#0xf000"),
+                Intrinsic::Debugtrap => self.mach("brk", [Arg::imm(0xf000)]),
                 // Apple's va_list is a pointer to the next argument slot.
                 Intrinsic::VaStart => {
                     let list = self.use_reg(args[0], S1);
-                    self.emit(format!("add\tx{S0}, x29, #{}", self.variadic_offset));
-                    self.emit(format!("str\tx{S0}, [x{list}]"));
+                    self.mach(
+                        "add",
+                        [
+                            (Reg::x(S0)).into(),
+                            (Reg::x(29)).into(),
+                            Arg::imm(self.variadic_offset),
+                        ],
+                    );
+                    self.mach(
+                        "str",
+                        [(Reg::x(S0)).into(), Address::base(Reg::x(list)).into()],
+                    );
                 }
                 // Round up to keep `sp` 16-byte aligned; the memory starts
                 // above the outgoing arguments, which stay at `sp`.
                 Intrinsic::StackAlloc => {
                     let size = self.use_reg(args[0], S0);
-                    self.emit(format!("add\tx{S0}, x{size}, #15"));
-                    self.emit(format!("and\tx{S0}, x{S0}, #-16"));
-                    self.emit(format!("sub\tsp, sp, x{S0}"));
+                    self.mach(
+                        "add",
+                        [(Reg::x(S0)).into(), (Reg::x(size)).into(), Arg::imm(15)],
+                    );
+                    self.mach(
+                        "and",
+                        [(Reg::x(S0)).into(), (Reg::x(S0)).into(), Arg::imm(-16)],
+                    );
+                    self.mach(
+                        "sub",
+                        [(Reg::SP).into(), (Reg::SP).into(), (Reg::x(S0)).into()],
+                    );
                     let d = self.def_reg(result);
-                    self.emit(format!("add\tx{d}, sp, #{}", self.copy_base));
+                    self.mach(
+                        "add",
+                        [
+                            (Reg::x(d)).into(),
+                            (Reg::SP).into(),
+                            Arg::imm(self.copy_base),
+                        ],
+                    );
                     self.def_done(result, d);
                 }
                 Intrinsic::StackSave => {
                     let d = self.def_reg(result);
-                    self.emit(format!("mov\tx{d}, sp"));
+                    self.mach("mov", [(Reg::x(d)).into(), (Reg::SP).into()]);
                     self.def_done(result, d);
                 }
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
-                    self.emit(format!("mov\tsp, x{mark}"));
+                    self.mach("mov", [(Reg::SP).into(), (Reg::x(mark)).into()]);
                 }
                 // The frame record is where the prologue points x29.
                 Intrinsic::FrameAddress => {
                     let d = self.def_reg(result);
-                    self.emit(format!("mov\tx{d}, x29"));
+                    self.mach("mov", [(Reg::x(d)).into(), (Reg::x(29)).into()]);
                     self.def_done(result, d);
                 }
             },
@@ -1620,16 +1737,14 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 }
                 let text = asm_text(func, &asm, &args, &regs).expect("checked");
-                for line in text.lines() {
-                    self.emit(line.trim());
-                }
+                self.out.inline_assembly(&text);
                 for (k, &output) in func.inst_results(inst).iter().enumerate() {
                     if let (Some(dst), Some(r)) = (self.alloc.loc(output), regs[k]) {
                         self.emit_move(dst, asm_loc(r));
                     }
                 }
             }
-            InstData::Trap => self.emit("brk\t#1"),
+            InstData::Trap => self.mach("brk", [Arg::imm(1)]),
             InstData::Return { args } => {
                 // A struct result in registers is loaded from where the
                 // function wrote it.
@@ -1725,7 +1840,10 @@ impl<'a> FunctionCompiler<'a> {
                         Slot::Reg(dst) => late.push(Late::Address(dst, at)),
                         Slot::Stack(offset) => {
                             self.address(Loc::Reg(S0), self.base, at);
-                            self.emit(format!("str\tx{S0}, [sp, #{offset}]"));
+                            self.mach(
+                                "str",
+                                [(Reg::x(S0)).into(), Address::offset(Reg::SP, offset).into()],
+                            );
                         }
                     }
                 }
@@ -1736,7 +1854,10 @@ impl<'a> FunctionCompiler<'a> {
                 ArgLoc::SretRegs(regs) => {
                     let p = self.use_reg(arg, S0);
                     let save = self.sret_save.expect("planned");
-                    self.emit(format!("str\tx{p}, [{}, #{save}]", self.base));
+                    self.mach(
+                        "str",
+                        [(Reg::x(p)).into(), Address::offset(self.base, save).into()],
+                    );
                     sret = Some((regs, layout.expect("a struct")));
                 }
             }
@@ -1750,7 +1871,7 @@ impl<'a> FunctionCompiler<'a> {
                 Late::Address(dst, at) => self.address(dst, self.base, at),
                 Late::Sret(arg) => {
                     let p = self.use_reg(arg, S0);
-                    self.emit(format!("mov\tx8, x{p}"));
+                    self.mach("mov", [(Reg::x(8)).into(), (Reg::x(p)).into()]);
                 }
                 Late::Struct(regs, layout, arg) => {
                     let p = self.use_reg(arg, S0);
@@ -1776,12 +1897,27 @@ impl<'a> FunctionCompiler<'a> {
     fn store_stack_arg(&mut self, arg: Value, ty: Type, offset: u32) {
         if ty == Type::I128 {
             let lo = self.use_reg(arg, S1);
-            self.emit(format!("str\tx{lo}, [sp, #{offset}]"));
+            self.mach(
+                "str",
+                [(Reg::x(lo)).into(), Address::offset(Reg::SP, offset).into()],
+            );
             let hi = self.use_reg_hi(arg, S1);
-            self.emit(format!("str\tx{hi}, [sp, #{}]", offset + 8));
+            self.mach(
+                "str",
+                [
+                    (Reg::x(hi)).into(),
+                    Address::offset(Reg::SP, offset + 8).into(),
+                ],
+            );
         } else if ty.is_float() {
             let r = self.use_freg(arg, FS1);
-            self.emit(format!("str\t{}, [sp, #{offset}]", freg(r, ty)));
+            self.mach(
+                "str",
+                [
+                    (freg(r, ty)).into(),
+                    Address::offset(Reg::SP, offset).into(),
+                ],
+            );
         } else {
             let r = self.use_reg(arg, S1);
             let op = match ty {
@@ -1789,7 +1925,10 @@ impl<'a> FunctionCompiler<'a> {
                 Type::I16 => "strh",
                 _ => "str",
             };
-            self.emit(format!("{op}\t{}, [sp, #{offset}]", reg(r, ty)));
+            self.mach(
+                op,
+                [(reg(r, ty)).into(), Address::offset(Reg::SP, offset).into()],
+            );
         }
     }
 
@@ -1809,10 +1948,16 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             reg(r, ty)
         };
-        self.emit(format!("{op}\t{rd}, [x29, #{offset}]"));
+        self.mach(
+            op,
+            [(rd).into(), Address::offset(Reg::x(29), offset).into()],
+        );
         if let Some(s) = scratch {
             let class = if ty.is_float() { 'd' } else { 'x' };
-            self.emit(format!("str\t{class}{r}, {}", self.slot(s)));
+            self.mach(
+                "str",
+                [(Reg::scalar(class, r)).into(), (self.slot(s)).into()],
+            );
         }
     }
 
@@ -1849,8 +1994,16 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 match cond {
                     IntCC::Eq | IntCC::Ne => {
-                        self.emit("cmp\tx0, x2");
-                        self.emit("ccmp\tx1, x3, #0, eq");
+                        self.mach("cmp", [(Reg::x(0)).into(), (Reg::x(2)).into()]);
+                        self.mach(
+                            "ccmp",
+                            [
+                                (Reg::x(1)).into(),
+                                (Reg::x(3)).into(),
+                                Arg::imm(0),
+                                Arg::from("eq"),
+                            ],
+                        );
                     }
                     // a > b is b < a, and a <= b is b >= a: compare
                     // swapped. The borrow of the low halves feeds the high.
@@ -1858,8 +2011,15 @@ impl<'a> FunctionCompiler<'a> {
                         let swap =
                             matches!(cond, IntCC::Sgt | IntCC::Sle | IntCC::Ugt | IntCC::Ule);
                         let (x, y) = if swap { (2, 0) } else { (0, 2) };
-                        self.emit(format!("cmp\tx{x}, x{y}"));
-                        self.emit(format!("sbcs\txzr, x{}, x{}", x + 1, y + 1));
+                        self.mach("cmp", [(Reg::x(x)).into(), (Reg::x(y)).into()]);
+                        self.mach(
+                            "sbcs",
+                            [
+                                (Reg::XZR).into(),
+                                (Reg::x(x + 1)).into(),
+                                (Reg::x(y + 1)).into(),
+                            ],
+                        );
                     }
                 }
                 let code = match cond {
@@ -1870,20 +2030,39 @@ impl<'a> FunctionCompiler<'a> {
                     IntCC::Ult | IntCC::Ugt => "lo",
                     IntCC::Ule | IntCC::Uge => "hs",
                 };
-                self.emit(format!("cset\tw{d}, {code}"));
+                self.mach("cset", [(Reg::w(d)).into(), (code).into()]);
                 self.def_done(result, d);
             }
             InstData::Select { args } if wide(self, args[1]) => {
                 // x0:x1 and x2:x3 are the arms, x4 (or x4:x5) the condition.
                 self.operands(&[args[1], args[2], args[0]]);
                 if wide(self, args[0]) {
-                    self.emit("orr\tx6, x4, x5");
-                    self.emit("cmp\tx6, #0");
+                    self.mach(
+                        "orr",
+                        [(Reg::x(6)).into(), (Reg::x(4)).into(), (Reg::x(5)).into()],
+                    );
+                    self.mach("cmp", [(Reg::x(6)).into(), Arg::imm(0)]);
                 } else {
                     self.test_nonzero(4, self.ty(args[0]));
                 }
-                self.emit("csel\tx6, x0, x2, ne");
-                self.emit("csel\tx7, x1, x3, ne");
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(6)).into(),
+                        (Reg::x(0)).into(),
+                        (Reg::x(2)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(7)).into(),
+                        (Reg::x(1)).into(),
+                        (Reg::x(3)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
                 self.pair_out(result, 6, 7);
             }
             InstData::Convert {
@@ -1894,18 +2073,29 @@ impl<'a> FunctionCompiler<'a> {
                 self.operands(&[arg]);
                 let signed = op == ConvertOp::Sext;
                 match (self.ty(arg), signed) {
-                    (Type::I64, _) => self.emit("mov\tx4, x0"),
-                    (Type::I32, true) => self.emit("sxtw\tx4, w0"),
-                    (Type::I32, false) => self.emit("mov\tw4, w0"),
-                    (Type::I16, true) => self.emit("sxth\tx4, w0"),
-                    (Type::I16, false) => self.emit("uxth\tw4, w0"),
-                    (_, true) => self.emit("sxtb\tx4, w0"),
-                    (_, false) => self.emit("uxtb\tw4, w0"),
+                    (Type::I64, _) => self.mach("mov", [(Reg::x(4)).into(), (Reg::x(0)).into()]),
+                    (Type::I32, true) => {
+                        self.mach("sxtw", [(Reg::x(4)).into(), (Reg::w(0)).into()])
+                    }
+                    (Type::I32, false) => {
+                        self.mach("mov", [(Reg::w(4)).into(), (Reg::w(0)).into()])
+                    }
+                    (Type::I16, true) => {
+                        self.mach("sxth", [(Reg::x(4)).into(), (Reg::w(0)).into()])
+                    }
+                    (Type::I16, false) => {
+                        self.mach("uxth", [(Reg::w(4)).into(), (Reg::w(0)).into()])
+                    }
+                    (_, true) => self.mach("sxtb", [(Reg::x(4)).into(), (Reg::w(0)).into()]),
+                    (_, false) => self.mach("uxtb", [(Reg::w(4)).into(), (Reg::w(0)).into()]),
                 }
                 if signed {
-                    self.emit("asr\tx5, x4, #63");
+                    self.mach(
+                        "asr",
+                        [(Reg::x(5)).into(), (Reg::x(4)).into(), Arg::imm(63)],
+                    );
                 } else {
-                    self.emit("mov\tx5, #0");
+                    self.mach("mov", [(Reg::x(5)).into(), Arg::imm(0)]);
                 }
                 self.pair_out(result, 4, 5);
             }
@@ -1915,12 +2105,26 @@ impl<'a> FunctionCompiler<'a> {
                 ..
             } => {
                 let a = self.use_reg(addr, S0);
-                self.emit(format!("ldp\tx4, x5, [x{a}]"));
+                self.mach(
+                    "ldp",
+                    [
+                        (Reg::x(4)).into(),
+                        (Reg::x(5)).into(),
+                        Address::base(Reg::x(a)).into(),
+                    ],
+                );
                 self.pair_out(result, 4, 5);
             }
             InstData::Store { value, addr, .. } if wide(self, value) => {
                 self.operands(&[value, addr]);
-                self.emit("stp\tx0, x1, [x2]");
+                self.mach(
+                    "stp",
+                    [
+                        (Reg::x(0)).into(),
+                        (Reg::x(1)).into(),
+                        Address::base(Reg::x(2)).into(),
+                    ],
+                );
             }
             // Multiplication is rejected in `new`. The carry or borrow of
             // the low halves feeds the high; the flags then describe the
@@ -1934,9 +2138,15 @@ impl<'a> FunctionCompiler<'a> {
                     OverflowOp::Ssub => ("subs", "sbcs", "vs"),
                     OverflowOp::Umul | OverflowOp::Smul => unreachable!("rejected"),
                 };
-                self.emit(format!("{lo}\tx4, x0, x2"));
-                self.emit(format!("{hi}\tx5, x1, x3"));
-                self.emit(format!("cset\tw6, {code}"));
+                self.mach(
+                    lo,
+                    [(Reg::x(4)).into(), (Reg::x(0)).into(), (Reg::x(2)).into()],
+                );
+                self.mach(
+                    hi,
+                    [(Reg::x(5)).into(), (Reg::x(1)).into(), (Reg::x(3)).into()],
+                );
+                self.mach("cset", [(Reg::w(6)).into(), (code).into()]);
                 self.pair_out(result, 4, 5);
                 let flag = self.func.inst_results(inst)[1];
                 if let Some(loc) = self.alloc.loc(flag) {
@@ -1978,8 +2188,8 @@ impl<'a> FunctionCompiler<'a> {
     /// the registers of the result.
     fn binary_i128(&mut self, inst: Inst, op: BinaryOp) -> (u8, u8) {
         let pair = |this: &mut Self, lo: &str, hi: &str| {
-            this.emit(format!("{lo}\tx4, x0, x2"));
-            this.emit(format!("{hi}\tx5, x1, x3"));
+            this.mach(lo, [Reg::x(4).into(), Reg::x(0).into(), Reg::x(2).into()]);
+            this.mach(hi, [Reg::x(5).into(), Reg::x(1).into(), Reg::x(3).into()]);
         };
         match op {
             BinaryOp::Iadd => pair(self, "adds", "adc"),
@@ -1989,47 +2199,90 @@ impl<'a> FunctionCompiler<'a> {
             BinaryOp::Xor => pair(self, "eor", "eor"),
             // (a1:a0)(b1:b0) mod 2^128 = a0 b0 + 2^64 (a0 b1 + a1 b0)
             BinaryOp::Imul => {
-                self.emit("mul\tx4, x0, x2");
-                self.emit("umulh\tx5, x0, x2");
-                self.emit("madd\tx5, x0, x3, x5");
-                self.emit("madd\tx5, x1, x2, x5");
+                self.mach(
+                    "mul",
+                    [(Reg::x(4)).into(), (Reg::x(0)).into(), (Reg::x(2)).into()],
+                );
+                self.mach(
+                    "umulh",
+                    [(Reg::x(5)).into(), (Reg::x(0)).into(), (Reg::x(2)).into()],
+                );
+                self.mach(
+                    "madd",
+                    [
+                        (Reg::x(5)).into(),
+                        (Reg::x(0)).into(),
+                        (Reg::x(3)).into(),
+                        (Reg::x(5)).into(),
+                    ],
+                );
+                self.mach(
+                    "madd",
+                    [
+                        (Reg::x(5)).into(),
+                        (Reg::x(1)).into(),
+                        (Reg::x(2)).into(),
+                        (Reg::x(5)).into(),
+                    ],
+                );
             }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
-                self.emit("and\tx2, x2, #127");
+                self.mach(
+                    "and",
+                    [(Reg::x(2)).into(), (Reg::x(2)).into(), Arg::imm(127)],
+                );
                 self.shift_i128(op, 2, (4, 5), [3, 6, 7]);
             }
             // rotl(x, n) = (x << n) | (x >> (-n mod 128)), and the mirror.
             BinaryOp::Rotl | BinaryOp::Rotr => {
-                self.emit("and\tx2, x2, #127");
-                self.emit("neg\tx3, x2");
-                self.emit("and\tx3, x3, #127");
+                self.mach(
+                    "and",
+                    [(Reg::x(2)).into(), (Reg::x(2)).into(), Arg::imm(127)],
+                );
+                self.mach("neg", [(Reg::x(3)).into(), (Reg::x(2)).into()]);
+                self.mach(
+                    "and",
+                    [(Reg::x(3)).into(), (Reg::x(3)).into(), Arg::imm(127)],
+                );
                 let (first, second) = match op {
                     BinaryOp::Rotl => (BinaryOp::Shl, BinaryOp::Ushr),
                     _ => (BinaryOp::Ushr, BinaryOp::Shl),
                 };
                 self.shift_i128(first, 2, (4, 5), [6, 7, 8]);
                 self.shift_i128(second, 3, (6, 7), [8, 16, 17]);
-                self.emit("orr\tx4, x4, x6");
-                self.emit("orr\tx5, x5, x7");
+                self.mach(
+                    "orr",
+                    [(Reg::x(4)).into(), (Reg::x(4)).into(), (Reg::x(6)).into()],
+                );
+                self.mach(
+                    "orr",
+                    [(Reg::x(5)).into(), (Reg::x(5)).into(), (Reg::x(7)).into()],
+                );
             }
             // compiler-rt takes and returns the pairs in x0:x1 and x2:x3,
             // where they already are. Traps first, as for narrower types.
             BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
                 let trap = self.trap_label();
-                self.emit(format!("orr\tx{S0}, x2, x3"));
-                self.emit(format!("cbz\tx{S0}, {trap}"));
+                self.mach(
+                    "orr",
+                    [(Reg::x(S0)).into(), (Reg::x(2)).into(), (Reg::x(3)).into()],
+                );
+                self.compare_branch(Reg::x(S0), false, trap.clone());
                 if op == BinaryOp::Sdiv {
                     // MIN / -1: the divisor's halves are both all ones and
                     // the dividend is 2^127.
                     let ok = format!("L{}_{inst}_divok", self.func.name);
-                    self.emit(format!("and\tx{S0}, x2, x3"));
-                    self.emit(format!("cmn\tx{S0}, #1"));
-                    self.emit(format!("b.ne\t{ok}"));
-                    self.emit(format!("cbnz\tx0, {ok}"));
+                    self.mach(
+                        "and",
+                        [(Reg::x(S0)).into(), (Reg::x(2)).into(), (Reg::x(3)).into()],
+                    );
+                    self.mach("cmn", [(Reg::x(S0)).into(), Arg::imm(1)]);
+                    self.conditional("ne", ok.clone());
+                    self.compare_branch(Reg::x(0), true, ok.clone());
                     self.materialize(S0, 1 << 63, true);
-                    self.emit(format!("cmp\tx1, x{S0}"));
-                    self.emit(format!("b.eq\t{trap}"));
-                    writeln!(self.out, "{ok}:").unwrap();
+                    self.mach("cmp", [(Reg::x(1)).into(), (Reg::x(S0)).into()]);
+                    self.conditional("eq", trap.clone());
+                    self.out.label(ok.clone());
                 }
                 let function = match op {
                     BinaryOp::Udiv => "___udivti3",
@@ -2037,7 +2290,7 @@ impl<'a> FunctionCompiler<'a> {
                     BinaryOp::Urem => "___umodti3",
                     _ => "___modti3",
                 };
-                self.emit(format!("bl\t{function}"));
+                self.out.branch(true, function.to_string());
                 return (0, 1);
             }
             _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
@@ -2053,33 +2306,92 @@ impl<'a> FunctionCompiler<'a> {
     fn shift_i128(&mut self, op: BinaryOp, n: u8, (ol, oh): (u8, u8), [a, b, c]: [u8; 3]) {
         match op {
             BinaryOp::Shl => {
-                self.emit(format!("lsl\tx{a}, x1, x{n}"));
-                self.emit(format!("mvn\tw{b}, w{n}"));
-                self.emit(format!("lsr\tx{c}, x0, #1"));
-                self.emit(format!("lsr\tx{c}, x{c}, x{b}"));
-                self.emit(format!("orr\tx{a}, x{a}, x{c}"));
-                self.emit(format!("lsl\tx{c}, x0, x{n}"));
-                self.emit(format!("tst\tx{n}, #64"));
-                self.emit(format!("csel\tx{oh}, x{c}, x{a}, ne"));
-                self.emit(format!("csel\tx{ol}, xzr, x{c}, ne"));
+                self.mach(
+                    "lsl",
+                    [(Reg::x(a)).into(), (Reg::x(1)).into(), (Reg::x(n)).into()],
+                );
+                self.mach("mvn", [(Reg::w(b)).into(), (Reg::w(n)).into()]);
+                self.mach("lsr", [(Reg::x(c)).into(), (Reg::x(0)).into(), Arg::imm(1)]);
+                self.mach(
+                    "lsr",
+                    [(Reg::x(c)).into(), (Reg::x(c)).into(), (Reg::x(b)).into()],
+                );
+                self.mach(
+                    "orr",
+                    [(Reg::x(a)).into(), (Reg::x(a)).into(), (Reg::x(c)).into()],
+                );
+                self.mach(
+                    "lsl",
+                    [(Reg::x(c)).into(), (Reg::x(0)).into(), (Reg::x(n)).into()],
+                );
+                self.mach("tst", [(Reg::x(n)).into(), Arg::imm(64)]);
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(oh)).into(),
+                        (Reg::x(c)).into(),
+                        (Reg::x(a)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(ol)).into(),
+                        (Reg::XZR).into(),
+                        (Reg::x(c)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
             }
             _ => {
                 let shr = if op == BinaryOp::Sshr { "asr" } else { "lsr" };
-                self.emit(format!("lsr\tx{a}, x0, x{n}"));
-                self.emit(format!("mvn\tw{b}, w{n}"));
-                self.emit(format!("lsl\tx{c}, x1, #1"));
-                self.emit(format!("lsl\tx{c}, x{c}, x{b}"));
-                self.emit(format!("orr\tx{a}, x{a}, x{c}"));
-                self.emit(format!("{shr}\tx{c}, x1, x{n}"));
+                self.mach(
+                    "lsr",
+                    [(Reg::x(a)).into(), (Reg::x(0)).into(), (Reg::x(n)).into()],
+                );
+                self.mach("mvn", [(Reg::w(b)).into(), (Reg::w(n)).into()]);
+                self.mach("lsl", [(Reg::x(c)).into(), (Reg::x(1)).into(), Arg::imm(1)]);
+                self.mach(
+                    "lsl",
+                    [(Reg::x(c)).into(), (Reg::x(c)).into(), (Reg::x(b)).into()],
+                );
+                self.mach(
+                    "orr",
+                    [(Reg::x(a)).into(), (Reg::x(a)).into(), (Reg::x(c)).into()],
+                );
+                self.mach(
+                    shr,
+                    [(Reg::x(c)).into(), (Reg::x(1)).into(), (Reg::x(n)).into()],
+                );
                 // What fills the high half once n >= 64.
                 if op == BinaryOp::Sshr {
-                    self.emit(format!("asr\tx{b}, x1, #63"));
+                    self.mach(
+                        "asr",
+                        [(Reg::x(b)).into(), (Reg::x(1)).into(), Arg::imm(63)],
+                    );
                 } else {
-                    self.emit(format!("mov\tx{b}, #0"));
+                    self.mach("mov", [(Reg::x(b)).into(), Arg::imm(0)]);
                 }
-                self.emit(format!("tst\tx{n}, #64"));
-                self.emit(format!("csel\tx{ol}, x{c}, x{a}, ne"));
-                self.emit(format!("csel\tx{oh}, x{b}, x{c}, ne"));
+                self.mach("tst", [(Reg::x(n)).into(), Arg::imm(64)]);
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(ol)).into(),
+                        (Reg::x(c)).into(),
+                        (Reg::x(a)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(oh)).into(),
+                        (Reg::x(b)).into(),
+                        (Reg::x(c)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
             }
         }
     }
@@ -2088,47 +2400,72 @@ impl<'a> FunctionCompiler<'a> {
     fn unary_i128(&mut self, op: UnaryOp) {
         match op {
             UnaryOp::Ineg => {
-                self.emit("negs\tx4, x0");
-                self.emit("ngc\tx5, x1");
+                self.mach("negs", [(Reg::x(4)).into(), (Reg::x(0)).into()]);
+                self.mach("ngc", [(Reg::x(5)).into(), (Reg::x(1)).into()]);
             }
             UnaryOp::Bnot => {
-                self.emit("mvn\tx4, x0");
-                self.emit("mvn\tx5, x1");
+                self.mach("mvn", [(Reg::x(4)).into(), (Reg::x(0)).into()]);
+                self.mach("mvn", [(Reg::x(5)).into(), (Reg::x(1)).into()]);
             }
             // The high half's count, or 64 plus the low half's.
             UnaryOp::Clz => {
-                self.emit("cmp\tx1, #0");
-                self.emit("clz\tx4, x1");
-                self.emit("clz\tx5, x0");
-                self.emit("add\tx5, x5, #64");
-                self.emit("csel\tx4, x4, x5, ne");
-                self.emit("mov\tx5, #0");
+                self.mach("cmp", [(Reg::x(1)).into(), Arg::imm(0)]);
+                self.mach("clz", [(Reg::x(4)).into(), (Reg::x(1)).into()]);
+                self.mach("clz", [(Reg::x(5)).into(), (Reg::x(0)).into()]);
+                self.mach(
+                    "add",
+                    [(Reg::x(5)).into(), (Reg::x(5)).into(), Arg::imm(64)],
+                );
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(4)).into(),
+                        (Reg::x(4)).into(),
+                        (Reg::x(5)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
+                self.mach("mov", [(Reg::x(5)).into(), Arg::imm(0)]);
             }
             UnaryOp::Ctz => {
-                self.emit("cmp\tx0, #0");
-                self.emit("rbit\tx4, x0");
-                self.emit("clz\tx4, x4");
-                self.emit("rbit\tx5, x1");
-                self.emit("clz\tx5, x5");
-                self.emit("add\tx5, x5, #64");
-                self.emit("csel\tx4, x4, x5, ne");
-                self.emit("mov\tx5, #0");
+                self.mach("cmp", [(Reg::x(0)).into(), Arg::imm(0)]);
+                self.mach("rbit", [(Reg::x(4)).into(), (Reg::x(0)).into()]);
+                self.mach("clz", [(Reg::x(4)).into(), (Reg::x(4)).into()]);
+                self.mach("rbit", [(Reg::x(5)).into(), (Reg::x(1)).into()]);
+                self.mach("clz", [(Reg::x(5)).into(), (Reg::x(5)).into()]);
+                self.mach(
+                    "add",
+                    [(Reg::x(5)).into(), (Reg::x(5)).into(), Arg::imm(64)],
+                );
+                self.mach(
+                    "csel",
+                    [
+                        (Reg::x(4)).into(),
+                        (Reg::x(4)).into(),
+                        (Reg::x(5)).into(),
+                        Arg::from("ne"),
+                    ],
+                );
+                self.mach("mov", [(Reg::x(5)).into(), Arg::imm(0)]);
             }
             UnaryOp::Popcnt => {
-                self.emit("fmov\td0, x0");
-                self.emit("fmov\td1, x1");
-                self.emit("cnt\tv0.8b, v0.8b");
-                self.emit("cnt\tv1.8b, v1.8b");
-                self.emit("addv\tb0, v0.8b");
-                self.emit("addv\tb1, v1.8b");
-                self.emit("fmov\tw4, s0");
-                self.emit("fmov\tw5, s1");
-                self.emit("add\tx4, x4, x5");
-                self.emit("mov\tx5, #0");
+                self.mach("fmov", [(Reg::d(0)).into(), (Reg::x(0)).into()]);
+                self.mach("fmov", [(Reg::d(1)).into(), (Reg::x(1)).into()]);
+                self.mach("cnt", [(Reg::v8b(0)).into(), (Reg::v8b(0)).into()]);
+                self.mach("cnt", [(Reg::v8b(1)).into(), (Reg::v8b(1)).into()]);
+                self.mach("addv", [(Reg::b(0)).into(), (Reg::v8b(0)).into()]);
+                self.mach("addv", [(Reg::b(1)).into(), (Reg::v8b(1)).into()]);
+                self.mach("fmov", [(Reg::w(4)).into(), (Reg::s(0)).into()]);
+                self.mach("fmov", [(Reg::w(5)).into(), (Reg::s(1)).into()]);
+                self.mach(
+                    "add",
+                    [(Reg::x(4)).into(), (Reg::x(4)).into(), (Reg::x(5)).into()],
+                );
+                self.mach("mov", [(Reg::x(5)).into(), Arg::imm(0)]);
             }
             UnaryOp::Bswap => {
-                self.emit("rev\tx4, x1");
-                self.emit("rev\tx5, x0");
+                self.mach("rev", [(Reg::x(4)).into(), (Reg::x(1)).into()]);
+                self.mach("rev", [(Reg::x(5)).into(), (Reg::x(0)).into()]);
             }
             _ => unreachable!("{op} is not an integer operation"),
         }
@@ -2148,11 +2485,20 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some((regs, layout)) = sret {
             let save = self.sret_save.expect("planned");
-            self.emit(format!("ldr\tx{S0}, [{}, #{save}]", self.base));
+            self.mach(
+                "ldr",
+                [(Reg::x(S0)).into(), Address::offset(self.base, save).into()],
+            );
             match abi::classify(layout) {
                 StructClass::Hfa { ty, .. } => {
                     for (&(offset, _), &r) in layout.leaves().iter().zip(&regs) {
-                        self.emit(format!("str\t{}, [x{S0}, #{offset}]", freg(loc_reg(r), ty)));
+                        self.mach(
+                            "str",
+                            [
+                                (freg(loc_reg(r), ty)).into(),
+                                Address::offset(Reg::x(S0), offset).into(),
+                            ],
+                        );
                     }
                 }
                 _ => {
@@ -2175,13 +2521,25 @@ impl<'a> FunctionCompiler<'a> {
             StructClass::Hfa { ty, .. } => {
                 for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
                     let fr = freg(loc_reg(r), ty);
-                    self.emit(format!("str\t{fr}, [{base}, #{}]", area + offset as usize));
+                    self.mach(
+                        "str",
+                        [
+                            (fr).into(),
+                            Address::offset(base, area + offset as usize).into(),
+                        ],
+                    );
                 }
             }
             _ => {
                 for (k, &r) in regs.iter().enumerate() {
                     let r = loc_reg(r);
-                    self.emit(format!("str\tx{r}, [{base}, #{}]", area + 8 * k));
+                    self.mach(
+                        "str",
+                        [
+                            (Reg::x(r)).into(),
+                            Address::offset(base, area + 8 * k).into(),
+                        ],
+                    );
                 }
             }
         }
@@ -2195,12 +2553,24 @@ impl<'a> FunctionCompiler<'a> {
             StructClass::Hfa { ty, .. } => {
                 for (i, &(offset, _)) in layout.leaves().iter().enumerate() {
                     let fr = freg(i as u8, ty);
-                    self.emit(format!("ldr\t{fr}, [{base}, #{}]", area + offset as usize));
+                    self.mach(
+                        "ldr",
+                        [
+                            (fr).into(),
+                            Address::offset(base, area + offset as usize).into(),
+                        ],
+                    );
                 }
             }
             StructClass::Gprs { count } => {
                 for k in 0..count as usize {
-                    self.emit(format!("ldr\tx{k}, [{base}, #{}]", area + 8 * k));
+                    self.mach(
+                        "ldr",
+                        [
+                            (Reg::x(k)).into(),
+                            Address::offset(base, area + 8 * k).into(),
+                        ],
+                    );
                 }
             }
             StructClass::Indirect => unreachable!("returned through memory"),
@@ -2213,7 +2583,13 @@ impl<'a> FunctionCompiler<'a> {
         match abi::classify(layout) {
             StructClass::Hfa { ty, .. } => {
                 for (&(offset, _), &r) in layout.leaves().iter().zip(regs) {
-                    self.emit(format!("ldr\t{}, [x{p}, #{offset}]", freg(loc_reg(r), ty)));
+                    self.mach(
+                        "ldr",
+                        [
+                            (freg(loc_reg(r), ty)).into(),
+                            Address::offset(Reg::x(p), offset).into(),
+                        ],
+                    );
                 }
             }
             _ => {
@@ -2233,9 +2609,23 @@ impl<'a> FunctionCompiler<'a> {
             let (op, _) = piece_ops(size);
             let target = if i == 0 { r } else { S1 };
             let wide = if size == 8 { 'x' } else { 'w' };
-            self.emit(format!("{op}\t{wide}{target}, [x{p}, #{}]", offset + at));
+            self.mach(
+                op,
+                [
+                    (Reg::scalar(wide, target)).into(),
+                    Address::offset(Reg::x(p), offset + at).into(),
+                ],
+            );
             if i > 0 {
-                self.emit(format!("orr\tx{r}, x{r}, x{S1}, lsl #{}", 8 * at));
+                self.mach(
+                    "orr",
+                    [
+                        (Reg::x(r)).into(),
+                        (Reg::x(r)).into(),
+                        (Reg::x(S1)).into(),
+                        Arg::shift("lsl", 8 * at),
+                    ],
+                );
             }
         }
     }
@@ -2248,10 +2638,19 @@ impl<'a> FunctionCompiler<'a> {
             let src = if at == 0 {
                 r
             } else {
-                self.emit(format!("lsr\tx{S1}, x{r}, #{}", 8 * at));
+                self.mach(
+                    "lsr",
+                    [(Reg::x(S1)).into(), (Reg::x(r)).into(), Arg::imm(8 * at)],
+                );
                 S1
             };
-            self.emit(format!("{op}\t{wide}{src}, [x{p}, #{}]", offset + at));
+            self.mach(
+                op,
+                [
+                    (Reg::scalar(wide, src)).into(),
+                    Address::offset(Reg::x(p), offset + at).into(),
+                ],
+            );
         }
     }
 
@@ -2260,11 +2659,20 @@ impl<'a> FunctionCompiler<'a> {
         for (at, n) in pieces(size) {
             let (load, store) = piece_ops(n);
             let wide = if n == 8 { 'x' } else { 'w' };
-            self.emit(format!("{load}\t{wide}{S1}, [x{src}, #{at}]"));
-            self.emit(format!(
-                "{store}\t{wide}{S1}, [{base}, #{}]",
-                to + at as usize
-            ));
+            self.mach(
+                load,
+                [
+                    (Reg::scalar(wide, S1)).into(),
+                    Address::offset(Reg::x(src), at).into(),
+                ],
+            );
+            self.mach(
+                store,
+                [
+                    (Reg::scalar(wide, S1)).into(),
+                    Address::offset(base, to + at as usize).into(),
+                ],
+            );
         }
     }
 
@@ -2275,12 +2683,27 @@ impl<'a> FunctionCompiler<'a> {
             _ => S0,
         };
         // `add` takes a 12-bit immediate, optionally shifted by 12.
-        self.emit(format!("add\tx{r}, {base}, #{}", offset & 0xfff));
+        self.mach(
+            "add",
+            [
+                (Reg::x(r)).into(),
+                Reg::from(base).into(),
+                Arg::imm(offset & 0xfff),
+            ],
+        );
         if offset >> 12 != 0 {
-            self.emit(format!("add\tx{r}, x{r}, #{}, lsl #12", offset >> 12));
+            self.mach(
+                "add",
+                [
+                    (Reg::x(r)).into(),
+                    (Reg::x(r)).into(),
+                    Arg::imm(offset >> 12),
+                    Arg::shift("lsl", 12),
+                ],
+            );
         }
         if let Loc::Stack(s) = dst {
-            self.emit(format!("str\tx{r}, {}", self.slot(s)));
+            self.mach("str", [(Reg::x(r)).into(), (self.slot(s)).into()]);
         }
     }
 
@@ -2293,16 +2716,16 @@ impl<'a> FunctionCompiler<'a> {
             if from.is_float() {
                 // fpext, fptrunc
                 let a = self.use_freg(arg, FS0);
-                self.emit(format!("fcvt\t{fd}, {}", freg(a, from)));
+                self.mach("fcvt", [(fd).into(), (freg(a, from)).into()]);
             } else {
                 let a = self.use_reg(arg, S0);
                 match op {
-                    ConvertOp::Bitcast => self.emit(format!("fmov\t{fd}, {}", reg(a, from))),
+                    ConvertOp::Bitcast => self.mach("fmov", [(fd).into(), (reg(a, from)).into()]),
                     _ => {
                         let signed = op == ConvertOp::Sitofp;
                         let x = reg(self.extend(S0, a, from, signed), from);
                         let mnemonic = if signed { "scvtf" } else { "ucvtf" };
-                        self.emit(format!("{mnemonic}\t{fd}, {x}"));
+                        self.mach(mnemonic, [(fd).into(), (x).into()]);
                     }
                 }
             }
@@ -2316,7 +2739,7 @@ impl<'a> FunctionCompiler<'a> {
                 ConvertOp::Fptoui => "fcvtzu",
                 _ => "fmov",
             };
-            self.emit(format!("{mnemonic}\t{}, {}", reg(d, to), freg(a, from)));
+            self.mach(mnemonic, [(reg(d, to)).into(), (freg(a, from)).into()]);
             self.def_done(result, d);
         }
     }
@@ -2339,44 +2762,85 @@ impl<'a> FunctionCompiler<'a> {
                     OverflowOp::Usub | OverflowOp::Ssub => "sub",
                     OverflowOp::Umul | OverflowOp::Smul => "mul",
                 };
-                self.emit(format!("{mnemonic}\tw{S0}, w{a}, w{b}"));
+                self.mach(
+                    mnemonic,
+                    [(Reg::w(S0)).into(), (Reg::w(a)).into(), (Reg::w(b)).into()],
+                );
                 if signed {
                     let ext = if bits == 8 { "sxtb" } else { "sxth" };
-                    self.emit(format!("cmp\tw{S0}, w{S0}, {ext}"));
+                    self.mach(
+                        "cmp",
+                        [(Reg::w(S0)).into(), (Reg::w(S0)).into(), (ext).into()],
+                    );
                 } else {
                     let high = !((1u32 << bits) - 1);
-                    self.emit(format!("tst\tw{S0}, #{high:#x}"));
+                    self.mach("tst", [(Reg::w(S0)).into(), Arg::imm(high)]);
                 }
-                self.emit(format!("cset\tw{S2}, ne"));
+                self.mach("cset", [(Reg::w(S2)).into(), Arg::from("ne")]);
             }
             None => {
                 let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(S0, ty));
                 match (op, ty) {
                     (OverflowOp::Uadd | OverflowOp::Sadd, _) => {
-                        self.emit(format!("adds\t{rd}, {ra}, {rb}"))
+                        self.mach("adds", [(rd).into(), (ra).into(), (rb).into()])
                     }
                     (OverflowOp::Usub | OverflowOp::Ssub, _) => {
-                        self.emit(format!("subs\t{rd}, {ra}, {rb}"))
+                        self.mach("subs", [(rd).into(), (ra).into(), (rb).into()])
                     }
                     // The full product's high half must be zero, or the
                     // sign extension of the low half.
                     (OverflowOp::Umul, Type::I64) => {
-                        self.emit(format!("umulh\tx{S2}, x{a}, x{b}"));
-                        self.emit(format!("mul\tx{S0}, x{a}, x{b}"));
-                        self.emit(format!("cmp\tx{S2}, #0"));
+                        self.mach(
+                            "umulh",
+                            [(Reg::x(S2)).into(), (Reg::x(a)).into(), (Reg::x(b)).into()],
+                        );
+                        self.mach(
+                            "mul",
+                            [(Reg::x(S0)).into(), (Reg::x(a)).into(), (Reg::x(b)).into()],
+                        );
+                        self.mach("cmp", [(Reg::x(S2)).into(), Arg::imm(0)]);
                     }
                     (OverflowOp::Smul, Type::I64) => {
-                        self.emit(format!("smulh\tx{S2}, x{a}, x{b}"));
-                        self.emit(format!("mul\tx{S0}, x{a}, x{b}"));
-                        self.emit(format!("cmp\tx{S2}, x{S0}, asr #63"));
+                        self.mach(
+                            "smulh",
+                            [(Reg::x(S2)).into(), (Reg::x(a)).into(), (Reg::x(b)).into()],
+                        );
+                        self.mach(
+                            "mul",
+                            [(Reg::x(S0)).into(), (Reg::x(a)).into(), (Reg::x(b)).into()],
+                        );
+                        self.mach(
+                            "cmp",
+                            [
+                                (Reg::x(S2)).into(),
+                                (Reg::x(S0)).into(),
+                                Arg::shift("asr", 63),
+                            ],
+                        );
                     }
                     (OverflowOp::Umul, _) => {
-                        self.emit(format!("umull\tx{S0}, w{a}, w{b}"));
-                        self.emit(format!("cmp\txzr, x{S0}, lsr #32"));
+                        self.mach(
+                            "umull",
+                            [(Reg::x(S0)).into(), (Reg::w(a)).into(), (Reg::w(b)).into()],
+                        );
+                        self.mach(
+                            "cmp",
+                            [
+                                (Reg::XZR).into(),
+                                (Reg::x(S0)).into(),
+                                Arg::shift("lsr", 32),
+                            ],
+                        );
                     }
                     (OverflowOp::Smul, _) => {
-                        self.emit(format!("smull\tx{S0}, w{a}, w{b}"));
-                        self.emit(format!("cmp\tx{S0}, w{S0}, sxtw"));
+                        self.mach(
+                            "smull",
+                            [(Reg::x(S0)).into(), (Reg::w(a)).into(), (Reg::w(b)).into()],
+                        );
+                        self.mach(
+                            "cmp",
+                            [(Reg::x(S0)).into(), (Reg::w(S0)).into(), Arg::from("sxtw")],
+                        );
                     }
                 }
                 let code = match op {
@@ -2385,7 +2849,7 @@ impl<'a> FunctionCompiler<'a> {
                     OverflowOp::Sadd | OverflowOp::Ssub => "vs",
                     OverflowOp::Umul | OverflowOp::Smul => "ne",
                 };
-                self.emit(format!("cset\tw{S2}, {code}"));
+                self.mach("cset", [(Reg::w(S2)).into(), (code).into()]);
             }
         }
         let results = self.func.inst_results(inst);
@@ -2611,10 +3075,10 @@ impl<'a> FunctionCompiler<'a> {
                 None => {
                     if op == BinaryOp::Rotl {
                         let neg = reg(S1, ty);
-                        self.emit(format!("neg\t{neg}, {rb}"));
-                        self.emit(format!("ror\t{rd}, {ra}, {neg}"));
+                        self.mach("neg", [(neg).into(), (rb).into()]);
+                        self.mach("ror", [(rd).into(), (ra).into(), (neg).into()]);
                     } else {
-                        self.emit(format!("ror\t{rd}, {ra}, {rb}"));
+                        self.mach("ror", [(rd).into(), (ra).into(), (rb).into()]);
                     }
                 }
                 // No narrow rotate instruction: (x << n) | (x >> (bits - n))
@@ -2623,16 +3087,35 @@ impl<'a> FunctionCompiler<'a> {
                 Some(bits) => {
                     let x = self.extend(S0, a, ty, false);
                     // w17 = n, w8 = bits - n
-                    self.emit(format!("and\tw{S1}, w{b}, #{}", bits - 1));
-                    self.emit(format!("mov\tw{S2}, #{bits}"));
-                    self.emit(format!("sub\tw{S2}, w{S2}, w{S1}"));
+                    self.mach(
+                        "and",
+                        [(Reg::w(S1)).into(), (Reg::w(b)).into(), Arg::imm(bits - 1)],
+                    );
+                    self.mach("mov", [(Reg::w(S2)).into(), Arg::imm(bits)]);
+                    self.mach(
+                        "sub",
+                        [
+                            (Reg::w(S2)).into(),
+                            (Reg::w(S2)).into(),
+                            (Reg::w(S1)).into(),
+                        ],
+                    );
                     let (first, second) = match op {
                         BinaryOp::Rotl => ("lsl", "lsr"),
                         _ => ("lsr", "lsl"),
                     };
-                    self.emit(format!("{first}\tw{S1}, w{x}, w{S1}"));
-                    self.emit(format!("{second}\tw{S2}, w{x}, w{S2}"));
-                    self.emit(format!("orr\tw{d}, w{S1}, w{S2}"));
+                    self.mach(
+                        first,
+                        [(Reg::w(S1)).into(), (Reg::w(x)).into(), (Reg::w(S1)).into()],
+                    );
+                    self.mach(
+                        second,
+                        [(Reg::w(S2)).into(), (Reg::w(x)).into(), (Reg::w(S2)).into()],
+                    );
+                    self.mach(
+                        "orr",
+                        [(Reg::w(d)).into(), (Reg::w(S1)).into(), (Reg::w(S2)).into()],
+                    );
                 }
             },
             BinaryOp::Umulhi | BinaryOp::Smulhi => {
@@ -2640,7 +3123,10 @@ impl<'a> FunctionCompiler<'a> {
                 match ty {
                     Type::I64 => {
                         let mnemonic = if signed { "smulh" } else { "umulh" };
-                        self.emit(format!("{mnemonic}\tx{d}, x{a}, x{b}"));
+                        self.mach(
+                            mnemonic,
+                            [(Reg::x(d)).into(), (Reg::x(a)).into(), (Reg::x(b)).into()],
+                        );
                     }
                     // Widening 32x32 -> 64 multiply, then take the top half.
                     Type::I32 => {
@@ -2649,17 +3135,26 @@ impl<'a> FunctionCompiler<'a> {
                         } else {
                             ("umull", "lsr")
                         };
-                        self.emit(format!("{mul}\tx{d}, w{a}, w{b}"));
-                        self.emit(format!("{shr}\tx{d}, x{d}, #32"));
+                        self.mach(
+                            mul,
+                            [(Reg::x(d)).into(), (Reg::w(a)).into(), (Reg::w(b)).into()],
+                        );
+                        self.mach(shr, [(Reg::x(d)).into(), (Reg::x(d)).into(), Arg::imm(32)]);
                     }
                     // The full product of two extended i8/i16 fits in 32 bits.
                     _ => {
                         let bits = narrow_bits(ty).expect("i8 or i16");
                         let a = self.extend(S0, a, ty, signed);
                         let b = self.extend(S1, b, ty, signed);
-                        self.emit(format!("mul\tw{d}, w{a}, w{b}"));
+                        self.mach(
+                            "mul",
+                            [(Reg::w(d)).into(), (Reg::w(a)).into(), (Reg::w(b)).into()],
+                        );
                         let shr = if signed { "asr" } else { "lsr" };
-                        self.emit(format!("{shr}\tw{d}, w{d}, #{bits}"));
+                        self.mach(
+                            shr,
+                            [(Reg::w(d)).into(), (Reg::w(d)).into(), Arg::imm(bits)],
+                        );
                     }
                 }
             }
@@ -2668,7 +3163,10 @@ impl<'a> FunctionCompiler<'a> {
                 // does that for 32 and 64 bits; narrower types need a mask.
                 let b = match narrow_bits(ty) {
                     Some(bits) => {
-                        self.emit(format!("and\tw{S1}, w{b}, #{}", bits - 1));
+                        self.mach(
+                            "and",
+                            [(Reg::w(S1)).into(), (Reg::w(b)).into(), Arg::imm(bits - 1)],
+                        );
                         S1
                     }
                     None => b,
@@ -2678,7 +3176,10 @@ impl<'a> FunctionCompiler<'a> {
                     BinaryOp::Ushr => ("lsr", self.extend(S0, a, ty, false)),
                     _ => ("asr", self.extend(S0, a, ty, true)),
                 };
-                self.emit(format!("{mnemonic}\t{rd}, {}, {}", reg(a, ty), reg(b, ty)));
+                self.mach(
+                    mnemonic,
+                    [(rd).into(), (reg(a, ty)).into(), (reg(b, ty)).into()],
+                );
             }
             BinaryOp::Udiv | BinaryOp::Urem | BinaryOp::Sdiv | BinaryOp::Srem => {
                 let signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
@@ -2686,14 +3187,17 @@ impl<'a> FunctionCompiler<'a> {
                 let b = reg(self.extend(S1, b, ty, signed), ty);
                 let trap = self.trap_label();
                 // Hardware division returns 0 for a zero divisor; the IR traps.
-                self.emit(format!("cbz\t{b}, {trap}"));
+                self.compare_branch(b, false, trap.clone());
                 if op == BinaryOp::Sdiv {
                     // MIN / -1 overflows. Hardware wraps; the IR traps.
                     let min = reg(S2, ty);
                     self.materialize(S2, min_value(ty), ty == Type::I64);
-                    self.emit(format!("cmn\t{b}, #1"));
-                    self.emit(format!("ccmp\t{a}, {min}, #0, eq"));
-                    self.emit(format!("b.eq\t{trap}"));
+                    self.mach("cmn", [(b).into(), Arg::imm(1)]);
+                    self.mach(
+                        "ccmp",
+                        [(a).into(), (min).into(), Arg::imm(0), Arg::from("eq")],
+                    );
+                    self.conditional("eq", trap.clone());
                 }
                 let div = if signed { "sdiv" } else { "udiv" };
                 match op {
@@ -2701,10 +3205,10 @@ impl<'a> FunctionCompiler<'a> {
                     // scratch register since `a` and `b` are read again.
                     BinaryOp::Urem | BinaryOp::Srem => {
                         let q = reg(S2, ty);
-                        self.emit(format!("{div}\t{q}, {a}, {b}"));
-                        self.emit(format!("msub\t{rd}, {q}, {b}, {a}"));
+                        self.mach(div, [(q).into(), (a).into(), (b).into()]);
+                        self.mach("msub", [(rd).into(), (q).into(), (b).into(), (a).into()]);
                     }
-                    _ => self.emit(format!("{div}\t{rd}, {a}, {b}")),
+                    _ => self.mach(div, [(rd).into(), (a).into(), (b).into()]),
                 }
             }
             _ => unreachable!("handled above"),
@@ -2717,14 +3221,17 @@ impl<'a> FunctionCompiler<'a> {
         let a = self.use_reg(arg, S0);
         let (ra, rd) = (reg(a, ty), reg(d, ty));
         match op {
-            UnaryOp::Ineg => self.emit(format!("neg\t{rd}, {ra}")),
-            UnaryOp::Bnot => self.emit(format!("mvn\t{rd}, {ra}")),
+            UnaryOp::Ineg => self.mach("neg", [(rd).into(), (ra).into()]),
+            UnaryOp::Bnot => self.mach("mvn", [(rd).into(), (ra).into()]),
             UnaryOp::Clz => {
                 // Count in 32 bits, then drop the zeros above the narrow width.
                 let x = reg(self.extend(S0, a, ty, false), ty);
-                self.emit(format!("clz\t{rd}, {x}"));
+                self.mach("clz", [(rd).into(), (x).into()]);
                 if let Some(bits) = narrow_bits(ty) {
-                    self.emit(format!("sub\tw{d}, w{d}, #{}", 32 - bits));
+                    self.mach(
+                        "sub",
+                        [(Reg::w(d)).into(), (Reg::w(d)).into(), Arg::imm(32 - bits)],
+                    );
                 }
             }
             UnaryOp::Ctz => {
@@ -2734,30 +3241,30 @@ impl<'a> FunctionCompiler<'a> {
                 let x = reg(S0, ty);
                 match narrow_bits(ty) {
                     Some(bits) => {
-                        self.emit(format!("orr\t{x}, {ra}, #{:#x}", 1u32 << bits));
-                        self.emit(format!("rbit\t{x}, {x}"));
+                        self.mach("orr", [(x).into(), (ra).into(), Arg::imm(1u32 << bits)]);
+                        self.mach("rbit", [(x).into(), (x).into()]);
                     }
-                    None => self.emit(format!("rbit\t{x}, {ra}")),
+                    None => self.mach("rbit", [(x).into(), (ra).into()]),
                 }
-                self.emit(format!("clz\t{rd}, {x}"));
+                self.mach("clz", [(rd).into(), (x).into()]);
             }
             UnaryOp::Popcnt => {
                 // No scalar popcount: count bits per byte in a SIMD register
                 // (`cnt`), then add the byte counts (`addv`).
                 let x = self.extend(S0, a, ty, false);
                 if ty == Type::I64 {
-                    self.emit(format!("fmov\td0, x{x}"));
+                    self.mach("fmov", [(Reg::d(0)).into(), (Reg::x(x)).into()]);
                 } else {
-                    self.emit(format!("fmov\ts0, w{x}"));
+                    self.mach("fmov", [(Reg::s(0)).into(), (Reg::w(x)).into()]);
                 }
-                self.emit("cnt\tv0.8b, v0.8b");
-                self.emit("addv\tb0, v0.8b");
-                self.emit(format!("fmov\tw{d}, s0"));
+                self.mach("cnt", [(Reg::v8b(0)).into(), (Reg::v8b(0)).into()]);
+                self.mach("addv", [(Reg::b(0)).into(), (Reg::v8b(0)).into()]);
+                self.mach("fmov", [(Reg::w(d)).into(), (Reg::s(0)).into()]);
             }
             UnaryOp::Bswap => match ty {
                 // Swaps the bytes within each halfword; the low one is ours.
-                Type::I16 => self.emit(format!("rev16\tw{d}, w{a}")),
-                _ => self.emit(format!("rev\t{rd}, {ra}")),
+                Type::I16 => self.mach("rev16", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
+                _ => self.mach("rev", [(rd).into(), (ra).into()]),
             },
             _ => unreachable!("float operations are lowered in `inst`"),
         }
@@ -2794,35 +3301,50 @@ impl<'a> FunctionCompiler<'a> {
                 x
             } else {
                 let sub = self.operand(S1, min, is64);
-                self.emit(format!("sub\t{}, {}, {sub}", reg(S0, ty), reg(x, ty)));
+                self.mach(
+                    "sub",
+                    [(reg(S0, ty)).into(), (reg(x, ty)).into(), (sub).into()],
+                );
                 S0
             };
-            self.emit(format!("cmp\t{}, #{span}", reg(idx, ty)));
-            self.emit(format!("b.hi\t{}", targets[0]));
+            self.mach("cmp", [(reg(idx, ty)).into(), Arg::imm(span)]);
+            self.conditional("hi", targets[0].clone());
             let table = format!("L{}_{inst}_table", self.func.name);
-            let index = if is64 {
-                format!("x{idx}, lsl #2")
-            } else {
-                format!("w{idx}, uxtw #2")
-            };
-            self.emit(format!("adr\tx{S1}, {table}"));
-            self.emit(format!("ldrsw\tx{S0}, [x{S1}, {index}]"));
-            self.emit(format!("add\tx{S1}, x{S1}, x{S0}"));
-            self.emit(format!("br\tx{S1}"));
+            let index = Address::index(
+                Reg::x(S1),
+                reg(idx, ty),
+                if is64 { "lsl" } else { "uxtw" },
+                Some(2),
+            );
+            self.out.symbolic(Symbolic::Address {
+                register: S1,
+                target: table.clone(),
+            });
+            self.mach("ldrsw", [(Reg::x(S0)).into(), index.into()]);
+            self.mach(
+                "add",
+                [
+                    (Reg::x(S1)).into(),
+                    (Reg::x(S1)).into(),
+                    (Reg::x(S0)).into(),
+                ],
+            );
+            self.mach("br", [(Reg::x(S1)).into()]);
             // Offsets from the table to each target, never executed.
-            writeln!(self.out, "{table}:").unwrap();
+            self.out.label(table.clone());
             for k in 0..=span {
                 let i = values
                     .iter()
                     .position(|&v| v == min + k)
                     .map_or(0, |i| i + 1);
-                self.emit(format!(".long\t{} - {table}", targets[i]));
+                self.out
+                    .integer(4, Expression::difference(targets[i].clone(), table.clone()));
             }
         } else {
             for (i, &value) in values.iter().enumerate() {
                 let operand = self.operand(S1, value, is64);
-                self.emit(format!("cmp\t{}, {operand}", reg(x, ty)));
-                self.emit(format!("b.eq\t{}", targets[i + 1]));
+                self.mach("cmp", [(reg(x, ty)).into(), (operand).into()]);
+                self.conditional("eq", targets[i + 1].clone());
             }
             if dests[0].args.is_empty() {
                 self.branch_unless_next(dests[0].block);
@@ -2832,7 +3354,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         for (dest, target) in dests.iter().zip(&targets) {
             if !dest.args.is_empty() {
-                writeln!(self.out, "{target}:").unwrap();
+                self.out.label(target.clone());
                 self.block_args(dest);
                 let label = self.label(dest.block);
                 self.out.branch(false, label);
@@ -2850,20 +3372,20 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(args[0], S0);
                 let a = self.extend(S0, a, ty, signed);
                 let b = match folded_imm(self.func, self.func.inst_data(inst)) {
-                    Some((_, k)) => format!("#{k}"),
+                    Some((_, k)) => Arg::imm(k),
                     None => {
                         let b = self.use_reg(args[1], S1);
-                        reg(self.extend(S1, b, ty, signed), ty)
+                        reg(self.extend(S1, b, ty, signed), ty).into()
                     }
                 };
-                self.emit(format!("cmp\t{}, {b}", reg(a, ty)));
+                self.mach("cmp", [(reg(a, ty)).into(), (b).into()]);
                 cond_code(cond)
             }
             InstData::Fcmp { cond, args } => {
                 let ty = self.ty(args[0]);
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);
-                self.emit(format!("fcmp\t{}, {}", freg(a, ty), freg(b, ty)));
+                self.mach("fcmp", [(freg(a, ty)).into(), (freg(b, ty)).into()]);
                 float_cond_code(cond)
             }
             _ => unreachable!("not a compare"),
@@ -2872,15 +3394,15 @@ impl<'a> FunctionCompiler<'a> {
 
     /// `value` as the second operand of `cmp`/`sub`: an immediate if it fits
     /// in 12 bits, else materialized in `scratch`.
-    fn operand(&mut self, scratch: u8, value: u64, is64: bool) -> String {
+    fn operand(&mut self, scratch: u8, value: u64, is64: bool) -> Arg {
         if value < 4096 {
-            return format!("#{value}");
+            return Arg::imm(value);
         }
         self.materialize(scratch, value, is64);
         if is64 {
-            format!("x{scratch}")
+            Reg::x(scratch).into()
         } else {
-            format!("w{scratch}")
+            Reg::w(scratch).into()
         }
     }
 
@@ -2888,10 +3410,10 @@ impl<'a> FunctionCompiler<'a> {
     fn test_nonzero(&mut self, reg: u8, ty: Type) {
         match ty {
             // Only the low bits of a narrow value are defined.
-            Type::I8 => self.emit(format!("tst\tw{reg}, #0xff")),
-            Type::I16 => self.emit(format!("tst\tw{reg}, #0xffff")),
-            Type::I32 => self.emit(format!("cmp\tw{reg}, #0")),
-            _ => self.emit(format!("cmp\tx{reg}, #0")),
+            Type::I8 => self.mach("tst", [(Reg::w(reg)).into(), Arg::imm(0xff)]),
+            Type::I16 => self.mach("tst", [(Reg::w(reg)).into(), Arg::imm(0xffff)]),
+            Type::I32 => self.mach("cmp", [(Reg::w(reg)).into(), Arg::imm(0)]),
+            _ => self.mach("cmp", [(Reg::x(reg)).into(), Arg::imm(0)]),
         }
     }
 
@@ -2983,7 +3505,7 @@ impl<'a> FunctionCompiler<'a> {
             (Type::I16, false) => "uxth",
             _ => return src,
         };
-        self.emit(format!("{op}\tw{scratch}, w{src}"));
+        self.mach(op, [(Reg::w(scratch)).into(), (Reg::w(src)).into()]);
         scratch
     }
 
@@ -3068,11 +3590,11 @@ impl<'a> FunctionCompiler<'a> {
     /// The memory operand for an access of type `ty` at `addr`: the stack
     /// slot itself if `addr` is one's address and the offset is encodable,
     /// else the address in a register.
-    fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> String {
+    fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> Address {
         if let Some(offset) = folded_offset(self.func, &self.stack_slot_offsets, addr, ty) {
-            return format!("[{}, #{offset}]", self.base);
+            return Address::offset(self.base, offset);
         }
-        format!("[x{}]", self.use_reg(addr, scratch))
+        Address::base(Reg::x(self.use_reg(addr, scratch)))
     }
 
     fn use_reg(&mut self, value: Value, scratch: u8) -> u8 {
@@ -3111,8 +3633,15 @@ impl<'a> FunctionCompiler<'a> {
         if self.ty(value) == Type::I128 {
             let lo = self.use_reg(value, S0);
             let hi = self.use_reg_hi(value, S1);
-            self.emit(format!("orr\tx{S0}, x{lo}, x{hi}"));
-            self.emit(format!("cmp\tx{S0}, #0"));
+            self.mach(
+                "orr",
+                [
+                    (Reg::x(S0)).into(),
+                    (Reg::x(lo)).into(),
+                    (Reg::x(hi)).into(),
+                ],
+            );
+            self.mach("cmp", [(Reg::x(S0)).into(), Arg::imm(0)]);
         } else {
             let c = self.use_reg(value, S0);
             self.test_nonzero(c, self.ty(value));
@@ -3165,15 +3694,15 @@ impl<'a> FunctionCompiler<'a> {
 
     /// The address of spill slot `index`: above the outgoing arguments at
     /// the bottom of the frame, close enough to `sp` for a scaled immediate.
-    fn slot(&self, index: u32) -> String {
-        format!("[{}, #{}]", self.base, self.spill_base + 8 * index as usize)
+    fn slot(&self, index: u32) -> Address {
+        Address::offset(self.base, self.spill_base + 8 * index as usize)
     }
 
     fn loc_name(&self, loc: Loc) -> String {
         match loc {
             Loc::Reg(r) => format!("x{r}"),
             Loc::FReg(r) => format!("d{r}"),
-            Loc::Stack(s) => self.slot(s),
+            Loc::Stack(s) => self.slot(s).to_string(),
         }
     }
 
@@ -3181,8 +3710,48 @@ impl<'a> FunctionCompiler<'a> {
         format!("L{}_{block}", self.func.name)
     }
 
-    fn emit(&mut self, line: impl AsRef<str>) {
-        writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    fn conditional(&mut self, condition: &str, target: String) {
+        self.out.symbolic(Symbolic::Conditional {
+            condition: native::condition(condition) as u8,
+            target,
+        });
+    }
+    fn compare_branch(&mut self, r: Reg, nonzero: bool, target: String) {
+        self.out.symbolic(Symbolic::Compare {
+            register: r.number as u8,
+            is64: r.bits() == 64,
+            nonzero,
+            target,
+        });
+    }
+    fn atomic<const N: usize>(&mut self, root: &str, order: &str, ty: Type, args: [Arg; N]) {
+        let width = width_suffix(ty);
+        if self.out.structured() {
+            let i = native::atomic(root, order, width, &args);
+            self.out.native(|| i, || unreachable!());
+        } else {
+            write!(self.out, "\t{root}{order}{width}\t").unwrap();
+            for (i, arg) in args.iter().enumerate() {
+                if i > 0 {
+                    self.out.push_str(", ");
+                }
+                write!(self.out, "{arg}").unwrap();
+            }
+            self.out.push_str("\n");
+        }
+    }
+
+    fn mach<const N: usize>(&mut self, op: &str, args: [Arg; N]) {
+        if self.out.structured() {
+            let instruction = native::lower(op, &args);
+            self.out.native(|| instruction, || unreachable!());
+        } else {
+            write!(self.out, "\t{op}").unwrap();
+            for (i, a) in args.iter().enumerate() {
+                write!(self.out, "{}{a}", if i == 0 { "\t" } else { ", " }).unwrap();
+            }
+            self.out.push_str("\n");
+        }
     }
 
     fn native<const N: usize>(
@@ -3330,46 +3899,32 @@ impl ExceptionTable {
     }
 
     /// Emits the LSDA after the function `name`, and returns to `__text`.
-    fn emit(&self, out: &mut String, name: &str) {
+    fn emit<T: Sink>(&self, out: &mut T, name: &str) {
         let l = |what: &str| format!("L{name}_{what}");
         let begin = l("begin");
-        out.push_str("\t.section\t__TEXT,__gcc_except_tab\n\t.p2align\t2\n");
-        // A non-temporary label (no `L`) starts a new atom: with
-        // `.subsections_via_symbols` the linker splits sections at symbols,
-        // and without one every function's LSDA would resolve to the start
-        // of a single atom holding them all.
-        writeln!(out, "GCC_except_table_{name}:\n{}:", l("lsda")).unwrap();
-        // No landing pad base: offsets are from the function's start.
-        out.push_str("\t.byte\t255\n");
+        out.section("__TEXT", "__gcc_except_tab", SectionKind::Data);
+        out.align(2);
+        out.label(format!("GCC_except_table_{name}"));
+        out.label(l("lsda"));
+        out.number(1, 255);
         if self.types.is_empty() {
-            out.push_str("\t.byte\t255\n");
+            out.number(1, 255);
         } else {
-            // Type table entries: indirect, pc-relative 4-byte pointers.
-            writeln!(
-                out,
-                "\t.byte\t155\n\t.uleb128\t{}-{}",
-                l("ttbase"),
-                l("ttref")
-            )
-            .unwrap();
-            writeln!(out, "{}:", l("ttref")).unwrap();
+            out.number(1, 155);
+            out.leb(false, Expression::difference(l("ttbase"), l("ttref")));
+            out.label(l("ttref"));
         }
-        // Call-site fields are ULEB128.
-        writeln!(
-            out,
-            "\t.byte\t1\n\t.uleb128\t{}-{}",
-            l("cst_end"),
-            l("cst_begin")
-        )
-        .unwrap();
-        writeln!(out, "{}:", l("cst_begin")).unwrap();
-        let entry = |out: &mut String, from: &str, to: &str, pad: Option<(&str, u32)>| {
-            writeln!(out, "\t.uleb128\t{from}-{begin}\n\t.uleb128\t{to}-{from}").unwrap();
-            match pad {
-                Some((pad, action)) => {
-                    writeln!(out, "\t.uleb128\t{pad}-{begin}\n\t.uleb128\t{action}").unwrap()
-                }
-                None => out.push_str("\t.byte\t0\n\t.byte\t0\n"),
+        out.number(1, 1);
+        out.leb(false, Expression::difference(l("cst_end"), l("cst_begin")));
+        out.label(l("cst_begin"));
+        let entry = |out: &mut T, from: &str, to: &str, pad: Option<(&str, u32)>| {
+            out.leb(false, Expression::difference(from, &begin));
+            out.leb(false, Expression::difference(to, from));
+            if let Some((pad, action)) = pad {
+                out.leb(false, Expression::difference(pad, &begin));
+                out.leb(false, Expression::constant(i128::from(action)));
+            } else {
+                out.bytes(&[0, 0]);
             }
         };
         let mut covered = begin.clone();
@@ -3385,23 +3940,26 @@ impl ExceptionTable {
             covered = to;
         }
         entry(out, &covered, &l("end"), None);
-        writeln!(out, "{}:", l("cst_end")).unwrap();
-        for &byte in &self.actions {
-            writeln!(out, "\t.byte\t{}", byte as u8).unwrap();
-        }
+        out.label(l("cst_end"));
+        out.bytes(&self.actions.iter().map(|&b| b as u8).collect::<Vec<_>>());
         if !self.types.is_empty() {
-            out.push_str("\t.p2align\t2\n");
+            out.align(2);
             for (i, name) in self.type_names.iter().enumerate().rev() {
                 if name.is_empty() {
-                    out.push_str("\t.long\t0\n");
+                    out.number(4, 0);
                 } else {
                     let here = l(&format!("tt{i}"));
-                    writeln!(out, "{here}:\n\t.long\t_{name}@GOT-{here}").unwrap();
+                    out.label(here.clone());
+                    out.directive(Directive::Integer {
+                        width: 4,
+                        expression: Expression::difference(format!("_{name}"), here),
+                        got: true,
+                    });
                 }
             }
-            writeln!(out, "{}:", l("ttbase")).unwrap();
+            out.label(l("ttbase"));
         }
-        out.push_str("\t.section\t__TEXT,__text,regular,pure_instructions\n");
+        out.section("__TEXT", "__text", SectionKind::Data);
     }
 }
 
@@ -3579,8 +4137,8 @@ fn asm_text(
             }
             (AsmOperand::Mem, Some(r), None) => write!(out, "[x{}]", r.num).unwrap(),
             (AsmOperand::Imm | AsmOperand::Mem, _, _) => return Err(bad()),
-            (_, Some(r), None) if r.float => out.push_str(&freg(r.num, ty)),
-            (_, Some(r), None) => out.push_str(&reg(r.num, ty)),
+            (_, Some(r), None) if r.float => write!(out, "{}", freg(r.num, ty)).unwrap(),
+            (_, Some(r), None) => write!(out, "{}", reg(r.num, ty)).unwrap(),
             (_, Some(r), Some(m @ ('s' | 'd' | 'q' | 'h' | 'b'))) if r.float => {
                 write!(out, "{m}{}", r.num).unwrap()
             }
@@ -3611,18 +4169,18 @@ fn return_loc(ty: Type) -> Loc {
 }
 
 /// `w<n>` for types up to 32 bits, `x<n>` otherwise.
-fn reg(n: u8, ty: Type) -> String {
+fn reg(n: u8, ty: Type) -> Reg {
     match ty.bytes() {
-        Some(bytes) if bytes <= 4 => format!("w{n}"),
-        _ => format!("x{n}"),
+        Some(bytes) if bytes <= 4 => Reg::w(n),
+        _ => Reg::x(n),
     }
 }
 
 /// `s<n>` for f32, `d<n>` for f64.
-fn freg(n: u8, ty: Type) -> String {
+fn freg(n: u8, ty: Type) -> Reg {
     match ty {
-        Type::F32 => format!("s{n}"),
-        _ => format!("d{n}"),
+        Type::F32 => Reg::s(n),
+        _ => Reg::d(n),
     }
 }
 

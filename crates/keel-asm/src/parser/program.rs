@@ -12,6 +12,8 @@ pub(super) enum Entry<'a> {
     Text(&'a str),
     Label(&'a str),
     Instruction(&'a Instruction),
+    Directive(&'a keel_asm_ir::Directive),
+    Symbolic(&'a keel_asm_ir::SymbolicInstruction),
     Branch(bool, &'a str),
 }
 impl<'a> Input<'a> {
@@ -23,6 +25,8 @@ impl<'a> Input<'a> {
                     s.contains(needle)
                 }
                 Item::Instruction(_) => false,
+                Item::Directive(d) => d.contains(needle),
+                Item::Symbolic(s) => s.target().contains(needle),
             }),
         }
     }
@@ -70,6 +74,8 @@ impl<'a> Iterator for Lines<'a> {
             let line = self.next_line;
             self.next_line += 1;
             match item {
+                Item::Directive(d) => return Some(Ok((line, Entry::Directive(d)))),
+                Item::Symbolic(s) => return Some(Ok((line, Entry::Symbolic(s)))),
                 Item::Instruction(i) => return Some(Ok((line, Entry::Instruction(i)))),
                 Item::Branch { link, target } => {
                     return Some(Ok((line, Entry::Branch(*link, target))));
@@ -108,6 +114,17 @@ pub(super) fn materialize(
             Item::Label(s) => {
                 super::symbol(s).map_err(|e| Error::new(0, e))?;
                 writeln!(text, "{s}:").unwrap();
+            }
+            Item::Directive(d) => {
+                d.validate().map_err(|e| Error::new(0, e))?;
+                writeln!(text, "{d}").unwrap();
+            }
+            Item::Symbolic(s) => {
+                s.validate().map_err(|e| Error::new(0, e))?;
+                super::symbol(s.target()).map_err(|e| Error::new(0, e))?;
+                crate::encode_instruction(&s.zero_instruction(), features)
+                    .map_err(|e| Error::new(0, e))?;
+                writeln!(text, "{s}").unwrap();
             }
             Item::Instruction(i) => {
                 let word = crate::encode_instruction(i, features).map_err(|e| Error::new(0, e))?;

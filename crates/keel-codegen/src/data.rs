@@ -1,6 +1,7 @@
 //! Data objects as assembler directives, shared by the targets.
 
 use crate::Format;
+use crate::metadata::{Directive, Expression, SectionKind, Sink};
 use keel_ir::{DataInit, DataItem, DataObject, Type};
 use std::fmt::Write;
 
@@ -29,38 +30,80 @@ pub(crate) fn asm_string(s: &str) -> String {
 /// Objects are exported (`.globl`) unless local, like functions.
 pub(crate) fn emit_data(out: &mut String, format: Format, data: &DataObject, init: &DataInit) {
     if format == Format::Elf {
-        emit_elf(out, data, init);
-        return;
+        emit_elf(out, data, init)
+    } else {
+        emit_macho(out, data, init)
     }
-    let name = &format.symbol(&data.name);
-    let log2_align = init.align.trailing_zeros();
+}
+
+pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
+    let name = Format::MachO.symbol(&data.name);
+    let alignment = init.align.trailing_zeros();
     if data.thread_local {
-        emit_thread_local(out, format, data, init);
+        let initial = format!("{name}$tlv$init");
+        if init.is_zero() {
+            out.directive(Directive::ZeroFill {
+                symbol: initial.clone(),
+                size: init.size(),
+                alignment: alignment as u8,
+                thread_local: true,
+            });
+        } else {
+            out.section("__DATA", "__thread_data", SectionKind::ThreadData);
+            out.align(alignment);
+            out.label(initial.clone());
+            emit_macho_items(out, init);
+        }
+        out.section("__DATA", "__thread_vars", SectionKind::ThreadVariables);
+        if !data.local {
+            out.directive(Directive::Global(name.clone()));
+        }
+        out.align(3);
+        out.label(name);
+        out.integer(8, Expression::symbol("__tlv_bootstrap"));
+        out.number(8, 0);
+        out.integer(8, Expression::symbol(initial));
         return;
     }
     if !data.local {
-        writeln!(out, "\t.globl\t{name}").unwrap();
+        out.directive(Directive::Global(name.clone()));
     }
     if !init.constant && init.is_zero() {
-        writeln!(
-            out,
-            "\t.zerofill\t__DATA,__bss,{name},{},{log2_align}",
-            init.size()
-        )
-        .unwrap();
+        out.directive(Directive::ZeroFill {
+            symbol: name,
+            size: init.size(),
+            alignment: alignment as u8,
+            thread_local: false,
+        });
         return;
     }
-    let section = match (init.constant, init.has_relocations()) {
-        (false, _) => "__DATA,__data",
-        (true, true) => "__DATA,__const",
-        (true, false) => "__TEXT,__const",
+    let (segment, section) = match (init.constant, init.has_relocations()) {
+        (false, _) => ("__DATA", "__data"),
+        (true, true) => ("__DATA", "__const"),
+        (true, false) => ("__TEXT", "__const"),
     };
-    writeln!(
-        out,
-        "\t.section\t{section}\n\t.p2align\t{log2_align}\n{name}:"
-    )
-    .unwrap();
-    emit_items(out, format, init);
+    out.section(segment, section, SectionKind::Data);
+    out.align(alignment);
+    out.label(name);
+    emit_macho_items(out, init);
+}
+fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
+    for item in &init.items {
+        match item {
+            DataItem::Bytes(bytes) => out.bytes(bytes),
+            DataItem::Int { ty, value } => {
+                let width = ty.bytes().unwrap_or(8);
+                let bits = 8 * width;
+                out.number(width as u8, (*value as u64) & (u64::MAX >> (64 - bits)));
+            }
+            DataItem::Zero(0) => {}
+            DataItem::Zero(n) => out.directive(Directive::Space(u64::from(*n))),
+            DataItem::Ptr { symbol, addend } => out.integer(
+                8,
+                Expression::symbol(Format::MachO.symbol(symbol)).with_addend(i128::from(*addend)),
+            ),
+        }
+    }
 }
 
 /// ELF puts a data object in the section its contents call for, as on
@@ -96,41 +139,6 @@ fn emit_elf(out: &mut String, data: &DataObject, init: &DataInit) {
     } else {
         emit_items(out, Format::Elf, init);
     }
-}
-
-/// A thread-local variable is a descriptor, `_name` in `__thread_vars`:
-/// the getter (`__tlv_bootstrap` until first use), a key the loader fills
-/// in, and the address of the initial value, `_name$tlv$init`, in
-/// `__thread_data` (or `__thread_bss` if zero). Each thread's copy is
-/// made from that.
-fn emit_thread_local(out: &mut String, format: Format, data: &DataObject, init: &DataInit) {
-    let name = &format.symbol(&data.name);
-    let log2_align = init.align.trailing_zeros();
-    if init.is_zero() {
-        writeln!(
-            out,
-            "\t.tbss\t{name}$tlv$init, {}, {log2_align}",
-            init.size()
-        )
-        .unwrap();
-    } else {
-        writeln!(
-            out,
-            "\t.section\t__DATA,__thread_data,thread_local_regular\n\t.p2align\t{log2_align}\n{name}$tlv$init:"
-        )
-        .unwrap();
-        emit_items(out, format, init);
-    }
-    out.push_str("\t.section\t__DATA,__thread_vars,thread_local_variables\n");
-    if !data.local {
-        writeln!(out, "\t.globl\t{name}").unwrap();
-    }
-    writeln!(out, "\t.p2align\t3\n{name}:").unwrap();
-    writeln!(
-        out,
-        "\t.quad\t__tlv_bootstrap\n\t.quad\t0\n\t.quad\t{name}$tlv$init"
-    )
-    .unwrap();
 }
 
 /// The bytes of a data object, as directives.

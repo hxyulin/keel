@@ -151,6 +151,137 @@ impl<'a> Debug<'a> {
             active: None,
         }
     }
+    pub(super) fn file(&mut self, index: u32, path: Vec<u8>) -> Result<(), String> {
+        if index == 0 || self.files.insert(index, path).is_some() {
+            return Err("duplicate or zero file number".into());
+        }
+        if self.files[&index].contains(&0) {
+            return Err("file path contains NUL".into());
+        }
+        Ok(())
+    }
+    pub(super) fn loc(
+        &mut self,
+        file: u32,
+        row: u32,
+        column: u32,
+        prologue: bool,
+        section: usize,
+        address: u64,
+    ) -> Result<(), String> {
+        if section != 0 {
+            return Err(".loc requires __text".into());
+        }
+        if !self.files.contains_key(&file) {
+            return Err(".loc references undeclared file".into());
+        }
+        self.rows.push(Row {
+            address,
+            file,
+            line: row,
+            column,
+            prologue,
+        });
+        Ok(())
+    }
+    pub(super) fn cfi(
+        &mut self,
+        cfi: &keel_asm_ir::Cfi,
+        section: usize,
+        address: u64,
+        line: usize,
+    ) -> Result<(), String> {
+        use keel_asm_ir::Cfi as C;
+        if section != 0 {
+            return Err("CFI directives require __text".into());
+        }
+        match cfi {
+            C::Start => {
+                if self.active.is_some() {
+                    return Err("invalid or nested .cfi_startproc".into());
+                }
+                self.active = Some(Frame {
+                    start: address,
+                    end: address,
+                    line,
+                    events: BumpVec::new_in(self.arena),
+                    rules: BumpVec::new_in(self.arena),
+                    saved: 0,
+                    personality: None,
+                    lsda: None,
+                });
+                return Ok(());
+            }
+            C::End => {
+                let mut frame = self
+                    .active
+                    .take()
+                    .ok_or(".cfi_endproc without .cfi_startproc")?;
+                if frame.saved != 0 {
+                    return Err("unbalanced CFI state stack".into());
+                }
+                frame.end = address;
+                self.frames.push(frame);
+                return Ok(());
+            }
+            _ => {}
+        }
+        let frame = self
+            .active
+            .as_mut()
+            .ok_or("CFI directive outside a procedure")?;
+        let mut bytes = BumpVec::new_in(self.arena);
+        let rule = match cfi {
+            C::Personality(name) | C::Lsda(name) => {
+                super::symbol(name)?;
+                let slot = if matches!(cfi, C::Personality(_)) {
+                    &mut frame.personality
+                } else {
+                    &mut frame.lsda
+                };
+                if slot.replace(self.arena.alloc_str(name)).is_some() {
+                    return Err(format!(
+                        "duplicate {}",
+                        if matches!(cfi, C::Personality(_)) {
+                            ".cfi_personality"
+                        } else {
+                            ".cfi_lsda"
+                        }
+                    ));
+                }
+                return Ok(());
+            }
+            C::DefCfa { register, offset } => {
+                if *register > 95 {
+                    return Err("invalid CFI register".into());
+                }
+                bytes.push(0x0c);
+                uleb(u64::from(*register), &mut bytes);
+                uleb(*offset, &mut bytes);
+                Rule::Cfa(u64::from(*register), *offset)
+            }
+            C::Offset { register, offset } => {
+                if *register > 95 {
+                    return Err("invalid CFI register".into());
+                }
+                if *offset > 0 || offset % 8 != 0 {
+                    return Err("CFI offset must be a nonpositive multiple of 8".into());
+                }
+                if *register < 64 {
+                    bytes.push(0x80 | *register)
+                } else {
+                    bytes.push(0x05);
+                    uleb(u64::from(*register), &mut bytes)
+                }
+                uleb(offset.unsigned_abs() / 8, &mut bytes);
+                Rule::Offset(u64::from(*register), *offset)
+            }
+            _ => unreachable!(),
+        };
+        frame.rules.push(rule);
+        frame.events.push((address, bytes));
+        Ok(())
+    }
     pub(super) fn directive(
         &mut self,
         op: &str,
@@ -164,12 +295,7 @@ impl<'a> Debug<'a> {
                 .split_once(char::is_whitespace)
                 .ok_or("expected .file number and path")?;
             let id: u32 = id.parse().map_err(|_| "invalid file number")?;
-            if id == 0 || self.files.insert(id, string(path)?).is_some() {
-                return Err("duplicate or zero file number".into());
-            }
-            if self.files[&id].contains(&0) {
-                return Err("file path contains NUL".into());
-            }
+            self.file(id, string(path)?)?;
             return Ok(true);
         }
         if op == ".loc" {
@@ -182,16 +308,14 @@ impl<'a> Debug<'a> {
             }
             let number = |s: &str| s.parse::<u32>().map_err(|_| "invalid .loc number");
             let file = number(args[0])?;
-            if !self.files.contains_key(&file) {
-                return Err(".loc references undeclared file".into());
-            }
-            self.rows.push(Row {
-                address,
+            self.loc(
                 file,
-                line: number(args[1])?,
-                column: number(args[2])?,
-                prologue: args.len() == 4,
-            });
+                number(args[1])?,
+                number(args[2])?,
+                args.len() == 4,
+                section,
+                address,
+            )?;
             return Ok(true);
         }
         if !op.starts_with(".cfi_") {
@@ -200,75 +324,62 @@ impl<'a> Debug<'a> {
         if section != 0 {
             return Err("CFI directives require __text".into());
         }
-        if op == ".cfi_startproc" {
-            if !operands.is_empty() || self.active.is_some() {
-                return Err("invalid or nested .cfi_startproc".into());
+        use keel_asm_ir::Cfi as C;
+        if op == ".cfi_startproc" || op == ".cfi_endproc" {
+            if !operands.is_empty() {
+                return Err(format!("{op} takes no operands"));
             }
-            self.active = Some(Frame {
-                start: address,
-                end: address,
+            self.cfi(
+                &if op == ".cfi_startproc" {
+                    C::Start
+                } else {
+                    C::End
+                },
+                section,
+                address,
                 line,
-                events: BumpVec::new_in(self.arena),
-                rules: BumpVec::new_in(self.arena),
-                saved: 0,
-                personality: None,
-                lsda: None,
-            });
+            )?;
             return Ok(true);
         }
-        if op == ".cfi_endproc" {
-            if !operands.is_empty() {
-                return Err(".cfi_endproc takes no operands".into());
+        let args: Vec<_> = operands
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        let typed = match (op, args.as_slice()) {
+            (".cfi_personality", [encoding, name]) | (".cfi_lsda", [encoding, name]) => {
+                let personality = op == ".cfi_personality";
+                let expected = if personality { 155 } else { 16 };
+                if super::unsigned(encoding, 255)? != expected {
+                    return Err(format!("{op} currently requires encoding {expected}"));
+                }
+                Some(if personality {
+                    C::Personality((*name).into())
+                } else {
+                    C::Lsda((*name).into())
+                })
             }
-            let mut frame = self
-                .active
-                .take()
-                .ok_or(".cfi_endproc without .cfi_startproc")?;
-            if frame.saved != 0 {
-                return Err("unbalanced CFI state stack".into());
-            }
-            frame.end = address;
-            self.frames.push(frame);
+            (".cfi_def_cfa", [r, n]) => Some(C::DefCfa {
+                register: reg(r)? as u8,
+                offset: n.parse().map_err(|_| "invalid CFA offset")?,
+            }),
+            (".cfi_offset", [r, n]) => Some(C::Offset {
+                register: reg(r)? as u8,
+                offset: n.parse().map_err(|_| "invalid saved-register offset")?,
+            }),
+            _ => None,
+        };
+        if let Some(cfi) = typed {
+            self.cfi(&cfi, section, address, line)?;
             return Ok(true);
         }
         let frame = self
             .active
             .as_mut()
             .ok_or("CFI directive outside a procedure")?;
-        let args: Vec<_> = operands
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
         let mut bytes = BumpVec::new_in(self.arena);
         let mut rule = Rule::Other;
         match (op, args.as_slice()) {
-            (".cfi_personality", [encoding, name]) | (".cfi_lsda", [encoding, name]) => {
-                let personality = op == ".cfi_personality";
-                let expected = if personality { 155 } else { 16 };
-                let encoding = super::unsigned(encoding, 255)?;
-                if encoding != expected {
-                    return Err(format!("{op} currently requires encoding {expected}"));
-                }
-                super::symbol(name)?;
-                let slot = if personality {
-                    &mut frame.personality
-                } else {
-                    &mut frame.lsda
-                };
-                if slot.replace(*name).is_some() {
-                    return Err(format!("duplicate {op}"));
-                }
-                return Ok(true);
-            }
-            (".cfi_def_cfa", [r, n]) => {
-                let r = reg(r)?;
-                let n = n.parse().map_err(|_| "invalid CFA offset")?;
-                bytes.push(0x0c);
-                uleb(r, &mut bytes);
-                uleb(n, &mut bytes);
-                rule = Rule::Cfa(r, n);
-            }
             (".cfi_def_cfa_register", [r]) => {
                 bytes.push(0x0d);
                 uleb(reg(r)?, &mut bytes);
@@ -278,21 +389,6 @@ impl<'a> Debug<'a> {
                 bytes.push(0x0e);
                 uleb(n, &mut bytes);
                 rule = Rule::CfaOffset(n);
-            }
-            (".cfi_offset", [r, n]) => {
-                let n: i64 = n.parse().map_err(|_| "invalid saved-register offset")?;
-                if n > 0 || n % 8 != 0 {
-                    return Err("CFI offset must be a nonpositive multiple of 8".into());
-                }
-                let r = reg(r)?;
-                if r < 64 {
-                    bytes.push(0x80 | r as u8);
-                } else {
-                    bytes.push(0x05);
-                    uleb(r, &mut bytes);
-                }
-                uleb(n.unsigned_abs() / 8, &mut bytes);
-                rule = Rule::Offset(r, n);
             }
             (".cfi_restore", [r]) => {
                 let r = reg(r)?;

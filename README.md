@@ -240,16 +240,15 @@ let object = keel_asm::assemble_program_object(
 )?;
 ```
 
-Both stages depend on `keel-asm-ir`, which owns typed generated `Opcode` and
-`FieldId` identities, `Instruction`, and `Program` items for instructions,
-labels, symbolic branches and explicit assembly-text fragments. Native items
-bypass source formatting and operand parsing, with normal encoding and feature
-validation. This is an incremental migration: constants, common integer ALU
-operations, moves, spills, frame operations, returns and direct branches have
-native paths; other instructions, metadata and inline assembly remain explicit
-text fragments. Oversized functions retain the existing text-based branch
-relaxation. Assembly text output remains available. Direct object emission
-currently targets AArch64 Mach-O; see [the API design](docs/design.md#assembler).
+Both stages depend on `keel-asm-ir`, which owns generated `Opcode` and
+`FieldId` identities, instructions, symbolic references and typed directives.
+All compiler-generated AArch64 instructions, data, CFI, DWARF and exception
+metadata bypass source formatting and parsing, with normal encoding and feature
+validation. Conditional branches stay structured during far-branch relaxation.
+Only user inline assembly enters the program as source text; inline macros use
+an explicit validated expansion fallback. Assembly text output remains available.
+Direct object emission currently targets AArch64 Mach-O; see
+[the API design](docs/design.md#assembler).
 
 Instruction metrics are available through `keel asm-metrics input.s` and
 [`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates

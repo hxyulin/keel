@@ -1,7 +1,6 @@
 //! Symbol expressions and Darwin instruction relocations. There is no
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
-use super::storage::{encode_named, upper};
 use super::text::Trim;
 use super::{count, integer, is_integer, reg, symbol};
 use crate::FieldId;
@@ -87,6 +86,12 @@ pub(super) fn address_word(op: &str, destination: &str, delta: i64) -> Result<u3
     if d.bits != 64 {
         return Err("adr/adrp require an X register".into());
     }
+    address_word_register(op, d.number, delta)
+}
+pub(super) fn address_word_register(op: &str, destination: u32, delta: i64) -> Result<u32, String> {
+    if destination > 31 {
+        return Err("invalid address register".into());
+    }
     let immediate = if op == "adrp" {
         if delta % 4096 != 0 {
             return Err("adrp displacement must be a multiple of 4096".into());
@@ -99,13 +104,20 @@ pub(super) fn address_word(op: &str, destination: &str, delta: i64) -> Result<u3
         return Err(format!("{op} displacement is out of range"));
     }
     let bits = (immediate as u32) & 0x1f_ffff;
-    encode_named(
-        format_args!("{}_only_pcreladdr", upper(op)),
-        &[
-            (FieldId::Rd, d.number),
-            (FieldId::immlo, bits & 3),
-            (FieldId::immhi, bits >> 2),
-        ],
+    crate::encode_instruction(
+        &keel_asm_ir::Instruction::new(
+            if op == "adrp" {
+                keel_asm_ir::Opcode::ADRP_only_pcreladdr
+            } else {
+                keel_asm_ir::Opcode::ADR_only_pcreladdr
+            },
+            [
+                (FieldId::Rd, destination),
+                (FieldId::immlo, bits & 3),
+                (FieldId::immhi, bits >> 2),
+            ],
+        ),
+        crate::TargetFeatures::default(),
     )
 }
 

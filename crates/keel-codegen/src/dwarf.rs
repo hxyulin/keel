@@ -3,11 +3,11 @@
 //! line table is the assembler's, from the `.loc` directives.
 
 use crate::Format;
+use crate::metadata::{Directive, Expression, Sink};
 use keel_ir::{
     DebugScope, DebugType, DebugTypeData, Encoding, EntityRef, Function, Language, MemberLocation,
     Module,
 };
-use std::fmt::Write;
 
 /// What the debug info needs to know of a compiled function.
 pub(crate) struct FrameDebug {
@@ -27,8 +27,8 @@ pub(crate) struct FrameDebug {
 /// `frames[i]` has the offsets of function `i`'s stack slots: each
 /// subprogram's frame base is DWARF register `frame_reg`, and its variables are at fixed
 /// offsets from it (`DW_OP_fbreg`).
-pub(crate) fn emit_debug_info(
-    out: &mut String,
+pub(crate) fn emit_debug_info<T: Sink>(
+    out: &mut T,
     format: Format,
     frame_reg: u8,
     module: &Module,
@@ -36,52 +36,74 @@ pub(crate) fn emit_debug_info(
 ) {
     let l = format.local();
     let elf = format == Format::Elf;
-    writeln!(out, "\t.section\t{}", format.debug_section("abbrev")).unwrap();
+
+    out.debug_section(format, "abbrev");
+
     if elf {
-        writeln!(out, "{l}debug_abbrev:").unwrap();
+        out.label(format!("{}debug_abbrev", l));
     }
     for (code, (tag, children, attrs)) in ABBREVS.iter().enumerate() {
-        writeln!(
-            out,
-            "\t.byte\t{}, {tag:#x}, {}",
-            code + 1,
-            u8::from(*children)
-        )
-        .unwrap();
+        out.number(1, code + 1);
+        out.number(1, tag);
+        out.number(1, u8::from(*children));
+
         for (attr, form) in *attrs {
-            writeln!(out, "\t.byte\t{attr:#x}, {form:#x}").unwrap();
+            out.number(1, attr);
+            out.number(1, form);
         }
-        out.push_str("\t.byte\t0, 0\n");
+
+        out.number(1, 0);
+        out.number(1, 0);
     }
-    out.push_str("\t.byte\t0\n");
+
+    out.number(1, 0);
 
     let comp_dir = std::env::current_dir().map_or(String::new(), |d| d.display().to_string());
     let first = &module.functions[0].name;
     let last = &module.functions[module.functions.len() - 1].name;
-    writeln!(out, "\t.section\t{}", format.debug_section("info")).unwrap();
+
+    out.debug_section(format, "info");
+
     // Type references (`DW_FORM_ref4`) are offsets from here, the start
     // of the unit.
-    writeln!(out, "{l}debug_cu:").unwrap();
-    writeln!(out, "\t.long\t{l}debug_info_end-{l}debug_info_start").unwrap();
-    writeln!(out, "{l}debug_info_start:").unwrap();
+
+    out.label(format!("{}debug_cu", l));
+
+    out.integer(
+        4,
+        Expression::difference(
+            format!("{}debug_info_end", l),
+            format!("{}debug_info_start", l),
+        ),
+    );
+
+    out.label(format!("{}debug_info_start", l));
+
     // DWARF 4, the abbreviations' offset in their section, 8-byte
     // addresses; then the compile unit. Mach-O debug info stays in the
     // object files, where each section starts at 0. An ELF linker
     // concatenates each `.debug_*` section of every object, so offsets
     // into them are labels, which it relocates.
-    out.push_str("\t.short\t4\n");
+
+    out.number(2, 4);
+
     if elf {
-        writeln!(out, "\t.long\t{l}debug_abbrev").unwrap();
+        out.integer(4, Expression::symbol(format!("{}debug_abbrev", l)));
     } else {
-        out.push_str("\t.long\t0\n");
+        out.number(4, 0);
     }
-    out.push_str("\t.byte\t8\n");
+
+    out.number(1, 8);
+
     let abbrev = match module.debug_language {
         Some(_) => Abbrev::CompileUnitLanguage,
         None => Abbrev::CompileUnit,
     };
-    writeln!(out, "\t.byte\t{}", abbrev as u8).unwrap();
-    writeln!(out, "\t.asciz\t{}", crate::data::asm_string("keel")).unwrap();
+
+    out.number(1, abbrev as u8);
+
+    out.cstring("keel");
+
     if let Some(language) = module.debug_language {
         // DW_LANG_C89, DW_LANG_C99, DW_LANG_C11.
         let code = match language {
@@ -89,44 +111,46 @@ pub(crate) fn emit_debug_info(
             Language::C99 => 0x0c,
             Language::C11 => 0x1d,
         };
-        writeln!(out, "\t.short\t{code:#x}").unwrap();
+
+        out.number(2, code);
     }
-    writeln!(
-        out,
-        "\t.asciz\t{}",
-        crate::data::asm_string(&module.files[0])
-    )
-    .unwrap();
-    writeln!(out, "\t.asciz\t{}", crate::data::asm_string(&comp_dir)).unwrap();
+
+    out.cstring(&module.files[0]);
+
+    out.cstring(&comp_dir);
+
     // The assembler's line table is all of `__debug_line`; on ELF it
     // starts at a label in `.debug_line`, added below.
     if elf {
-        writeln!(out, "\t.long\t{l}debug_line").unwrap();
+        out.integer(4, Expression::symbol(format!("{}debug_line", l)));
     } else {
-        out.push_str("\t.long\t0\n");
+        out.number(4, 0);
     }
     // The unit's size spans several functions, which `.subsections_via_
     // symbols` makes separate atoms: written directly, the difference
     // becomes a relocation pair dsymutil does not support ("unsupported
     // relocation in __debug_info"). Through `.set` the assembler computes
     // it as a constant, as clang does.
-    writeln!(
-        out,
-        "{l}debug_unit_size = {l}{last}_end-{l}{first}_begin\n\
-         \t.quad\t{l}{first}_begin\n\t.long\t{l}debug_unit_size"
-    )
-    .unwrap();
-    let die = |out: &mut String, abbrev: Abbrev| {
-        writeln!(out, "\t.byte\t{}", abbrev as u8).unwrap();
+    out.directive(Directive::Set {
+        name: format!("{l}debug_unit_size"),
+        expression: Expression::difference(format!("{l}{last}_end"), format!("{l}{first}_begin")),
+    });
+    out.integer(8, Expression::symbol(format!("{l}{first}_begin")));
+    out.integer(4, Expression::symbol(format!("{l}debug_unit_size")));
+    let die = |out: &mut T, abbrev: Abbrev| {
+        out.number(1, abbrev as u8);
     };
-    let string = |out: &mut String, s: &str| {
-        writeln!(out, "\t.asciz\t{}", crate::data::asm_string(s)).unwrap();
+    let string = |out: &mut T, s: &str| {
+        out.cstring(s);
     };
-    let type_ref = |out: &mut String, ty: DebugType| {
-        writeln!(out, "\t.long\t{l}dt{}-{l}debug_cu", ty.index()).unwrap();
+    let type_ref = |out: &mut T, ty: DebugType| {
+        out.integer(
+            4,
+            Expression::difference(format!("{}dt{}", l, ty.index()), format!("{}debug_cu", l)),
+        );
     };
-    let udata = |out: &mut String, n: u64| {
-        writeln!(out, "\t.uleb128\t{n}").unwrap();
+    let udata = |out: &mut T, n: u64| {
+        out.leb(false, Expression::constant((n) as i128));
     };
     // Range lists of scopes whose code is not contiguous, for
     // `__debug_ranges`.
@@ -144,15 +168,20 @@ pub(crate) fn emit_debug_info(
         if let Some(ty) = func.debug_return {
             type_ref(out, ty);
         }
-        writeln!(
-            out,
-            "\t.quad\t{l}{name}_begin\n\t.long\t{l}{name}_end-{l}{name}_begin"
-        )
-        .unwrap();
+
+        out.integer(8, Expression::symbol(format!("{}{}_begin", l, name)));
+        out.integer(
+            4,
+            Expression::difference(format!("{}{}_end", l, name), format!("{}{}_begin", l, name)),
+        );
+
         // The frame base: an expression of one byte, DW_OP_reg<n>.
-        writeln!(out, "\t.byte\t1, {:#x}", 0x50 + frame_reg).unwrap();
+
+        out.number(1, 1);
+        out.number(1, 0x50 + frame_reg);
+
         let ranges = scope_ranges(format, func, &frame.scope_marks);
-        let var = |out: &mut String, var: &keel_ir::DebugVar| {
+        let var = |out: &mut T, var: &keel_ir::DebugVar| {
             die(
                 out,
                 if var.param {
@@ -165,19 +194,12 @@ pub(crate) fn emit_debug_info(
             type_ref(out, var.ty);
             // DW_OP_fbreg and the offset.
             let offset = sleb128(frame.slots[var.slot.index()]);
-            write!(
-                out,
-                "\t.byte\t{}, 0x91",
-                offset.len() + 1 + usize::from(var.indirect)
-            )
-            .unwrap();
-            for b in offset {
-                write!(out, ", {b:#x}").unwrap();
-            }
+            let mut bytes = vec![(offset.len() + 1 + usize::from(var.indirect)) as u8, 0x91];
+            bytes.extend(offset);
             if var.indirect {
-                out.push_str(", 0x06"); // DW_OP_deref
+                bytes.push(0x06);
             }
-            out.push('\n');
+            out.bytes(&bytes);
         };
         // Parameters first, as debuggers list them in order; then the
         // scopes, each with its variables and the scopes in it.
@@ -200,7 +222,8 @@ pub(crate) fn emit_debug_info(
         let mut stack: Vec<(DebugScope, bool)> = children(None).map(|s| (s, false)).collect();
         while let Some((scope, opened)) = stack.pop() {
             if opened {
-                out.push_str("\t.byte\t0\n");
+                out.number(1, 0);
+
                 continue;
             }
             // A scope without code cannot be stopped in.
@@ -209,15 +232,26 @@ pub(crate) fn emit_debug_info(
                 [] => continue,
                 [(begin, end)] => {
                     die(out, Abbrev::LexicalBlock);
-                    writeln!(out, "\t.quad\t{begin}\n\t.long\t{end}-{begin}").unwrap();
+
+                    out.integer(8, Expression::symbol(format!("{}", begin)));
+                    out.integer(
+                        4,
+                        Expression::difference(format!("{}", end), format!("{}", begin)),
+                    );
                 }
                 _ => {
                     die(out, Abbrev::LexicalBlockRanges);
                     let list = format!("{l}debug_ranges{}", range_lists.len());
                     if elf {
-                        writeln!(out, "\t.long\t{list}").unwrap();
+                        out.integer(4, Expression::symbol(format!("{}", list)));
                     } else {
-                        writeln!(out, "\t.long\t{list}-{l}debug_ranges").unwrap();
+                        out.integer(
+                            4,
+                            Expression::difference(
+                                format!("{}", list),
+                                format!("{}debug_ranges", l),
+                            ),
+                        );
                     }
                     range_lists.push((format!("{l}{name}_begin"), scope_ranges.clone()));
                 }
@@ -228,7 +262,8 @@ pub(crate) fn emit_debug_info(
             stack.push((scope, true));
             stack.extend(children(Some(scope)).map(|s| (s, false)));
         }
-        out.push_str("\t.byte\t0\n");
+
+        out.number(1, 0);
     }
     for global in &module.debug_globals {
         let Some(data) = module.data_object(&global.symbol) else {
@@ -258,24 +293,28 @@ pub(crate) fn emit_debug_info(
             // The address of the thread-local's descriptor
             // (DW_OP_const8u), which DW_OP_form_tls_address turns into
             // this thread's copy, as clang writes it.
-            writeln!(
-                out,
-                "\t.byte\t10, 0x0e\n\t.quad\t{}\n\t.byte\t0x9b",
-                format.symbol(&global.symbol)
-            )
-            .unwrap();
+
+            out.number(1, 10);
+            out.number(1, 0x0e);
+            out.integer(
+                8,
+                Expression::symbol(format!("{}", format.symbol(&global.symbol))),
+            );
+            out.number(1, 0x9b);
         } else {
             // Nine bytes: DW_OP_addr and the address.
-            writeln!(
-                out,
-                "\t.byte\t9, 0x03\n\t.quad\t{}",
-                format.symbol(&global.symbol)
-            )
-            .unwrap();
+
+            out.number(1, 9);
+            out.number(1, 0x03);
+            out.integer(
+                8,
+                Expression::symbol(format!("{}", format.symbol(&global.symbol))),
+            );
         }
     }
     for (i, ty) in module.debug_types.iter().enumerate() {
-        writeln!(out, "{l}dt{i}:").unwrap();
+        out.label(format!("{}dt{}", l, i));
+
         match ty {
             DebugTypeData::Base {
                 name,
@@ -292,17 +331,21 @@ pub(crate) fn emit_debug_info(
                     Encoding::Unsigned => 0x07,
                     Encoding::UnsignedChar => 0x08,
                 };
-                writeln!(out, "\t.byte\t{ate:#x}").unwrap();
+
+                out.number(1, ate);
+
                 udata(out, u64::from(*size));
             }
             DebugTypeData::Pointer(Some(pointee)) => {
                 die(out, Abbrev::Pointer);
                 type_ref(out, *pointee);
-                out.push_str("\t.byte\t8\n");
+
+                out.number(1, 8);
             }
             DebugTypeData::Pointer(None) => {
                 die(out, Abbrev::VoidPointer);
-                out.push_str("\t.byte\t8\n");
+
+                out.number(1, 8);
             }
             DebugTypeData::Struct {
                 name,
@@ -361,7 +404,8 @@ pub(crate) fn emit_debug_info(
                         (None, MemberLocation::Bits { .. }) => {}
                     }
                 }
-                out.push_str("\t.byte\t0\n");
+
+                out.number(1, 0);
             }
             DebugTypeData::Array { elem, count } => {
                 die(out, Abbrev::Array);
@@ -373,7 +417,8 @@ pub(crate) fn emit_debug_info(
                     }
                     None => die(out, Abbrev::UnknownSubrange),
                 }
-                out.push_str("\t.byte\t0\n");
+
+                out.number(1, 0);
             }
             DebugTypeData::Typedef { name, ty } => {
                 die(
@@ -423,39 +468,50 @@ pub(crate) fn emit_debug_info(
                 for (name, value) in values {
                     die(out, Abbrev::Enumerator);
                     string(out, name);
-                    writeln!(out, "\t.sleb128\t{value}").unwrap();
+
+                    out.leb(true, Expression::constant(i128::from(*value)));
                 }
-                out.push_str("\t.byte\t0\n");
+
+                out.number(1, 0);
             }
         }
     }
-    out.push_str("\t.byte\t0\n");
-    writeln!(out, "{l}debug_info_end:").unwrap();
+
+    out.number(1, 0);
+
+    out.label(format!("{}debug_info_end", l));
+
     if !range_lists.is_empty() {
         // Each list starts from its function (a base address entry, -1
         // and the address), so the entries are differences within one
         // function, which the assembler computes.
-        writeln!(
-            out,
-            "\t.section\t{}\n{l}debug_ranges:",
-            format.debug_section("ranges")
-        )
-        .unwrap();
+
+        out.debug_section(format, "ranges");
+        out.label(format!("{}debug_ranges", l));
+
         for (i, (base, ranges)) in range_lists.iter().enumerate() {
-            writeln!(out, "{l}debug_ranges{i}:\n\t.quad\t-1\n\t.quad\t{base}").unwrap();
+            out.label(format!("{}debug_ranges{}", l, i));
+            out.number(8, -1);
+            out.integer(8, Expression::symbol(format!("{}", base)));
+
             for (begin, end) in ranges {
-                writeln!(out, "\t.quad\t{begin}-{base}\n\t.quad\t{end}-{base}").unwrap();
+                out.integer(
+                    8,
+                    Expression::difference(format!("{}", begin), format!("{}", base)),
+                );
+                out.integer(
+                    8,
+                    Expression::difference(format!("{}", end), format!("{}", base)),
+                );
             }
-            out.push_str("\t.quad\t0\n\t.quad\t0\n");
+
+            out.number(8, 0);
+            out.number(8, 0);
         }
     }
     if elf {
-        writeln!(
-            out,
-            "\t.section\t{}\n{l}debug_line:",
-            format.debug_section("line")
-        )
-        .unwrap();
+        out.debug_section(format, "line");
+        out.label(format!("{}debug_line", l));
     }
 }
 

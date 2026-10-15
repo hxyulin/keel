@@ -62,6 +62,18 @@ fn all_backend_fixtures_assemble_in_normal_tiny_and_optimized_configurations() {
             let program =
                 keel_codegen::aarch64::compile_program_with_pipeline(&module, &pools, &pipeline)
                     .unwrap();
+            let has_inline_asm = module.functions.iter().any(|f| {
+                f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::InlineAsm { .. }))
+            });
+            if !has_inline_asm {
+                assert_eq!(
+                    program.stats().text_bytes,
+                    0,
+                    "{} must emit no generated text",
+                    path.display()
+                );
+            }
             let direct =
                 keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
                     .unwrap_or_else(|e| {
@@ -120,6 +132,18 @@ fn all_c_fixtures_assemble_with_and_without_optimization_and_debug_info() {
                     keel_codegen::Target::Aarch64AppleDarwin,
                 )
                 .unwrap();
+                let has_inline_asm = module.functions.iter().any(|f| {
+                    f.layout_insts()
+                        .any(|(_, i)| matches!(f.inst_data(i), keel_ir::InstData::InlineAsm { .. }))
+                });
+                if !has_inline_asm {
+                    assert_eq!(
+                        program.stats().text_bytes,
+                        0,
+                        "{} must emit no generated text",
+                        path.display()
+                    );
+                }
                 let direct = keel_asm::assemble_program_object(
                     &program,
                     keel_asm::TargetFeatures::default(),

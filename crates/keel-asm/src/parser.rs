@@ -500,6 +500,253 @@ fn assemble_pass(
         let (line, raw) = raw?;
         let err = |message| Error::new(line, message);
         let raw = match raw {
+            program::Entry::Directive(d) => {
+                use keel_asm_ir::Directive as D;
+                d.validate().map_err(err)?;
+                match d {
+                    D::Section {
+                        segment,
+                        name,
+                        kind,
+                    } => current = data::select(&mut result, segment, name, *kind).map_err(err)?,
+                    D::Global(name) => {
+                        globals.insert(name.as_str(), line);
+                    }
+                    D::SubsectionsViaSymbols => result.subsections_via_symbols = true,
+                    D::Align(power) => {
+                        data::align(&mut result, current, u32::from(*power)).map_err(err)?
+                    }
+                    D::CString(bytes) => {
+                        data::append(&mut result, current, bytes).map_err(err)?;
+                        data::append(&mut result, current, &[0]).map_err(err)?;
+                    }
+                    D::Bytes(bytes) => data::append(&mut result, current, bytes).map_err(err)?,
+                    D::Space(size) => data::reserve(&mut result, current, *size, 0).map_err(err)?,
+                    D::Set {
+                        name,
+                        expression: e,
+                    } => {
+                        if aliases
+                            .insert(name.as_str(), (line, native_expression(e)))
+                            .is_some()
+                        {
+                            return Err(err("duplicate symbol assignment".into()));
+                        }
+                    }
+                    D::Integer {
+                        width,
+                        expression: e,
+                        got,
+                    } => {
+                        let expr = native_expression(e);
+                        if expr.add.is_none() {
+                            if *got {
+                                return Err(err("GOT pointer requires a symbol".into()));
+                            }
+                            data::append(
+                                &mut result,
+                                current,
+                                &data::value(expr.constant, *width).map_err(err)?,
+                            )
+                            .map_err(err)?;
+                        } else {
+                            data::bytes_mut(&mut result, current).map_err(err)?;
+                            let location = data::Location {
+                                section: current,
+                                offset: data::position(&result, current),
+                            };
+                            data_fixups.push(DataFixup {
+                                line,
+                                location,
+                                width: *width,
+                                expression: expr,
+                                right_shift: 0,
+                                got: *got,
+                            });
+                            data::reserve(&mut result, current, u64::from(*width), 0)
+                                .map_err(err)?;
+                        }
+                    }
+                    D::Leb {
+                        signed,
+                        expression: e,
+                    } => {
+                        let expr = native_expression(e);
+                        let value = if let Some(add) = expr.add {
+                            symbolic_leb = true;
+                            if let Some(sub) = expr.subtract {
+                                leb_differences.push((line, add, sub));
+                            }
+                            if let Some(previous) = previous {
+                                let sub = expr.subtract.ok_or_else(|| {
+                                    err("LEB128 requires a same-section symbol difference".into())
+                                })?;
+                                let a = previous.get(add).ok_or_else(|| {
+                                    err(format!("undefined LEB128 symbol `{add}`"))
+                                })?;
+                                let b = previous.get(sub).ok_or_else(|| {
+                                    err(format!("undefined LEB128 symbol `{sub}`"))
+                                })?;
+                                if a.section != b.section {
+                                    return Err(err(
+                                        "LEB128 requires a same-section symbol difference".into(),
+                                    ));
+                                }
+                                expr.constant
+                                    .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                                    .ok_or_else(|| err("LEB128 expression overflow".into()))?
+                            } else {
+                                0
+                            }
+                        } else {
+                            expr.constant
+                        };
+                        let mut bytes = Vec::new();
+                        if *signed {
+                            debug::sleb(
+                                i64::try_from(value)
+                                    .map_err(|_| err("signed LEB128 value out of range".into()))?,
+                                &mut bytes,
+                            )
+                        } else {
+                            debug::uleb(
+                                u64::try_from(value).map_err(|_| {
+                                    err("unsigned LEB128 value out of range".into())
+                                })?,
+                                &mut bytes,
+                            )
+                        }
+                        data::append(&mut result, current, &bytes).map_err(err)?;
+                    }
+                    D::ZeroFill {
+                        symbol: name,
+                        size,
+                        alignment,
+                        thread_local,
+                    } => {
+                        if labels.contains_key(name.as_str()) {
+                            return Err(err(format!("duplicate label `{name}`")));
+                        }
+                        let section = data::select(
+                            &mut result,
+                            "__DATA",
+                            if *thread_local {
+                                "__thread_bss"
+                            } else {
+                                "__bss"
+                            },
+                            if *thread_local {
+                                crate::SectionKind::ThreadZeroFill
+                            } else {
+                                crate::SectionKind::ZeroFill
+                            },
+                        )
+                        .map_err(err)?;
+                        data::align(&mut result, section, u32::from(*alignment)).map_err(err)?;
+                        let location = data::Location {
+                            section,
+                            offset: data::position(&result, section),
+                        };
+                        labels.insert(name.as_str(), location);
+                        label_order.push((name.as_str(), location));
+                        data::reserve(&mut result, section, *size, 0).map_err(err)?;
+                    }
+                    D::File { index, path } => debug.file(*index, path.clone()).map_err(err)?,
+                    D::Loc {
+                        file,
+                        line: row,
+                        column,
+                        prologue_end,
+                    } => debug
+                        .loc(
+                            *file,
+                            *row,
+                            *column,
+                            *prologue_end,
+                            current,
+                            data::position(&result, current),
+                        )
+                        .map_err(err)?,
+                    D::Cfi(cfi) => debug
+                        .cfi(cfi, current, data::position(&result, current), line)
+                        .map_err(err)?,
+                }
+                continue;
+            }
+            program::Entry::Symbolic(spec) => {
+                use keel_asm_ir::{PageKind as P, SymbolicInstruction as S};
+                spec.validate().map_err(err)?;
+                symbol(spec.target()).map_err(err)?;
+                if current != 0 || !result.text.len().is_multiple_of(4) {
+                    return Err(err(
+                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                    ));
+                }
+                let instruction = spec.zero_instruction();
+                let word = crate::encode_instruction(&instruction, features).map_err(err)?;
+                let offset = result.text.len();
+                if metrics {
+                    locations.push(InstructionLocation { line, offset });
+                }
+                match spec {
+                    S::Conditional { .. } | S::Compare { .. } => {
+                        let mut fields = BumpVec::new_in(&arena);
+                        fields.extend(
+                            instruction
+                                .fields
+                                .iter()
+                                .copied()
+                                .filter(|(f, _)| *f != FieldId::imm19),
+                        );
+                        branches.push(Branch {
+                            line,
+                            offset,
+                            spec: control::Branch {
+                                encoding: instruction.opcode,
+                                field: FieldId::imm19,
+                                width: 19,
+                                fields,
+                                target: spec.target(),
+                            },
+                        });
+                    }
+                    S::Address { register, .. } => addresses.push((
+                        line,
+                        offset,
+                        u32::from(*register),
+                        relocate::Expression {
+                            name: spec.target(),
+                            modifier: None,
+                            addend: 0,
+                        },
+                    )),
+                    S::PageAddress { kind, .. } | S::PageOffset { kind, .. } => {
+                        let page = matches!(spec, S::PageAddress { .. });
+                        let kind = match (kind, page) {
+                            (P::Direct, true) => crate::RelocationKind::Page21,
+                            (P::Direct, false) => crate::RelocationKind::PageOff12,
+                            (P::Got, true) => crate::RelocationKind::GotPage21,
+                            (P::Got, false) => crate::RelocationKind::GotPageOff12,
+                            (P::ThreadLocal, true) => crate::RelocationKind::TlvpPage21,
+                            (P::ThreadLocal, false) => crate::RelocationKind::TlvpPageOff12,
+                        };
+                        let offset = u32::try_from(offset)
+                            .map_err(|_| err("relocation offset exceeds 32 bits".into()))?;
+                        relocation_lines.insert((0, offset), line);
+                        result.relocations.push(crate::Relocation {
+                            section: 0,
+                            size: 4,
+                            subtract_symbol: None,
+                            offset,
+                            symbol: spec.target().into(),
+                            kind,
+                            addend: 0,
+                        });
+                    }
+                }
+                result.text.extend_from_slice(&word.to_le_bytes());
+                continue;
+            }
             program::Entry::Branch(link, target) => {
                 symbol(target).map_err(err)?;
                 if current != 0 || !result.text.len().is_multiple_of(4) {
@@ -518,9 +765,9 @@ fn assemble_pass(
                     offset: result.text.len(),
                     spec: control::Branch {
                         encoding: if link {
-                            "BL_only_branch_imm"
+                            keel_asm_ir::Opcode::BL_only_branch_imm
                         } else {
-                            "B_only_branch_imm"
+                            keel_asm_ir::Opcode::B_only_branch_imm
                         },
                         field: FieldId::imm26,
                         width: 26,
@@ -972,7 +1219,12 @@ fn assemble_pass(
                 if expr.modifier.is_some() {
                     return Err(err("adr does not accept symbol modifiers".into()));
                 }
-                addresses.push((line, result.text.len(), args[0], expr));
+                addresses.push((
+                    line,
+                    result.text.len(),
+                    reg(args[0], false, true).map_err(err)?.number,
+                    expr,
+                ));
                 relocate::address_word("adr", args[0], 0).map_err(err)?
             };
             result.text.extend_from_slice(&word.to_le_bytes());
@@ -1009,7 +1261,7 @@ fn assemble_pass(
     }
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
-        let kind = if branch.spec.encoding.ends_with("_loadlit") {
+        let kind = if branch.spec.encoding.name().ends_with("_loadlit") {
             "literal load"
         } else {
             "branch"
@@ -1085,7 +1337,9 @@ fn assemble_pass(
             branch.spec.field,
             ((delta / 4) as u32) & ((1 << branch.spec.width) - 1),
         ));
-        let word = encode(branch.spec.encoding, &branch.spec.fields).map_err(err)?;
+        let instruction =
+            keel_asm_ir::Instruction::new(branch.spec.encoding, branch.spec.fields.iter().copied());
+        let word = crate::encode_instruction(&instruction, features).map_err(err)?;
         result.text[branch.offset..branch.offset + 4].copy_from_slice(&word.to_le_bytes());
     }
     for (line, offset, destination, expr) in addresses {
@@ -1115,7 +1369,7 @@ fn assemble_pass(
                 "adr requires a target in the same linker atom; use adrp/add across atoms",
             ));
         }
-        let word = relocate::address_word(
+        let word = relocate::address_word_register(
             "adr",
             destination,
             target.offset as i64 + expr.addend - offset as i64,
@@ -1362,4 +1616,12 @@ fn assemble_pass(
         })
         .collect();
     Ok((result, symbolic_leb, locations))
+}
+
+fn native_expression(e: &keel_asm_ir::Expression) -> data::Expression<'_> {
+    data::Expression {
+        add: e.add.as_deref(),
+        subtract: e.subtract.as_deref(),
+        constant: e.constant,
+    }
 }

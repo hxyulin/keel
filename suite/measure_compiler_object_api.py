@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--compiler', type=Path, default=Path('target/release/keel'))
     parser.add_argument('--profiler', type=Path, default=Path('target/release/examples/profile_pipeline'))
     parser.add_argument('--baseline-compiler', type=Path, help='optional saved compiler before the API change')
+    parser.add_argument('--baseline-has-object-api', action='store_true', help='also compare the prior structured object path')
     parser.add_argument('--baseline-commit', help='source commit for the optional baseline binary')
     parser.add_argument('--input-dir', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
@@ -47,10 +48,12 @@ def main():
               'host': platform.platform(), 'cpu': run(['sysctl', '-n', 'machdep.cpu.brand_string']).decode().strip(),
               'compiler_sha256': sha(compiler), 'profiler_sha256': sha(profiler), 'script_sha256': sha(Path(__file__)),
               'library_pairs': args.library_pairs, 'cli_pairs': args.cli_pairs, 'inputs': [],
-              'method': 'Same current build, no optimization. Library: backend plus assembly/object emission and buffer destruction, balanced alternating order, two warmups; source reading, C frontend and IR validation excluded. CLI: complete preprocessed-C-to-object workflow, randomized paired warm-cache serial rounds, one warmup; source path invokes cc then asm, direct path cc --emit-object. Includes input/output and startup. No C preprocessing, linking or Clang compilation timed. Every whole object verified byte-identical. Native coverage is structured instructions / all source instructions; remaining text bytes include directives and unmigrated instructions.'}
+              'method': 'Same current build, no optimization. Library: backend plus assembly/object emission and buffer destruction, balanced alternating order, two warmups; source reading, C frontend and IR validation excluded. CLI: complete preprocessed-C-to-object workflow, randomized paired warm-cache serial rounds, one warmup; source path invokes cc then asm, direct path cc --emit-object. Includes input/output and startup. No C preprocessing, linking or Clang compilation timed. Every whole object verified byte-identical. Native coverage is structured instructions / all source instructions; remaining text bytes measure explicit source fragments (only user inline assembly after full migration).'}
     commands = {'text': [], 'program': []}
     if args.baseline_compiler:
         commands['before-text'] = []
+        if args.baseline_has_object_api:
+            commands['before-program'] = []
         report['baseline_compiler_sha256'] = sha(args.baseline_compiler.resolve())
         report['baseline_commit'] = args.baseline_commit
     for path in inputs:
@@ -74,6 +77,14 @@ def main():
             assert before_object.read_bytes() == actual.read_bytes(), path
             row['before_commands'] = before_commands
             commands['before-text'].extend(before_commands)
+            if args.baseline_has_object_api:
+                before_direct = work / 'before-program' / (path.stem + '.o')
+                before_direct.parent.mkdir(exist_ok=True)
+                before_program_command = [str(before), 'cc', str(path), '--emit-object', '-o', str(before_direct)]
+                run(before_program_command)
+                assert before_direct.read_bytes() == actual.read_bytes(), path
+                commands['before-program'].append(before_program_command)
+                row['before_program_command'] = before_program_command
         row.update(text_commands=text_commands, program_commands=program_commands, object_sha256=sha(actual))
         report['inputs'].append(row)
         commands['text'].extend(text_commands)
@@ -101,6 +112,8 @@ def main():
     if args.baseline_compiler:
         report['cli']['before_text_over_program'] = statistics.median([a / b for a, b in zip(samples['before-text'], samples['program'])])
         report['cli']['text_after_over_before'] = statistics.median([a / b for a, b in zip(samples['text'], samples['before-text'])])
+        if args.baseline_has_object_api:
+            report['cli']['before_program_over_program'] = statistics.median([a / b for a, b in zip(samples['before-program'], samples['program'])])
     report['library'] = summary({mode: [sum(x['library'][mode + '_ms'][i] for x in report['inputs'])
                                        for i in range(args.library_pairs)] for mode in ('text', 'program')})
     report['coverage'] = {key: sum(x['library'][key] for x in report['inputs'])

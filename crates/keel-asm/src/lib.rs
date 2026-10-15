@@ -93,43 +93,7 @@ pub struct Relocation {
     pub addend: i64,
 }
 
-/// Mach-O data-section types used by Keel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SectionKind {
-    Data,
-    CString,
-    Literal4,
-    Literal8,
-    Literal16,
-    /// DWARF metadata, excluded from the linked image.
-    Debug,
-    /// Runtime DWARF call-frame records.
-    EhFrame,
-    ZeroFill,
-    ThreadData,
-    ThreadZeroFill,
-    ThreadVariables,
-}
-impl SectionKind {
-    pub fn is_zero_fill(self) -> bool {
-        matches!(self, Self::ZeroFill | Self::ThreadZeroFill)
-    }
-    fn flags(self) -> u32 {
-        match self {
-            Self::Data => 0,
-            Self::CString => 2,
-            Self::Literal4 => 3,
-            Self::Literal8 => 4,
-            Self::Literal16 => 0xe,
-            Self::Debug => 0x0200_0000,
-            Self::EhFrame => 0x6800_000b,
-            Self::ZeroFill => 1,
-            Self::ThreadData => 0x11,
-            Self::ThreadZeroFill => 0x12,
-            Self::ThreadVariables => 0x13,
-        }
-    }
-}
+pub use keel_asm_ir::SectionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SectionContents {

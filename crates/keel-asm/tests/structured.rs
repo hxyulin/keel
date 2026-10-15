@@ -74,10 +74,9 @@ fn oversized_functions_keep_existing_far_branch_relaxation() {
     let text = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
     let program =
         keel_codegen::compile_program(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-    assert_eq!(
-        program.stats().instructions,
-        0,
-        "oversized function must use existing relaxation"
+    assert!(
+        program.stats().instructions > 0,
+        "oversized function must retain native instructions"
     );
     assert_eq!(
         assemble_program_object(&program, TargetFeatures::default()).unwrap(),
@@ -103,5 +102,230 @@ fn macro_fallback_does_not_turn_invalid_structured_symbols_into_source() {
                 .message
                 .contains("invalid symbol")
         );
+    }
+}
+
+#[test]
+fn fully_structured_metadata_and_symbolic_instructions_match_source() {
+    use keel_asm_ir::{
+        Cfi, Directive as D, Expression as E, PageKind, SectionKind, SymbolicInstruction as S,
+    };
+    let mut p = Program::new();
+    p.directive(D::Section {
+        segment: "__TEXT".into(),
+        name: "__text".into(),
+        kind: SectionKind::Data,
+    });
+    p.directive(D::File {
+        index: 1,
+        path: b"Lkeel_metadata_a \"quoted\" file.c".to_vec(),
+    });
+    p.directive(D::Global("_entry".into()));
+    p.directive(D::Align(2));
+    p.label("_entry");
+    p.directive(D::Cfi(Cfi::Start));
+    p.directive(D::Cfi(Cfi::DefCfa {
+        register: 31,
+        offset: 16,
+    }));
+    p.directive(D::Cfi(Cfi::Offset {
+        register: 72,
+        offset: -8,
+    }));
+    p.directive(D::Loc {
+        file: 1,
+        line: 7,
+        column: 2,
+        prologue_end: true,
+    });
+    p.symbolic(S::Conditional {
+        condition: 0,
+        target: "Lend".into(),
+    });
+    p.symbolic(S::Compare {
+        register: 1,
+        is64: false,
+        nonzero: true,
+        target: "Lend".into(),
+    });
+    p.symbolic(S::Address {
+        register: 2,
+        target: "Lend".into(),
+    });
+    for kind in [PageKind::Direct, PageKind::Got, PageKind::ThreadLocal] {
+        p.symbolic(S::PageAddress {
+            register: 3,
+            kind,
+            target: "_external".into(),
+        });
+        p.symbolic(S::PageOffset {
+            register: 3,
+            base: 3,
+            load: kind != PageKind::Direct,
+            kind,
+            target: "_external".into(),
+        });
+    }
+    p.label("Lend");
+    p.instruction(Instruction::new(Opcode::RET_64R_branch_reg, [(Rn, 30)]));
+    p.directive(D::Cfi(Cfi::End));
+    p.directive(D::Section {
+        segment: "__DATA".into(),
+        name: "__data".into(),
+        kind: SectionKind::Data,
+    });
+    p.label("Ldata");
+    p.directive(D::Integer {
+        width: 8,
+        expression: E::symbol("_entry"),
+        got: false,
+    });
+    p.directive(D::Leb {
+        signed: false,
+        expression: E::difference("Ldata_end", "Ldata"),
+    });
+    p.directive(D::Leb {
+        signed: true,
+        expression: E::constant(-129),
+    });
+    p.directive(D::CString(b"hi\n".to_vec()));
+    p.directive(D::Bytes(vec![0, 255]));
+    p.directive(D::Space(3));
+    p.label("Ldata_end");
+    p.directive(D::Set {
+        name: "Lsize".into(),
+        expression: E::difference("Ldata_end", "Ldata"),
+    });
+    p.directive(D::Integer {
+        width: 4,
+        expression: E::symbol("Lsize"),
+        got: false,
+    });
+    p.directive(D::ZeroFill {
+        symbol: "_zero".into(),
+        size: 32,
+        alignment: 4,
+        thread_local: false,
+    });
+    p.directive(D::ZeroFill {
+        symbol: "_tls".into(),
+        size: 8,
+        alignment: 3,
+        thread_local: true,
+    });
+    p.directive(D::SubsectionsViaSymbols);
+    let source = r#".text
+.file 1 "Lkeel_metadata_a \"quoted\" file.c"
+.globl _entry
+.p2align 2
+_entry:
+.cfi_startproc
+.cfi_def_cfa sp, 16
+.cfi_offset d8, -8
+.loc 1 7 2 prologue_end
+b.eq Lend
+cbnz w1, Lend
+adr x2, Lend
+adrp x3, _external@PAGE
+add x3, x3, _external@PAGEOFF
+adrp x3, _external@GOTPAGE
+ldr x3, [x3, _external@GOTPAGEOFF]
+adrp x3, _external@TLVPPAGE
+ldr x3, [x3, _external@TLVPPAGEOFF]
+Lend:
+ret
+.cfi_endproc
+.data
+Ldata:
+.quad _entry
+.uleb128 Ldata_end-Ldata
+.sleb128 -129
+.asciz "hi\n"
+.byte 0,255
+.space 3
+Ldata_end:
+Lsize = Ldata_end-Ldata
+.long Lsize
+.zerofill __DATA,__bss,_zero,32,4
+.tbss _tls,8,3
+.subsections_via_symbols
+"#;
+    assert_eq!(p.stats().text_bytes, 0);
+    let expected = assemble_object(source).unwrap();
+    assert_eq!(
+        assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+        expected
+    );
+    // Force preprocessing to exercise validated serialization of every new kind.
+    p.text(".rept 0\nnop\n.endr\n");
+    assert_eq!(
+        assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn invalid_typed_metadata_and_symbols_are_rejected_with_and_without_macro_fallback() {
+    use keel_asm_ir::{
+        Cfi, Directive as D, Expression as E, Item, PageKind, SymbolicInstruction as S,
+    };
+    let invalid = [
+        Item::Directive(D::Global("bad\nnop".into())),
+        Item::Directive(D::Integer {
+            width: 3,
+            expression: E::constant(0),
+            got: false,
+        }),
+        Item::Directive(D::Integer {
+            width: 8,
+            expression: E::symbol("bad\nnop"),
+            got: false,
+        }),
+        Item::Directive(D::Cfi(Cfi::DefCfa {
+            register: 96,
+            offset: 0,
+        })),
+        Item::Directive(D::Align(17)),
+        Item::Directive(D::Loc {
+            file: 1,
+            line: 1,
+            column: 0,
+            prologue_end: false,
+        }),
+        Item::Symbolic(S::Conditional {
+            condition: 16,
+            target: "Lend".into(),
+        }),
+        Item::Symbolic(S::Compare {
+            register: 32,
+            is64: true,
+            nonzero: false,
+            target: "Lend".into(),
+        }),
+        Item::Symbolic(S::Address {
+            register: 0,
+            target: "bad\nnop".into(),
+        }),
+        Item::Symbolic(S::PageOffset {
+            register: 0,
+            base: 0,
+            load: false,
+            kind: PageKind::Got,
+            target: "_x".into(),
+        }),
+    ];
+    for fallback in [false, true] {
+        for item in &invalid {
+            let mut p = Program::new();
+            if fallback {
+                p.text(".rept 0\nnop\n.endr\n");
+            }
+            p.items.push(item.clone());
+            p.label("Lend");
+            assert!(
+                assemble_program_object(&p, TargetFeatures::default()).is_err(),
+                "{item:?}, fallback={fallback}"
+            );
+        }
     }
 }
