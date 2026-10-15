@@ -157,6 +157,8 @@ pub enum Builtin {
     Popcount,
     /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
     Overflow(OverflowOp),
+    /// Mixed integer types, exact mathematical representability.
+    GenericOverflow(OverflowOp),
     /// Evaluates its arguments once and returns the first value. Branch
     /// likelihood metadata is validated by the parser, then ignored.
     Hint,

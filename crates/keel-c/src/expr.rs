@@ -898,6 +898,39 @@ impl<'a> Parser<'a> {
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
+        if let Some(op) = generic_overflow(base) {
+            let args = self.builtin_args(3, loc)?;
+            if !args[0].ty.is_integer() || !args[1].ty.is_integer() {
+                return Err(Error::new(
+                    loc,
+                    "generic overflow operands must be integers",
+                ));
+            }
+            let result_sugar = args[2].sugar.pointee(&self.typedefs);
+            fn is_const(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
+                match sugar {
+                    Sugar::Const(_) => true,
+                    Sugar::Volatile(inner) => is_const(inner, defs),
+                    Sugar::Typedef(i) => is_const(&defs[*i].sugar, defs),
+                    _ => false,
+                }
+            }
+            if !args[2].ty.is_ptr()
+                || !matches!(args[2].ty.pointee(), Some(Ty::Int(k)) if *k != IntKind::Bool)
+                || matches!(result_sugar.unqualified(&self.typedefs), Sugar::Enum(_))
+                || is_const(&result_sugar, &self.typedefs)
+            {
+                return Err(Error::new(
+                    loc,
+                    "generic overflow result must point to a non-const, non-boolean, non-enum integer",
+                ));
+            }
+            return Ok(mk(
+                ExprKind::Builtin(Builtin::GenericOverflow(op), args),
+                Ty::Int(IntKind::Bool),
+                loc,
+            ));
+        }
         if let Some((op, ty)) = typed_overflow(base) {
             let args = self.builtin_args(3, loc)?;
             if !args[0].ty.is_arith() || !args[1].ty.is_arith() {
@@ -1797,4 +1830,15 @@ fn int_literal_type(value: u64, decimal: bool, unsigned: bool, longs: u8) -> Ty 
         }
     }
     Ty::Int(ULLong)
+}
+
+/// Generic names retain operand types; the unsigned op identifies the arithmetic
+/// operation only, not the signedness of any C operand or destination.
+pub(crate) fn generic_overflow(name: &str) -> Option<OverflowOp> {
+    match name {
+        "add_overflow" => Some(OverflowOp::Uadd),
+        "sub_overflow" => Some(OverflowOp::Usub),
+        "mul_overflow" => Some(OverflowOp::Umul),
+        _ => None,
+    }
 }

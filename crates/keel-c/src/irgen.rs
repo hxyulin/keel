@@ -25,8 +25,8 @@ use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
     DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, InstData, IntCC,
-    Intrinsic, Language, MemoryFlags, Module, Ordering, Purpose, RmwOp, Signature, SourceFile,
-    SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
+    Intrinsic, Language, MemoryFlags, Module, Ordering, OverflowOp, Purpose, RmwOp, Signature,
+    SourceFile, SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
 };
 use std::collections::HashMap;
 
@@ -1914,6 +1914,142 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         Ok(self.b.function().inst_results(inst).first().copied())
     }
 
+    /// Compute using unsigned magnitudes, retaining a carry beyond 128 bits.
+    /// This avoids both signed overflow and an IR integer wider than i128.
+    fn generic_overflow(
+        &mut self,
+        op: OverflowOp,
+        args: &[Expr<'p>],
+        vals: &[Value],
+        loc: Loc,
+    ) -> R<Value> {
+        let result_ty = args[2].ty.pointee().unwrap();
+        let max_size = args[..2]
+            .iter()
+            .map(|a| a.ty.int_kind().unwrap().size())
+            .chain([result_ty.int_kind().unwrap().size()])
+            .max()
+            .unwrap();
+        let wide_ty = Ty::Int(if max_size <= 4 {
+            IntKind::ULong
+        } else {
+            IntKind::UInt128
+        });
+        let wide = wide_ty.ir();
+        let a = self.convert(vals[0], &args[0].ty, &wide_ty, loc)?;
+        let b = self.convert(vals[1], &args[1].ty, &wide_ty, loc)?;
+        let zero = self.b.ins().iconst(wide, 0);
+        let no = self.b.ins().iconst(Type::I8, 0);
+        let yes = self.b.ins().iconst(Type::I8, 1);
+        let an = if args[0].ty.is_signed() {
+            self.b.ins().icmp(IntCC::Slt, a, zero)
+        } else {
+            no
+        };
+        let bn = if args[1].ty.is_signed() {
+            self.b.ins().icmp(IntCC::Slt, b, zero)
+        } else {
+            no
+        };
+        let na = self.b.ins().ineg(a);
+        let nb = self.b.ins().ineg(b);
+        let am = self.b.ins().select(an, na, a);
+        let bm = self.b.ins().select(bn, nb, b);
+        let (magnitude, negative, carry) = if op == OverflowOp::Umul {
+            let negative = self.b.ins().xor(an, bn);
+            let (product, carry) = if args[..2]
+                .iter()
+                .any(|a| a.ty.int_kind().unwrap().size() == 16)
+            {
+                // a0*b0 + (a0*b1 + a1*b0)*2^64. Detect every
+                // discarded high limb and carry without computing i256.
+                let shift = self.b.ins().iconst(wide, 64);
+                let mask = self.b.ins().iconst(wide, -1);
+                let mask = self.b.ins().ushr(mask, shift);
+                let al = self.b.ins().and(am, mask);
+                let bl = self.b.ins().and(bm, mask);
+                let ah = self.b.ins().ushr(am, shift);
+                let bh = self.b.ins().ushr(bm, shift);
+                let ll = self.b.ins().imul(al, bl);
+                let lh = self.b.ins().imul(al, bh);
+                let hl = self.b.ins().imul(ah, bl);
+                let ah_nonzero = self.b.ins().icmp(IntCC::Ne, ah, zero);
+                let bh_nonzero = self.b.ins().icmp(IntCC::Ne, bh, zero);
+                let hh_nonzero = self.b.ins().and(ah_nonzero, bh_nonzero);
+                let lh_high = self.b.ins().ushr(lh, shift);
+                let hl_high = self.b.ins().ushr(hl, shift);
+                let high = self.b.ins().or(lh_high, hl_high);
+                let high_nonzero = self.b.ins().icmp(IntCC::Ne, high, zero);
+                let lh_low = self.b.ins().shl(lh, shift);
+                let hl_low = self.b.ins().shl(hl, shift);
+                let (sum, c1) = self.b.ins().overflow(OverflowOp::Uadd, ll, lh_low);
+                let (product, c2) = self.b.ins().overflow(OverflowOp::Uadd, sum, hl_low);
+                let c = self.b.ins().or(c1, c2);
+                let high = self.b.ins().or(hh_nonzero, high_nonzero);
+                (product, self.b.ins().or(c, high))
+            } else {
+                (self.b.ins().imul(am, bm), no)
+            };
+            (product, negative, carry)
+        } else {
+            // Subtraction is addition with the second mathematical sign
+            // reversed; negative zero is harmless and normalized below.
+            let bn = if op == OverflowOp::Usub {
+                self.b.ins().xor(bn, yes)
+            } else {
+                bn
+            };
+            let same_sign = self.b.ins().icmp(IntCC::Eq, an, bn);
+            let (sum, carry) = self.b.ins().overflow(OverflowOp::Uadd, am, bm);
+            let a_larger = self.b.ins().icmp(IntCC::Uge, am, bm);
+            let ab = self.b.ins().isub(am, bm);
+            let ba = self.b.ins().isub(bm, am);
+            let difference = self.b.ins().select(a_larger, ab, ba);
+            let difference_sign = self.b.ins().select(a_larger, an, bn);
+            let magnitude = self.b.ins().select(same_sign, sum, difference);
+            let negative = self.b.ins().select(same_sign, an, difference_sign);
+            (magnitude, negative, self.b.ins().and(same_sign, carry))
+        };
+        let nonzero = self.b.ins().icmp(IntCC::Ne, magnitude, zero);
+        // A wrapped zero with carry is still a nonzero mathematical value.
+        let nonzero = self.b.ins().or(nonzero, carry);
+        let negative = self.b.ins().and(negative, nonzero);
+        let kind = result_ty.int_kind().unwrap();
+        let bits = kind.size() * 8;
+        let all = self.b.ins().iconst(wide, -1);
+        let wide_bits = wide.bytes().unwrap() * 8;
+        let limit = if kind.signed() {
+            let shift = self
+                .b
+                .ins()
+                .iconst(wide, i64::from(wide_bits) - bits as i64 + 1);
+            let positive_max = self.b.ins().ushr(all, shift);
+            let one = self.b.ins().uext(wide, negative);
+            self.b.ins().iadd(positive_max, one)
+        } else if bits == u64::from(wide_bits) {
+            all
+        } else {
+            let shift = self
+                .b
+                .ins()
+                .iconst(wide, i64::from(wide_bits) - bits as i64);
+            self.b.ins().ushr(all, shift)
+        };
+        let too_large = self.b.ins().icmp(IntCC::Ugt, magnitude, limit);
+        let overflow = self.b.ins().or(carry, too_large);
+        let overflow = if kind.signed() {
+            overflow
+        } else {
+            self.b.ins().or(overflow, negative)
+        };
+        let negated = self.b.ins().ineg(magnitude);
+        let wrapped = self.b.ins().select(negative, negated, magnitude);
+        let value = self.convert(wrapped, &wide_ty, result_ty, loc)?;
+        let flags = self.object_flags(result_ty, &args[2].sugar.pointee(&self.g.p.typedefs));
+        self.b.ins().store_with_flags(value, vals[2], flags);
+        Ok(overflow)
+    }
+
     fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let mut vals = Vec::new();
         for a in args {
@@ -1932,6 +2068,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.ins().store_with_flags(value, vals[2], flags);
                 overflow
             }
+            Builtin::GenericOverflow(op) => self.generic_overflow(op, args, &vals, e.loc)?,
             Builtin::Hint => vals[0],
             Builtin::AssumeAligned(alignment) => {
                 // Keep the contract local to this expression's SSA result.
