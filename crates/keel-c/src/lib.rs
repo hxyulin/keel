@@ -36,6 +36,11 @@ mod types;
 
 pub use predefined::predefined_macros;
 pub use preprocess::{PreprocessOptions, preprocess};
+#[cfg(feature = "profile")]
+pub use preprocess::{PreprocessStats, preprocess_with_stats};
+
+#[cfg(feature = "profile")]
+pub mod profile;
 
 use std::fmt;
 

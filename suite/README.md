@@ -339,3 +339,322 @@ and SQLite correctness checks. Preprocessing and linking are outside timings.
 Internal stage timings exclude input/output and startup, include destruction,
 and report five samples after two warmups. They are diagnostic measurements,
 not an exact decomposition of independently timed CLI medians.
+
+## C frontend profiling
+
+`profile_c_frontend.py` profiles the native preprocessor and the C-to-IR
+frontend on every Lua, QuickJS and SQLite translation unit (44 files). Build
+before timing, then use an existing suite work directory containing the
+sources and generated QuickJS C files:
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --examples
+python3 suite/profile_c_frontend.py \
+  --source-root target/suite \
+  --input-root target/frontend-profile/native-inputs \
+  --output suite/reports/c-frontend-profile-20261015.json
+```
+
+Native preprocessing preparation currently uses the macOS suite definitions
+and SDK. Omit `--source-root` to profile already prepared `.i` directories on
+other hosts; use `--sample-seconds 0` to omit macOS stack sampling. Input
+reading is outside frontend timing. Native preprocessing includes header IO,
+macro expansion, output formatting and internal destruction. The independent
+C-to-IR measurements use resident preprocessed text and separate lexing,
+parsing/name resolution/type checking, IR generation and parser/AST/token
+cleanup. Returned IR destruction is recorded separately. Both ordinary and
+debug-info modes run nine rounds by default; applications and timing modes
+are shuffled with a fixed seed, and file order rotates across rounds.
+
+The staged helper is behind the optional `keel-c/profile` feature; the normal
+compiler API is unchanged. Before measurement, every file is compiled through
+both APIs, both modules pass the IR verifier, and their complete Debug
+representations must match. The unchanged API provides the total-time
+baseline to check stage instrumentation overhead. Builds and tests must finish
+before timing. Raw samples, commands, source/binary hashes and stack samples
+are retained. These are warm-cache, serial frontend library measurements,
+not cold builds or end-to-end compiler timings. Preprocessing and C-to-IR
+medians are measured separately; adding them estimates the combined cost.
+
+The [15 October baseline report](reports/c-frontend-profile-20261015.html)
+([raw data](reports/c-frontend-profile-20261015.json)) uses local main
+`ae7c2f8` on Apple M5 Max. To regenerate its stack summaries and presentation:
+
+```sh
+python3 suite/summarize_c_frontend.py suite/reports/c-frontend-profile-20261015.json \
+  --output suite/reports/c-frontend-profile-analysis-20261015.json
+python3 suite/render_c_frontend_profile.py
+```
+
+The summarizer demangles with `c++filt` and derives inclusive sample shares
+from leaf weights, counting recursive frames once per sample. Categories can
+overlap. It asserts nonnegative leaf weights and conservation of total samples.
+
+## Preprocessor optimization comparison
+
+The [optimized preprocessor report](reports/c-preprocessor-optimized-20261015.html)
+compares immutable original, compact-scalar and SIMD-search binaries against
+local main `ae7c2f8`. All 44 application outputs are byte-identical and their IR
+verifies. Eleven paired rounds show a 2.44× equal-application geometric mean
+speedup on Apple M5 Max. SIMD contributes a further 4.6–5.1% reduction over the
+compact scalar implementation; most of the gain comes from fewer allocations
+and copies. These are preprocessing library times, including transitive header
+IO and internal cleanup, with warm caches. They exclude reading the top-level
+source, process startup, SDK discovery, returned-text destruction and C-to-IR.
+
+Archive the original example binary before editing; build and archive each
+candidate before timing. Then run:
+
+```sh
+python3 suite/measure_preprocessor.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/baseline/profile_preprocess \
+  --variant compact-scalar=target/frontend-profile/baseline/profile_preprocess-compact-scalar \
+  --variant simd=target/frontend-profile/baseline/profile_preprocess-simd \
+  --work-dir target/frontend-profile/paired-preprocessor \
+  --output suite/reports/c-preprocessor-optimized-20261015.json
+```
+
+The [source/build details](reports/c-preprocessor-optimization-details-20261015.json)
+retain source hashes and the exact runtime-source patch that replaces the three
+SIMD-backed searches with scalar searches. The rest of those variants is
+identical. The timing runner checks output equality, verifies IR through each
+binary, rotates variant order, shuffles applications, and bootstraps paired
+ratios within each fixed workload. Keep builds/tests separate from timings.
+
+The separate `profile_preprocess_allocations` example counts allocator calls
+only across `preprocess`. Build that same example against the original and
+candidate implementations, then run:
+
+```sh
+python3 suite/measure_preprocessor_allocations.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline PATH_TO_ORIGINAL_COUNTING_EXAMPLE \
+  --candidate target/release/examples/profile_preprocess_allocations \
+  --output suite/reports/c-preprocessor-allocations-20261015.json
+python3 suite/render_preprocessor_optimization.py
+```
+
+The [allocation data](reports/c-preprocessor-allocations-20261015.json) show
+76–77% fewer allocation/reallocation calls and 53–55% fewer cumulative requested
+bytes. Requested bytes include full reallocation sizes and are not peak live
+memory or RSS. Counting binaries are never used for timing.
+
+## Arena and header-source cache comparison
+
+The [arena/cache report](reports/c-preprocessor-arena-20261015.html)
+([raw timing](reports/c-preprocessor-arena-20261015.json),
+[storage measurements](reports/c-preprocessor-arena-storage-20261015.json))
+measures another 2.83× preprocessing speedup over the SIMD/compact-token
+version, and 6.95× versus the original in the same eleven paired rounds on
+Apple M5 Max. Allocation/reallocation calls fall another 95.6–96.3%.
+
+Tokens borrow source text. Macro nodes, macro parameter/body slices, generated
+text and persistent hide sets use a bump arena. Exact-sized lexical token
+buffers and source owners live in separate typed arenas, whose destructors
+release boxed buffers, owned read strings and memory maps at call completion.
+The returned output remains an ordinary owned string; bookkeeping maps also
+use ordinary owned storage. The design avoids retaining discarded capacities
+from growing large token vectors in the bump arena.
+
+Source text and unexpanded lexical tokens are cached by canonical path and
+disk/embedded-header identity within each `preprocess` invocation. Macro
+expansion and conditional state remain per inclusion. Conservative complete
+`#ifndef` guards can skip inactive bodies, with structural validation preserving
+malformed-conditional diagnostics. `#undef`, conditional `#pragma once`, aliases,
+`#line`, and `include_next` retain their behavior. Each new invocation sees
+current file contents. Source-open counters exclude top-level input loading
+and path-resolution metadata operations.
+
+Headers at least 64 KiB use validated read-only COW mappings where available;
+smaller/empty files and mapping failures use reads. Included files must remain
+unchanged until the call returns, including avoiding concurrent truncation of
+mapped files. Source and token caching supply the main file-access gain. MMAP
+versus cached reads reduces the aggregate paired median ratio by just 0.27%;
+two of three per-application intervals include no change. No cold-storage or
+cross-CPU benefit is established by these warm-cache timings.
+
+Build and freeze all variants before timing. The prior optimized binary is the
+baseline; `original` is the original preprocessor. Final/ablation source hashes
+and exact compile-time-constant patches are in the
+[build details](reports/c-preprocessor-arena-details-20261015.json):
+
+```sh
+python3 suite/measure_preprocessor.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/arena-baseline/profile_preprocess \
+  --variant original=target/frontend-profile/baseline/profile_preprocess \
+  --variant arena=target/frontend-profile/arena-baseline/profile_preprocess-arena-only \
+  --variant cache-read=target/frontend-profile/arena-baseline/profile_preprocess-cache-read \
+  --variant cache-mmap=target/frontend-profile/arena-baseline/profile_preprocess-cache-mmap \
+  --work-dir target/frontend-profile/arena-paired \
+  --output suite/reports/c-preprocessor-arena-20261015.json
+python3 suite/measure_preprocessor_storage.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/arena-baseline/profile_preprocess_allocations \
+  --candidate target/frontend-profile/arena-baseline/profile_preprocess_allocations-cache-mmap \
+  --profiler target/frontend-profile/arena-baseline/profile_preprocess-cache-mmap \
+  --output suite/reports/c-preprocessor-arena-storage-20261015.json
+python3 suite/summarize_preprocessor_arena.py \
+  --timing suite/reports/c-preprocessor-arena-20261015.json \
+  --storage suite/reports/c-preprocessor-arena-storage-20261015.json \
+  --output suite/reports/c-preprocessor-arena-analysis-20261015.json
+python3 suite/render_preprocessor_arena.py
+```
+
+`preprocess_with_stats` and the `profile_preprocess stats` mode require the
+`profile` feature. They instantiate a separate counter-enabled implementation;
+the ordinary API compiles the counters away. The storage runner independently
+collects allocator calls, requested bytes and macOS counting-harness peak RSS.
+Requested bytes exclude mappings and are not peak memory. RSS is a full-process
+single-run high-water mark, including warmups, rather than isolated call memory.
+Never use these counting binaries for latency measurements.
+
+
+### Additional preprocessor fast paths (2026-10-15)
+
+The next pass reuses expanded pending-vector capacity across directives,
+precomputes include search directories and checks candidates lazily, reuses a
+single macro lookup and bypasses token-paste buffers for ordinary object macros,
+and slices tokens from validated strings instead of validating UTF-8 per token.
+Spliced buffers receive one checked validation; no unchecked string conversion
+was added. Include resolution itself remains uncached, preserving caller and
+`include_next` origin behavior.
+
+[Paired measurements](reports/c-preprocessor-easy-20261015.json) compare frozen
+release binaries with identical build flags. Variants are cumulative: `buffer`,
+`paths`, `macros`, then `all` (validated string scanning). Nine pairs per
+application show an equal-application geometric mean time reduction of 8.6%
+(1.094x speedup; bootstrap 95% reduction interval 5.5–8.9%). Median application
+latencies are Lua 223.66 → 205.89 ms, QuickJS 117.05 → 109.05 ms, and SQLite
+93.39 → 83.66 ms. Lua's paired interval alone crosses no change, so its gain
+remains less certain. These are warm-cache measurements on one Apple M5 Max.
+Most incremental benefit comes from string slicing; smaller steps are sensitive
+to noise and their contribution depends on order.
+
+[Allocation measurements](reports/c-preprocessor-easy-storage-20261015.json)
+show 15.0%, 19.7%, and 24.1% fewer allocation/reallocation calls for Lua,
+QuickJS, and SQLite. Retaining pending-vector capacity has a memory tradeoff:
+single counting-process peak RSS changes from 43.69 → 51.84 MiB for Lua,
+123.61 → 126.97 MiB for QuickJS, and 298.91 → 294.66 MiB for SQLite. These
+full-process observations include warmups and are not isolated-call peaks.
+
+All 65 frontend/driver tests pass, including a new Unicode/splicing regression.
+All five variants produce byte-identical outputs for the 44 corpus files and
+verify their generated IR. The rebuilt release driver's 44 CLI outputs also
+match. [Build details and incremental patches](reports/c-preprocessor-easy-details-20261015.json)
+record source hashes and the cumulative changes.
+
+```sh
+python3 suite/measure_preprocessor.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/easy/profile-baseline \
+  --variant buffer=target/frontend-profile/easy/profile-buffer \
+  --variant paths=target/frontend-profile/easy/profile-paths \
+  --variant macros=target/frontend-profile/easy/profile-macros \
+  --variant all=target/frontend-profile/easy/profile-all \
+  --rounds 9 --work-dir target/frontend-profile/easy/paired \
+  --output suite/reports/c-preprocessor-easy-20261015.json
+```
+
+
+### Current preprocessor stack profile (2026-10-15)
+
+[Interactive report](reports/c-preprocessor-current-profile-20261015.html) and
+[raw timings, stack summaries, and provenance](reports/c-preprocessor-current-profile-20261015.json)
+record the preprocessor after all four fast paths. Each application has seven
+warm timing rounds and a separate six-second macOS sample capture. Timing and
+sampling run serially; stack sampling is not used for latency measurements.
+Exact corpus hashes are checked against the original profile. Sample files are
+saved beside the JSON with the application name suffix.
+
+The exclusive phase view assigns each leaf sample to its nearest recognized
+preprocessor operation; inlined output is grouped with flush overhead. The
+separate inclusive copying/allocator/UTF-8 views overlap those phases. Current
+scanning is 25–36%, expansion 21–26%, and memory copying 14–22% of all samples.
+Copying inside expansion alone is 7.6–16.4%; token-stream splices are a candidate,
+but the stacks do not isolate that exact operation. Search plus canonicalization
+is 8–18%. UTF-8 validation is below 0.6%, compared with 4–5% in the prior short
+Lua/SQLite survey. Sample shares describe attribution, not speedups.
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile_preprocess
+# Freeze the binary before profiling; do not build concurrently with sampling.
+mkdir -p target/frontend-profile/current
+cp target/release/examples/profile_preprocess target/frontend-profile/current/profile_preprocess
+python3 suite/profile_preprocessor_current.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --binary target/frontend-profile/current/profile_preprocess \
+  --output suite/reports/c-preprocessor-current-profile-20261015.json
+python3 suite/render_preprocessor_current.py
+```
+
+
+### Scanning, directives, header resolution, and macro streaming (2026-10-15)
+
+[Saved report](reports/c-preprocessor-deeper-20261015.html),
+[paired timings](reports/c-preprocessor-deeper-20261015.json),
+[allocation/RSS measurements](reports/c-preprocessor-deeper-storage-20261015.json),
+and [refreshed stack profiles](reports/c-preprocessor-deeper-profile-20261015.json)
+cover the next pass. The baseline is the previously profiled four-fast-path
+version, not the original preprocessor. All timing variants use identical release
+flags with line-table debug information; binaries are frozen before measurement.
+
+The final equal-application geometric mean time reduction is 20.1% (1.252x
+speedup; 95% paired bootstrap reduction interval 19.8–20.4%). Median latencies
+are Lua 203.31 → 161.89 ms, QuickJS 107.33 → 80.62 ms, and SQLite 83.74 →
+71.22 ms. Cumulative comparisons attribute roughly 3.1% to next-newline tracking
+and whitespace runs, 4.8% to borrowing directive lines and skipping inactive
+ordinary code, 3.0% to resolution caching, and 10.3% to macro streaming plus
+scratch reuse. These order-dependent reductions compare with the preceding
+stage, are not additive, and do not compose exactly because medians differ.
+
+The scanner searches ahead for each physical newline once, preserving sparse
+splice mapping and byte columns. Directives borrow cached token slices unless
+`#line` or an alternate file spelling requires location changes. Header resolution
+caches both found and missing results per invocation; quoted including-file and
+`include_next` origin contexts are distinct. Included files and search directories
+must stay unchanged during a call. Macro expansion stores unconsumed tokens in
+reverse order so replacing a prefix does not shift the original suffix; rescans,
+hide sets, invocation boundaries, builtins, and expansion limits remain intact.
+Drained input buffers with capacity at most 4,096 tokens can be recycled; larger
+buffers are released. Standard owned vectors retain bounded scratch capacity
+rather than adding scratch allocation churn to the bump arena.
+
+Fresh profiles show copying inside expansion down from 7.6–16.4% of all samples
+to 0.6–1.1%. Allocation/reallocation counts change by +2.2% (Lua), −2.5%
+(QuickJS), and +0.8% (SQLite). One full-process RSS observation changes from
+44.98 → 38.53 MiB, 126.50 → 133.72 MiB, and 296.59 → 300.42 MiB respectively.
+RSS includes warmups and is not isolated-call memory. The extra macro output
+vector and resolution cache have a memory tradeoff even though copying falls.
+
+All 67 frontend/driver tests pass. New Clang parity coverage stresses replacement
+prefix/suffix boundaries and argument order; header-cache coverage distinguishes
+quoted callers, angle includes, and query misses across invocations. All six
+variants produce byte-identical outputs on the 44 translation units and verify
+IR, and the rebuilt driver matches all 44 CLI outputs. Exact patches and source
+hashes are in the [build details](reports/c-preprocessor-deeper-details-20261015.json).
+
+```sh
+python3 suite/measure_preprocessor.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/current/profile_preprocess \
+  --variant scan=target/frontend-profile/deeper/profile-scan \
+  --variant directives=target/frontend-profile/deeper/profile-directives \
+  --variant headers=target/frontend-profile/deeper/profile-headers \
+  --variant stream=target/frontend-profile/deeper/profile-stream \
+  --variant all=target/frontend-profile/deeper/profile-all \
+  --rounds 11 --work-dir target/frontend-profile/deeper/paired \
+  --output suite/reports/c-preprocessor-deeper-20261015.json
+python3 suite/measure_preprocessor_storage.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline target/frontend-profile/deeper/allocations-baseline \
+  --candidate target/frontend-profile/deeper/allocations-all \
+  --profiler target/frontend-profile/deeper/profile-all \
+  --output suite/reports/c-preprocessor-deeper-storage-20261015.json
+python3 suite/profile_preprocessor_current.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --binary target/frontend-profile/deeper/profile-all \
+  --output suite/reports/c-preprocessor-deeper-profile-20261015.json
+python3 suite/render_preprocessor_deeper.py
+```

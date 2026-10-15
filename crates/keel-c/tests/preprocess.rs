@@ -339,3 +339,271 @@ fn builtin_override_and_command_line_order() {
     let got = preprocess("F(A)", "test.c", &opts).unwrap();
     assert_eq!(tokens(&got), tokens("42+42"));
 }
+
+#[test]
+fn scanner_searches_preserve_tokens_at_vector_boundaries() {
+    let mut source = String::from("#define STR(x) #x\n#define JOIN(a,b) a ## b\n");
+    // Exercise short tails and delimiters on either side of 16/32/64-byte
+    // boundaries, both quote styles, escapes, UTF-8, splices, and long comments.
+    for padding in 0..80 {
+        let text = "a".repeat(padding);
+        source.push_str(&format!("STR({text} /* {text}\n{text} */ tail)\n"));
+        source.push_str(&format!("\"{text}\\\"tail\" '{text}\\\\' // {text}\n"));
+        source.push_str(&format!("JOIN(pre\\\nfix,{text})\n"));
+    }
+    source.push_str("#define α 17\nα\n#line 71 \"virtual.c\"\n__LINE__ __FILE__\n");
+    parity(&source);
+}
+
+#[test]
+fn spliced_diagnostics_keep_physical_line_and_column() {
+    for (source, line, column, message) in [
+        (" \\\n  \"unfinished", 2, 3, "unterminated literal"),
+        ("\\\r\n\\\n   /* unfinished", 3, 4, "unterminated comment"),
+        ("\\\n\"tail\\", 2, 1, "unterminated literal"),
+    ] {
+        let error = preprocess(source, "physical.c", &PreprocessOptions::default()).unwrap_err();
+        assert_eq!(
+            (error.file.as_str(), error.line, error.col),
+            ("physical.c", line, column)
+        );
+        assert!(error.message.contains(message));
+    }
+}
+
+#[test]
+fn cached_headers_reexpand_with_current_macros_and_file_spelling() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-cached-state");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("state.h"),
+        "__FILE__ __INCLUDE_LEVEL__ MODE __COUNTER__\n#line 100 \"virtual.h\"\n__LINE__ MODE\n",
+    )
+    .unwrap();
+    let source = "#define MODE 1\n#include \"state.h\"\n#undef MODE\n#define MODE 2\n#include \"./state.h\"\n";
+    let path = dir.join("main.c");
+    let opts = PreprocessOptions::default();
+    let got = preprocess(source, path.to_str().unwrap(), &opts).unwrap();
+    let expected = format!(
+        "{:?} 1 1 0 100 1 {:?} 1 2 1 100 2",
+        dir.join("state.h").to_str().unwrap(),
+        dir.join("./state.h").to_str().unwrap()
+    );
+    assert_eq!(tokens(&got), tokens(&expected));
+    #[cfg(feature = "profile")]
+    {
+        let (profiled, stats) =
+            keel_c::preprocess_with_stats(source, path.to_str().unwrap(), &opts).unwrap();
+        assert_eq!(profiled, got);
+        assert_eq!(stats.include_requests, 2);
+        assert_eq!(stats.file_opens, 1);
+        assert_eq!(stats.scanned_files, 2); // root + one physical header
+        assert_eq!(stats.source_cache_hits, 1);
+        assert_eq!(stats.token_cache_hits, 1);
+    }
+    // Invocation-local caching must not hide a subsequent file change.
+    std::fs::write(dir.join("state.h"), "changed\n").unwrap();
+    let fresh = preprocess(source, path.to_str().unwrap(), &opts).unwrap();
+    assert_eq!(tokens(&fresh), tokens("changed changed"));
+}
+
+#[test]
+fn cached_guard_detection_respects_undef_else_and_trailing_tokens() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-cached-guards");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, source) in [
+        (
+            "guard.h",
+            "#ifndef GUARD_H\n#define GUARD_H\nVALUE\n#endif\n",
+        ),
+        (
+            "else.h",
+            "#ifndef ELSE_H\n#define ELSE_H\nfirst\n#else\nagain\n#endif\n",
+        ),
+        (
+            "tail.h",
+            "#ifndef TAIL_H\n#define TAIL_H\ninside\n#endif\noutside\n",
+        ),
+    ] {
+        std::fs::write(dir.join(name), source).unwrap();
+    }
+    let source = "#define VALUE 1\n#include \"guard.h\"\n#include \"guard.h\"\n#undef GUARD_H\n#undef VALUE\n#define VALUE 2\n#include \"guard.h\"\n#include \"else.h\"\n#include \"else.h\"\n#include \"tail.h\"\n#include \"tail.h\"\n";
+    let got = preprocess(
+        source,
+        dir.join("main.c").to_str().unwrap(),
+        &PreprocessOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        tokens(&got),
+        tokens("1 2 first again inside outside outside")
+    );
+    #[cfg(feature = "profile")]
+    {
+        let (_, stats) = keel_c::preprocess_with_stats(
+            source,
+            dir.join("main.c").to_str().unwrap(),
+            &PreprocessOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(stats.file_opens, 3);
+        assert_eq!(stats.guard_skips, 1);
+        assert_eq!(stats.scanned_files, 4);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_aliases_preserve_conditional_pragma_once() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-cached-aliases");
+    std::fs::create_dir_all(&dir).unwrap();
+    let header = dir.join("once.h");
+    std::fs::write(&header, "#if MARK\n#pragma once\n#endif\nVALUE\n").unwrap();
+    let alias = dir.join("alias.h");
+    let _ = std::fs::remove_file(&alias);
+    std::os::unix::fs::symlink("once.h", &alias).unwrap();
+    let source = "#define MARK 0\n#define VALUE 7\n#include \"once.h\"\n#undef MARK\n#define MARK 1\n#undef VALUE\n#define VALUE 8\n#include \"alias.h\"\n#undef VALUE\n#define VALUE 9\n#include \"once.h\"\n";
+    let got = preprocess(
+        source,
+        dir.join("main.c").to_str().unwrap(),
+        &PreprocessOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(tokens(&got), tokens("7 8"));
+    #[cfg(feature = "profile")]
+    {
+        let (_, stats) = keel_c::preprocess_with_stats(
+            source,
+            dir.join("main.c").to_str().unwrap(),
+            &PreprocessOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(stats.file_opens, 1);
+        assert_eq!(stats.once_skips, 1);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cached_include_next_keeps_each_search_origin() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-cached-next");
+    for name in ["a", "b", "c"] {
+        std::fs::create_dir_all(dir.join(name)).unwrap();
+    }
+    std::fs::write(dir.join("a/chain.h"), "head __INCLUDE_LEVEL__ __COUNTER__\n#if __has_include_next(<chain.h>)\n#include_next <chain.h>\n#endif\n").unwrap();
+    let alias = dir.join("b/chain.h");
+    let _ = std::fs::remove_file(&alias);
+    std::os::unix::fs::symlink("../a/chain.h", alias).unwrap();
+    std::fs::write(dir.join("c/chain.h"), "tail __INCLUDE_LEVEL__\n").unwrap();
+    let opts = PreprocessOptions {
+        include_dirs: ["a", "b", "c"].map(|n| dir.join(n)).into(),
+        ..Default::default()
+    };
+    let source = "#include <chain.h>\n";
+    let got = preprocess(source, dir.join("main.c").to_str().unwrap(), &opts).unwrap();
+    assert_eq!(tokens(&got), tokens("head 1 0 head 2 1 tail 3"));
+    #[cfg(feature = "profile")]
+    {
+        let (_, stats) =
+            keel_c::preprocess_with_stats(source, dir.join("main.c").to_str().unwrap(), &opts)
+                .unwrap();
+        assert_eq!(stats.file_opens, 2);
+        assert_eq!(stats.token_cache_hits, 1);
+    }
+}
+
+#[test]
+fn top_level_text_is_independent_of_same_named_disk_header() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-cached-root");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("main.c");
+    std::fs::write(&path, "from_disk\n").unwrap();
+    let got = preprocess(
+        "#include \"main.c\"\n",
+        path.to_str().unwrap(),
+        &PreprocessOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(tokens(&got), tokens("from_disk"));
+}
+
+#[test]
+fn predefined_header_guard_keeps_nested_conditional_diagnostics() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-guard-diagnostics");
+    std::fs::create_dir_all(&dir).unwrap();
+    let opts = PreprocessOptions {
+        defines: vec![("GUARDED".into(), Some("1".into()))],
+        ..Default::default()
+    };
+    for invalid in ["#else\n#else\n", "#else\n#elif 1\n"] {
+        std::fs::write(
+            dir.join("guard.h"),
+            format!("#ifndef GUARDED\n#define GUARDED\n#if 1\n{invalid}#endif\n#endif\n"),
+        )
+        .unwrap();
+        let error = preprocess(
+            "#include \"guard.h\"\n",
+            dir.join("main.c").to_str().unwrap(),
+            &opts,
+        )
+        .unwrap_err();
+        assert!(error.message.contains("after #else"), "{error}");
+    }
+    let deep = format!(
+        "#ifndef GUARDED\n#define GUARDED\n{}{}#endif\n",
+        "#if 0\n".repeat(40),
+        "#endif\n".repeat(40)
+    );
+    std::fs::write(dir.join("guard.h"), deep).unwrap();
+    assert!(
+        preprocess(
+            "#include \"guard.h\"\n",
+            dir.join("main.c").to_str().unwrap(),
+            &opts
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn expansion_prefix_replacements_keep_suffix_arguments_and_token_order() {
+    let mut src = String::from(
+        "#define ID(x) x\n#define F(a,b) a + b\n#define PREFIX F(1,\n#define ERASE(x)\n#define CAT(a,b) a ## b\n#define NAME F\n#define STR(x) #x\n",
+    );
+    for _ in 0..128 {
+        src.push_str(
+            "before PREFIX ID(2)) after ID(NAME)(3,4) CAT(N,AME)(5,6) ERASE((7,8)) STR(a b)\n",
+        );
+    }
+    parity(&src);
+}
+
+#[test]
+fn header_resolution_cache_keeps_quoted_callers_and_search_kinds_separate() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-header-resolution");
+    for (name, value) in [("a", "10"), ("b", "20"), ("search", "30")] {
+        std::fs::create_dir_all(dir.join(name)).unwrap();
+        std::fs::write(dir.join(name).join("value.h"), value).unwrap();
+    }
+    for name in ["a", "b"] {
+        std::fs::write(
+            dir.join(name).join("entry.h"),
+            "#include \"value.h\"\n#include <value.h>\n__has_include(\"only.h\")\n",
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.join("a/only.h"), "").unwrap();
+    let _ = std::fs::remove_file(dir.join("b/only.h"));
+    let opts = PreprocessOptions {
+        include_dirs: vec![dir.join("search")],
+        ..Default::default()
+    };
+    let source = "#include \"a/entry.h\"\n#include \"b/entry.h\"\n#include \"a/entry.h\"\n#include \"b/entry.h\"\n";
+    let path = dir.join("main.c");
+    let got = preprocess(source, path.to_str().unwrap(), &opts).unwrap();
+    assert_eq!(tokens(&got), tokens("10 30 1 20 30 0 10 30 1 20 30 0"));
+    // Negative query results also expire at the end of the invocation.
+    std::fs::write(dir.join("b/only.h"), "").unwrap();
+    let fresh = preprocess(source, path.to_str().unwrap(), &opts).unwrap();
+    assert_eq!(tokens(&fresh), tokens("10 30 1 20 30 1 10 30 1 20 30 1"));
+}
