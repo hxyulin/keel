@@ -3192,7 +3192,7 @@ impl<'a> FunctionCompiler<'a> {
         text: impl FnOnce() -> String,
     ) {
         self.out
-            .native(NativeInstruction::new(opcode, fields), text);
+            .native(|| NativeInstruction::new(opcode, fields), text);
     }
 
     fn spill(&mut self, store: bool, float: bool, register: u8, slot: u32) {

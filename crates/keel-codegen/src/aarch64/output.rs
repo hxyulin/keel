@@ -21,12 +21,16 @@ impl Output {
     pub(super) fn push_str(&mut self, text: &str) {
         self.write_str(text).unwrap();
     }
-    pub(super) fn native(&mut self, instruction: Instruction, text: impl FnOnce() -> String) {
+    pub(super) fn native(
+        &mut self,
+        instruction: impl FnOnce() -> Instruction,
+        text: impl FnOnce() -> String,
+    ) {
         match self {
             Self::Text(out) => {
                 writeln!(out, "\t{}", text()).unwrap();
             }
-            Self::Structured(out) => out.instruction(instruction),
+            Self::Structured(out) => out.instruction(instruction()),
         }
     }
     pub(super) fn label(&mut self, label: String) {
