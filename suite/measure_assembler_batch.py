@@ -30,6 +30,7 @@ def interval(values, rng):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', type=Path, default=Path('target/release/keel'))
+    parser.add_argument('--baseline-compiler', type=Path, help='optional prior batch-capable Keel binary')
     parser.add_argument('--input-dir', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -64,9 +65,13 @@ def main():
         'method': 'Serial CLI wall time, randomized paired warm-cache rounds. Each mode assembles all files; batch uses one process, other modes one process per file. Includes input and output; excludes compilation, linking and verification. All batches match per-file Keel objects exactly, and instruction bytes match Clang. Does not isolate process spawn from other per-process initialization or compare parallel builds.',
         'rows': [],
     }
+    if args.baseline_compiler:
+        report['baseline_keel_sha256'] = sha(args.baseline_compiler.resolve())
     rng = random.Random(20261015)
     for name, sources in [('input-directory', inputs), ('tiny-functions', tiny_inputs)]:
         dirs = {mode: work / name / mode for mode in ['keel-per-file', 'keel-batch', 'clang-cc1as']}
+        if args.baseline_compiler:
+            dirs['keel-batch-before'] = work / name / 'keel-batch-before'
         for directory in dirs.values():
             directory.mkdir(parents=True, exist_ok=True)
         commands = {
@@ -74,6 +79,8 @@ def main():
             'keel-batch': [[str(compiler), 'asm', '--cpu', 'apple-m5', *map(str, sources), '--out-dir', str(dirs['keel-batch'])]],
             'clang-cc1as': [[str(clang), '-cc1as', '-triple', 'arm64-apple-macosx11.0.0', '-target-cpu', 'apple-m5', '-filetype', 'obj', str(path), '-o', str(dirs['clang-cc1as'] / (path.stem + '.o'))] for path in sources],
         }
+        if args.baseline_compiler:
+            commands['keel-batch-before'] = [[str(args.baseline_compiler.resolve()), 'asm', '--cpu', 'apple-m5', *map(str, sources), '--out-dir', str(dirs['keel-batch-before'])]]
 
         def invoke(mode):
             start = time.perf_counter_ns()
@@ -86,6 +93,8 @@ def main():
         for path in sources:
             files = {mode: directory / (path.stem + '.o') for mode, directory in dirs.items()}
             assert files['keel-per-file'].read_bytes() == files['keel-batch'].read_bytes(), path
+            if args.baseline_compiler:
+                assert files['keel-batch-before'].read_bytes() == files['keel-batch'].read_bytes(), path
             assert sections(files['keel-batch'])['__TEXT,__text'] == sections(files['clang-cc1as'])['__TEXT,__text'], path
         samples = {mode: [] for mode in commands}
         for i in range(args.warmups + args.pairs):
@@ -108,6 +117,10 @@ def main():
             'clang_over_batch_bootstrap_95': interval(clang_ratios, rng),
             'batch_objects_identical': True, 'text_matches_clang': True,
         }
+        if args.baseline_compiler:
+            ratios = [a / b for a, b in zip(samples['keel-batch'], samples['keel-batch-before'])]
+            row['batch_after_over_before'] = statistics.median(ratios)
+            row['batch_after_over_before_bootstrap_95'] = interval(ratios, rng)
         report['rows'].append(row)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + '\n')
