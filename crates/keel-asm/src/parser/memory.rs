@@ -361,3 +361,12 @@ fn ordered(op: &str, args: &[&str]) -> Result<u32, String> {
         &[("Rt", t.number), ("Rn", address.base.number)],
     )
 }
+
+/// LSE atomics use only a base address, optionally spelled with #0.
+pub(super) fn atomic_base(text: &str) -> Result<Reg, String> {
+    let a = address(&[text])?;
+    if a.mode != Mode::Offset || !matches!(a.offset, Offset::Immediate(0)) {
+        return Err("atomic addresses require [base] or [base, #0], without writeback".into());
+    }
+    Ok(a.base)
+}

@@ -256,6 +256,14 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             base_instruction(opcode, &expanded)
         }
+        "ngc" | "ngcs" => {
+            count(args, 2, 2)?;
+            let d = reg(args[0], false, true)?;
+            base_instruction(
+                if op == "ngc" { "sbc" } else { "sbcs" },
+                &[args[0], if d.bits == 64 { "xzr" } else { "wzr" }, args[1]],
+            )
+        }
         "adc" | "adcs" | "sbc" | "sbcs" | "sdiv" | "udiv" | "lslv" | "lsrv" | "asrv" | "rorv" => {
             count(args, 3, 3)?;
             let r = regs(args)?;

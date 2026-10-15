@@ -1108,6 +1108,374 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         requirements: &[],
     },
     Encoding {
+        name: "CASAB_C32_comswap",
+        base: 0x08e07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASAH_C32_comswap",
+        base: 0x48e07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASALB_C32_comswap",
+        base: 0x08e0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASALH_C32_comswap",
+        base: 0x48e0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASAL_C32_comswap",
+        base: 0x88e0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASAL_C64_comswap",
+        base: 0xc8e0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASA_C32_comswap",
+        base: 0x88e07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASA_C64_comswap",
+        base: 0xc8e07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASB_C32_comswap",
+        base: 0x08a07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASH_C32_comswap",
+        base: 0x48a07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASLB_C32_comswap",
+        base: 0x08a0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASLH_C32_comswap",
+        base: 0x48a0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASL_C32_comswap",
+        base: 0x88a0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CASL_C64_comswap",
+        base: 0xc8a0fc00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CAS_C32_comswap",
+        base: 0x88a07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "CAS_C64_comswap",
+        base: 0xc8a07c00,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
         name: "CBNZ_32_compbranch",
         base: 0x35000000,
         mask: 0xff000000,
@@ -1725,6 +2093,28 @@ pub(super) const ENCODINGS: &[Encoding] = &[
                 width: 5,
             },
         ],
+        requirements: &[],
+    },
+    Encoding {
+        name: "DMB_BO_barriers",
+        base: 0xd50330bf,
+        mask: 0xfffff0ff,
+        fields: &[Field {
+            name: "CRm",
+            start: 8,
+            width: 4,
+        }],
+        requirements: &[],
+    },
+    Encoding {
+        name: "DSB_BO_barriers",
+        base: 0xd503309f,
+        mask: 0xfffff0ff,
+        fields: &[Field {
+            name: "CRm",
+            start: 8,
+            width: 4,
+        }],
         requirements: &[],
     },
     Encoding {
@@ -3225,6 +3615,385 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         requirements: &[Requirement::Feature("FEAT_FP")],
     },
     Encoding {
+        name: "ISB_BI_barriers",
+        base: 0xd50330df,
+        mask: 0xfffff0ff,
+        fields: &[Field {
+            name: "CRm",
+            start: 8,
+            width: 4,
+        }],
+        requirements: &[],
+    },
+    Encoding {
+        name: "LDADDAB_32_memop",
+        base: 0x38a00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDAH_32_memop",
+        base: 0x78a00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDALB_32_memop",
+        base: 0x38e00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDALH_32_memop",
+        base: 0x78e00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDAL_32_memop",
+        base: 0xb8e00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDAL_64_memop",
+        base: 0xf8e00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDA_32_memop",
+        base: 0xb8a00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDA_64_memop",
+        base: 0xf8a00000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDB_32_memop",
+        base: 0x38200000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDH_32_memop",
+        base: 0x78200000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDLB_32_memop",
+        base: 0x38600000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDLH_32_memop",
+        base: 0x78600000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDL_32_memop",
+        base: 0xb8600000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADDL_64_memop",
+        base: 0xf8600000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADD_32_memop",
+        base: 0xb8200000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDADD_64_memop",
+        base: 0xf8200000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
         name: "LDARB_LR32_ldstord",
         base: 0x08dffc00,
         mask: 0xfffffc00,
@@ -3295,6 +4064,742 @@ pub(super) const ENCODINGS: &[Encoding] = &[
             },
         ],
         requirements: &[],
+    },
+    Encoding {
+        name: "LDCLRAB_32_memop",
+        base: 0x38a01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRAH_32_memop",
+        base: 0x78a01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRALB_32_memop",
+        base: 0x38e01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRALH_32_memop",
+        base: 0x78e01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRAL_32_memop",
+        base: 0xb8e01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRAL_64_memop",
+        base: 0xf8e01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRA_32_memop",
+        base: 0xb8a01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRA_64_memop",
+        base: 0xf8a01000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRB_32_memop",
+        base: 0x38201000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRH_32_memop",
+        base: 0x78201000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRLB_32_memop",
+        base: 0x38601000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRLH_32_memop",
+        base: 0x78601000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRL_32_memop",
+        base: 0xb8601000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLRL_64_memop",
+        base: 0xf8601000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLR_32_memop",
+        base: 0xb8201000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDCLR_64_memop",
+        base: 0xf8201000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORAB_32_memop",
+        base: 0x38a02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORAH_32_memop",
+        base: 0x78a02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORALB_32_memop",
+        base: 0x38e02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORALH_32_memop",
+        base: 0x78e02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORAL_32_memop",
+        base: 0xb8e02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORAL_64_memop",
+        base: 0xf8e02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORA_32_memop",
+        base: 0xb8a02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORA_64_memop",
+        base: 0xf8a02000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORB_32_memop",
+        base: 0x38202000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORH_32_memop",
+        base: 0x78202000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORLB_32_memop",
+        base: 0x38602000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORLH_32_memop",
+        base: 0x78602000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORL_32_memop",
+        base: 0xb8602000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEORL_64_memop",
+        base: 0xf8602000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEOR_32_memop",
+        base: 0xb8202000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDEOR_64_memop",
+        base: 0xf8202000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
     },
     Encoding {
         name: "LDP_32_ldstpair_off",
@@ -5260,6 +6765,1846 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         requirements: &[Requirement::Feature("FEAT_FP")],
     },
     Encoding {
+        name: "LDSETAB_32_memop",
+        base: 0x38a03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETAH_32_memop",
+        base: 0x78a03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETALB_32_memop",
+        base: 0x38e03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETALH_32_memop",
+        base: 0x78e03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETAL_32_memop",
+        base: 0xb8e03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETAL_64_memop",
+        base: 0xf8e03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETA_32_memop",
+        base: 0xb8a03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETA_64_memop",
+        base: 0xf8a03000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETB_32_memop",
+        base: 0x38203000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETH_32_memop",
+        base: 0x78203000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETLB_32_memop",
+        base: 0x38603000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETLH_32_memop",
+        base: 0x78603000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETL_32_memop",
+        base: 0xb8603000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSETL_64_memop",
+        base: 0xf8603000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSET_32_memop",
+        base: 0xb8203000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSET_64_memop",
+        base: 0xf8203000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXAB_32_memop",
+        base: 0x38a04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXAH_32_memop",
+        base: 0x78a04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXALB_32_memop",
+        base: 0x38e04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXALH_32_memop",
+        base: 0x78e04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXAL_32_memop",
+        base: 0xb8e04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXAL_64_memop",
+        base: 0xf8e04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXA_32_memop",
+        base: 0xb8a04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXA_64_memop",
+        base: 0xf8a04000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXB_32_memop",
+        base: 0x38204000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXH_32_memop",
+        base: 0x78204000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXLB_32_memop",
+        base: 0x38604000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXLH_32_memop",
+        base: 0x78604000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXL_32_memop",
+        base: 0xb8604000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAXL_64_memop",
+        base: 0xf8604000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAX_32_memop",
+        base: 0xb8204000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMAX_64_memop",
+        base: 0xf8204000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINAB_32_memop",
+        base: 0x38a05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINAH_32_memop",
+        base: 0x78a05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINALB_32_memop",
+        base: 0x38e05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINALH_32_memop",
+        base: 0x78e05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINAL_32_memop",
+        base: 0xb8e05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINAL_64_memop",
+        base: 0xf8e05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINA_32_memop",
+        base: 0xb8a05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINA_64_memop",
+        base: 0xf8a05000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINB_32_memop",
+        base: 0x38205000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINH_32_memop",
+        base: 0x78205000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINLB_32_memop",
+        base: 0x38605000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINLH_32_memop",
+        base: 0x78605000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINL_32_memop",
+        base: 0xb8605000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMINL_64_memop",
+        base: 0xf8605000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMIN_32_memop",
+        base: 0xb8205000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDSMIN_64_memop",
+        base: 0xf8205000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXAB_32_memop",
+        base: 0x38a06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXAH_32_memop",
+        base: 0x78a06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXALB_32_memop",
+        base: 0x38e06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXALH_32_memop",
+        base: 0x78e06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXAL_32_memop",
+        base: 0xb8e06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXAL_64_memop",
+        base: 0xf8e06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXA_32_memop",
+        base: 0xb8a06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXA_64_memop",
+        base: 0xf8a06000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXB_32_memop",
+        base: 0x38206000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXH_32_memop",
+        base: 0x78206000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXLB_32_memop",
+        base: 0x38606000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXLH_32_memop",
+        base: 0x78606000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXL_32_memop",
+        base: 0xb8606000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAXL_64_memop",
+        base: 0xf8606000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAX_32_memop",
+        base: 0xb8206000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMAX_64_memop",
+        base: 0xf8206000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINAB_32_memop",
+        base: 0x38a07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINAH_32_memop",
+        base: 0x78a07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINALB_32_memop",
+        base: 0x38e07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINALH_32_memop",
+        base: 0x78e07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINAL_32_memop",
+        base: 0xb8e07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINAL_64_memop",
+        base: 0xf8e07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINA_32_memop",
+        base: 0xb8a07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINA_64_memop",
+        base: 0xf8a07000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINB_32_memop",
+        base: 0x38207000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINH_32_memop",
+        base: 0x78207000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINLB_32_memop",
+        base: 0x38607000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINLH_32_memop",
+        base: 0x78607000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINL_32_memop",
+        base: 0xb8607000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMINL_64_memop",
+        base: 0xf8607000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMIN_32_memop",
+        base: 0xb8207000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "LDUMIN_64_memop",
+        base: 0xf8207000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
         name: "LDURB_32_ldst_unscaled",
         base: 0x38400000,
         mask: 0xffe00c00,
@@ -5728,6 +9073,359 @@ pub(super) const ENCODINGS: &[Encoding] = &[
             },
         ],
         requirements: &[],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_D2_d",
+        base: 0x6f00e400,
+        mask: 0xfff8fc00,
+        fields: &[
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_D_ds",
+        base: 0x2f00e400,
+        mask: 0xfff8fc00,
+        fields: &[
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_L_hl",
+        base: 0x0f008400,
+        mask: 0xbff8dc00,
+        fields: &[
+            Field {
+                name: "Q",
+                start: 30,
+                width: 1,
+            },
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "cmode",
+                start: 12,
+                width: 4,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_L_sl",
+        base: 0x0f000400,
+        mask: 0xbff89c00,
+        fields: &[
+            Field {
+                name: "Q",
+                start: 30,
+                width: 1,
+            },
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "cmode",
+                start: 12,
+                width: 4,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_M_sm",
+        base: 0x0f00c400,
+        mask: 0xbff8ec00,
+        fields: &[
+            Field {
+                name: "Q",
+                start: 30,
+                width: 1,
+            },
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "cmode",
+                start: 12,
+                width: 4,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
+    },
+    Encoding {
+        name: "MOVI_asimdimm_N_b",
+        base: 0x0f00e400,
+        mask: 0xbff8fc00,
+        fields: &[
+            Field {
+                name: "Q",
+                start: 30,
+                width: 1,
+            },
+            Field {
+                name: "a",
+                start: 18,
+                width: 1,
+            },
+            Field {
+                name: "b",
+                start: 17,
+                width: 1,
+            },
+            Field {
+                name: "c",
+                start: 16,
+                width: 1,
+            },
+            Field {
+                name: "d",
+                start: 9,
+                width: 1,
+            },
+            Field {
+                name: "e",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "f",
+                start: 7,
+                width: 1,
+            },
+            Field {
+                name: "g",
+                start: 6,
+                width: 1,
+            },
+            Field {
+                name: "h",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_AdvSIMD")],
     },
     Encoding {
         name: "MOVK_32_movewide",
@@ -8674,6 +12372,385 @@ pub(super) const ENCODINGS: &[Encoding] = &[
             },
         ],
         requirements: &[],
+    },
+    Encoding {
+        name: "SVC_EX_exception",
+        base: 0xd4000001,
+        mask: 0xffe0001f,
+        fields: &[Field {
+            name: "imm16",
+            start: 5,
+            width: 16,
+        }],
+        requirements: &[],
+    },
+    Encoding {
+        name: "SWPAB_32_memop",
+        base: 0x38a08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPAH_32_memop",
+        base: 0x78a08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPALB_32_memop",
+        base: 0x38e08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPALH_32_memop",
+        base: 0x78e08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPAL_32_memop",
+        base: 0xb8e08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPAL_64_memop",
+        base: 0xf8e08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPA_32_memop",
+        base: 0xb8a08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPA_64_memop",
+        base: 0xf8a08000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPB_32_memop",
+        base: 0x38208000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPH_32_memop",
+        base: 0x78208000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPLB_32_memop",
+        base: 0x38608000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPLH_32_memop",
+        base: 0x78608000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPL_32_memop",
+        base: 0xb8608000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWPL_64_memop",
+        base: 0xf8608000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWP_32_memop",
+        base: 0xb8208000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
+    },
+    Encoding {
+        name: "SWP_64_memop",
+        base: 0xf8208000,
+        mask: 0xffe0fc00,
+        fields: &[
+            Field {
+                name: "Rs",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "Rt",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_LSE")],
     },
     Encoding {
         name: "TBNZ_only_testbranch",

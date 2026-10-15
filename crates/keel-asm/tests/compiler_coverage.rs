@@ -1,0 +1,90 @@
+//! Every compiler fixture must assemble through Keel, in addition to the
+//! compiler suites that use Clang for reference assembly and execution.
+#![cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use keel_codegen::{
+    Pools,
+    aarch64::{REGISTERS, compile_with},
+};
+use std::{path::Path, process::Command};
+
+#[test]
+fn all_backend_fixtures_assemble_in_normal_tiny_and_optimized_configurations() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-codegen/tests/programs");
+    let tiny = Pools {
+        caller_saved: &[9, 10],
+        callee_saved: &[19, 20],
+        float_caller_saved: &[19, 20],
+        float_callee_saved: &[8, 9],
+    };
+    let mut count = 0;
+    for path in std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "keel"))
+    {
+        let source = std::fs::read_to_string(&path).unwrap();
+        if source
+            .lines()
+            .find_map(|s| s.strip_prefix("; target: "))
+            .is_some_and(|t| t != "aarch64-apple-darwin")
+        {
+            continue;
+        }
+        for (pools, opt) in [(REGISTERS, false), (tiny, false), (REGISTERS, true)] {
+            let mut module = keel_ir::parse(&source).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            if opt {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            let source = compile_with(&module, &pools).unwrap();
+            keel_asm::assemble_object(&source).unwrap_or_else(|e| {
+                panic!("{} optimize={opt} pools={pools:?}: {e}", path.display())
+            });
+            count += 1;
+        }
+    }
+    assert!(count > 100, "fixture discovery failed");
+}
+#[test]
+fn all_c_fixtures_assemble_with_and_without_optimization_and_debug_info() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-c/tests/programs");
+    let mut count = 0;
+    for path in std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "c"))
+    {
+        let preprocessed = Command::new("clang")
+            .args(["-E", "-std=c11"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(preprocessed.status.success());
+        let source = String::from_utf8(preprocessed.stdout).unwrap();
+        for debug_info in [false, true] {
+            for opt in [false, true] {
+                let mut module = keel_c::compile(
+                    &source,
+                    path.to_str().unwrap(),
+                    keel_c::Options {
+                        debug_info,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                if opt {
+                    keel_opt::optimize(&mut module).unwrap();
+                }
+                let source =
+                    keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin)
+                        .unwrap();
+                keel_asm::assemble_object(&source).unwrap_or_else(|e| {
+                    panic!("{} optimize={opt} debug={debug_info}: {e}", path.display())
+                });
+                count += 1;
+            }
+        }
+    }
+    assert!(count > 40, "fixture discovery failed");
+}

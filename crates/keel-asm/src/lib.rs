@@ -193,8 +193,8 @@ enum Requirement {
     NotEqual(&'static str, u32),
 }
 
-// The assembler's fixed Apple arm64 target supports floating-point and Advanced SIMD registers.
-const TARGET_FEATURES: &[&str] = &["FEAT_FP", "FEAT_AdvSIMD"];
+// Fixed Apple Silicon target: scalar FP, Advanced SIMD, and LSE atomics.
+const TARGET_FEATURES: &[&str] = &["FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE"];
 
 struct Encoding {
     name: &'static str,

@@ -290,8 +290,10 @@ dependencies = [
 name = "keel-asm"
 version = "0.1.0"
 dependencies = [
+ "keel-c",
  "keel-codegen",
  "keel-ir",
+ "keel-opt",
  "object",
 ]
 

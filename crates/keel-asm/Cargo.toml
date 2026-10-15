@@ -9,3 +9,5 @@ license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 keel-codegen = { path = "../keel-codegen" }
 keel-ir = { path = "../keel-ir" }
+keel-opt = { path = "../keel-opt" }
+keel-c = { path = "../keel-c" }

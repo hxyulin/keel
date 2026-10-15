@@ -85,8 +85,15 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     count(args, 1, 1)?;
-    if op == "brk" {
-        return encode("BRK_EX_exception", &[("imm16", unsigned(args[0], 65535)?)]);
+    if op == "brk" || op == "svc" {
+        return encode(
+            if op == "brk" {
+                "BRK_EX_exception"
+            } else {
+                "SVC_EX_exception"
+            },
+            &[("imm16", unsigned(args[0], 65535)?)],
+        );
     }
     let r = reg(args[0], false, true)?;
     if r.bits != 64 {

@@ -78,6 +78,8 @@ machine-readable ISA data. It supports integer arithmetic, logical and
 bitfield operations, conditional branches/selects, indirect calls, scalar
 floating-point arithmetic/conversions, popcount’s SIMD instructions, and
 integer/FP/SIMD loads and stores (including pairs and acquire/release).
+Scalar LSE atomics include read-modify-write operations and compare-and-swap;
+DMB/DSB/ISB barriers, `ngc`/`ngcs`, `svc`, and SIMD `movi` are supported too.
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
 Data support includes initialized/zero-fill/TLS sections, integer directives,

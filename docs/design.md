@@ -916,8 +916,8 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 364 instruction forms. Generated requirements retain
-Arm’s `FEAT_FP` and `FEAT_AdvSIMD` availability checks; the fixed
+subset currently has 534 instruction forms. Generated requirements retain
+Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, and `FEAT_LSE` availability checks; the fixed
 Apple arm64 target enables those features. Encoding conditions are distinct
 from feature requirements: for example, byte register-offset forms exclude
 `option == 0b011`, which has a separate instruction form. The generator
@@ -983,7 +983,9 @@ Branches include `b.<condition>`, `cbz/cbnz`, and `tbz/tbnz`, with checked
 signed byte-displacement ranges of ±1 MiB and ±32 KiB respectively. Test
 branches allow X names for low bits, but W names require bit indices <32.
 Out-of-range branches are errors; the assembler does not relax them.
-`br/blr` require X registers; `brk` takes a 16-bit immediate.
+`br/blr` require X registers; `brk` and `svc` take a 16-bit immediate.
+`ngc`/`ngcs` lower to SBC/SBCS with a zero-register first input, for W/X
+operands including zero registers.
 
 **Floating-point and population count.** Scalar S/D forms include
 `fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
@@ -994,8 +996,12 @@ remain unsupported. `fmov` also supports S/W and D/X bitwise transfers and
 all 256 scalar FP immediate encodings (zero needs a register transfer).
 
 Keel’s scalar popcount lowering uses the supported SIMD `cnt` (8B/16B)
-and `addv` reductions (8B/16B, 4H/8H, 4S). General vector arithmetic remains
-unsupported. FP and SIMD operand widths and register numbers are checked.
+and `addv` reductions (8B/16B, 4H/8H, 4S). `movi` supports all six modified
+immediate forms: byte replication (8B/16B); halfwords (4H/8H) with LSL #0/#8;
+words (2S/4S) with LSL #0/#8/#16/#24 or MSL #8/#16; scalar D and vector 2D
+64-bit masks whose bytes are each 00 or FF. Byte and 64-bit mask forms take
+no shift operand. General vector arithmetic remains unsupported. FP and SIMD
+operand widths and register numbers are checked.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
 against their operand roles. `fp` and `lr` name x29 and x30.
@@ -1031,8 +1037,22 @@ registers with the same number are distinct and do not overlap.
 
 `ldar`/`stlr` support W/X registers, with `ldarb`/`stlrb` and `ldarh`/`stlrh`
 for byte/halfword W transfers. These accept only `[base]` or `[base, #0]`,
-without writeback. Other atomic operations, exclusive accesses,
-non-temporal pairs, unprivileged accesses, and literal loads remain
+without writeback. Scalar LSE atomics support LDADD/LDCLR/LDSET/LDEOR,
+LDSMIN/LDSMAX/LDUMIN/LDUMAX, SWP, and CAS, each with relaxed, acquire (`a`),
+release (`l`), and acquire-release (`al`) variants. B/H suffixes select byte
+and halfword W transfers; unsuffixed W/X forms transfer 32/64 bits. Both data
+registers must have the same width; SP is allowed only as the address base,
+and zero registers are accepted as data operands. Addresses are `[Xn|SP]`
+with optional #0 and no writeback/register offsets. Store-only aliases
+STADD/STCLR/STSET/STEOR/STSMIN/STSMAX/STUMIN/STUMAX support relaxed/release
+ordering and map the result to ZR. Acquire behavior with a ZR destination is
+exactly as specified by Arm; no ordering bits are silently rewritten.
+
+DMB and DSB accept OSH/NSH/ISH load/store/full variants and LD/ST/SY. ISB
+accepts SY, its default when omitted. All three also accept a raw 4-bit
+numeric option. LSE requirements are retained in generated records and
+explicitly enabled for the fixed Apple Silicon target. Pair CAS, exclusive
+accesses, non-temporal pairs, unprivileged accesses, and literal loads remain
 unsupported. Symbolic page-offset memory operands are supported below.
 
 Named labels are case-sensitive; mnemonics and register names accept either
@@ -1083,9 +1103,9 @@ file because Mach-O has no applicable external instruction relocation.
 emit little-endian integers, with comma-separated operands. Constants accept
 decimal/hexadecimal values and addition/subtraction; values must fit the
 signed-or-unsigned range of their width. `.space`/`.zero` reserve bytes with
-an optional byte fill value. Raw strings can be emitted as byte lists, as
-Keel does; quoted-string and floating-point data directives are not yet
-supported.
+an optional byte fill value. Raw strings can be emitted as byte lists or
+with `.ascii`/`.asciz` (see debug/data support below). Floating-point data
+directives remain unsupported; Keel emits their integer bit patterns.
 
 `.data`, `.const`, `.const_data`, and `.bss` switch to `__DATA,__data`,
 `__TEXT,__const`, `__DATA,__const`, and `__DATA,__bss`. `.section` also
@@ -1268,3 +1288,18 @@ line rows and data encodings against Clang, verify Keel’s types/scopes/variabl
 with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
 assembled frame. Cross-atom conditional branches and ADR remain errors;
 unrepresentable layouts retain their DWARF unwind records.
+
+
+**Compiler-output coverage.** The assembler suite checks every backend
+fixture with normal/reduced register pools and after optimization, and every
+C fixture with/without optimization and debug information. These checks use
+Keel's assembler for the complete generated source, retaining all directives;
+Clang remains the reference assembler in the separate compiler suites. Native
+assembler tests run the atomic driver (including multithreaded increments and
+CAS locks), 128-bit arithmetic, and inline assembly containing SVC and MOVI.
+Differential tests cover all scalar LSE ordering/width forms, store aliases,
+barrier options, and all modified-immediate MOVI values for supported lane
+arrangements. The fixture matrix currently contains 170 configurations; an
+end-to-end coverage audit assembles, links, and runs those configurations,
+with DWARF verification for the 22 C debug configurations. Fixture coverage
+does not imply complete A64 ISA or GNU assembler syntax coverage.

@@ -29,6 +29,10 @@ MEMORY_NAMES += [f"{op}_{tag}_ldstpair_{form}" for op in ("LDP", "STP")
                  for tag in ("32", "64", "S", "D", "Q") for form in ("off", "pre", "post")]
 MEMORY_NAMES += [f"{op}_{order}{bits}_ldstord" for op, order in (("LDAR", "LR"), ("STLR", "SL")) for bits in (32, 64)]
 MEMORY_NAMES += [f"{op}{suffix}_{order}32_ldstord" for op, order in (("LDAR", "LR"), ("STLR", "SL")) for suffix in ("B", "H")]
+ATOMIC_NAMES = [f"{op}{order}{suffix}_{'C' if op == 'CAS' else ''}{bits}_{'comswap' if op == 'CAS' else 'memop'}"
+                for op in ("LDADD", "LDCLR", "LDSET", "LDEOR", "LDSMIN", "LDSMAX", "LDUMIN", "LDUMAX", "SWP", "CAS")
+                for order in ("", "A", "L", "AL") for suffix, bits in (("B",32),("H",32),("",32),("",64))]
+BARRIER_NAMES = ["DMB_BO_barriers", "DSB_BO_barriers", "ISB_BI_barriers"]
 ARITHMETIC_NAMES = []
 for bits in (32, 64):
     ARITHMETIC_NAMES += [f"{op}_{bits}_log_shift" for op in ("AND", "ANDS", "ORR", "EOR", "BIC", "BICS", "ORN", "EON")]
@@ -43,7 +47,7 @@ for bits in (32, 64):
     ARITHMETIC_NAMES += [f"{op}_{bits}M_bitfield" for op in ("SBFM", "UBFM", "BFM")]
     ARITHMETIC_NAMES += [f"EXTR_{bits}_extract"]
 ARITHMETIC_NAMES += ["REV32_64_dp_1src", "SMULH_64_dp_3src", "UMULH_64_dp_3src", "SMADDL_64WA_dp_3src", "UMADDL_64WA_dp_3src"]
-CONTROL_NAMES = ["BR_64_branch_reg", "BLR_64_branch_reg", "BRK_EX_exception", "B_only_condbranch", "TBZ_only_testbranch", "TBNZ_only_testbranch"]
+CONTROL_NAMES = ["BR_64_branch_reg", "BLR_64_branch_reg", "BRK_EX_exception", "SVC_EX_exception", "B_only_condbranch", "TBZ_only_testbranch", "TBNZ_only_testbranch"]
 CONTROL_NAMES += [f"{op}_{bits}_compbranch" for op in ("CBZ", "CBNZ") for bits in (32, 64)]
 FP_NAMES = []
 for tag in ("S", "D"):
@@ -61,7 +65,7 @@ NAMES = sorted(set(
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 
@@ -94,7 +98,7 @@ def requirements(node):
         assert node["name"] == "IsFeatureImplemented" and node["parameters"] == []
         assert len(node["arguments"]) == 1 and node["arguments"][0]["_type"] == "AST.Identifier"
         feature = node["arguments"][0]["value"]
-        assert feature in ("FEAT_FP", "FEAT_AdvSIMD")
+        assert feature in ("FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE")
         return [f'Requirement::Feature("{feature}")']
     if node.get("_type") == "AST.BinaryOp":
         if node["op"] == "&&":

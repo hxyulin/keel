@@ -1,4 +1,5 @@
 mod arithmetic;
+mod atomic;
 mod atoms;
 mod compact;
 mod control;
@@ -135,6 +136,9 @@ fn is_integer(s: &str) -> bool {
 }
 
 fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
+    if let Some(word) = atomic::instruction(op, a)? {
+        return Ok(word);
+    }
     match op {
         "ldr" | "str" | "ldrb" | "strb" | "ldrh" | "strh" | "ldrsb" | "ldrsh" | "ldrsw"
         | "ldur" | "stur" | "ldurb" | "sturb" | "ldurh" | "sturh" | "ldursb" | "ldursh"
@@ -275,7 +279,8 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             encode("NOP_HI_hints", &[])
         }
         "cnt" | "addv" => vector::instruction(op, a),
-        "br" | "blr" | "brk" => control::instruction(op, a),
+        "movi" => vector::move_immediate(a),
+        "br" | "blr" | "brk" | "svc" => control::instruction(op, a),
         "fmov" | "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" | "fadd"
         | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fcsel" | "fmadd" | "fmsub" | "fnmadd"
         | "fnmsub" | "fcmp" | "fcmpe" | "fcvt" | "scvtf" | "ucvtf" | "fcvtzs" | "fcvtzu" => {
