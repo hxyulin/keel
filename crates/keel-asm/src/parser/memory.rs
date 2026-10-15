@@ -225,7 +225,7 @@ fn writeback_overlap(t: &Transfer, address: &Address) -> Result<(), String> {
 }
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
-    if matches!(op, "ldp" | "stp") {
+    if matches!(op, "ldp" | "stp" | "ldpsw") {
         return pair(op, args);
     }
     if matches!(op, "ldar" | "ldarb" | "ldarh" | "stlr" | "stlrb" | "stlrh") {
@@ -375,7 +375,7 @@ fn pair(op: &str, args: &[&str]) -> Result<u32, String> {
     if a.bits != b.bits || a.class != b.class || a.bits < 32 {
         return Err("register pairs require matching W, X, S, D, or Q registers".into());
     }
-    if op == "ldp" && a.number == b.number {
+    if op != "stp" && a.number == b.number {
         return Err("load-pair destination registers must differ".into());
     }
     let address = address(&args[2..])?;
@@ -384,7 +384,18 @@ fn pair(op: &str, args: &[&str]) -> Result<u32, String> {
     let Offset::Immediate(offset) = address.offset else {
         return Err("register pairs require an immediate offset".into());
     };
-    let imm7 = signed_scaled(offset, i64::from(a.bits / 8), 7)?;
+    if op == "ldpsw" && (a.class != Class::Gpr || a.bits != 64) {
+        return Err("LDPSW requires X registers".into());
+    }
+    let imm7 = signed_scaled(
+        offset,
+        if op == "ldpsw" {
+            4
+        } else {
+            i64::from(a.bits / 8)
+        },
+        7,
+    )?;
     let form = match address.mode {
         Mode::Offset => "off",
         Mode::Pre => "pre",

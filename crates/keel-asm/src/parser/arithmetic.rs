@@ -429,7 +429,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             )
         }
         "lsl" | "lsr" | "asr" | "ror" | "sbfm" | "ubfm" | "bfm" | "bfi" | "bfxil" | "ubfx"
-        | "sbfx" | "extr" | "uxtb" | "uxth" | "sxtb" | "sxth" | "sxtw" => bitfield(op, args),
+        | "sbfx" | "ubfiz" | "sbfiz" | "extr" | "uxtb" | "uxth" | "sxtb" | "sxth" | "sxtw" => {
+            bitfield(op, args)
+        }
         _ => Err(format!("unsupported instruction `{op}`")),
     }
 }
@@ -519,6 +521,8 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             match op {
                 "bfi" => ("BFM", (d.bits - first) % d.bits, width - 1),
+                "ubfiz" => ("UBFM", (d.bits - first) % d.bits, width - 1),
+                "sbfiz" => ("SBFM", (d.bits - first) % d.bits, width - 1),
                 "bfxil" => ("BFM", first, first + width - 1),
                 "sbfx" => ("SBFM", first, first + width - 1),
                 _ => ("UBFM", first, first + width - 1),

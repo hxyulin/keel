@@ -147,6 +147,20 @@ pub(super) fn instruction(
             ];
             return encode_with_features("SYS_CR_systeminstrs", &fields, features).map(Some);
         }
+        "ldapr" | "ldaprb" | "ldaprh" => {
+            count(a, 2, 2)?;
+            let t = reg(a[0], false, true)?;
+            if op != "ldapr" && t.bits != 32 {
+                return Err("byte/halfword LDAPR requires W registers".into());
+            }
+            let n = super::memory::atomic_base(a[1])?;
+            return encode_named_features(
+                format_args!("{}_{}L_memop", upper(op), t.bits),
+                &[(FieldId::Rt, t.number), (FieldId::Rn, n.number)],
+                features,
+            )
+            .map(Some);
+        }
         "prfm" | "prfum" => return super::memory::prefetch(op, a).map(Some),
         _ => return crypto(op, a, features),
     }
@@ -160,6 +174,67 @@ fn xreg(s: &str, sp: bool) -> Result<u32, String> {
 }
 
 fn crypto(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32>, String> {
+    if matches!(
+        op,
+        "smax" | "smin" | "umax" | "umin" | "cnt" | "ctz" | "abs"
+    ) && a
+        .first()
+        .is_some_and(|s| s.starts_with(['w', 'x', 'W', 'X']))
+    {
+        let unary = matches!(op, "cnt" | "ctz" | "abs");
+        count(a, if unary { 2 } else { 3 }, if unary { 2 } else { 3 })?;
+        let d = reg(a[0], false, true)?;
+        let n = reg(a[1], false, true)?;
+        super::same_width(d, n)?;
+        let fields = [(FieldId::Rd, d.number), (FieldId::Rn, n.number)];
+        if unary {
+            return encode_named_features(
+                format_args!("{}_{}_dp_1src", upper(op), d.bits),
+                &fields,
+                features,
+            )
+            .map(Some);
+        }
+        if super::is_integer(a[2]) {
+            let imm = super::integer(a[2])?;
+            if !(if op.starts_with('s') {
+                -128..=127
+            } else {
+                0..=255
+            })
+            .contains(&imm)
+            {
+                return Err("CSSC immediate out of range".into());
+            }
+            return encode_named_features(
+                format_args!(
+                    "{}_{}{}_minmax_imm",
+                    upper(op),
+                    d.bits,
+                    if op.starts_with('u') { "U" } else { "" }
+                ),
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n.number),
+                    (FieldId::imm8, (imm & 255) as u32),
+                ],
+                features,
+            )
+            .map(Some);
+        }
+        let m = reg(a[2], false, true)?;
+        super::same_width(d, m)?;
+        return encode_named_features(
+            format_args!("{}_{}_dp_2src", upper(op), d.bits),
+            &[
+                (FieldId::Rd, d.number),
+                (FieldId::Rn, n.number),
+                (FieldId::Rm, m.number),
+            ],
+            features,
+        )
+        .map(Some);
+    }
     if matches!(op, "pmull" | "pmull2") && a.first().is_some_and(|s| lower(s).ends_with(".1q")) {
         count(a, 3, 3)?;
         if !features.supports("FEAT_PMULL") {

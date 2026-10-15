@@ -104,7 +104,7 @@ fn invalid_operands_and_unsupported_syntax_are_diagnostics() {
         ".cfi_startproc",
         ".section __DATA,__unsupported",
         ".p2align 17",
-        ".p2align 2, 0",
+        ".p2align 2, 256",
         ".byte 256",
         "L: nop\nL: ret",
         "b 1f",
@@ -371,7 +371,7 @@ fn invalid_memory_operands_have_line_diagnostics() {
         "ldar x0, [x1, #0]!",
         "ldar x0, [x1, x2]",
         "ldnp x0, x2, [x1]",
-        "prfm pldl1keep, [x1]",
+        "prfm pldl1keep, [x1, #1]",
     ] {
         let error = assemble(&format!("nop\n{bad}")).expect_err(bad);
         assert_eq!(error.line, 2, "{bad}: {error}");

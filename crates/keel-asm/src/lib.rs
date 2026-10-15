@@ -47,6 +47,8 @@ pub struct Symbol {
     /// Zero is __TEXT,__text; subsequent indices address Assembly::sections.
     pub section: Option<usize>,
     pub global: bool,
+    /// Tentative common definition: byte size and power-of-two alignment.
+    pub common: Option<(u64, u8)>,
 }
 
 /// Darwin arm64 instruction relocation types (Apple's arm64/reloc.h).
@@ -95,6 +97,10 @@ pub struct Relocation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionKind {
     Data,
+    CString,
+    Literal4,
+    Literal8,
+    Literal16,
     /// DWARF metadata, excluded from the linked image.
     Debug,
     /// Runtime DWARF call-frame records.
@@ -111,6 +117,10 @@ impl SectionKind {
     fn flags(self) -> u32 {
         match self {
             Self::Data => 0,
+            Self::CString => 2,
+            Self::Literal4 => 3,
+            Self::Literal8 => 4,
+            Self::Literal16 => 0xe,
             Self::Debug => 0x0200_0000,
             Self::EhFrame => 0x6800_000b,
             Self::ZeroFill => 1,
@@ -169,10 +179,27 @@ impl Default for BuildVersion {
     }
 }
 
+/// A Mach-O linker optimization hint referencing text instruction offsets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkerOptimizationHint {
+    pub kind: u8,
+    pub offsets: [u64; 3],
+}
+impl LinkerOptimizationHint {
+    fn argument_count(&self) -> Result<usize, Error> {
+        match self.kind {
+            1 | 2 | 7 | 8 => Ok(2),
+            3..=6 => Ok(3),
+            _ => Err(Error::new(0, "invalid linker optimization hint kind")),
+        }
+    }
+}
+
 /// Encoded text, extra data sections, and symbols before writing the object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assembly {
     pub build_version: BuildVersion,
+    pub linker_optimization_hints: Vec<LinkerOptimizationHint>,
     /// Permit the Mach-O linker to reorder/dead-strip symbol-defined atoms.
     pub subsections_via_symbols: bool,
     pub text: Vec<u8>,
@@ -226,7 +253,7 @@ pub struct TargetFeatures {
     sve: bool,
     sme: bool,
     numeric: u16,
-    compat: u8,
+    compat: u16,
     matrix: u8,
 }
 impl TargetFeatures {
@@ -317,8 +344,8 @@ impl TargetFeatures {
         self
     }
     /// Select the M5 features currently modeled by this assembler: the Apple
-    /// baseline, all nine non-scalable numeric extensions, SME/SME2, and the four
-    /// optional SME matrix element types. This does
+    /// baseline, numeric extensions, SME/SME2 and optional matrix element types,
+    /// PAC/BTI, AES/PMULL, SHA-1/SHA-256, CRC32, CSSC and RCpc loads. This does
     /// not enable ordinary SVE or claim coverage of unimplemented M5 families.
     /// Selection is for encoding only; execution still needs OS/hardware checks.
     pub const fn apple_m5() -> Self {
@@ -326,7 +353,7 @@ impl TargetFeatures {
             sve: false,
             sme: true,
             numeric: (1 << 9) - 1,
-            compat: 127,
+            compat: 511,
             matrix: 31,
         }
     }
@@ -365,6 +392,16 @@ impl TargetFeatures {
         self.compat |= 64;
         self
     }
+    /// Permit common short sequence compression instructions.
+    pub const fn with_cssc(mut self) -> Self {
+        self.compat |= 128;
+        self
+    }
+    /// Permit RCpc acquire loads.
+    pub const fn with_lrcpc(mut self) -> Self {
+        self.compat |= 256;
+        self
+    }
     fn supports(self, feature: &str) -> bool {
         TARGET_FEATURES.contains(&feature)
             || [
@@ -375,6 +412,8 @@ impl TargetFeatures {
                 "FEAT_SHA256",
                 "FEAT_CRC32",
                 "FEAT_PMULL",
+                "FEAT_CSSC",
+                "FEAT_LRCPC",
             ]
             .iter()
             .position(|f| *f == feature)

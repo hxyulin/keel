@@ -387,3 +387,158 @@ fn immediate_fields(imm: u32) -> Vec<(FieldId, u32)> {
     .map(|(i, n)| (n, (imm >> (7 - i)) & 1))
     .collect()
 }
+
+/// Apple's mnemonic-suffix syntax carries the destination arrangement. Source
+/// arrangements for widening and dot products must be derived, not copied.
+pub(super) fn apple_syntax<'a, 'b>(
+    op: &'b str,
+    args: super::storage::Operands<'a>,
+    arena: &'a bumpalo::Bump,
+) -> Result<(&'b str, super::storage::Operands<'a>), String> {
+    if let Some((root, size)) = op.split_once('.').filter(|(root, size)| {
+        matches!(
+            *root,
+            "ld1" | "ld2" | "ld3" | "ld4" | "st1" | "st2" | "st3" | "st4"
+        ) && matches!(*size, "b" | "h" | "s" | "d")
+    }) {
+        count(&args, 2, 3)?;
+        let (list, lane) = args[0]
+            .split_once('}')
+            .ok_or("expected lane register list")?;
+        let list = list.strip_prefix('{').ok_or("expected register list")?;
+        let mut output = bumpalo::collections::String::new_in(arena);
+        use std::fmt::Write;
+        output.push('{');
+        for (index, reg) in list.split(',').enumerate() {
+            if index != 0 {
+                output.push(',');
+            }
+            let reg = reg.trim();
+            if reg.contains('.') {
+                return Err("Apple lane syntax requires unqualified registers".into());
+            }
+            write!(&mut output, "{reg}.{size}").unwrap();
+        }
+        write!(&mut output, "}}{lane}").unwrap();
+        let mut result = super::storage::Operands::new();
+        result.push(output.into_bump_str());
+        for arg in &args[1..] {
+            result.push(arg);
+        }
+        return Ok((root, result));
+    }
+    if matches!(op, "mov.s" | "mov.d")
+        || op == "mov"
+            && args.first().is_some_and(|s| s.starts_with(['s', 'd']))
+            && args
+                .get(1)
+                .is_some_and(|s| s.starts_with('v') && s.contains('[') && !s.contains('.'))
+    {
+        count(&args, 2, 2)?;
+        let scalar = op == "mov";
+        let size = if scalar { &args[0][..1] } else { &op[4..] };
+        let mut result = super::storage::Operands::new();
+        for arg in args.iter() {
+            if arg.starts_with('v') && arg.contains('[') {
+                let (name, lane) = arg.split_once('[').unwrap();
+                if name.contains('.') {
+                    return Err("Apple lane syntax requires unqualified registers".into());
+                }
+                result
+                    .push(bumpalo::format!(in arena, "{}.{}[{}", name, size, lane).into_bump_str());
+            } else {
+                result.push(arg);
+            }
+        }
+        return Ok((if scalar { "dup" } else { "mov" }, result));
+    }
+    let Some((root, shape)) = op.split_once('.').filter(|(_, shape)| {
+        matches!(
+            *shape,
+            "8b" | "16b" | "4h" | "8h" | "2s" | "4s" | "1d" | "2d"
+        )
+    }) else {
+        return Ok((op, args));
+    };
+    if !matches!(
+        root,
+        "movi"
+            | "mov"
+            | "fmov"
+            | "add"
+            | "sub"
+            | "and"
+            | "orr"
+            | "eor"
+            | "cmtst"
+            | "ucvtf"
+            | "scvtf"
+            | "fdiv"
+            | "fmul"
+            | "fadd"
+            | "fsub"
+            | "sdot"
+            | "udot"
+            | "addv"
+            | "addp"
+            | "ushll"
+            | "ushll2"
+            | "sshll"
+            | "sshll2"
+            | "zip1"
+            | "zip2"
+            | "ld1r"
+    ) {
+        return Err("unsupported Apple SIMD mnemonic suffix".into());
+    }
+    let mut result = super::storage::Operands::new();
+    let mut vectors = 0;
+    for (index, arg) in args.iter().enumerate() {
+        let arg_shape = if index > 0 && matches!(root, "sdot" | "udot") {
+            match shape {
+                "2s" => "8b",
+                "4s" => "16b",
+                _ => return Err("invalid dot-product suffix".into()),
+            }
+        } else if index > 0 && matches!(root, "ushll" | "ushll2" | "sshll" | "sshll2") {
+            match (shape, root.ends_with('2')) {
+                ("8h", false) => "8b",
+                ("8h", true) => "16b",
+                ("4s", false) => "4h",
+                ("4s", true) => "8h",
+                ("2d", false) => "2s",
+                ("2d", true) => "4s",
+                _ => return Err("invalid widening suffix".into()),
+            }
+        } else {
+            shape
+        };
+        let arg = arg.trim();
+        let text = if let Some(number) = arg.strip_prefix(['v', 'V']) {
+            if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("Apple suffix requires unqualified vector registers".into());
+            }
+            vectors += 1;
+            bumpalo::format!(in arena, "v{number}.{arg_shape}",).into_bump_str() as &str
+        } else if root == "ld1r" && index == 0 {
+            let number = arg
+                .strip_prefix('{')
+                .and_then(|s| s.strip_suffix('}'))
+                .map(str::trim)
+                .and_then(|s| s.strip_prefix(['v', 'V']))
+                .ok_or("expected vector register list")?;
+            if !number.bytes().all(|b| b.is_ascii_digit()) {
+                return Err("invalid register list".into());
+            }
+            vectors += 1;
+            bumpalo::format!(in arena, "{{v{number}.{arg_shape}}}",).into_bump_str()
+        } else {
+            arg
+        };
+        result.push(text);
+    }
+    if vectors == 0 {
+        return Err("Apple SIMD suffix requires vector operands".into());
+    }
+    Ok((root, result))
+}

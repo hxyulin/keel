@@ -69,3 +69,80 @@ fn gates_and_invalid_operands() {
         );
     }
 }
+
+#[test]
+fn compiler_cssc_and_pair_sign_extension_match_clang() {
+    let source = "smax w0, w1, w2\nsmin x0, x1, x2\numax x0, x1, #255\numin w0, w1, #0\nsmin w0, w1, #-128\nsmax x0, x1, #127\ncnt w0, w1\nctz x0, x1\nabs w0, w1\n";
+    common::compare_clang_with_features(source, TargetFeatures::apple_m5(), &["-mcpu=apple-m5"]);
+    for line in source.lines() {
+        assert!(assemble(line).is_err());
+        assert!(assemble_with_features(line, TargetFeatures::default().with_cssc()).is_ok());
+    }
+    common::compare_clang(
+        "ldpsw x0, x1, [x2, #252]\nldpsw x3, x4, [sp, #-256]!\nldpsw x5, x6, [x7], #4\nubfiz x0, x1, #4, #12\nsbfiz w0, w1, #16, #8\n",
+    );
+    for bad in [
+        "ldpsw w0, w1, [x2]",
+        "ldpsw x0, x0, [x2]",
+        "ldpsw x0, x1, [x2, #2]",
+        "smin w0, w1, #128",
+        "umax x0, x1, #-1",
+        "cnt x0, w1",
+    ] {
+        assert!(
+            assemble_with_features(bad, TargetFeatures::apple_m5()).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn scalar_conversion_rounding_and_rcpc_match_clang() {
+    let mut source = String::new();
+    use std::fmt::Write;
+    for fp in ["s", "d"] {
+        for gp in ["w", "x"] {
+            for op in ["scvtf", "ucvtf"] {
+                for scale in [1, if gp == "w" { 32 } else { 64 }] {
+                    writeln!(&mut source, "{op} {fp}0, {gp}1, #{scale}").unwrap();
+                }
+            }
+            for op in [
+                "fcvtzs", "fcvtzu", "fcvtms", "fcvtmu", "fcvtns", "fcvtnu", "fcvtps", "fcvtpu",
+                "fcvtas", "fcvtau",
+            ] {
+                writeln!(&mut source, "{op} {gp}0, {fp}1").unwrap();
+                if matches!(op, "fcvtzs" | "fcvtzu") {
+                    for scale in [1, if gp == "w" { 32 } else { 64 }] {
+                        writeln!(&mut source, "{op} {gp}0, {fp}1, #{scale}").unwrap();
+                    }
+                }
+            }
+        }
+        for op in ["fccmp", "fccmpe"] {
+            writeln!(&mut source, "{op} {fp}0, {fp}1, #15, mi").unwrap();
+        }
+    }
+    common::compare_clang(&source);
+    let source = "ldapr x0, [x1]\nldapr w2, [sp]\nldaprb w3, [x4]\nldaprh w5, [x6]\n";
+    common::compare_clang_with_features(source, TargetFeatures::apple_m5(), &["-mcpu=apple-m5"]);
+    for line in source.lines() {
+        assert!(assemble(line).is_err());
+        assert!(assemble_with_features(line, TargetFeatures::default().with_lrcpc()).is_ok());
+    }
+    for bad in [
+        "scvtf d0, w1, #0",
+        "scvtf s0, w1, #33",
+        "fcvtzu w0, d1, #0",
+        "fcvtzs x0, d1, #65",
+        "fccmp s0, d1, #0, eq",
+        "fccmp s0, s1, #16, eq",
+        "ldaprb x0, [x1]",
+        "ldapr w0, [x1, #8]",
+    ] {
+        assert!(
+            assemble_with_features(bad, TargetFeatures::apple_m5()).is_err(),
+            "{bad}"
+        );
+    }
+}

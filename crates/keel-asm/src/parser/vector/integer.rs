@@ -324,6 +324,9 @@ pub(super) fn shift(op: &str, a: &[&str]) -> Result<Option<u32>, String> {
         "sshr" | "ushr" | "ssra" | "usra" | "srshr" | "urshr" | "srsra" | "ursra" | "sri"
     );
     let convert = matches!(root, "scvtf" | "ucvtf" | "fcvtzs" | "fcvtzu");
+    if convert && a.get(1).is_some_and(|s| s.starts_with(['w', 'x'])) {
+        return Ok(None);
+    }
     if !(narrow || wide || left || right || convert)
         || !a
             .first()

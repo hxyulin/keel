@@ -177,6 +177,23 @@ fn is_integer(s: &str) -> bool {
 }
 
 fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
+    instruction_with_features(op, a, crate::TargetFeatures::default())
+}
+fn instruction_with_features(
+    op: &str,
+    a: &[&str],
+    features: crate::TargetFeatures,
+) -> Result<u32, String> {
+    if op.starts_with("aes")
+        || op.starts_with("sha")
+        || matches!(op, "pmull" | "pmull2")
+            && a.first()
+                .is_some_and(|s| s.ends_with(".1q") || s.ends_with(".1Q"))
+    {
+        if let Some(word) = system::instruction(op, a, features)? {
+            return Ok(word);
+        }
+    }
     if let Some(word) = vector::extra(op, a)? {
         return Ok(word);
     }
@@ -186,9 +203,8 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
     match op {
         "ldr" | "str" | "ldrb" | "strb" | "ldrh" | "strh" | "ldrsb" | "ldrsh" | "ldrsw"
         | "ldur" | "stur" | "ldurb" | "sturb" | "ldurh" | "sturh" | "ldursb" | "ldursh"
-        | "ldursw" | "ldp" | "stp" | "ldar" | "ldarb" | "ldarh" | "stlr" | "stlrb" | "stlrh" => {
-            memory::instruction(op, a)
-        }
+        | "ldursw" | "ldp" | "stp" | "ldpsw" | "ldar" | "ldarb" | "ldarh" | "stlr" | "stlrb"
+        | "stlrh" => memory::instruction(op, a),
         "movz" | "movk" | "movn" => {
             count(a, 2, 3)?;
             let d = reg(a[0], false, true)?;
@@ -333,10 +349,13 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
         "br" | "blr" | "brk" | "svc" => control::instruction(op, a),
         "fmov" | "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" | "fadd"
         | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fcsel" | "fmadd" | "fmsub" | "fnmadd"
-        | "fnmsub" | "fcmp" | "fcmpe" | "fcvt" | "scvtf" | "ucvtf" | "fcvtzs" | "fcvtzu" => {
-            float::instruction(op, a)
-        }
-        _ => arithmetic::instruction(op, a),
+        | "fnmsub" | "fcmp" | "fcmpe" | "fccmp" | "fccmpe" | "fcvt" | "scvtf" | "ucvtf"
+        | "fcvtzs" | "fcvtzu" | "fcvtms" | "fcvtmu" | "fcvtns" | "fcvtnu" | "fcvtps" | "fcvtpu"
+        | "fcvtas" | "fcvtau" => float::instruction(op, a),
+        _ => match system::instruction(op, a, features)? {
+            Some(word) => Ok(word),
+            None => arithmetic::instruction(op, a),
+        },
     }
 }
 
@@ -363,6 +382,7 @@ struct DataFixup<'a> {
     width: u8,
     expression: data::Expression<'a>,
     got: bool,
+    right_shift: u32,
 }
 
 pub(super) fn assemble(
@@ -417,6 +437,7 @@ fn assemble_pass(
     let mut label_order = BumpVec::new_in(&arena);
     let mut result = Assembly {
         build_version: crate::BuildVersion::default(),
+        linker_optimization_hints: Vec::new(),
         subsections_via_symbols: false,
         text: Vec::new(),
         text_alignment: 2,
@@ -433,7 +454,9 @@ fn assemble_pass(
     let mut current = 0;
     let mut labels: BTreeMap<&str, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
+    let mut common = BTreeMap::new();
     let mut branches = BumpVec::new_in(&arena);
+    let mut loh = BumpVec::new_in(&arena);
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
@@ -492,6 +515,32 @@ fn assemble_pass(
             )
             .map_err(err)?
         {
+            continue;
+        }
+        if op == ".loh" {
+            let (kind, operands) = operands
+                .split_once(char::is_whitespace)
+                .ok_or_else(|| err("expected LOH kind and symbols".into()))?;
+            let kind = match kind {
+                "AdrpAdrp" | "1" => 1,
+                "AdrpLdr" | "2" => 2,
+                "AdrpAddLdr" | "3" => 3,
+                "AdrpLdrGotLdr" | "4" => 4,
+                "AdrpAddStr" | "5" => 5,
+                "AdrpLdrGotStr" | "6" => 6,
+                "AdrpAdd" | "7" => 7,
+                "AdrpLdrGot" | "8" => 8,
+                _ => return Err(err("invalid LOH kind".into())),
+            };
+            let args = memory::operands(operands.trim_fast()).map_err(err)?;
+            let arity = if matches!(kind, 1 | 2 | 7 | 8) { 2 } else { 3 };
+            count(&args, arity, arity).map_err(err)?;
+            let mut names = [""; 3];
+            for (out, name) in names.iter_mut().zip(args.iter()) {
+                symbol(name).map_err(err)?;
+                *out = name;
+            }
+            loh.push((line, kind, names, arity));
             continue;
         }
         if op == ".build_version" {
@@ -597,12 +646,29 @@ fn assemble_pass(
                 } else {
                     argument
                 };
+                let (expression, right_shift) =
+                    if let Some((inner, shift)) = expression.split_once(">>") {
+                        let inner = inner
+                            .trim_fast()
+                            .strip_prefix('(')
+                            .and_then(|s| s.strip_suffix(')'))
+                            .ok_or_else(|| {
+                                err("shifted data requires a parenthesized expression".into())
+                            })?;
+                        (inner, unsigned(shift.trim_fast(), 63).map_err(err)?)
+                    } else {
+                        (expression, 0)
+                    };
                 let expr = data::expression(expression).map_err(err)?;
                 if expr.add.is_none() {
                     data::append(
                         &mut result,
                         current,
-                        &data::value(expr.constant, width).map_err(err)?,
+                        &data::value(
+                            data::shift_value(expr.constant, right_shift).map_err(err)?,
+                            width,
+                        )
+                        .map_err(err)?,
                     )
                     .map_err(err)?;
                 } else {
@@ -616,6 +682,7 @@ fn assemble_pass(
                         location,
                         width,
                         expression: expr,
+                        right_shift,
                         got,
                     });
                     data::reserve(&mut result, current, u64::from(width), 0).map_err(err)?;
@@ -624,6 +691,21 @@ fn assemble_pass(
             continue;
         }
         match op.as_ref() {
+            ".comm" => {
+                count(&args, 2, 3).map_err(err)?;
+                symbol(args[0]).map_err(err)?;
+                let size = u64::try_from(integer(args[1]).map_err(err)?)
+                    .map_err(|_| err("invalid common size".into()))?;
+                let alignment = args
+                    .get(2)
+                    .map_or(Ok(0), |s| unsigned(s, 15))
+                    .map_err(err)? as u8;
+                if size == 0 || common.insert(args[0], (size, alignment)).is_some() {
+                    return Err(err("empty or duplicate common definition".into()));
+                }
+                globals.insert(args[0], line);
+                continue;
+            }
             ".subsections_via_symbols" => {
                 count(&args, 0, 0).map_err(err)?;
                 result.subsections_via_symbols = true;
@@ -663,9 +745,24 @@ fn assemble_pass(
                 continue;
             }
             ".p2align" => {
-                count(&args, 1, 1).map_err(err)?;
+                if args.is_empty() || args.len() > 3 {
+                    return Err(err("expected 1..=3 alignment operands".into()));
+                }
                 let power = unsigned(args[0], 16).map_err(err)?;
-                data::align(&mut result, current, power).map_err(err)?;
+                let fill = args
+                    .get(1)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| unsigned(s, 255))
+                    .transpose()
+                    .map_err(err)?
+                    .map(|n| n as u8);
+                let maximum = args
+                    .get(2)
+                    .map(|s| unsigned(s, u32::MAX as i64))
+                    .transpose()
+                    .map_err(err)?
+                    .map(u64::from);
+                data::align_with(&mut result, current, power, fill, maximum).map_err(err)?;
                 continue;
             }
             ".space" | ".zero" => {
@@ -717,6 +814,17 @@ fn assemble_pass(
                 "instructions require four-byte-aligned __TEXT,__text locations".into(),
             ));
         }
+        let (op, args) = if op.contains('.')
+            || op == "mov"
+                && args.first().is_some_and(|s| s.starts_with(['s', 'd']))
+                && args
+                    .get(1)
+                    .is_some_and(|s| s.contains('[') && !s.contains('.'))
+        {
+            vector::apple_syntax(&op, args, &arena).map_err(err)?
+        } else {
+            (op.as_ref(), args)
+        };
         if metrics {
             locations.push(InstructionLocation {
                 line,
@@ -768,10 +876,7 @@ fn assemble_pass(
             Some(word) => word,
             None => match vector::numeric(&op, &args, features).map_err(err)? {
                 Some(word) => word,
-                None => match system::instruction(&op, &args, features).map_err(err)? {
-                    Some(word) => word,
-                    None => instruction(&op, &args).map_err(err)?,
-                },
+                None => instruction_with_features(op, &args, features).map_err(err)?,
             },
         };
         result.text.extend_from_slice(&word.to_le_bytes());
@@ -1035,14 +1140,21 @@ fn assemble_pass(
             false
         };
         if resolved {
-            let bytes =
-                data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let bytes = data::value(
+                data::shift_value(constant, fixup.right_shift)
+                    .map_err(|e| Error::new(fixup.line, e))?,
+                fixup.width,
+            )
+            .map_err(|e| Error::new(fixup.line, e))?;
             let out = data::bytes_mut(&mut result, fixup.location.section)
                 .map_err(|e| Error::new(fixup.line, e))?;
             let offset = fixup.location.offset as usize;
             out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
         } else {
-            if fixup.width < 4 || (fixup.width != 8 && expr.subtract.is_none()) {
+            if fixup.right_shift != 0
+                || fixup.width < 4
+                || (fixup.width != 8 && expr.subtract.is_none())
+            {
                 return Err(Error::new(
                     fixup.line,
                     "symbolic data requires .quad pointers or .long/.quad differences",
@@ -1064,6 +1176,40 @@ fn assemble_pass(
                 addend: constant as i64,
             });
         }
+    }
+    for (line, kind, names, arity) in loh {
+        let mut offsets = [0; 3];
+        let mut first = None;
+        for (offset, name) in offsets.iter_mut().zip(&names[..arity]) {
+            let location = *labels
+                .get(name)
+                .ok_or_else(|| Error::new(line, format!("undefined LOH symbol `{name}`")))?;
+            if location.section != 0
+                || location.offset % 4 != 0
+                || location.offset >= result.text.len() as u64
+            {
+                return Err(Error::new(
+                    line,
+                    "LOH symbols must reference text instructions",
+                ));
+            }
+            if let Some((first_name, first_location)) = first {
+                if result.subsections_via_symbols
+                    && !atoms.same((first_name, first_location), (name, location))
+                {
+                    return Err(Error::new(
+                        line,
+                        "LOH symbols must belong to one linker atom",
+                    ));
+                }
+            } else {
+                first = Some((*name, location));
+            }
+            *offset = location.offset;
+        }
+        result
+            .linker_optimization_hints
+            .push(crate::LinkerOptimizationHint { kind, offsets });
     }
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
@@ -1088,11 +1234,20 @@ fn assemble_pass(
     }
     names.sort_unstable();
     names.dedup();
+    for name in common.keys() {
+        if labels.contains_key(name) {
+            return Err(Error::new(
+                globals[name],
+                "common symbol also has a section definition",
+            ));
+        }
+    }
     result.symbols = names
         .into_iter()
         .map(|name| {
             let location = labels.get(&name);
             Symbol {
+                common: common.get(name).copied(),
                 global: location.is_none() || globals.contains_key(&name),
                 offset: location.map(|l| l.offset),
                 section: location.map(|l| l.section),

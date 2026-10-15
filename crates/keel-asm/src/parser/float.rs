@@ -174,19 +174,68 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 &[(FieldId::Rd, d.0), (FieldId::Rn, n.0)],
             )
         }
+        "fccmp" | "fccmpe" => {
+            count(args, 4, 4)?;
+            let n = fp(args[0])?;
+            let m = fp(args[1])?;
+            if n.1 != m.1 {
+                return Err("floating-point register widths must match".into());
+            }
+            encode_named(
+                format_args!("{}_{}_floatccmp", upper(op), n.1),
+                &[
+                    (FieldId::Rn, n.0),
+                    (FieldId::Rm, m.0),
+                    (FieldId::nzcv, super::unsigned(args[2], 15)?),
+                    (FieldId::cond, condition(args[3])?),
+                ],
+            )
+        }
         "scvtf" | "ucvtf" => {
-            count(args, 2, 2)?;
+            count(args, 2, 3)?;
             let d = fp(args[0])?;
             let n = reg(args[1], false, true)?;
+            if args.len() == 3 {
+                let fbits = super::unsigned(args[2], i64::from(n.bits))?;
+                if fbits == 0 {
+                    return Err("fixed-point scale must be positive".into());
+                }
+                return encode_named(
+                    format_args!("{}_{}{}_float2fix", upper(op), d.1, n.bits),
+                    &[
+                        (FieldId::Rd, d.0),
+                        (FieldId::Rn, n.number),
+                        (FieldId::scale, 64 - fbits),
+                    ],
+                );
+            }
             encode_named(
                 format_args!("{}_{}{}_float2int", upper(op), d.1, n.bits),
                 &[(FieldId::Rd, d.0), (FieldId::Rn, n.number)],
             )
         }
-        "fcvtzs" | "fcvtzu" => {
-            count(args, 2, 2)?;
+        "fcvtzs" | "fcvtzu" | "fcvtms" | "fcvtmu" | "fcvtns" | "fcvtnu" | "fcvtps" | "fcvtpu"
+        | "fcvtas" | "fcvtau" => {
+            count(args, 2, 3)?;
             let d = reg(args[0], false, true)?;
             let n = fp(args[1])?;
+            if args.len() == 3 {
+                if !matches!(op, "fcvtzs" | "fcvtzu") {
+                    return Err("fixed-point conversion requires round toward zero".into());
+                }
+                let fbits = super::unsigned(args[2], i64::from(d.bits))?;
+                if fbits == 0 {
+                    return Err("fixed-point scale must be positive".into());
+                }
+                return encode_named(
+                    format_args!("{}_{}{}_float2fix", upper(op), d.bits, n.1),
+                    &[
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.0),
+                        (FieldId::scale, 64 - fbits),
+                    ],
+                );
+            }
             encode_named(
                 format_args!("{}_{}{}_float2int", upper(op), d.bits, n.1),
                 &[(FieldId::Rd, d.number), (FieldId::Rn, n.0)],

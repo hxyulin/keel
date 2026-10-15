@@ -92,6 +92,8 @@ pub(super) fn string(s: &str) -> Result<Vec<u8>, String> {
             b'n' => b'\n',
             b't' => b'\t',
             b'r' => b'\r',
+            b'b' => 8,
+            b'f' => 12,
             b'"' => b'"',
             b'\\' => b'\\',
             b'0'..=b'7' => {
@@ -120,13 +122,13 @@ fn reg(s: &str) -> Result<u64, String> {
     if s == "lr" {
         return Ok(30);
     }
-    if let Some(n) = s.strip_prefix('x') {
+    if let Some(n) = s.strip_prefix('x').or_else(|| s.strip_prefix('w')) {
         let n: u64 = n.parse().map_err(|_| "invalid CFI register")?;
         if n <= 30 {
             return Ok(n);
         }
     }
-    if let Some(n) = s.strip_prefix('d').or_else(|| s.strip_prefix('v')) {
+    if let Some(n) = s.strip_prefix(['b', 'h', 's', 'd', 'q', 'v']) {
         let n: u64 = n.parse().map_err(|_| "invalid CFI register")?;
         if n <= 31 {
             return Ok(n + 64);
@@ -308,6 +310,12 @@ impl<'a> Debug<'a> {
             (".cfi_undefined", [r]) => {
                 bytes.push(0x07);
                 uleb(reg(r)?, &mut bytes);
+            }
+            (".cfi_negate_ra_state", []) => {
+                // DW_CFA_AARCH64_negate_ra_state. Rule::Other keeps the
+                // signed return-address state in DWARF instead of discarding
+                // it through compact-unwind selection.
+                bytes.push(0x2d);
             }
             (".cfi_remember_state", []) => {
                 bytes.push(0x0a);

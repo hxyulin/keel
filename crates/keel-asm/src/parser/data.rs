@@ -62,6 +62,10 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
         ("__TEXT", "__const" | "__gcc_except_tab") | ("__DATA", "__data" | "__const") => {
             SectionKind::Data
         }
+        ("__TEXT", "__cstring") => SectionKind::CString,
+        ("__TEXT", "__literal4") => SectionKind::Literal4,
+        ("__TEXT", "__literal8") => SectionKind::Literal8,
+        ("__TEXT", "__literal16") => SectionKind::Literal16,
         ("__DATA", "__bss") => SectionKind::ZeroFill,
         ("__DATA", "__thread_data") => SectionKind::ThreadData,
         ("__DATA", "__thread_bss") => SectionKind::ThreadZeroFill,
@@ -77,6 +81,10 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
     let expected = match kind {
         SectionKind::Data | SectionKind::Debug => "regular",
         SectionKind::EhFrame => "coalesced",
+        SectionKind::CString => "cstring_literals",
+        SectionKind::Literal4 => "4byte_literals",
+        SectionKind::Literal8 => "8byte_literals",
+        SectionKind::Literal16 => "16byte_literals",
         SectionKind::ZeroFill => "zerofill",
         SectionKind::ThreadData => "thread_local_regular",
         SectionKind::ThreadZeroFill => "thread_local_zerofill",
@@ -145,6 +153,15 @@ pub(super) fn reserve(
     Ok(())
 }
 pub(super) fn align(a: &mut Assembly, section: usize, power: u32) -> Result<(), String> {
+    align_with(a, section, power, None, None)
+}
+pub(super) fn align_with(
+    a: &mut Assembly,
+    section: usize,
+    power: u32,
+    fill: Option<u8>,
+    maximum: Option<u64>,
+) -> Result<(), String> {
     if section == 0 {
         a.text_alignment = a.text_alignment.max(power);
     } else {
@@ -152,6 +169,12 @@ pub(super) fn align(a: &mut Assembly, section: usize, power: u32) -> Result<(), 
     }
     let alignment = 1u64 << power;
     let padding = (alignment - position(a, section) % alignment) % alignment;
+    if maximum.is_some_and(|limit| padding > limit) {
+        return Ok(());
+    }
+    if let Some(fill) = fill {
+        return reserve(a, section, padding, fill);
+    }
     if section == 0 {
         let partial = padding % 4;
         reserve(a, section, partial, 0)?;
@@ -297,4 +320,16 @@ pub(super) fn build_version(text: &str) -> Result<crate::BuildVersion, String> {
             .transpose()?
             .unwrap_or(0),
     })
+}
+
+/// LLVM MC expressions shift a 64-bit bit pattern logically, including when
+/// the unshifted symbol difference is negative.
+pub(super) fn shift_value(value: i128, shift: u32) -> Result<i128, String> {
+    if shift == 0 {
+        return Ok(value);
+    }
+    if !(-(1i128 << 63)..(1i128 << 64)).contains(&value) {
+        return Err("shifted data exceeds 64 bits".into());
+    }
+    Ok(i128::from((value as u64) >> shift))
 }

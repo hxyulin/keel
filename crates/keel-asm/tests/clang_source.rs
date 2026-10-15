@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 mod common;
 use common::{Temp, run};
 use std::process::Command;
@@ -71,4 +72,168 @@ fn unchanged_clang_simple_source() {
         &["-mcpu=apple-m5"],
     );
     keel_asm::assemble_object_with_features(&source, keel_asm::TargetFeatures::apple_m5()).unwrap();
+}
+
+#[test]
+fn linker_hints_and_literal_metadata_match_clang() {
+    use object::{Object, ObjectSection};
+    let source = ".text\n.globl _f\n_f:\nL0: adrp x0, _data@PAGE\nL1: add x0, x0, _data@PAGEOFF\nL2: ldr x1, [x0]\nret\n.loh AdrpAdd L0, L1\n.loh AdrpAddLdr L0, L1, L2\n.section __TEXT,__literal4,4byte_literals\n.p2align 2, 0\n.long 123\n.section __TEXT,__literal8,8byte_literals\n.p2align 3, 0\n.quad 456\n.section __TEXT,__literal16,16byte_literals\n.p2align 4, 0\n.quad 7, 8\n.section __TEXT,__cstring,cstring_literals\n.asciz \"a\\b\\f\"\n.subsections_via_symbols\n";
+    let temp = Temp::new();
+    let input = temp.0.join("input.s");
+    let output = temp.0.join("clang.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .args(["-target", "arm64-apple-macos11", "-c"])
+        .arg(input)
+        .arg("-o")
+        .arg(&output));
+    let reference = std::fs::read(output).unwrap();
+    let actual = keel_asm::assemble_object(source).unwrap();
+    fn hints(bytes: &[u8]) -> &[u8] {
+        let word = |at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+        let mut at = 32;
+        for _ in 0..word(16) {
+            if word(at) == 0x2e {
+                let start = word(at + 8);
+                return &bytes[start..start + word(at + 12)];
+            }
+            at += word(at + 4);
+        }
+        panic!("missing linker hints");
+    }
+    assert_eq!(hints(&actual), hints(&reference));
+    let actual = object::File::parse(actual.as_slice()).unwrap();
+    let reference = object::File::parse(reference.as_slice()).unwrap();
+    for section in reference.sections() {
+        let actual = actual.section_by_name(section.name().unwrap()).unwrap();
+        let flags = |s: object::SectionFlags| match s {
+            object::SectionFlags::MachO { flags } => flags & !0x300,
+            _ => panic!("expected Mach-O"),
+        };
+        assert_eq!(flags(actual.flags()), flags(section.flags()));
+        assert!(actual.align() >= section.align());
+        assert_eq!(actual.data().unwrap(), section.data().unwrap());
+        assert_eq!(actual.relocations().count(), section.relocations().count());
+    }
+    for bad in [
+        ".loh Bad L0, L1",
+        ".loh AdrpAdd L0",
+        ".loh AdrpAdd L0, Lmissing",
+        ".loh AdrpAdd L0, Lend",
+    ] {
+        assert!(
+            keel_asm::assemble(&format!(".text\nL0: nop\nL1: ret\nLend:\n{bad}\n")).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn unchanged_clang_pac_call_frame() {
+    let temp = Temp::new();
+    let input = temp.0.join("input.c");
+    let assembly = temp.0.join("input.s");
+    std::fs::write(
+        &input,
+        "extern long g(long); long f(long x) { return g(x) + 1; }\n",
+    )
+    .unwrap();
+    run(Command::new("clang")
+        .args([
+            "-S",
+            "-O2",
+            "-target",
+            "arm64-apple-macosx11.0.0",
+            "-mcpu=apple-m5",
+            "-mbranch-protection=standard",
+        ])
+        .arg(input)
+        .arg("-o")
+        .arg(&assembly));
+    let source = std::fs::read_to_string(assembly).unwrap();
+    common::compare_clang_with_features(
+        &source,
+        keel_asm::TargetFeatures::apple_m5(),
+        &["-mcpu=apple-m5"],
+    );
+    let result =
+        keel_asm::assemble_with_features(&source, keel_asm::TargetFeatures::apple_m5()).unwrap();
+    assert!(source.contains(".cfi_negate_ra_state"));
+    assert!(
+        result
+            .sections
+            .iter()
+            .find(|s| s.name == "__eh_frame")
+            .unwrap()
+            .data()
+            .contains(&0x2d)
+    );
+    result.to_macho().unwrap();
+}
+
+#[test]
+fn common_symbols_and_shifted_jump_tables_match_clang() {
+    use object::{Object, ObjectSymbol};
+    let source = ".comm _common,24,4\n.text\n.globl _f\n_f:\nL0: nop\nL1: ret\n.section __TEXT,__const\n.byte (L1-L0)>>2\n.quad (L0-L1)>>2\n.subsections_via_symbols\n";
+    let temp = Temp::new();
+    let input = temp.0.join("input.s");
+    let output = temp.0.join("clang.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .args(["-target", "arm64-apple-macos11", "-c"])
+        .arg(input)
+        .arg("-o")
+        .arg(&output));
+    let reference = std::fs::read(output).unwrap();
+    let actual = keel_asm::assemble_object(source).unwrap();
+    let reference = object::File::parse(reference.as_slice()).unwrap();
+    let actual = object::File::parse(actual.as_slice()).unwrap();
+    let a = actual.symbol_by_name("_common").unwrap();
+    let b = reference.symbol_by_name("_common").unwrap();
+    assert_eq!(
+        (a.size(), a.address(), a.section(), a.flags()),
+        (b.size(), b.address(), b.section(), b.flags())
+    );
+    use object::ObjectSection;
+    assert_eq!(
+        actual.section_by_name("__const").unwrap().data().unwrap(),
+        reference
+            .section_by_name("__const")
+            .unwrap()
+            .data()
+            .unwrap()
+    );
+    for bad in [
+        ".comm _x, -1, 0",
+        ".comm _x, 4, 16",
+        ".comm _x, 4, 0\n_x: ret",
+        ".byte (A-B)>>2",
+        ".byte (L1-L0)>>128",
+    ] {
+        assert!(
+            keel_asm::assemble(&format!(".text\nL0: nop\nL1: ret\n{bad}\n")).is_err(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn apple_vector_suffixes_and_alignment_match_clang() {
+    common::compare_clang_with_features(
+        ".text\n.p2align 4, 0\nadd.2d v0, v1, v2\nushll.4s v0, v1, #0\nushll2.4s v0, v1, #1\nsdot.4s v0, v1, v2\naddv.4s s0, v1\nld1r.2d { v0 }, [x0]\nld1.b {v0}[3], [x0]\nmov.d v0[1], v1[0]\nmov.s v1[0], w0\nmov s0, v1[3]\n.p2align 4,,4\nret\n",
+        keel_asm::TargetFeatures::apple_m5(),
+        &["-mcpu=apple-m5"],
+    );
+    for bad in [
+        "add.2d x0, x1, x2",
+        "mov.s v0.d[0], w0",
+        "ushll.8b v0, v1, #0",
+        ".p2align 4, 256",
+        "sdot.2d v0, v1, v2",
+    ] {
+        assert!(
+            keel_asm::assemble_with_features(bad, keel_asm::TargetFeatures::apple_m5()).is_err(),
+            "{bad}"
+        );
+    }
 }

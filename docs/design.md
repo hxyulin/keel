@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1486 instruction/alias forms. Generated requirements retain
+subset currently has 1647 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks, plus the numeric feature predicates described below;
 the fixed Apple arm64 target enables only FP, AdvSIMD,
@@ -1862,3 +1862,57 @@ arrangements. The initial end-to-end coverage audit assembled, linked, and ran 1
 configurations, with DWARF verification for the 22 C debug configurations;
 the automated assembly checks discover newly added fixtures as the suite grows. Fixture coverage
 does not imply complete A64 ISA or GNU assembler syntax coverage.
+
+
+**M5 compatibility additions (October 2026 audit).** The nine confirmed probes
+now assemble, with useful families around each: the classic PAC/AUT/XPAC
+register, SP, zero-modifier, branch and return forms; BTI targets; AES rounds,
+SHA-1/SHA-256, CRC32/CRC32C, 64-bit PMULL; CASP in both widths and all four
+orderings; scaled, unscaled, register-offset and local-literal prefetch; selected
+MRS/MSR registers and DC/IC operations, plus numeric SYS syntax. Compiler output
+also required CSSC integer min/max, count/abs/ctz, RCpc acquire loads, LDPSW,
+bitfield insert aliases, scalar FP rounding conversions, conditional FP compare
+and fixed-point conversions. Optional features have separate library builders;
+`apple_m5()` selects them. Default FP/NEON/LSE behavior stays gated as before.
+New instruction fields use stack arrays and stack-formatted encoding names.
+
+The instruction layouts and feature predicates are imported through the same
+checksum-verified Arm archive. `isa/m5-compat.txt` inventories selected records.
+`isa/system.json` retains selected Registers.json names, architecture conditions
+and accessor encodings/directions. The generator validates their AArch64
+conditions and accessor predicates; it does not model runtime access/trap rules.
+System/cache instructions may require privilege or OS permission: assembler
+acceptance is permission to encode, never a promise of EL0 execution. The Arm
+PMULL record has a baseline AdvSIMD predicate; the 64-bit polynomial form adds
+an explicit FEAT_PMULL gate in operand handling, preserving baseline byte PMULL.
+
+The capability audit compared installed Apple Clang 21's
+`--print-enabled-extensions -mcpu=apple-m5` against LLVM's
+[Apple M5 inventory](https://github.com/llvm/llvm-project/blob/main/clang/test/Driver/print-enabled-extensions/aarch64-apple-m5.c)
+and Apple's [pointer-authentication documentation](https://developer.apple.com/documentation/xcode/enabling-enhanced-security-for-your-app).
+LLVM explicitly identifies MPAM and SEL2 as over-broad architecture defaults in
+its list. Neither that list nor Clang accepting a spelling establishes executable
+hardware parity. No ordinary SVE was enabled, nor were all listed extensions.
+SHA-512/SHA-3, MTE, most system-register names, generic encoded system-register
+syntax and newer PAC extensions remain outside this implementation. There is
+no full M5 ISA or Clang syntax parity claim.
+
+Clang source support preserves `.build_version` deployment/SDK in
+LC_BUILD_VERSION, literal/C-string section types, `.comm` as Mach-O common
+symbols (including alignment), and all eight `.loh` kinds in
+LC_LINKER_OPTIMIZATION_HINT. LOH labels must resolve to aligned text within one
+linker atom. Optional `.p2align` fill/maximum operands, CFI W and FP register
+aliases, C string backspace/form-feed escapes, local shifted symbol differences
+and the audited Apple SIMD suffix/lane spellings are supported. Shifted
+expressions follow LLVM's logical 64-bit right-shift semantics; unresolved
+shifted relocations remain errors. `.cfi_negate_ra_state` emits the AArch64
+DWARF opcode and forces DWARF unwind retention so signed-RA state is preserved.
+
+`suite/audit_clang_assembler.py` compiles sources unchanged with Clang -S -O2,
+assembles with both tools, and compares code/data bytes, normalized relocations,
+section type/size/alignment, build version and linker hints. The checked-in
+October 15 source audit covers all 18 repository C fixtures and 33 Lua translation
+units, with input/assembly/binary hashes. DWARF and compact-unwind bytes are
+excluded from this raw-byte audit because equivalent representations can differ;
+focused Rust tests exercise the object metadata and call-frame paths. This is
+an inventory of those exact sources/options, not every compiler mode or syntax.

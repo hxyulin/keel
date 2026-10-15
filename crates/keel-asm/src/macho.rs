@@ -86,7 +86,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     let mut order: Vec<_> = (0..views.len()).collect();
     order.sort_by_key(|id| views[*id].zero);
     let segment_size = 72 + views.len() * 80;
-    let command_size = segment_size + 24 + 80 + 24;
+    let has_loh = !assembly.linker_optimization_hints.is_empty();
+    let command_size = segment_size + 24 + 80 + 24 + if has_loh { 16 } else { 0 };
     let mut file = (32 + command_size) as u64;
     let mut vm = 0;
     let mut layouts = Vec::new();
@@ -133,6 +134,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             || !all_names.insert(symbol.name.as_str())
             || (symbol.offset.is_none() && !symbol.global)
             || symbol.offset.is_some() != symbol.section.is_some()
+            || symbol.common.is_some_and(|(size, alignment)| {
+                size == 0 || alignment > 15 || symbol.section.is_some() || !symbol.global
+            })
         {
             return Err(Error::new(0, "invalid or duplicate symbol"));
         }
@@ -216,6 +220,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             || symbol.name.contains('\0')
             || (symbol.offset.is_none() && !symbol.global)
             || symbol.offset.is_some() != symbol.section.is_some()
+            || symbol.common.is_some_and(|(size, alignment)| {
+                size == 0 || alignment > 15 || symbol.section.is_some() || !symbol.global
+            })
             || indices.insert(symbol.name.as_str(), index as u32).is_some()
         {
             return Err(Error::new(0, "invalid or duplicate symbol"));
@@ -235,7 +242,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                     .ok_or_else(|| Error::new(0, "symbol address overflow"))?,
             )
         } else {
-            (0, 0)
+            (0, symbol.common.map_or(0, |c| c.0))
         };
         u32le(&mut entries, size(strings.len())?);
         entries.extend_from_slice(&[
@@ -248,7 +255,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             },
             ordinal,
             0,
-            if symbol.section.is_some() && !symbol.global && symbol.name.starts_with('L') {
+            if let Some((_, alignment)) = symbol.common {
+                alignment
+            } else if symbol.section.is_some() && !symbol.global && symbol.name.starts_with('L') {
                 2
             } else {
                 0
@@ -353,6 +362,23 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     {
         return Err(Error::new(0, "invalid relocation section"));
     }
+    let mut loh = Vec::new();
+    for hint in &assembly.linker_optimization_hints {
+        let count = hint.argument_count()?;
+        uleb(&mut loh, u64::from(hint.kind));
+        uleb(&mut loh, count as u64);
+        for offset in &hint.offsets[..count] {
+            if *offset % 4 != 0 || *offset >= assembly.text.len() as u64 {
+                return Err(Error::new(0, "invalid LOH text offset"));
+            }
+            uleb(&mut loh, addresses[0] + offset);
+        }
+    }
+    let lohoff = align(file, 8)?;
+    loh.resize(align(loh.len() as u64, 8)? as usize, 0);
+    if has_loh {
+        file = lohoff + loh.len() as u64;
+    }
     let symoff = align(file, 8)?;
     let stroff = symoff
         .checked_add(entries.len() as u64)
@@ -382,7 +408,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         0x0100_000c,
         0,
         1,
-        4,
+        if has_loh { 5 } else { 4 },
         command_size as u32,
         flags,
         0,
@@ -457,6 +483,11 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     for value in [0x32, 24, build.platform, build.minimum, build.sdk, 0] {
         u32le(&mut out, value);
     }
+    if has_loh {
+        for value in [0x2e, 16, size(lohoff as usize)?, size(loh.len())?] {
+            u32le(&mut out, value);
+        }
+    }
     debug_assert_eq!(out.len(), 32 + command_size);
     for layout in &layouts {
         if views[layout.id].zero {
@@ -489,8 +520,23 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         out.resize(layout.reloff as usize, 0);
         out.extend_from_slice(&layout.records);
     }
+    if has_loh {
+        out.resize(lohoff as usize, 0);
+        out.extend_from_slice(&loh);
+    }
     out.resize(symoff as usize, 0);
     out.extend_from_slice(&entries);
     out.extend_from_slice(&strings);
     Ok(out)
+}
+
+fn uleb(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 127) as u8;
+        value >>= 7;
+        out.push(byte | if value == 0 { 0 } else { 128 });
+        if value == 0 {
+            break;
+        }
+    }
 }

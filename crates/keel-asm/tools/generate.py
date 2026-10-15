@@ -95,7 +95,7 @@ NUMERIC_NAMES = [line for line in (ROOT / "isa/m5-numeric.txt").read_text().spli
 SME_FEATURES = {"FEAT_SME2", "FEAT_SME_F64F64", "FEAT_SME_I16I64", "FEAT_SME_F16F16", "FEAT_SME_B16B16"}
 SME_NAMES = [line for line in (ROOT / "isa/sme.txt").read_text().splitlines()
              if line and not line.startswith("#")]
-COMPAT_FEATURES = {"FEAT_PAuth", "FEAT_BTI", "FEAT_AES", "FEAT_SHA1", "FEAT_SHA256", "FEAT_CRC32", "FEAT_PMULL"}
+COMPAT_FEATURES = {"FEAT_PAuth", "FEAT_BTI", "FEAT_AES", "FEAT_SHA1", "FEAT_SHA256", "FEAT_CRC32", "FEAT_PMULL", "FEAT_CSSC", "FEAT_LRCPC"}
 COMPAT_NAMES = [line for line in (ROOT / "isa/m5-compat.txt").read_text().splitlines()
                 if line and not line.startswith("#")]
 SYSTEM_NAMES = {"NZCV", "FPCR", "FPSR", "TPIDR_EL0", "TPIDRRO_EL0", "CNTVCT_EL0", "CNTPCT_EL0", "CNTFRQ_EL0", "CTR_EL0", "DCZID_EL0", "DC CVAU", "DC CVAC", "DC CIVAC", "DC ZVA", "IC IVAU", "IC IALLU", "IC IALLUIS"}
@@ -267,6 +267,7 @@ def generate(data):
     lines.append("];\n")
     lines.append("pub(super) fn system_operand(op: &str, name: &str) -> Option<&'static [(FieldId, u32)]> { Some(match (op, name) {")
     for register in json.loads((ROOT / "isa/system.json").read_text()):
+        assert register["condition"] == {"_type": "AST.Function", "arguments": [{"_type": "AST.Identifier", "value": "FEAT_AA64"}], "name": "IsFeatureImplemented", "parameters": []}
         for accessor in register["accessors"]:
             op = {"A64.MRS": "mrs", "A64.MSRregister": "msr", "A64.DC": "dc", "A64.IC": "ic"}[accessor["name"]]
             assert accessor["condition"] == {"_type": "AST.Bool", "value": True}
