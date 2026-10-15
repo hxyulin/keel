@@ -77,7 +77,10 @@ section name. `M` requires a positive entry size, `S` requires `M`, and `G`
 requires a signature and explicit `comdat` selection. Merge/string NOBITS
 sections, other group selection kinds, and additional section arguments are
 rejected. Typed callers can use `Directive::ElfSectionMetadata`; the existing
-`ElfSection` API is unchanged.
+`ElfSection` API is unchanged. A group-only signature may receive a synthetic
+`.group` definition; a signature referenced by an ordinary relocation stays
+undefined unless the input defines it. Local targets in mergeable sections retain
+symbol identities so link-time merging applies PC-relative addends correctly.
 
 ## Limits and performance boundaries
 
@@ -106,7 +109,8 @@ Unneeded local `.L` symbols are omitted from ELF; ordinary
 relocations use section symbols plus the target's section offset. Explicit
 global/weak/hidden symbols, undefined symbols, TLS symbols, GOT/TLS references
 and absolute symbols requiring PC-relative linker relocations retain their
-identity. Absolute constants used only in resolved data are omitted too.
+identity. Referenced merge-section targets and COMDAT signatures retain identity
+as well. Absolute constants used only in resolved data are omitted too.
 Executable alignment uses single-byte NOPs unless a fill byte is explicit;
 data alignment uses zeros. Explicit fills preserve their low byte. Tuned
 multi-byte NOP sequences are not generated. Parsed instructions and raw encodings
