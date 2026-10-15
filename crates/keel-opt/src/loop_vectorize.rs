@@ -10,6 +10,7 @@ use keel_ir::{
     ValueDef, VectorBinaryOp as V, VectorType,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
+mod scan;
 
 /// Packed 128-bit capabilities used for vectorization profitability. Portable
 /// uses the intersection of the two supported targets, not scalar fallbacks.
@@ -670,5 +671,5 @@ pub fn run(f: &mut Function, target: VectorTarget) -> bool {
             changed = true;
         }
     }
-    changed
+    scan::run(f) || changed
 }

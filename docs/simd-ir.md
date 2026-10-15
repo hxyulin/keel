@@ -188,7 +188,7 @@ There is no frontend dependency in the pass. Basic optimization and unoptimized
 builds retain scalar loops. Explicit `-p` pipelines include the pass only when
 listed, for example `-p simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,dce,gcm,loop-vectorize`.
 
-The supported subset is increasing-by-one counted loops with a 32- or
+The counted-map subset is increasing-by-one loops with a 32- or
 64-bit induction variable, an invariant starting index, a separate header and
 straight-line body, one store, and contiguous streams of one scalar element type.
 Loads, copies, fills, integer
@@ -231,7 +231,7 @@ Loop discovery computes control-flow and dominance analysis lazily and reuses it
 across rejected candidates. A successful transformation invalidates both analyses
 before examining another loop, since it adds blocks and redirects edges.
 
-Offsets between streams, non-unit strides, reductions, induction values used as
+For counted maps, offsets between streams, non-unit strides, reductions, induction values used as
 lane data or live-outs, additional loop-carried values, calls, atomics, volatile
 memory, mixed element widths, narrowing/widening conversions, conditional bodies,
 and general SLP vectorization are not yet supported. Narrow C arithmetic often
@@ -264,3 +264,38 @@ and bounded byte scans/short copies as future vectorization investigations.
 The probes change retained application source or IR copies; they do not add a
 compiler inliner or constant-division pass. See the runtime profiling commands
 in `suite/README.md`.
+
+### Bounded ASCII prefix scans
+
+`loop-vectorize` also recognizes the pointer loop `while (p < end && *p < 128)
+p++`, as emitted by the C frontend for QuickJS's `JS_NewStringLen`. The bound
+must be invariant, the byte load ordinary and nonvolatile, and the character
+test and pointer increment must have no other effects. The induction pointer
+may be used after the loop. Swapped bound operands, inverted branches, and
+unsigned-byte or zero-extended-byte comparisons are recognized; arbitrary
+character predicates and unbounded sentinel scans are not.
+
+An initial scalar prefix advances to sixteen-byte alignment, stopping at either
+the bound or the first non-ASCII byte. Each chunk then checks pointer ordering
+and at least sixteen remaining bytes before issuing an `i64x2` load. Alignment
+keeps each load within a protection granule on the supported targets, including
+when the scalar scan would stop before a protected page but its bound lies
+beyond that page. Extracting and ORing its two lanes,
+followed by a repeated-byte high-bit mask, detects whether all sixteen bytes
+are ASCII. Entirely ASCII chunks advance by sixteen. A failing chunk or a short
+tail enters the original scalar header at the current pointer, so the scalar
+loop determines the exact first non-ASCII position and preserves exit values.
+No chunk reads before the current pointer or at/after the end bound. Empty and
+reversed ranges take the original scalar path without dereferencing memory.
+
+Integer `i64x2` extraction now selects native `UMOV` on NEON, and `MOVQ` plus
+`MOVHLPS` for the upper lane on SSE2, preserving live vector inputs. Other
+extraction shapes retain shared lane legalization. No new vector IR operations
+or CPU feature requirement is introduced. Structural and native tests cover
+every exit position, all byte values and alignments, volatile rejection,
+protected-page boundaries, and multiple selector/allocation configurations.
+
+The profiling evidence identifies this scan as an opportunity, not a dominant
+application cost. Short inputs pay an additional range check; benchmark long
+ASCII runs and early failures separately before attributing application gains
+to this transformation.
