@@ -762,6 +762,9 @@ fn assemble_pass(
                     .transpose()
                     .map_err(err)?
                     .map(u64::from);
+                if maximum == Some(0) {
+                    return Err(err("alignment maximum byte count must be positive".into()));
+                }
                 data::align_with(&mut result, current, power, fill, maximum).map_err(err)?;
                 continue;
             }

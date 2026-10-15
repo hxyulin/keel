@@ -229,6 +229,7 @@ fn apple_vector_suffixes_and_alignment_match_clang() {
         "mov.s v0.d[0], w0",
         "ushll.8b v0, v1, #0",
         ".p2align 4, 256",
+        ".p2align 4,,0",
         "sdot.2d v0, v1, v2",
     ] {
         assert!(
