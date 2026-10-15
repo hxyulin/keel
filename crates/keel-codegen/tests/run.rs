@@ -266,6 +266,7 @@ fn optimized_regressions_spills() {
         "known_bits",
         "canonical_constants",
         "scalar_simplify",
+        "branch_ranges",
     ] {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));

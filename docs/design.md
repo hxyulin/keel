@@ -738,9 +738,10 @@ analyses they need; there is no analysis cache yet.
 | `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
-| `instcombine` | consume canonical integer operands, fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
+| `instcombine` | consume canonical integer operands, fold constants, Boolean identities and wrapping integer cancellation; group constants in unshared associative chains; collapse integer conversion chains, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
 | `memory-forward` (opt-in) | block-local exact-address, same-type load reuse and store-to-load forwarding; every write invalidates all prior facts, and volatile accesses, calls, atomics and lifetime barriers clear them |
-| `known-bits` (opt-in) | propagate integer known-zero/known-one facts through SSA, remove proven redundant masks and fold comparisons from derived bounds |
+| `branch-ranges` (opt-in) | derive signed/unsigned intervals from dominating conditional edges and fold later comparisons against literals |
+| `known-bits` (opt-in) | propagate integer known-zero/known-one facts through SSA, including carry-aware add/subtract/negate, remove proven redundant masks and fold comparisons from derived bounds |
 | `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |

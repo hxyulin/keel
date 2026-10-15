@@ -9,8 +9,8 @@ preconditions.
 
 | Area | Current support | Substantial missing work |
 |---|---|---|
-| Constant/identity simplification | Constant evaluation, integer identities, elementary cast cancellation, constant selects, checked arithmetic, power-of-two reductions | Broader Boolean/algebraic identities, cast chains, integer reassociation and cancellation with canonical forms |
-| Integer facts | `known-bits` now proves zero/one bits through bit operations, shifts, casts, selects and block arguments; derives bounds for comparisons | Carry-aware arithmetic facts, richer intervals, relationships between values, facts conditional on a taken edge |
+| Constant/identity simplification | Constant evaluation, Boolean absorption/complements, integer cancellation and single-use constant grouping, integer cast chains, constant selects, checked arithmetic, power-of-two reductions | De Morgan/select rewrites, richer expression matching and cost-aware associative tree formation |
+| Integer facts | `known-bits` proves zero/one bits through bit operations, carry-aware add/subtract/negate, shifts, casts, selects and block arguments; `branch-ranges` derives intervals from guarded edges | Combined bit/interval/relational domains, propagation of path ranges through block arguments and arithmetic |
 | Constant propagation | SCCP follows executable edges and propagates constants through parameters | Combining executable-edge information with nonconstant bit/range facts |
 | CFG | Constant branches/switches, unreachable removal, forwarding and block merging | Branch threading using path facts, richer switch simplification, additional merge/selection forms |
 | SSA parameters | Simple uniform/dominating and anchored self-loop parameters via opt-in `phi-simplify` | General mutually recursive redundant parameter components |
@@ -205,9 +205,9 @@ cleanup recipes remain opt-in.
 
 This illustrates two different needs: fact analysis discovers missing proofs,
 while canonicalization makes existing rules and lowering easier to apply.
-Repeated passes cannot substitute for either one. The next simplification
-families are Boolean absorption/cancellation, broader integer cast chains,
-integer algebraic cancellation, and conditional range facts for CFG cleanup.
+Repeated passes cannot substitute for either one. The incremental additions below cover Boolean identities, integer cast chains,
+wrapping algebra and arithmetic/path facts. General relational reasoning and
+broader expression matching remain open.
 
 ## Boolean identities
 
@@ -279,3 +279,28 @@ a native fixture checks an i128 addition and its comparison. Richer interval
 and relational facts are still outside this domain.
 
 The [incremental arithmetic-facts report](../suite/reports/arithmetic-bits-aarch64-2026-10-15.json) uses identical late-known-bits recipes on both compilers. It records 4 fewer IR instructions, -16 text bytes, runtime ratio 0.9868, and compile-time ratio 1.0131. This domain remains opt-in; short timing screens do not justify promoting the pipeline.
+
+## Ranges from conditional edges
+
+The opt-in `branch-ranges` pass derives intervals from integer comparisons
+against literals on taken conditional edges. It walks the dominator tree with
+scoped facts, refines signed and unsigned domains separately, and folds later
+comparisons when the entire admitted interval proves the result. Signed values
+use sign-bit-biased ordering, including i128. Equality constrains both domains;
+non-equality removes an excluded endpoint when representable by an interval.
+
+An edge fact is introduced only for a target with one predecessor, and only
+when the conditional's two targets differ. Facts apply throughout that target's
+dominated region and are restored when leaving it. They do not leak into
+siblings, joins or loop headers. The pass does not move memory operations,
+carry facts across distinct loads, map block arguments, or infer relationships
+between different SSA values. It changes comparisons to constants; subsequent
+combining and CFG cleanup consume them. `keel-O-ranges` exposes that recipe.
+
+Tests exhaust all i8 inputs for every guard/query predicate combination and
+boundary guard constants, cover all widths and reversed operands, mixed signed
+and unsigned queries, parallel edges, joins, loops, distinct memory reads and
+16 combinations of other passes. Native fixtures use both selectors and
+allocators under restricted registers.
+
+The [incremental branch-range report](../suite/reports/branch-ranges-aarch64-2026-10-15.json) holds late combining/CFG cleanup constant on both sides. Adding the analysis removes 12 IR instructions, changes text by -152 bytes, and measures runtime ratio 0.9997 and compile-time ratio 1.0190. It remains opt-in pending stronger profitability evidence.

@@ -193,3 +193,9 @@ runtime ratio is 0.9923 (mostly intervals spanning one), and compile-time ratio
 is 1.0768. The census also counts `left_comparison_literals`. Default Basic and
 Full now start with canonicalization; explicit historical recipes retain their
 listed stages, with prerequisites restored for consumers that request them.
+
+`keel-O-ranges` adds conditional-edge integer ranges after GVN, followed by
+combining and CFG cleanup. The [simplification audit](../docs/simplification.md)
+records separate Boolean, cast-chain, wrapping-algebra, carry-fact and
+branch-range measurements. Incremental screens use three paired samples;
+small timing differences should not be treated as established speedups.

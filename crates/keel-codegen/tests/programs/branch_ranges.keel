@@ -1,0 +1,18 @@
+; expect: exit 0
+; opt-passes: canonicalize, simplify-cfg, instcombine, simplify-cfg, gvn, branch-ranges, instcombine, simplify-cfg, dce, gcm
+func @branch_ranges(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 16
+    v2 = icmp.ult v0, v1
+    brif v2, block1, block2
+block1:
+    v3 = iconst.i64 32
+    v4 = icmp.ult v0, v3
+    v5 = uext.i64 v4
+    return v5
+block2:
+    v6 = iconst.i64 8
+    v7 = icmp.ult v0, v6
+    v8 = uext.i64 v7
+    return v8
+}

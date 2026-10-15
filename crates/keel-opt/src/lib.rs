@@ -13,6 +13,7 @@
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
+mod branch_ranges;
 mod canonicalize;
 mod const_fold;
 mod dce;
@@ -106,6 +107,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "resolve operand aliases and normalize integer operand order and comparisons",
         run: canonicalize::run,
     },
+    BuiltinPass {
+        name: "branch-ranges",
+        description: "fold integer comparisons using ranges from dominating conditional edges",
+        run: branch_ranges::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -138,6 +144,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[8],
     &BUILTINS[9],
     &BUILTINS[10],
+    &BUILTINS[11],
 ];
 
 /// Independent optimizer effort; Full adds value numbering and code motion.
