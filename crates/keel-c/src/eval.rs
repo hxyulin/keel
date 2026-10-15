@@ -114,7 +114,7 @@ pub fn eval(e: &Expr) -> Option<Const> {
     Some(match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
-        ExprKind::Builtin(Builtin::Hint, args) => {
+        ExprKind::Builtin(Builtin::Hint | Builtin::AssumeAligned(_), args) => {
             let value = eval_constant(&args[0], true)?;
             for arg in &args[1..] {
                 eval_constant(arg, true)?;

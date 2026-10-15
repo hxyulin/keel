@@ -1049,7 +1049,11 @@ impl Parser {
                     }
                     values.push(self.cast(offset, ULONG));
                 }
-                Ok(mk(ExprKind::Builtin(Builtin::Hint, values), ptr, loc))
+                Ok(mk(
+                    ExprKind::Builtin(Builtin::AssumeAligned(n as u64), values),
+                    ptr,
+                    loc,
+                ))
             }
             "object_size" | "dynamic_object_size" => {
                 // The size is never known here: "unknown" is -1 for types 0

@@ -7,7 +7,7 @@
 //! it type-checks as it goes, producing the typed tree in `ast.rs`.
 //!
 //! Beyond ISO C it accepts what Apple's headers use: `__attribute__((..))`
-//! (only `aligned`, `packed` and `returns_twice` mean anything), `__asm`
+//! (`aligned`, `packed`, `returns_twice` and `noreturn` have semantics), `__asm`
 //! labels that rename a symbol, `__inline`, `__restrict`, nullability
 //! qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
 
@@ -73,6 +73,7 @@ pub struct Attrs {
     pub alignas: Option<u64>,
     pub packed: bool,
     pub returns_twice: bool,
+    pub noreturn: bool,
 }
 
 impl Attrs {
@@ -85,6 +86,7 @@ impl Attrs {
         }
         self.packed |= other.packed;
         self.returns_twice |= other.returns_twice;
+        self.noreturn |= other.noreturn;
     }
     fn alignment(self) -> Option<u64> {
         self.aligned
@@ -534,6 +536,7 @@ impl Parser {
             is_const,
             thread_local: false,
             returns_twice: false,
+            noreturn: false,
             func: None,
         });
         self.globals.len() - 1
@@ -797,6 +800,7 @@ impl Parser {
                 is_const,
                 thread_local: spec.thread_local,
                 returns_twice: false,
+                noreturn: false,
                 func: None,
             });
             let g = self.globals.len() - 1;
@@ -872,6 +876,7 @@ impl Parser {
                     is_const: false,
                     thread_local: false,
                     returns_twice: false,
+                    noreturn: false,
                     func: None,
                 });
                 let g = self.globals.len() - 1;
@@ -913,6 +918,7 @@ impl Parser {
                 "setjmp" | "_setjmp" | "sigsetjmp" | "__sigsetjmp" | "savectx" | "vfork"
             );
         self.globals[g].returns_twice |= returns_twice;
+        self.globals[g].noreturn |= attrs.noreturn;
         g
     }
 
@@ -1028,6 +1034,7 @@ impl Parser {
                         match name {
                             "packed" => attrs.packed = true,
                             "returns_twice" => attrs.returns_twice = true,
+                            "noreturn" => attrs.noreturn = true,
                             _ => {}
                         }
                         if self.eat("(") {
@@ -1116,7 +1123,7 @@ impl Parser {
                 "volatile" | "__volatile" | "__volatile__" => spec.is_volatile = true,
                 "inline" | "__inline" | "__inline__" => spec.inline = true,
                 "_Thread_local" | "__thread" => spec.thread_local = true,
-                "_Noreturn" => {}
+                "_Noreturn" => spec.attrs.noreturn = true,
                 w if IGNORED_QUALIFIERS.contains(&w) => {}
                 "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
                 "_Complex" => is_complex = true,

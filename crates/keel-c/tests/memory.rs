@@ -297,3 +297,120 @@ fn over_aligned_volatile_locals_preserve_access_flags() {
         keel_codegen::compile(&module, target).unwrap();
     }
 }
+
+#[test]
+fn proven_address_alignment_reaches_accesses_without_strengthening_packed_pointers() {
+    let cases: &[(&str, &[u32])] = &[
+        ("int f(void) { volatile int x = 1; return x; }", &[4]),
+        (
+            "int f(void) { volatile int x __attribute__((aligned(64))) = 1; return x; }",
+            &[64],
+        ),
+        (
+            "int x __attribute__((aligned(32))); int f(void) { return x; }",
+            &[32],
+        ),
+        (
+            "int x __attribute__((aligned(32))); int f(void) { int *p = &x; return *p; }",
+            &[32],
+        ),
+        (
+            "int f(void) { volatile int a[4] __attribute__((aligned(64))) = {1}; return a[1]; }",
+            &[4],
+        ),
+        (
+            "int f(int i) { volatile int a[4] __attribute__((aligned(64))) = {1}; return a[i]; }",
+            &[4],
+        ),
+        (
+            "struct __attribute__((packed)) S { char c; int x; }; struct S s; int f(void) { return s.x; }",
+            &[1],
+        ),
+        (
+            "struct __attribute__((packed)) S { char c; int x; }; int f(struct S *s) { return s->x; }",
+            &[1],
+        ),
+        ("int f(char *p) { return *(int *)(p + 1); }", &[1]),
+        (
+            "int f(void *p) { return *(int *)__builtin_assume_aligned(p, 64); }",
+            &[64],
+        ),
+        (
+            "int f(void *p) { int *q = __builtin_assume_aligned(p, 64); return *q; }",
+            &[64],
+        ),
+        (
+            "int f(void *p) { return *(int *)__builtin_assume_aligned(p, 64, 4); }",
+            &[4],
+        ),
+        (
+            "int f(void *p) { return *(int *)__builtin_assume_aligned(p, 64, -8); }",
+            &[8],
+        ),
+        (
+            "int f(void *p) { return *(int *)__builtin_assume_aligned(p, 64, 0); }",
+            &[64],
+        ),
+        (
+            "int f(void *p, int n) { return *(int *)__builtin_assume_aligned(p, 64, n); }",
+            &[1],
+        ),
+        (
+            "int f(void *p, int c) { if (c) { int x = *(int *)__builtin_assume_aligned(p, 64); } return *(int *)p; }",
+            &[64, 1],
+        ),
+        (
+            "int f(void *p, int c) { int *q = c ? __builtin_assume_aligned(p, 64) : p; return *q; }",
+            &[1],
+        ),
+        (
+            "int f(void *p, void *r) { int *q = __builtin_assume_aligned(p, 64); q = r; return *q; }",
+            &[1],
+        ),
+    ];
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        for &(source, expected) in cases {
+            let mut module = compile(source, target);
+            assert_eq!(
+                flags(&module, true)
+                    .iter()
+                    .map(|f| f.align)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{source}\n{module}"
+            );
+            // Contracts must also survive serialization and optimization.
+            let text = module.to_string();
+            let parsed = keel_ir::parse(&text).unwrap();
+            assert_eq!(flags(&parsed, true), flags(&module, true));
+            keel_opt::optimize(&mut module).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn aggregate_chunk_alignment_is_reduced_at_each_offset() {
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let module = compile(
+            "struct __attribute__((aligned(32))) S { long a, b, c; }; struct S s; int f(void) { volatile struct S d; d = s; return 0; }",
+            target,
+        );
+        assert_eq!(
+            flags(&module, true)
+                .iter()
+                .map(|f| f.align)
+                .collect::<Vec<_>>(),
+            [32, 8, 16, 8]
+        );
+        // Stack storage is explicitly rounded up for over-aligned objects.
+        assert_eq!(
+            flags(&module, false)
+                .iter()
+                .map(|f| f.align)
+                .collect::<Vec<_>>(),
+            [32, 8, 16, 8]
+        );
+    }
+}

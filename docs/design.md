@@ -1012,7 +1012,9 @@ Some accepted extensions have deliberately limited behavior:
 - `__builtin_assume_aligned` returns its pointer as `void *` without
   adjusting it or checking alignment at runtime. Alignment must be a
   nonzero power-of-two integer constant. The optional integer offset is
-  evaluated once, but no alignment information is retained by the IR.
+  evaluated once. Proven alignment is retained on subsequent IR loads and
+  stores through that SSA pointer; a constant offset reduces the guaranteed
+  alignment, and an unknown offset makes no additional promise.
 - `__builtin_constant_p` recognizes integer expressions the frontend can
   evaluate, rather than asking the optimizer whether a value is constant.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` always
@@ -1035,7 +1037,11 @@ Some accepted extensions have deliberately limited behavior:
   represented by the current IR signature. Packed bit-fields requiring
   partial or crossing storage-container accesses, unaligned atomic members
   and unaligned pointer relocations are diagnosed rather than emitted.
-- Attribute syntax is accepted broadly, and `returns_twice` affects calls.
+- Attribute syntax is accepted broadly. `returns_twice` affects calls;
+  `_Noreturn` and GNU `noreturn` terminate direct calls with a trap if the
+  callee unexpectedly returns, exposing the absent continuation to CFG
+  simplification. These contracts are merged across function redeclarations.
+  GNU function-pointer `noreturn` attributes are not represented.
   Other attributes are ignored, including `cleanup`, `weak`, `alias`,
   `visibility`, `constructor` and `vector_size`; their runtime, linkage or
   type behavior is not supported.
@@ -1046,6 +1052,67 @@ Some accepted extensions have deliberately limited behavior:
 - Clang's `__has_builtin`, `__has_feature` and `__has_attribute` checks
   are evaluated by Clang during preprocessing. Their answers describe
   Clang, not keel, and can enable code that keel does not support.
+
+### Optimization information at the C/IR boundary
+
+The C frontend supplies all three application suites; Lua is C input, not a
+separate language frontend. An audit of the pinned Lua 5.4.7, QuickJS
+2024-01-13 and SQLite 3.46.1 sources found these optimization annotations:
+
+- Lua's `llimits.h` defines `l_noret` using GNU `noreturn`, used for error
+  paths such as `luaD_throw`. Its `luaconf.h` defines `luai_likely` and
+  `luai_unlikely` using `__builtin_expect`, and `LUAI_FUNC` requests internal
+  visibility on supported targets.
+- QuickJS's `cutils.h` defines `likely`/`unlikely`, `force_inline`,
+  `no_inline` and packed integer access wrappers. Formatting and unused
+  annotations are diagnostic rather than optimization contracts.
+- SQLite's amalgamation defines `SQLITE_INLINE`/`SQLITE_NOINLINE`, and
+  requests eight-byte alignment for its small memory pool when enabled.
+
+Lowering preserves signed comparison/division/shift and integer extension
+semantics, ABI extension and aggregate layouts, immutable global data,
+volatile memory operations, atomic orderings, object layouts/alignment,
+`returns_twice`, and direct `noreturn` control flow. Access alignment is
+computed from actual stack slots, global declarations, explicitly rounded
+local addresses, `__builtin_assume_aligned`, and pointer offsets. It is
+written into `MemoryFlags`, so IR printing/parsing and downstream passes
+retain it. Copy and initializer chunks get alignment at their actual byte
+offsets, not the alignment of the aggregate base. Alignment never implies
+`notrap`, immutable memory or alias freedom. Unknown pointers and unresolved
+block parameters conservatively have alignment one; packed accesses are not
+strengthened merely because their C scalar type normally has stricter
+alignment. Alignment facts can therefore be lost across control-flow merges,
+memory round trips and function boundaries.
+
+Remaining information gaps require IR contracts and consumers, rather than
+mapping source annotations onto unrelated flags:
+
+- Branch likelihood and explicit probabilities are still discarded by the
+  hint builtins. Preserving these on CFG edges and using them in block layout
+  is a concrete next step for Lua and QuickJS. Probabilities are advisory;
+  probability zero or one must not make an edge unreachable.
+- `always_inline`/`noinline`, `hot`/`cold` and visibility are not represented.
+  Inlining needs a call-graph pass and a cost model; retaining these attributes
+  alone would not inline the helpers the suites request.
+- `restrict` and C effective-type alias information are discarded. Scoped
+  alias contracts and alias analysis are needed before memory optimizations
+  can use them. A pointer to `const` does not establish immutable storage.
+- GNU `pure`/`const`, `malloc`, `alloc_size`, `alloc_align`, `nonnull`,
+  `returns_nonnull` and `nothrow` function contracts are ignored. Calls remain
+  conservative memory/lifetime barriers. Declaration attributes must be
+  distinguished from Clang's nullability spellings, which are not equivalent
+  optimizer promises. Allocation contracts also need object/lifetime modeling.
+- Signed C overflow and in-bounds pointer arithmetic have no corresponding
+  IR flags; integer arithmetic remains wrapping. Do not substitute trapping
+  arithmetic, `notrap` or unrestricted reassociation for those contracts.
+- Object-size builtins still return unknown bounds, and fortified calls lose
+  their supplied checks as described above. This is also a compatibility gap,
+  not evidence that the checks are redundant.
+
+The direct-call and access-alignment changes expose facts without claiming a
+suite speedup. Assess future contracts with IR regressions, both target
+backends, the application correctness suites and paired measurements.
+The alignment-offset interpretation follows [GCC's builtin documentation](https://gcc.gnu.org/onlinedocs/gcc/Other-Builtins.html).
 
 GNU `__auto_type` follows the single-identifier and initializer scope
 rules in [GCC's documentation](https://gcc.gnu.org/onlinedocs/gcc/Typeof.html).

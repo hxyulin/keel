@@ -158,8 +158,10 @@ pub enum Builtin {
     /// `(a, b, result_ptr)`: stores the wrapped result and returns `_Bool`.
     Overflow(OverflowOp),
     /// Evaluates its arguments once and returns the first value. Branch
-    /// and alignment metadata are validated by the parser, then ignored.
+    /// likelihood metadata is validated by the parser, then ignored.
     Hint,
+    /// Pointer alignment contract; optional offset remains a runtime operand.
+    AssumeAligned(u64),
     Alloca,
     Trap,
     /// A resumable debugger breakpoint, unlike the terminating `Trap`.
@@ -303,6 +305,7 @@ pub struct Global {
     pub is_const: bool,
     pub thread_local: bool,
     pub returns_twice: bool,
+    pub noreturn: bool,
     /// Index in the function list, for a defined function.
     pub func: Option<usize>,
 }

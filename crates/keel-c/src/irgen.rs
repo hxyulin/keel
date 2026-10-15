@@ -24,9 +24,9 @@ use crate::{Error, Loc};
 use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
-    DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic,
-    Language, MemoryFlags, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc,
-    StackSlot, Symbol, Type, Value,
+    DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, InstData, IntCC,
+    Intrinsic, Language, MemoryFlags, Module, Ordering, Purpose, RmwOp, Signature, SourceFile,
+    SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
 };
 use std::collections::HashMap;
 
@@ -270,6 +270,91 @@ impl<'p> Gen<'p> {
         Error::new(Loc::default(), format!("{what}, which is not supported"))
     }
 
+    /// Preserve proven address alignment on every emitted access, including
+    /// byte copies and initializer chunks. No pointee-type inference: packed
+    /// members and pointers cast from byte buffers may be unaligned.
+    fn preserve_access_alignment(&self, func: &mut Function, mut known: HashMap<Value, u32>) {
+        let slots: HashMap<_, _> = func.stack_slots().map(|(s, d)| (s, d.align)).collect();
+        let symbols: HashMap<_, _> = func
+            .data_symbols()
+            .map(|(r, name)| {
+                let align = self
+                    .p
+                    .globals
+                    .iter()
+                    .find(|g| g.symbol == name)
+                    .map(|g| g.align as u32)
+                    .or_else(|| {
+                        self.module
+                            .data_object(name)
+                            .and_then(|d| d.init.as_ref())
+                            .map(|d| d.align)
+                    })
+                    .unwrap_or(1);
+                (r, align)
+            })
+            .collect();
+        fn alignment(
+            func: &Function,
+            value: Value,
+            known: &mut HashMap<Value, u32>,
+            slots: &HashMap<StackSlot, u32>,
+            symbols: &HashMap<keel_ir::DataRef, u32>,
+            depth: usize,
+        ) -> u32 {
+            let value = func.resolve(value);
+            if let Some(&a) = known.get(&value) {
+                return a;
+            }
+            // Block parameters (including cyclic loop phis) and excessively
+            // deep expressions conservatively carry no alignment promise.
+            if depth == 64 {
+                return 1;
+            }
+            let ValueDef::Result(inst, _) = func.value_def(value) else {
+                return 1;
+            };
+            let result = match func.inst_data(inst) {
+                InstData::StackAddr { slot } => slots[slot],
+                InstData::SymbolAddr {
+                    symbol: Symbol::Data(data),
+                } => symbols[data],
+                InstData::Iconst { imm, .. } => 1u32 << (*imm as u64).trailing_zeros().min(31),
+                InstData::Binary {
+                    op: op @ (BinaryOp::Ptradd | BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::Imul),
+                    args,
+                } => {
+                    let a = alignment(func, args[0], known, slots, symbols, depth + 1);
+                    let b = alignment(func, args[1], known, slots, symbols, depth + 1);
+                    if *op == BinaryOp::Imul {
+                        u64::from(a).saturating_mul(u64::from(b)).min(1 << 31) as u32
+                    } else {
+                        a.min(b)
+                    }
+                }
+                _ => 1,
+            };
+            known.insert(value, result);
+            result
+        }
+        let accesses: Vec<_> = func
+            .layout_insts()
+            .filter_map(|(_, inst)| match func.inst_data(inst) {
+                InstData::Load { addr, .. } | InstData::Store { addr, .. } => Some((inst, *addr)),
+                _ => None,
+            })
+            .collect();
+        for (inst, addr) in accesses {
+            let align = alignment(func, addr, &mut known, &slots, &symbols, 0);
+            match func.inst_data_mut(inst) {
+                InstData::Load { flags, .. } | InstData::Store { flags, .. } => {
+                    flags.align = flags.align.max(align)
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
     fn function(&mut self, def: &'p FuncDef) -> R<Function> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
@@ -289,6 +374,7 @@ impl<'p> Gen<'p> {
             b,
             def,
             locals: Vec::new(),
+            alignments: HashMap::new(),
             sret: None,
             breaks: Vec::new(),
             continues: Vec::new(),
@@ -322,6 +408,7 @@ impl<'p> Gen<'p> {
                     let mask = fg.b.ins().iconst(Type::I64, -(align as i64));
                     let rounded = fg.b.ins().and(upper, mask);
                     let addr = fg.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, rounded);
+                    fg.alignments.insert(addr, align as u32);
                     let debug_slot = fg.g.debug.then(|| {
                         let pointer = fg.b.func.create_stack_slot(8, 8);
                         let at = fg.b.ins().stack_addr(pointer);
@@ -426,7 +513,9 @@ impl<'p> Gen<'p> {
         }
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
+        let alignments = std::mem::take(&mut fg.alignments);
         fg.b.finalize();
+        self.preserve_access_alignment(&mut func, alignments);
         Ok(func)
     }
 
@@ -606,6 +695,8 @@ struct FnGen<'g, 'p, 'f> {
     b: FunctionBuilder<'f>,
     def: &'p FuncDef,
     locals: Vec<Storage>,
+    /// Facts attached to distinct SSA definitions, never to a mutable C variable.
+    alignments: HashMap<Value, u32>,
     sret: Option<Value>,
     breaks: Vec<Block>,
     continues: Vec<Block>,
@@ -1783,6 +1874,22 @@ impl FnGen<'_, '_, '_> {
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
         };
+        if direct.is_some_and(|g| self.g.p.globals[g].noreturn) {
+            self.b.ins().trap();
+            self.terminated = true;
+            self.ensure_block();
+            // A GNU noreturn function can have a non-void return type.
+            // Its nominal result must not escape into this unreachable block.
+            return Ok(if fty.ret == Ty::Void {
+                None
+            } else {
+                Some(self.zero(if ret_slot.is_some() {
+                    Type::Ptr
+                } else {
+                    fty.ret.ir()
+                }))
+            });
+        }
         if let Some(slot) = ret_slot {
             return Ok(Some(self.b.ins().stack_addr(slot)));
         }
@@ -1808,6 +1915,23 @@ impl FnGen<'_, '_, '_> {
                 overflow
             }
             Builtin::Hint => vals[0],
+            Builtin::AssumeAligned(alignment) => {
+                // Keep the contract local to this expression's SSA result.
+                // Reusing vals[0] would leak a branch-local assumption to
+                // unrelated uses of the original pointer.
+                let zero = ins.iconst(Type::I64, 0);
+                let result = self.b.ins().ptradd(vals[0], zero);
+                let offset = args.get(1).and_then(crate::eval::eval_int);
+                let align = match (args.len(), offset) {
+                    (1, _) => alignment,
+                    (_, Some(offset)) => {
+                        alignment.min(1u64 << (offset as u64).trailing_zeros().min(63))
+                    }
+                    _ => 1,
+                };
+                self.alignments.insert(result, align.min(1 << 31) as u32);
+                result
+            }
             Builtin::Signbit => {
                 let (int, bits) = match args[0].ty {
                     Ty::Float => (Type::I32, 31),
