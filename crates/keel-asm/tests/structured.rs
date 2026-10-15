@@ -83,3 +83,24 @@ fn oversized_functions_keep_existing_far_branch_relaxation() {
         assemble_object(&text).unwrap()
     );
 }
+
+#[test]
+fn macro_fallback_does_not_turn_invalid_structured_symbols_into_source() {
+    for item in [
+        keel_asm_ir::Item::Label("bad:\nnop\nLend".into()),
+        keel_asm_ir::Item::Branch {
+            link: false,
+            target: "Lend\nnop\nLend:".into(),
+        },
+    ] {
+        let mut program = Program::new();
+        program.text(".rept 1\nnop\n.endr\n");
+        program.items.push(item);
+        assert!(
+            assemble_program_object(&program, TargetFeatures::default())
+                .unwrap_err()
+                .message
+                .contains("invalid symbol")
+        );
+    }
+}

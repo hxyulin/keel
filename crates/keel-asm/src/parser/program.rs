@@ -106,6 +106,7 @@ pub(super) fn materialize(
                 }
             }
             Item::Label(s) => {
+                super::symbol(s).map_err(|e| Error::new(0, e))?;
                 writeln!(text, "{s}:").unwrap();
             }
             Item::Instruction(i) => {
@@ -113,6 +114,7 @@ pub(super) fn materialize(
                 writeln!(text, ".long {word}").unwrap();
             }
             Item::Branch { link, target } => {
+                super::symbol(target).map_err(|e| Error::new(0, e))?;
                 writeln!(text, "{} {target}", if *link { "bl" } else { "b" }).unwrap();
             }
         }
