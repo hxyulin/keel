@@ -112,8 +112,8 @@ fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
                     && address.expression.subtract.is_none()))
         })
         .collect();
-    let mut encodings: Vec<Option<(bool, encode::Encoding)>> =
-        (0..items.len()).map(|_| None).collect();
+    let mut encodings = vec![None; items.len()];
+    let mut encoded_bytes = Vec::new();
     loop {
         let mut a = Assembler::new()?;
         let mut branches = Vec::new();
@@ -123,7 +123,13 @@ fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
                 t.lines()
                     .try_for_each(|directive| a.directive(directive, *line))
             } else if let Item::X86Instruction(i) = item {
-                a.instruction_encoding(i, *line, short[index], &mut encodings[index])
+                a.instruction_encoding(
+                    i,
+                    *line,
+                    short[index],
+                    &mut encodings[index],
+                    &mut encoded_bytes,
+                )
             } else {
                 a.item(item, *line)
             };
@@ -267,10 +273,14 @@ impl Assembler {
         i: &x86::Instruction,
         line: usize,
         short: bool,
-        cached: &mut Option<(bool, encode::Encoding)>,
+        cached: &mut Option<std::ops::Range<usize>>,
+        encoded_bytes: &mut Vec<u8>,
     ) -> Result<(), String> {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
+        }
+        if let Some(range) = cached {
+            return self.bytes(&encoded_bytes[range.clone()]);
         }
         // Intel operands known to be absolute at this point are constants.
         // Forward references remain symbolic, including later absolute aliases.
@@ -301,29 +311,23 @@ impl Assembler {
                 address.expression = Expression::constant(value);
             }
         }
-        // Only raw encodings are reusable. A previously defined absolute
-        // expression can depend on layout (e.g. .set n,end-start), so folded
-        // operands must be evaluated and encoded again on every pass.
-        let folded_encoding;
-        let e = if let Some(i) = folded.as_ref() {
-            folded_encoding = encode::encode(i, short)?;
-            &folded_encoding
-        } else {
-            if cached
-                .as_ref()
-                .is_none_or(|(was_short, _)| *was_short != short)
-            {
-                *cached = Some((short, encode::encode(i, short)?));
-            }
-            &cached.as_ref().unwrap().1
-        };
+        let e = encode::encode(folded.as_ref().unwrap_or(i), short)?;
+        // Cache only symbol-free encodings, in one compact byte arena. Keeping
+        // a heap allocation and symbolic fixups for every instruction costs
+        // more memory/cache traffic than reencoding the symbolic minority.
+        // Folded absolute expressions can depend on layout and are never cached.
+        if folded.is_none() && e.fixups.is_empty() {
+            let start = encoded_bytes.len();
+            encoded_bytes.extend_from_slice(&e.bytes);
+            *cached = Some(start..encoded_bytes.len());
+        }
         let at = self.offset();
-        for f in &e.fixups {
+        for f in e.fixups {
             self.fixes.push(Fix {
                 section: self.current,
                 offset: at + f.offset as u64,
                 width: f.width,
-                address: f.address.clone(),
+                address: f.address,
                 kind: f.kind,
                 line,
             })
