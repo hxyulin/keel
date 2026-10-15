@@ -150,8 +150,22 @@ impl Linker {
                 address += PAGE as u64;
             }
             let mut file_end = file;
+            let tls_alignment = ids
+                .iter()
+                .filter(|&&id| matches!(self.outputs[id].flags & 255, 0x11 | 0x12))
+                .map(|&id| self.outputs[id].alignment)
+                .max()
+                .unwrap_or(0);
+            let mut tls_started = false;
             for &id in &ids {
                 let s = &mut self.outputs[id];
+                if !tls_started && matches!(s.flags & 255, 0x11 | 0x12) {
+                    // dyld uses offsets into a malloc-backed TLS template.
+                    // Preserve section alignment relative to the template base,
+                    // not only relative to the executable's image base.
+                    s.alignment = s.alignment.max(tls_alignment);
+                    tls_started = true;
+                }
                 let a = 1 << s.alignment;
                 // Segment starts are at least 16 KiB aligned, and all section
                 // alignments above that are handled in VM and file together.
@@ -487,6 +501,38 @@ impl Linker {
                 nlist(symbols, strings, &object.name, 0x64, 0, 0, 0); // N_SO
                 nlist(symbols, strings, path.to_str().unwrap(), 0x66, 0, 1, 0); // N_OSO; zero timestamp means no staleness check
                 for (si, symbol) in object.symbols.iter().enumerate() {
+                    let common =
+                        symbol.kind & 0xe == 0 && symbol.kind & 1 != 0 && symbol.value != 0;
+                    if common {
+                        let target = self.symbol_target(oi, si)?;
+                        let ordinal = match target {
+                            Target::Common(_) => self.outputs[self.common_section].ordinal,
+                            Target::Definition(o, sym) => {
+                                let definition = &self.objects[o].symbols[sym];
+                                if definition.section == 0 {
+                                    0
+                                } else {
+                                    let section = &self.objects[o].sections[definition.section - 1];
+                                    self.outputs[section
+                                        .output
+                                        .ok_or("debug common resolves to discarded section")?]
+                                    .ordinal
+                                }
+                            }
+                            Target::Header => 1,
+                            Target::Import(_) => return fail("debug common resolves to an import"),
+                        };
+                        nlist(
+                            symbols,
+                            strings,
+                            &symbol.name,
+                            0x20,
+                            ordinal,
+                            0,
+                            self.address(target)?,
+                        );
+                        continue;
+                    }
                     if symbol.kind & 0xe != 0xe
                         || symbol.name.starts_with("ltmp")
                         || symbol.name.starts_with('L')

@@ -93,6 +93,24 @@ int main(void) {
         run('ar', 'rcs', archive, other)
         pair('tls-archive-' + producer, [main_obj, archive])
 
+    # The initialized template can have less alignment than TLS BSS. Check
+    # actual addresses, not just stored values, in main and a fresh pthread.
+    for alignment in [4, 8, 16]:
+        source = f'''#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+__thread char initial=7;
+__thread char zero[{alignment}] __attribute__((aligned({alignment})));
+static int check(void){{return initial!=7 || zero[0]!=0 || ((uintptr_t)zero % {alignment})!=0;}}
+static void *worker(void *unused){{return (void*)(intptr_t)check();}}
+int main(void){{pthread_t thread;void *result;puts("TLS addresses");if(check())return 1;initial=91;zero[0]=23;
+if(pthread_create(&thread,0,worker,0))return 2;pthread_join(thread,&result);
+return result!=0 || initial!=91 || zero[0]!=23;}}
+'''
+        for producer in ['clang', 'keel']:
+            obj = compile(f'tls-alignment-{alignment}-{producer}', source, producer)
+            pair(f'tls-alignment-{alignment}-{producer}', [obj])
+
     weak_a = compile('weak-a', '__attribute__((weak)) int shared=17; __attribute__((weak)) int f(void){return shared;} int a(void){return f();}\n')
     weak_b = compile('weak-b', '__attribute__((weak)) int shared=17; __attribute__((weak)) int f(void){return shared;} int b(void){return f();}\n')
     strong = compile('strong', 'int shared=29; int f(void){return shared;}\n')
@@ -229,6 +247,38 @@ int helper(void) { return twice(21); }
         output = run('lldb', '-b', exe, '-o', f'breakpoint set --file debug-{producer}.c --line 3', '-o', 'run', '-o', 'frame variable', '-o', 'bt', '-o', 'continue')
         assert b'local = 42' in output and b'`main' in output, output.decode()
         results['tests'][exe.name]['lldb_line_locals_backtrace_standalone_dsym'] = True
+
+    # Tentative definitions are N_UNDF commons, not N_SECT definitions.
+    # Their DWARF must map to the final common/strong symbol address too.
+    common_source = '''int global;
+int main(void) {
+  global = 42;
+  return global != 42;
+}
+'''
+    common = compile('debug-common', common_source, flags=['-g', '-fcommon', '-O0'])
+    strong = compile('debug-common-strong', 'int global=17;\n', flags=['-g', '-O0'])
+    for name, extra in [('debug-common', []), ('debug-common-overridden', [strong])]:
+        mapped = out / (name + '.mapped')
+        run(keel, 'link', '--sysroot', root, common, *extra,
+            '--debug-map', str(mapped) + '.objects', '-o', mapped)
+        run('codesign', '--verify', '--strict', mapped)
+        output = run('lldb', '-b', mapped, '-o', 'breakpoint set --file debug-common.c --line 4',
+                     '-o', 'run', '-o', 'target variable global', '-o', 'expression global',
+                     '-o', 'continue')
+        (out / (name + '.mapped.lldb.txt')).write_bytes(output)
+        assert b'stop reason = breakpoint' in output and b'(int) global = 42' in output, output.decode()
+        exe = pair(name, [common, *extra], debug=True)
+        # Verify the dSYM alone resolves the common global, without OSO inputs.
+        shutil.rmtree(exe.with_suffix('.debug-objects'))
+        output = run('lldb', '-b', exe, '-o', 'breakpoint set --file debug-common.c --line 4',
+                     '-o', 'run', '-o', 'target variable global', '-o', 'expression global',
+                     '-o', 'continue')
+        (out / (name + '.lldb.txt')).write_bytes(output)
+        assert b'stop reason = breakpoint' in output and b'(int) global = 42' in output, output.decode()
+        run('dwarfdump', '--verify', str(exe) + '.dSYM')
+        results['tests'][name]['lldb_common_global_standalone_dsym'] = True
+        results['tests'][name]['lldb_common_global_debug_map'] = True
 
     (out / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
     print(json.dumps(results, indent=2))

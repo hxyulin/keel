@@ -306,3 +306,24 @@ python3 suite/validate_native_linker_compat.py --keel target/release/keel --out 
 The existing regression/application commands above apply unchanged; the new
 validator creates its own SDK-interface overlay for test dylibs, retained debug
 objects, debugger transcripts, and JSON results inside `--out`.
+
+
+### Independent review fixes
+
+Review of `b313ac1` found two correctness issues that the initial probes did not
+cover. The first TLS template section now uses the greatest template-section
+alignment, preserving aligned offsets when initialized data needs less alignment
+than TLS BSS. New Clang/Keel probes check actual 4-, 8-, and 16-byte addresses in
+main and a fresh pthread, as well as independent values. Allocation guarantees
+beyond the OS TLV allocator's alignment remain outside this contract.
+
+Debug maps now include tentative `-fcommon` globals at their final resolved
+addresses, including commons overridden by strong definitions. LLDB checks
+recover `(int) global = 42` both from debug maps alone and from standalone dSYMs
+after deleting object snapshots; `dwarfdump --verify` passes.
+
+The expanded compatibility validator passes 33 cases and 150 signed native
+launches, plus two additional LLDB launches of common-global debug maps. The
+40 Rust tests and strict driver/linker Clippy checks pass. The report's
+`review_followup` section records the new results and debugger transcripts,
+while retaining the original application/regression evidence separately.
