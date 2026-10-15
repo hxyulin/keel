@@ -5,6 +5,7 @@
 //! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -25,6 +26,7 @@
 use keel_codegen::Target;
 use keel_ir::Module;
 use std::process::ExitCode;
+mod asm;
 mod input;
 
 const USAGE: &str = "usage:
@@ -32,6 +34,7 @@ const USAGE: &str = "usage:
   keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
+  keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel passes
 
@@ -63,7 +66,6 @@ struct Options {
     emit_ir: bool,
     passes: Option<Vec<String>>,
     target: Option<Target>,
-    asm_features: keel_asm::TargetFeatures,
 }
 
 impl Options {
@@ -99,18 +101,6 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
-            "--cpu" => {
-                opts.asm_features = match args.next().map(String::as_str) {
-                    Some("baseline") => keel_asm::TargetFeatures::default(),
-                    Some("apple-m5") => keel_asm::TargetFeatures::apple_m5(),
-                    Some(cpu) => {
-                        return Err(format!(
-                            "unknown assembler CPU `{cpu}`; expected baseline or apple-m5"
-                        ));
-                    }
-                    None => return Err("`--cpu` needs baseline or apple-m5".into()),
-                };
-            }
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
@@ -217,21 +207,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
             write_output(&opts, &output)
         }
-        "asm" => {
-            let opts = parse_options(rest, &["-o", "--cpu"])?;
-            let input = opts.input.as_ref().ok_or(USAGE)?;
-            let output = opts
-                .output
-                .as_ref()
-                .ok_or("`asm` requires `-o <output.o>`")?;
-            let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
-            let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-            let object = keel_asm::assemble_object_with_features(text, opts.asm_features)
-                .map_err(|e| format!("{input}: {e}"))?;
-            // Release the mapping before opening output, including in-place output.
-            drop(src);
-            std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
-        }
+        "asm" => asm::run(rest),
         "compile" => {
             let opts = parse_options(
                 rest,

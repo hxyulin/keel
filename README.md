@@ -179,7 +179,7 @@ Scalar LSE atomics include read-modify-write operations and compare-and-swap;
 DMB/DSB/ISB barriers, `ngc`/`ngcs`, `svc`, and SIMD `movi` are supported too.
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
-The generated table currently contains 534 encoding forms, counting register
+The generated table currently contains 1647 encoding forms, counting register
 widths, addressing modes, and atomic ordering variants separately. This is
 a supported subset, rather than complete A64 or GNU assembler compatibility.
 Data support includes initialized/zero-fill/TLS sections, integer directives,
@@ -189,11 +189,30 @@ line tables, and debug sections for types and variables.
 Exception personalities, LSDA tables, and C++ exception propagation are
 supported, along with subsection splitting for linker reordering and dead
 stripping. The tests assemble all current backend fixtures and C fixtures
-(including optimization and debug configurations). Literal loads, exclusive
-accesses, general SIMD arithmetic, and other unsupported forms still limit
-arbitrary assembly and inline assembly.
+(including optimization and debug configurations). General NEON arithmetic and
+selected SVE/SME forms are supported. `--cpu apple-m5` enables the modeled M5
+numeric, matrix, crypto, CRC, PAC and BTI extensions; it does not claim complete
+M5 ISA coverage or enable ordinary non-streaming SVE. Broader system syntax and
+some instruction families remain unsupported.
 Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
+
+Assemble multiple independent files in one process to amortize startup:
+
+```sh
+target/release/keel asm --cpu apple-m5 src/one.s src/two.s --out-dir build/objects
+```
+
+Each input produces `<stem>.o` in the output directory, which is created if
+necessary. Files are processed serially with separate symbol and directive
+state; memory for each input is released before the next. Output-name collisions
+and outputs aliasing an input are rejected before any object is written. On
+macOS, names differing only by case are conservatively treated as collisions.
+The batch stops on its first error, keeping objects already written. A single
+input can still use `-o file.o`; `-o` and `--out-dir` are mutually exclusive.
+Use `--` before input names beginning with a dash. This assembler accepts AArch64
+syntax and emits Apple arm64 Mach-O; x86 AT&T/Intel syntax and ELF output require
+separate target support.
 
 Instruction metrics are available through `keel asm-metrics input.s` and
 [`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates
