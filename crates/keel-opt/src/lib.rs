@@ -20,6 +20,7 @@ mod dce;
 mod gcm;
 mod gvn;
 mod inline;
+pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
 mod instcombine;
 mod known_bits;
 mod loop_vectorize;
