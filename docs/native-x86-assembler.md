@@ -200,3 +200,22 @@ pass. The relocation differential also checks temporary section targets with
 trailing instruction immediates. Modern AArch64 differential checks run on Mac,
 not Linux Clang 18. Strict assembler library/x86-test Clippy passes with the
 existing AArch64/parser lint categories allowed; the report names those allowances.
+
+
+### Integration review
+
+Independent review found a temporary absolute-symbol case missed by the initial
+identity filter: `.set .Labs,42; .long .Labs-.` needs a PC32 relocation after
+converting the data difference. The assembler now retains the required symbol
+instead of panicking. Defined-before-use, forward-definition and forward-alias
+cases have explicit relocation tests and Clang/GNU comparisons; resolved
+absolute-only data still omits unnecessary temporary symbols.
+
+The second review found no remaining blockers after 80 additional Clang
+absolute-difference comparisons and 21 unsupported-input diagnostic checks.
+Integrated checks with the macOS linker changes pass 43 selected Mac assembler
+checks, 40 linker/driver tests, 45 Linux assembler checks, all 424 native runtime
+fixture variants plus spills, and the GNU reader/GDB/libgcc metadata checks.
+The report's `review_followup` records these results. Original performance samples
+remain tied to the measured `e3a4bc6` implementation; the final symbol-retention
+correctness fix was not separately timed.
