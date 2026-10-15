@@ -1272,7 +1272,8 @@ operands including zero registers.
 `fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
 `fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
 (register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
-and `fcvtzs/fcvtzu` convert W/X ↔ S/D. S/D fixed-point GPR conversions remain unsupported in this baseline path.
+and `fcvtzs/fcvtzu` convert W/X ↔ S/D. S/D fixed-point GPR conversions
+remain unsupported in this baseline path.
 Optional FP16 arithmetic and H/GPR fixed-point conversions are described below. `fmov` also supports S/W and D/X bitwise transfers and
 all 256 scalar FP immediate encodings (zero needs a register transfer).
 
@@ -1339,7 +1340,16 @@ plus `with_jscvt` and `with_frintts`. `TargetFeatures::apple_m5()` selects the
 baseline, these nine numeric features, and SME; it does not enable ordinary
 SVE or imply implementation of other M5 instruction families. This follows
 LLVM's [M5 feature definition](https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/lib/Target/AArch64/AArch64Processors.td).
-Existing APIs and CLI assembly retain the fixed Apple baseline.
+Existing APIs and CLI assembly default to the fixed Apple baseline.
+The explicit command-line selection is:
+
+```sh
+keel asm --cpu apple-m5 input.s -o output.o
+```
+
+`--cpu baseline` selects the baseline explicitly; unknown CPU names are errors.
+CPU selection only affects assembly and does not change compiler codegen,
+probe the host, or enable ordinary SVE.
 
 `isa/m5-numeric.txt` inventories 217 non-scalable records from the pinned
 archive whose feature predicates select these extensions without requiring
@@ -1395,7 +1405,7 @@ SME therefore does not imply non-streaming SVE availability. CPU/OS support
 must be checked at runtime; [Arm's macOS validation guide](https://learn.arm.com/learning-paths/laptops-and-desktops/kleidicv-on-mac/run-test-2/)
 uses `sysctl hw.optional.arm.FEAT_SME` for this purpose.
 
-`assemble`/`assemble_object` and the CLI keep the fixed baseline. Library
+`assemble`/`assemble_object` and the CLI default to the fixed baseline. Library
 callers may use `assemble_with_features`/`assemble_object_with_features`
 with `TargetFeatures::default().with_sme()` or `.with_sve()` (or both).
 These flags permit encodings only; they neither probe hardware nor insert
@@ -1427,8 +1437,8 @@ and an execution smoke test, without matrix-result verification yet.
 
 Remaining scalable coverage includes predicated arithmetic, scalable memory,
 vector shifts/conversions, ZA tile transfers and partial clearing, additional
-matrix types, and SME2/SVE2 instructions. Remaining ordinary M5 coverage includes crypto, pointer authentication,
-and newer scalar ISA. These are explicit coverage boundaries, not complete
+matrix types, and SME2/SVE2 instructions. Remaining ordinary M5 coverage
+includes crypto, pointer authentication, and newer scalar ISA. These are explicit coverage boundaries, not complete
 A64/SVE/SME support.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked

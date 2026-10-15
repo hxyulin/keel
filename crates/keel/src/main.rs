@@ -4,8 +4,9 @@
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
+
 //! keel passes                                      list the passes
 //! ```
 //!
@@ -31,11 +32,13 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-  keel asm <input.s> -o <output.o>
+  keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
   keel asm-metrics <input.s> [-o <metrics.json>]
+
   keel passes
 
   Input files must remain unchanged during parsing.";
+
 
 fn main() -> ExitCode {
     #[cfg(feature = "profile-with-tracy")]
@@ -63,6 +66,7 @@ struct Options {
     emit_ir: bool,
     passes: Option<Vec<String>>,
     target: Option<Target>,
+    asm_features: keel_asm::TargetFeatures,
 }
 
 impl Options {
@@ -98,6 +102,18 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         }
         match flag {
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
+            "--cpu" => {
+                opts.asm_features = match args.next().map(String::as_str) {
+                    Some("baseline") => keel_asm::TargetFeatures::default(),
+                    Some("apple-m5") => keel_asm::TargetFeatures::apple_m5(),
+                    Some(cpu) => {
+                        return Err(format!(
+                            "unknown assembler CPU `{cpu}`; expected baseline or apple-m5"
+                        ));
+                    }
+                    None => return Err("`--cpu` needs baseline or apple-m5".into()),
+                };
+            }
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
@@ -205,7 +221,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             write_output(&opts, &output)
         }
         "asm" => {
-            let opts = parse_options(rest, &["-o"])?;
+            let opts = parse_options(rest, &["-o", "--cpu"])?;
             let input = opts.input.as_ref().ok_or(USAGE)?;
             let output = opts
                 .output
@@ -213,9 +229,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .ok_or("`asm` requires `-o <output.o>`")?;
             let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
-            let object = keel_asm::assemble_object(text).map_err(|e| format!("{input}: {e}"))?;
+            let object = keel_asm::assemble_object_with_features(text, opts.asm_features).map_err(|e| format!("{input}: {e}"))?;
             // Release the mapping before opening output, including in-place output.
             drop(src);
+
             std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
         }
         "compile" => {
@@ -390,6 +407,59 @@ mod tests {
             let error = run(vec![command.into(), "--mmap".into()]).unwrap_err();
             assert!(error.starts_with("unknown flag `--mmap`"));
         }
+    }
+
+    #[test]
+    fn assembler_cpu_selection_gates_numeric_encodings_end_to_end() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "keel-cli-numeric-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let input = dir.join("numeric.s");
+        let output = dir.join("numeric.o");
+        let source = "fadd v0.8h,v1.8h,v2.8h\nsdot v0.4s,v1.16b,v2.16b\nbfdot v0.4s,v1.8h,v2.8h\n";
+        std::fs::write(&input, source).unwrap();
+        let invoke = |flags: &[&str]| {
+            let mut args = vec![
+                "asm".to_owned(),
+                input.display().to_string(),
+                "-o".into(),
+                output.display().to_string(),
+            ];
+            args.extend(flags.iter().map(|s| s.to_string()));
+            run(args)
+        };
+        assert!(invoke(&[]).unwrap_err().contains("FEAT_FP16"));
+        assert!(!output.exists());
+        invoke(&["--cpu", "apple-m5"]).unwrap();
+        assert_eq!(
+            std::fs::read(&output).unwrap(),
+            keel_asm::assemble_object_with_features(source, keel_asm::TargetFeatures::apple_m5())
+                .unwrap()
+        );
+        assert!(
+            invoke(&["--cpu", "apple-m5", "--cpu", "baseline"])
+                .unwrap_err()
+                .contains("FEAT_FP16")
+        );
+        assert!(
+            invoke(&["--cpu", "unknown"])
+                .unwrap_err()
+                .contains("unknown assembler CPU")
+        );
+        assert!(invoke(&["--cpu"]).unwrap_err().contains("needs"));
+        std::fs::remove_dir_all(&dir).unwrap();
+        // CPU selection belongs to assembly; it must not silently change codegen.
+        assert!(
+            run(vec!["compile".into(), "--cpu".into(), "apple-m5".into()])
+                .unwrap_err()
+                .contains("unknown flag")
+        );
+
     }
 
     #[test]
