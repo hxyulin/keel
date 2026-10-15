@@ -262,3 +262,20 @@ representation and shared-chain guards. Native regression inputs include
 unsigned wraparound and run with restricted registers.
 
 The [incremental algebra report](../suite/reports/algebra-aarch64-2026-10-15.json) records 129 fewer IR instructions, -360 text bytes, runtime ratio 0.9942, and compile-time ratio 1.0047. Three-pair timing does not establish a small runtime gain.
+
+## Carry-aware arithmetic facts
+
+The opt-in known-bits analysis now models wrapping addition, subtraction and
+negation. Carry-in bits are bounded by adding the minimum and maximum admitted
+operands; a result bit is known only when both operand bits and that carry-in
+are known. Subtraction uses complemented RHS bits plus a carry-in of one.
+All arithmetic wraps at the result width, including i128. This is a constant-time
+bitvector transfer rather than per-bit enumeration during compilation.
+
+Exhaustive four-bit abstract-state tests check every admitted concrete operand
+pair for both add and subtract. Integration tests cover every integer width,
+unsigned and signed overflow boundaries, borrow, negation and derived bounds;
+a native fixture checks an i128 addition and its comparison. Richer interval
+and relational facts are still outside this domain.
+
+The [incremental arithmetic-facts report](../suite/reports/arithmetic-bits-aarch64-2026-10-15.json) uses identical late-known-bits recipes on both compilers. It records 4 fewer IR instructions, -16 text bytes, runtime ratio 0.9868, and compile-time ratio 1.0131. This domain remains opt-in; short timing screens do not justify promoting the pipeline.

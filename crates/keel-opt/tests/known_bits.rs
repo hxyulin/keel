@@ -315,3 +315,38 @@ block1(v7: i8):
         check(&original, &second, &[input]);
     }
 }
+
+#[test]
+fn carry_and_borrow_facts_prove_arithmetic_bounds_at_every_width() {
+    for ty in ["i8", "i16", "i32", "i64", "i128"] {
+        for (op, args) in [("iadd", "v2, v3"), ("isub", "v3, v2")] {
+            let source = format!(
+                "func @f({ty}) -> i8 {{\nblock0(v0: {ty}):\n v1 = iconst.{ty} 15\n v2 = and v0, v1\n v3 = iconst.{ty} 16\n v4 = {op} {args}\n v5 = iconst.{ty} 32\n v6 = icmp.ult v4, v5\n return v6\n}}"
+            );
+            let (original, module) = apply(&source, &["known-bits", "instcombine", "dce"]);
+            assert!(!module.to_string().contains("icmp"), "{source}\n{module}");
+            if ty != "i128" {
+                for x in (0..256).chain([u64::MAX, 1 << 63]) {
+                    check(&original, &module, &[x]);
+                }
+            }
+        }
+    }
+    for op in ["iadd", "isub"] {
+        for c in [0, 1, 16, 127, 128, 250, 255] {
+            let source = format!(
+                "func @f(i8) -> i8 {{\nblock0(v0: i8):\n v1 = iconst.i8 15\n v2 = and v0, v1\n v3 = iconst.i8 {c}\n v4 = {op} v2, v3\n v5 = iconst.i8 32\n v6 = icmp.ult v4, v5\n return v6\n}}"
+            );
+            let (original, module) = apply(&source, &["known-bits", "instcombine", "dce"]);
+            for x in 0..256 {
+                check(&original, &module, &[x]);
+            }
+        }
+    }
+    let source = "func @f(i8) -> i8 {\nblock0(v0: i8):\n v1 = iconst.i8 15\n v2 = and v0, v1\n v3 = iconst.i8 16\n v4 = or v2, v3\n v5 = ineg v4\n v6 = iconst.i8 0\n v7 = icmp.slt v5, v6\n return v7\n}";
+    let (original, module) = apply(source, &["known-bits", "instcombine", "dce"]);
+    assert!(!module.to_string().contains("icmp"), "{module}");
+    for x in 0..256 {
+        check(&original, &module, &[x]);
+    }
+}

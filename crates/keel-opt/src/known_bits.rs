@@ -31,6 +31,24 @@ fn exact(value: u128, width: u32) -> Bits {
         one: value & mask(width),
     }
 }
+// For each bit, carry-in is monotone in the lower input bits. Compute its
+// extremes with all unknown input bits zero/one. A sum bit is known only if
+// both input bits and its carry-in are known. Wrapping discards the final carry.
+fn add(a: Bits, b: Bits, carry: bool, width: u32) -> Bits {
+    let m = mask(width);
+    let max_a = m & !a.zero;
+    let max_b = m & !b.zero;
+    let low_sum = a.one.wrapping_add(b.one).wrapping_add(u128::from(carry));
+    let high_sum = max_a.wrapping_add(max_b).wrapping_add(u128::from(carry));
+    let low_carry = low_sum ^ a.one ^ b.one;
+    let high_carry = high_sum ^ max_a ^ max_b;
+    let unknown = (!(a.zero | a.one) | !(b.zero | b.one) | (low_carry ^ high_carry)) & m;
+    Bits {
+        zero: !low_sum & !unknown & m,
+        one: low_sum & !unknown & m,
+    }
+}
+
 fn bounds(bits: Bits, width: u32, signed: bool) -> (u128, u128) {
     let (zero, one) = if signed {
         let sign = 1u128 << (width - 1);
@@ -114,6 +132,21 @@ fn infer(func: &Function, value: Value, facts: &[Bits], incoming: &Incoming) -> 
                 one: 0,
             },
             InstData::Unary {
+                op: UnaryOp::Ineg,
+                arg,
+            } => {
+                let a = get(arg);
+                add(
+                    exact(0, w),
+                    Bits {
+                        zero: a.one,
+                        one: a.zero,
+                    },
+                    true,
+                    w,
+                )
+            }
+            InstData::Unary {
                 op: UnaryOp::Bnot,
                 arg,
             } => {
@@ -126,6 +159,16 @@ fn infer(func: &Function, value: Value, facts: &[Bits], incoming: &Incoming) -> 
             InstData::Binary { op, args } => {
                 let (a, b) = (get(args[0]), get(args[1]));
                 match op {
+                    BinaryOp::Iadd => add(a, b, false, w),
+                    BinaryOp::Isub => add(
+                        a,
+                        Bits {
+                            zero: b.one,
+                            one: b.zero,
+                        },
+                        true,
+                        w,
+                    ),
                     BinaryOp::And => Bits {
                         zero: a.zero | b.zero,
                         one: a.one & b.one,
@@ -234,11 +277,13 @@ fn analyze(func: &Function) -> Vec<Bits> {
             InstData::Icmp { .. }
                 | InstData::Select { .. }
                 | InstData::Unary {
-                    op: UnaryOp::Bnot,
+                    op: UnaryOp::Bnot | UnaryOp::Ineg,
                     ..
                 }
                 | InstData::Binary {
-                    op: BinaryOp::And
+                    op: BinaryOp::Iadd
+                        | BinaryOp::Isub
+                        | BinaryOp::And
                         | BinaryOp::Or
                         | BinaryOp::Xor
                         | BinaryOp::Shl
@@ -411,6 +456,57 @@ mod tests {
                                 };
                                 assert_eq!(proven, expected, "{a:?} {cond:?} {b:?}, x={x}, y={y}");
                             }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn addition_and_subtraction_abstract_facts_cover_every_four_bit_state() {
+        let states: Vec<_> = (0..81)
+            .map(|mut code| {
+                let mut b = Bits::default();
+                for bit in 0..4 {
+                    match code % 3 {
+                        1 => b.zero |= 1 << bit,
+                        2 => b.one |= 1 << bit,
+                        _ => {}
+                    }
+                    code /= 3;
+                }
+                let concrete: Vec<u128> = (0..16)
+                    .filter(|v| v & b.zero == 0 && v & b.one == b.one)
+                    .collect();
+                (b, concrete)
+            })
+            .collect();
+        for (a, aa) in &states {
+            for (b, bb) in &states {
+                for subtract in [false, true] {
+                    let rhs = if subtract {
+                        Bits {
+                            zero: b.one,
+                            one: b.zero,
+                        }
+                    } else {
+                        *b
+                    };
+                    let inferred = add(*a, rhs, subtract, 4);
+                    assert_eq!(inferred.zero & inferred.one, 0);
+                    for &x in aa {
+                        for &y in bb {
+                            let actual = (if subtract {
+                                x.wrapping_sub(y)
+                            } else {
+                                x.wrapping_add(y)
+                            }) & 15;
+                            assert_eq!(actual & inferred.zero, 0, "{a:?} {b:?} {subtract} {x} {y}");
+                            assert_eq!(
+                                actual & inferred.one,
+                                inferred.one,
+                                "{a:?} {b:?} {subtract} {x} {y}"
+                            );
                         }
                     }
                 }
