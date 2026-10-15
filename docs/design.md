@@ -1162,9 +1162,10 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1315 instruction/alias forms. Generated requirements retain
+subset currently has 1319 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
-availability checks; the fixed Apple arm64 target enables only FP, AdvSIMD,
+availability checks, plus the numeric feature predicates described below;
+the fixed Apple arm64 target enables only FP, AdvSIMD,
 and LSE. Optional features require an explicit library opt-in described below.
 Encoding conditions are distinct from feature requirements: for example, byte register-offset forms exclude
 `option == 0b011`, which has a separate instruction form. The generator
@@ -1271,8 +1272,8 @@ operands including zero registers.
 `fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
 `fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
 (register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
-and `fcvtzs/fcvtzu` convert W/X ↔ S/D. Fixed-point GPR conversions and half-precision arithmetic
-remain unsupported. `fmov` also supports S/W and D/X bitwise transfers and
+and `fcvtzs/fcvtzu` convert W/X ↔ S/D. S/D fixed-point GPR conversions remain unsupported in this baseline path.
+Optional FP16 arithmetic and H/GPR fixed-point conversions are described below. `fmov` also supports S/W and D/X bitwise transfers and
 all 256 scalar FP immediate encodings (zero needs a register transfer).
 
 Keel’s scalar popcount lowering uses the supported SIMD `cnt` (8B/16B)
@@ -1314,9 +1315,8 @@ Operand validation rejects reserved sizes, scalar/vector mismatches, invalid
 lane indices, nonconsecutive lists, and invalid shift/multiplier registers.
 The polynomial widening form is restricted to baseline byte elements;
 64-bit polynomial multiplication requires the later crypto extension phase.
-Optional FP16 arithmetic, BF16, dot products, RDM, complex arithmetic, and
-other M5 numeric extensions remain separate, with default feature checks
-unchanged.
+Optional FP16 arithmetic, BF16, dot products, RDM, and complex arithmetic
+are selected through the numeric features below; default checks remain unchanged.
 
 `tests/neon-cases.txt` names one source case for every inventory entry. A unit
 test requires an exact inventory match and verifies each assembled word
@@ -1344,13 +1344,35 @@ Existing APIs and CLI assembly retain the fixed Apple baseline.
 `isa/m5-numeric.txt` inventories 217 non-scalable records from the pinned
 archive whose feature predicates select these extensions without requiring
 other optional features. The importer checks that inventory against the
-archive and retains all feature conditions. The first increment implements
+archive and retains all feature conditions. The implementation covers all
+217 records:
 SDOT/UDOT/USDOT/SUDOT, SMMLA/UMMLA/USMMLA, BF16 conversion/dot/matrix and
 bottom/top multiply-accumulate, SQRDMLAH/SQRDMLSH, FCMLA/FCADD, widening
 FP16 FMLAL/FMLSL variants, FJCVTZS, and FRINT32/64Z/X. Indexed forms validate
 group sizes, lane bounds, restricted multiplier registers, and rotations.
-H-element complex arithmetic additionally requires FP16. Full FP16
-arithmetic is the remaining increment in this inventory.
+H-element complex arithmetic additionally requires FP16. FP16 support includes
+scalar and vector arithmetic, rounding, comparisons/conditional comparisons,
+select, fused multiply-add, reciprocal estimates/refinement, reductions,
+indexed arithmetic, immediates, bit transfers, and integer/fixed-point
+conversions. Shared SIMD fixed-point encodings additionally check FP16 for H
+elements; GPR fixed-point scales use the W/X width (1..32/64), while H/H scales
+use 1..16. H↔S/D format conversions use their upstream baseline FP requirement,
+without silently enabling FP16 arithmetic.
+
+`tests/numeric-cases.txt` names a case for each of the 217 records. Unit tests
+require exact inventory coverage, check each selected Arm fixed-bit mask, and
+reject every case under default features. Clang compares all cases plus
+arrangements, lane boundaries, rotations, conversion scales, conditional
+codes, and all 256 FP16 immediate values. Native tests verify signed dot and
+matrix products, RDM rounding/saturation, BF16 dot products, widening FP16,
+complex multiplication, JavaScript conversion, bounded rounding, scalar and
+vector FP16 math, scaling, and bit transfers. The inventory covers non-scalable
+forms only; SME/SME2 numeric forms belong to the scalable phase. Regenerate:
+
+```sh
+python3 crates/keel-asm/tools/numeric_cases.py
+python3 crates/keel-asm/tools/numeric_cases.py --check
+```
 
 Clang comparisons use the explicit `-mcpu=apple-m5` reference target. Native
 numeric tests query each required `hw.optional.arm.FEAT_*` flag before
@@ -1405,9 +1427,8 @@ and an execution smoke test, without matrix-result verification yet.
 
 Remaining scalable coverage includes predicated arithmetic, scalable memory,
 vector shifts/conversions, ZA tile transfers and partial clearing, additional
-matrix types, and SME2/SVE2 instructions. Remaining ordinary coverage includes optional NEON FP16 arithmetic and other
-M5 numeric extensions, Apple crypto, pointer authentication, and newer scalar
-ISA. These are explicit coverage boundaries, not complete
+matrix types, and SME2/SVE2 instructions. Remaining ordinary M5 coverage includes crypto, pointer authentication,
+and newer scalar ISA. These are explicit coverage boundaries, not complete
 A64/SVE/SME support.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked

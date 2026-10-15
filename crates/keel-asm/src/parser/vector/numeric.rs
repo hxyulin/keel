@@ -1,5 +1,7 @@
 //! Optional non-scalable numeric extensions. All encodings retain Arm feature
 //! predicates; conditional H-element forms also check FP16 explicitly.
+mod half;
+
 use super::super::{reg, unsigned};
 use super::{Lane, Shape, count, finish_with_features, number};
 use crate::TargetFeatures;
@@ -40,17 +42,61 @@ fn lane_fields(m: Lane) -> Result<Vec<(&'static str, u32)>, String> {
     Ok(vec![("Rm", m.number & 15), ("L", l), ("M", mb), ("H", h)])
 }
 
+fn mentions_half(args: &[&str]) -> bool {
+    args.iter().any(|s| {
+        (s.starts_with(['h', 'H'])
+            && s.len() > 1
+            && s.as_bytes()[1..].iter().all(u8::is_ascii_digit))
+            || (s.starts_with(['v', 'V'])
+                && (s.ends_with(['h', 'H']) || s.contains(".h[") || s.contains(".H[")))
+    })
+}
+
 pub(super) fn instruction(
     op: &str,
     args: &[&str],
     features: TargetFeatures,
 ) -> Result<Option<u32>, String> {
+    if !mentions_half(args)
+        && !matches!(
+            op,
+            "sdot"
+                | "udot"
+                | "usdot"
+                | "sudot"
+                | "bfdot"
+                | "smmla"
+                | "ummla"
+                | "usmmla"
+                | "bfmmla"
+                | "sqrdmlah"
+                | "sqrdmlsh"
+                | "fmlal"
+                | "fmlsl"
+                | "fmlal2"
+                | "fmlsl2"
+                | "bfmlalb"
+                | "bfmlalt"
+                | "fcmla"
+                | "fcadd"
+                | "bfcvt"
+                | "bfcvtn"
+                | "bfcvtn2"
+                | "fjcvtzs"
+                | "frint32z"
+                | "frint32x"
+                | "frint64z"
+                | "frint64x"
+        )
+    {
+        return Ok(None);
+    }
     let owned: Vec<_> = args.iter().map(|s| s.to_ascii_lowercase()).collect();
     let a: Vec<_> = owned.iter().map(String::as_str).collect();
     if let Some(word) = advanced(op, &a, features)? {
         return Ok(Some(word));
     }
-    half(op, &a, features)
+    half::instruction(op, &a, features)
 }
 
 fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32>, String> {
@@ -226,13 +272,7 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
                         fields.push(("Rm", m.number));
                     }
                     let tag = if bfloat {
-                        if indexed {
-                            "E"
-                        } else if matrix {
-                            "E"
-                        } else {
-                            "D"
-                        }
+                        if indexed || matrix { "E" } else { "D" }
                     } else if matrix {
                         "G"
                     } else {
@@ -322,9 +362,5 @@ fn advanced(op: &str, a: &[&str], features: TargetFeatures) -> Result<Option<u32
         )
         .map(Some);
     }
-    Ok(None)
-}
-
-fn half(_op: &str, _a: &[&str], _features: TargetFeatures) -> Result<Option<u32>, String> {
     Ok(None)
 }

@@ -479,6 +479,51 @@ mod tests {
     }
 
     #[test]
+    fn m5_profile_models_numeric_features_and_streaming_sme_without_sve() {
+        let m5 = TargetFeatures::apple_m5();
+        for feature in NUMERIC_FEATURES {
+            assert!(m5.supports(feature), "{feature}");
+        }
+        assert!(m5.supports("FEAT_SME"));
+        assert!(!m5.supports("FEAT_SVE"));
+        assert!(!m5.supports("FEAT_SME2")); // Not modeled by this increment.
+        for feature in NUMERIC_FEATURES {
+            assert!(!TargetFeatures::default().supports(feature));
+        }
+    }
+
+    #[test]
+    fn every_m5_numeric_record_has_a_matching_gated_case() {
+        use std::collections::BTreeSet;
+        let expected: BTreeSet<_> = include_str!("../isa/m5-numeric.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+            .collect();
+        let mut covered = BTreeSet::new();
+        for line in include_str!("../tests/numeric-cases.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+        {
+            let (name, source) = line.split_once('\t').unwrap();
+            assert!(covered.insert(name), "duplicate numeric case {name}");
+            let bytes = assemble_with_features(source, TargetFeatures::apple_m5())
+                .unwrap_or_else(|e| panic!("{name}: {source}: {e}"))
+                .text;
+            assert_eq!(bytes.len(), 4, "{name}");
+            let word = u32::from_le_bytes(bytes.try_into().unwrap());
+            let encoding = generated::encoding(name).unwrap();
+            assert_eq!(word & encoding.mask, encoding.base, "{name}: {source}");
+            assert!(
+                assemble(source).is_err(),
+                "numeric feature leaked into default: {name}"
+            );
+        }
+        assert_eq!(covered, expected);
+        assert_eq!(covered.len(), 217);
+
+    }
+
+    #[test]
     fn every_baseline_neon_record_has_a_matching_assembled_case() {
         use std::collections::BTreeSet;
         let expected: BTreeSet<_> = include_str!("../isa/neon.txt")

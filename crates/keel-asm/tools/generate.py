@@ -65,7 +65,7 @@ for tag in ("S", "D"):
     FP_NAMES += [f"FCSEL_{tag}_floatsel", f"FMOV_{tag}_floatimm"]
     FP_NAMES += [f"{op}_{tag}{bits}_float2int" for op in ("SCVTF", "UCVTF") for bits in (32, 64)]
     FP_NAMES += [f"{op}_{bits}{tag}_float2int" for op in ("FCVTZS", "FCVTZU") for bits in (32, 64)]
-FP_NAMES += ["FCVT_DS_floatdp1", "FCVT_SD_floatdp1", "FMOV_32S_float2int", "FMOV_S32_float2int", "FMOV_64D_float2int", "FMOV_D64_float2int"]
+FP_NAMES += ["FCVT_DS_floatdp1", "FCVT_SD_floatdp1", "FCVT_HS_floatdp1", "FCVT_HD_floatdp1", "FCVT_SH_floatdp1", "FCVT_DH_floatdp1", "FMOV_32S_float2int", "FMOV_S32_float2int", "FMOV_64D_float2int", "FMOV_D64_float2int"]
 SIMD_NAMES = [f"{op}_asimdsame_only" for op in (
     "ADD", "SUB", "MUL", "MLA", "MLS", "SMAX", "SMIN", "UMAX", "UMIN",
     "CMEQ", "CMGT", "CMGE", "CMHI", "CMHS", "AND", "ORR", "ORN", "EOR",

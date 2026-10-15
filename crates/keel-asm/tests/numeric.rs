@@ -348,3 +348,254 @@ int main(void){
     return 0;
 }");
 }
+
+#[test]
+fn every_m5_numeric_record_matches_clang() {
+    let source = include_str!("numeric-cases.txt")
+        .lines()
+        .filter(|s| !s.starts_with('#'))
+        .map(|s| s.split_once('\t').unwrap().1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    compare(&source);
+}
+
+#[test]
+fn half_scalar_vector_and_conversion_boundaries_match_clang() {
+    let mut s = String::new();
+    for d in ["h31", "v31.4h", "v31.8h"] {
+        let n = if d == "h31" {
+            "h0"
+        } else if d.ends_with("4h") {
+            "v0.4h"
+        } else {
+            "v0.8h"
+        };
+        let m = if d == "h31" {
+            "h30"
+        } else if d.ends_with("4h") {
+            "v30.4h"
+        } else {
+            "v30.8h"
+        };
+        for op in [
+            "fabs", "fneg", "fsqrt", "frintn", "frintp", "frintm", "frintz", "frinta", "frintx",
+            "frinti", "frecpe", "frsqrte", "scvtf", "ucvtf", "fcvtns", "fcvtnu", "fcvtas",
+            "fcvtau", "fcvtps", "fcvtpu", "fcvtms", "fcvtmu", "fcvtzs", "fcvtzu",
+        ] {
+            s.push_str(&format!("{op} {d},{n}\n"));
+        }
+        for op in [
+            "fadd", "fsub", "fmul", "fdiv", "fmin", "fmax", "fminnm", "fmaxnm", "fmulx", "fcmeq",
+            "fcmgt", "fcmge", "fcmlt", "fcmle", "facgt", "facge", "fabd", "frecps", "frsqrts",
+        ] {
+            if d == "h31" && matches!(op, "fcmlt" | "fcmle") {
+                continue;
+            }
+            s.push_str(&format!("{op} {d},{n},{m}\n"));
+        }
+        if d != "h31" {
+            for op in [
+                "fmla", "fmls", "faddp", "fminp", "fmaxp", "fminnmp", "fmaxnmp",
+            ] {
+                s.push_str(&format!("{op} {d},{n},{m}\n"));
+            }
+        }
+        for op in ["fcmeq", "fcmgt", "fcmge", "fcmlt", "fcmle"] {
+            s.push_str(&format!("{op} {d},{n},#0.0\n"));
+        }
+        for op in ["fmla", "fmls", "fmul", "fmulx"] {
+            for index in 0..8 {
+                for rm in [0, 15] {
+                    s.push_str(&format!("{op} {d},{n},v{rm}.h[{index}]\n"));
+                }
+            }
+        }
+        for op in ["scvtf", "ucvtf", "fcvtzs", "fcvtzu"] {
+            for scale in [1, 16] {
+                s.push_str(&format!("{op} {d},{n},#{scale}\n"));
+            }
+        }
+        for sign in [-1.0, 1.0] {
+            for exponent in -3..=4 {
+                for fraction in 0..16 {
+                    let value = sign * (1.0 + f64::from(fraction) / 16.0) * 2f64.powi(exponent);
+                    s.push_str(&format!("fmov {d},#{value}\n"));
+                }
+            }
+        }
+    }
+    for p in ["w", "x"] {
+        let bits = if p == "w" { 32 } else { 64 };
+        for op in ["scvtf", "ucvtf"] {
+            s.push_str(&format!("{op} h31,{p}zr\n"));
+            for fbits in [1, bits] {
+                s.push_str(&format!("{op} h31,{p}0,#{fbits}\n"));
+            }
+        }
+        for op in [
+            "fcvtns", "fcvtnu", "fcvtas", "fcvtau", "fcvtps", "fcvtpu", "fcvtms", "fcvtmu",
+            "fcvtzs", "fcvtzu",
+        ] {
+            s.push_str(&format!("{op} {p}zr,h31\n"));
+        }
+        for op in ["fcvtzs", "fcvtzu"] {
+            for fbits in [1, bits] {
+                s.push_str(&format!("{op} {p}30,h31,#{fbits}\n"));
+            }
+        }
+        s.push_str(&format!("fmov h31,{p}zr\nfmov {p}zr,h31\n"));
+    }
+    for op in ["fcmp", "fcmpe"] {
+        s.push_str(&format!("{op} h31,h0\n{op} h31,#0.0\n"));
+    }
+    for cc in [
+        "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt", "le", "al",
+        "nv",
+    ] {
+        for op in ["fccmp", "fccmpe"] {
+            for nzcv in [0, 15] {
+                s.push_str(&format!("{op} h31,h0,#{nzcv},{cc}\n"));
+            }
+        }
+        s.push_str(&format!("fcsel h31,h0,h30,{cc}\n"));
+    }
+    for op in ["fmadd", "fmsub", "fnmadd", "fnmsub"] {
+        s.push_str(&format!("{op} h31,h0,h30,h1\n"));
+    }
+    for op in ["faddp", "fmaxp", "fminp", "fmaxnmp", "fminnmp"] {
+        s.push_str(&format!("{op} h31,v0.2h\n"));
+    }
+    for op in ["fmaxv", "fminv", "fmaxnmv", "fminnmv"] {
+        for arr in ["4h", "8h"] {
+            s.push_str(&format!("{op} h31,v0.{arr}\n"));
+        }
+    }
+    s.push_str("frecpx h31,h0\nfnmul h31,h0,h30\nfmov h31,h0\nFADD V31.8H,V0.8H,V1.8H\n");
+    compare(&s);
+    common::compare_clang("fcvt h31,s0\nfcvt h31,d0\nfcvt s31,h0\nfcvt d31,h0\n");
+}
+
+#[test]
+fn fp16_opt_in_and_m5_profile_preserve_baseline() {
+    let features = TargetFeatures::default().with_fp16();
+    for source in [
+        "fadd h0,h1,h2",
+        "fadd v0.8h,v1.8h,v2.8h",
+        "fmul v0.8h,v1.8h,v2.h[7]",
+        "scvtf h0,w0,#32",
+        "fcvtzs w0,h0",
+        "scvtf v0.8h,v1.8h,#16",
+    ] {
+        assert!(assemble_with_features(source, features).is_ok(), "{source}");
+        assert!(
+            assemble(source).unwrap_err().message.contains("FEAT_FP16"),
+            "{source}"
+        );
+        assert!(assemble_with_features(source, TargetFeatures::default().with_fhm()).is_err());
+    }
+    for source in ["add v0.4s,v1.4s,v2.4s", "scvtf d0,x0", "fcsel d0,d1,d2,hs"] {
+        assert_eq!(
+            assemble(source).unwrap(),
+            assemble_with_features(source, TargetFeatures::apple_m5()).unwrap()
+        );
+    }
+    assert!(assemble_with_features("ptrue p0.s", TargetFeatures::apple_m5()).is_ok());
+    // The profile does not imply ordinary SVE: only SME satisfies the shared
+    // instruction's OR condition; all numeric feature builders leave SME off.
+    assert!(assemble_with_features("smstart", features).is_err());
+}
+
+#[test]
+fn invalid_numeric_shapes_scales_and_rotations_are_rejected() {
+    for source in [
+        "sdot v0.4s,v1.8b,v2.8b",
+        "sdot v0.8h,v1.16b,v2.16b",
+        "sdot v0.4s,v1.16b,v2.4b[4]",
+        "sudot v0.4s,v1.16b,v2.16b",
+        "smmla v0.2s,v1.8b,v2.8b",
+        "bfdot v0.4s,v1.4h,v2.4h",
+        "bfmlalb v0.2s,v1.4h,v2.4h",
+        "bfmlalt v0.4s,v1.8h,v16.h[0]",
+        "bfcvtn2 v0.4h,v1.4s",
+        "sqrdmlah v0.16b,v1.16b,v2.16b",
+        "sqrdmlsh v0.8h,v1.8h,v16.h[0]",
+        "fcadd v0.4s,v1.4s,v2.4s,#0",
+        "fcmla v0.4s,v1.4s,v2.4s,#360",
+        "fcmla v0.4h,v1.4h,v2.h[2],#0",
+        "fcmla v0.2s,v1.2s,v2.s[0],#0",
+        "fcmla v0.2d,v1.2d,v2.d[0],#0",
+        "fmlal v0.4s,v1.8h,v2.8h",
+        "fmlal v0.2s,v1.4h,v2.4h",
+        "fmlal2 v0.4s,v1.4h,v16.h[0]",
+        "fadd h0,s1,h2",
+        "fadd v0.4h,v1.8h,v2.4h",
+        "fmul h0,h1,v16.h[0]",
+        "fmul v0.8h,v1.8h,v2.h[8]",
+        "scvtf h0,w0,#0",
+        "scvtf h0,w0,#33",
+        "fcvtzu x0,h0,#65",
+        "scvtf v0.8h,v1.8h,#17",
+        "fcmgt h0,h1,#1.0",
+        "fcmlt h0,h1,h2",
+        "fccmp h0,h1,#16,eq",
+        "fmov h0,#0.0",
+        "fcsel h0,h1,s2,eq",
+        "faddp h0,v1.4h",
+        "fmaxv h0,v1.4s",
+        "fjcvtzs x0,d1",
+        "frint32z h0,h1",
+    ] {
+        let error = assemble_with_features(&format!("nop\n{source}"), TargetFeatures::apple_m5())
+            .expect_err(source);
+        assert_eq!(error.line, 2, "{source}: {error}");
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn half_arithmetic_conversions_and_bit_transfers_execute() {
+    if !advertised(&["FEAT_FP16"]) {
+        return;
+    }
+    execute_numeric(
+        "
+.text
+.globl _halfmath, _halfvector, _halfscale, _halfbits
+_halfmath:
+    fcvt h0,s0
+    fcvt h1,s1
+    fadd h2,h0,h1
+    fmul h2,h2,h1
+    fcvt s0,h2
+    ret
+_halfvector:
+    ldr q0,[x0]
+    fmul v1.8h,v0.8h,v0.h[1]
+    fcvtzs v2.8h,v1.8h
+    str q2,[x1]
+    ret
+_halfscale:
+    scvtf h0,w0,#1
+    fcvtzs w0,h0,#1
+    ret
+_halfbits:
+    fmov h0,w0
+    fmov w0,h0
+    ret
+",
+        "
+#include <stdint.h>
+extern float halfmath(float,float);extern void halfvector(const uint16_t*,int16_t*);
+extern int32_t halfscale(int32_t);extern uint32_t halfbits(uint32_t);
+int main(void){
+    if(halfmath(1.5f,2.0f)!=7.0f||halfmath(-4.0f,0.5f)!=-1.75f)return 1;
+    uint16_t a[8]={0x3c00,0x4000,0x4200,0x4400,0xbc00,0xc000,0x3800,0};int16_t out[8];
+    halfvector(a,out);int16_t expected[8]={2,4,6,8,-2,-4,1,0};
+    for(int i=0;i<8;++i)if(out[i]!=expected[i])return 2;
+    for(int i=-42;i<=42;++i)if(halfscale(i)!=i)return 3;
+    if(halfbits(0xdead3c00)!=0x3c00)return 4;
+    return 0;
+}",
+    );
+}
