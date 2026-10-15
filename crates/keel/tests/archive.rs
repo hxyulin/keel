@@ -207,3 +207,66 @@ fn archive_cli_native_linkers_tools_and_preserved_failures() {
     }
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+include!("../../keel-link/tests/fixtures/archive_validation.rs");
+
+#[test]
+fn archive_cli_raw_validation_both_targets() {
+    let dir = std::env::temp_dir().join(format!("keel-archive-cli-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut objects = Vec::new();
+    for (target, instruction) in [
+        ("x86_64-unknown-linux-gnu", "call missing"),
+        ("aarch64-apple-darwin", "bl missing"),
+    ] {
+        let source = dir.join("input.s");
+        let obj = dir.join("input.o");
+        std::fs::write(
+            &source,
+            format!(".text\n.globl exported\nexported:\n{instruction}\nret\n"),
+        )
+        .unwrap();
+        success(keel(&[
+            "asm",
+            "--target",
+            target,
+            path(&source),
+            "-o",
+            path(&obj),
+        ]));
+        objects.push(std::fs::read(obj).unwrap());
+    }
+    let input = dir.join("case.o");
+    let output = dir.join("keep.a");
+    for (name, darwin, bytes) in malformed_cases(&objects[0], &objects[1]) {
+        let target = if darwin {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
+        std::fs::write(&input, bytes).unwrap();
+        std::fs::write(&output, b"preserve").unwrap();
+        let result = keel(&[
+            "archive",
+            "--target",
+            target,
+            "-o",
+            path(&output),
+            path(&input),
+        ]);
+        assert!(!result.status.success(), "{name}");
+        assert!(!result.stderr.is_empty(), "{name}");
+        assert_eq!(std::fs::read(&output).unwrap(), b"preserve", "{name}");
+    }
+    let (extended, _, _) = extended_elf(&objects[0]);
+    std::fs::write(&input, extended).unwrap();
+    success(keel(&[
+        "archive",
+        "--target",
+        "x86_64-unknown-linux-gnu",
+        "-o",
+        path(&output),
+        path(&input),
+    ]));
+    std::fs::remove_dir_all(dir).unwrap();
+}

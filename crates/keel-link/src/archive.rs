@@ -51,34 +51,7 @@ pub fn build(inputs: &[Input<'_>], target: Target) -> Result<Vec<u8>> {
                     "expected {target:?} little-endian 64-bit relocatable object"
                 ));
             }
-            // Generic readers intentionally suppress some malformed load-command
-            // and relocation-table errors. Force their fallible raw accessors.
-            match &file {
-                object::File::MachO64(macho) => {
-                    let mut commands = macho.macho_load_commands().map_err(|e| e.to_string())?;
-                    while commands.next().map_err(|e| e.to_string())?.is_some() {}
-                    for section in macho.sections() {
-                        section.macho_relocations().map_err(|e| e.to_string())?;
-                    }
-                }
-                object::File::Elf64(elf) => {
-                    use object::read::elf::SectionHeader;
-                    for section in elf.elf_section_table().iter() {
-                        let entry_size = match section.sh_type(elf.endian()) {
-                            object::elf::SHT_SYMTAB | object::elf::SHT_DYNSYM => 24,
-                            object::elf::SHT_RELA => 24,
-                            object::elf::SHT_REL => 16,
-                            _ => continue,
-                        };
-                        if section.sh_entsize(elf.endian()) != entry_size
-                            || section.sh_size(elf.endian()) % entry_size != 0
-                        {
-                            return Err("invalid ELF table entry size".into());
-                        }
-                    }
-                }
-                _ => unreachable!("format and width checked above"),
-            }
+            validate_raw(&file, input.bytes)?;
             // Parsing is lazy: force section payload and symbol/name bounds checks.
             for section in file.sections() {
                 section.name_bytes().map_err(|e| e.to_string())?;
@@ -265,4 +238,132 @@ pub fn write(inputs: &[Input<'_>], target: Target, output: &Path) -> Result<()> 
         let _ = std::fs::remove_file(&temporary);
     }
     result.map_err(|e| format!("{}: {e}", output.display()))
+}
+
+// Generic ObjectSymbol::section() deliberately maps malformed references and
+// valid format-specific special symbols to Unknown. Validate the raw values,
+// rather than rejecting Unknown (which would reject e.g. Mach-O N_INDR).
+fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
+    match file {
+        object::File::Elf64(elf) => {
+            use object::elf::*;
+            use object::read::elf::{SectionHeader, Sym};
+            let endian = elf.endian();
+            let sections = elf.elf_section_table();
+            for (index, section) in sections.enumerate() {
+                let kind = section.sh_type(endian);
+                let entry_size = match kind {
+                    SHT_SYMTAB | SHT_DYNSYM | SHT_RELA => 24,
+                    SHT_REL => 16,
+                    SHT_SYMTAB_SHNDX => 4,
+                    _ => continue,
+                };
+                if section.sh_entsize(endian) != entry_size
+                    || section.sh_size(endian) % entry_size != 0
+                {
+                    return Err("invalid ELF table entry size".into());
+                }
+                if kind == SHT_SYMTAB || kind == SHT_DYNSYM {
+                    let symbols = sections
+                        .symbol_table_by_index(endian, bytes, index)
+                        .map_err(|e| e.to_string())?;
+                    for (i, symbol) in symbols.enumerate() {
+                        symbols
+                            .symbol_name(endian, symbol)
+                            .map_err(|e| e.to_string())?;
+                        match symbol.st_shndx(endian) {
+                            SHN_UNDEF | SHN_ABS | SHN_COMMON => {}
+                            // AMD64 ABI large common, not an ordinary section.
+                            0xff02 => {}
+                            SHN_XINDEX => {
+                                let actual = symbols
+                                    .shndx(endian, i)
+                                    .ok_or("missing ELF extended symbol section index")?;
+                                // Extended indices are actual section ordinals,
+                                // never SHN_UNDEF/ABS/COMMON/reserved encodings.
+                                if actual < u32::from(SHN_LORESERVE)
+                                    || actual as usize >= sections.len()
+                                {
+                                    return Err("invalid ELF extended symbol section index".into());
+                                }
+                            }
+                            n if n < SHN_LORESERVE && (n as usize) < sections.len() => {}
+                            _ => {
+                                return Err(
+                                    "invalid or unsupported ELF symbol section index".into()
+                                );
+                            }
+                        }
+                    }
+                } else if kind == SHT_SYMTAB_SHNDX {
+                    let symbols = sections
+                        .symbol_table_by_index(endian, bytes, section.link(endian))
+                        .map_err(|e| e.to_string())?;
+                    if section.sh_size(endian) / 4 != symbols.len() as u64
+                        || symbols.shndx_section() != index
+                    {
+                        return Err("invalid or duplicate ELF extended index table".into());
+                    }
+                    for (i, symbol) in symbols.enumerate() {
+                        if symbol.st_shndx(endian) != SHN_XINDEX
+                            && symbols.shndx(endian, i) != Some(0)
+                        {
+                            return Err("nonzero unused ELF extended symbol index".into());
+                        }
+                    }
+                } else {
+                    let symbols = sections
+                        .symbol_table_by_index(endian, bytes, section.link(endian))
+                        .map_err(|e| e.to_string())?;
+                    // ET_REL sh_info identifies the section being relocated.
+                    sections
+                        .section(object::SectionIndex(section.sh_info(endian) as usize))
+                        .map_err(|e| e.to_string())?;
+                    let data = section.data(endian, bytes).map_err(|e| e.to_string())?;
+                    for relocation in data.chunks_exact(entry_size as usize) {
+                        // Both Elf64_Rel and Elf64_Rela have r_info at byte 8.
+                        let info = u64::from_le_bytes(relocation[8..16].try_into().unwrap());
+                        if (info >> 32) as usize >= symbols.len() {
+                            return Err("invalid ELF relocation symbol index".into());
+                        }
+                    }
+                }
+            }
+        }
+        object::File::MachO64(macho) => {
+            use object::macho::*;
+            use object::read::macho::Nlist;
+            let mut commands = macho.macho_load_commands().map_err(|e| e.to_string())?;
+            while commands.next().map_err(|e| e.to_string())?.is_some() {}
+            let count = macho.sections().count();
+            let symbols = macho.macho_symbol_table();
+            for symbol in symbols.iter() {
+                // STABS have their own n_type/section semantics.
+                if !symbol.is_stab()
+                    && symbol.n_type() & N_TYPE == N_SECT
+                    && (symbol.n_sect() == 0 || symbol.n_sect() as usize > count)
+                {
+                    return Err("invalid Mach-O symbol section index".into());
+                }
+            }
+            for section in macho.sections() {
+                for relocation in section.macho_relocations().map_err(|e| e.to_string())? {
+                    let info = relocation.info(macho.endian());
+                    // ARM64_RELOC_ADDEND stores a signed 24-bit addend in
+                    // r_symbolnum, not a symbol/section reference. Local zero
+                    // is R_ABS. Other relocation types need no linker support.
+                    if info.r_type == ARM64_RELOC_ADDEND {
+                        continue;
+                    }
+                    if (info.r_extern && info.r_symbolnum as usize >= symbols.len())
+                        || (!info.r_extern && info.r_symbolnum as usize > count)
+                    {
+                        return Err("invalid Mach-O relocation symbol or section index".into());
+                    }
+                }
+            }
+        }
+        _ => unreachable!("format and width checked above"),
+    }
+    Ok(())
 }

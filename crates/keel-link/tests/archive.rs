@@ -342,3 +342,107 @@ fn darwin_common_and_weak_index_entries() {
     assert!(names.iter().any(|n| n == b"_weak"));
     assert!(names.iter().any(|n| n == b"_common"));
 }
+
+include!("fixtures/archive_validation.rs");
+
+#[test]
+fn raw_symbol_and_relocation_validation_preserves_output() {
+    let elf = object(
+        Target::X86_64LinuxGnu,
+        ".text\n.globl exported\nexported:\ncall missing\nret\n",
+    );
+    let macho = object(
+        Target::Aarch64AppleDarwin,
+        ".text\n.globl exported\nexported:\nbl missing\nret\n",
+    );
+    let dir = std::env::temp_dir().join(format!("keel-archive-raw-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let output = dir.join("keep.a");
+    for (name, darwin, bytes) in malformed_cases(&elf, &macho) {
+        let target = if darwin {
+            Target::Aarch64AppleDarwin
+        } else {
+            Target::X86_64LinuxGnu
+        };
+        let input = [Input {
+            name,
+            bytes: &bytes,
+        }];
+        assert!(archive::build(&input, target).is_err(), "{name}");
+        std::fs::write(&output, b"preserve").unwrap();
+        assert!(archive::write(&input, target, &output).is_err(), "{name}");
+        assert_eq!(std::fs::read(&output).unwrap(), b"preserve", "{name}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+    }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn extended_indices_and_packaging_only_relocations_are_valid() {
+    let elf = object(
+        Target::X86_64LinuxGnu,
+        ".text\n.globl exported\nexported:\ncall missing\nret\n",
+    );
+    let macho = object(
+        Target::Aarch64AppleDarwin,
+        ".text\n.globl exported\nexported:\nbl missing\nret\n",
+    );
+    let (extended, _, _) = extended_elf(&elf);
+    let mut elf_tls = elf.clone();
+    let (_, _, rel, _) = elf_tables(&elf);
+    put32(&mut elf_tls, u64_at(&elf, rel + 24) + 8, 19); // R_X86_64_TLSGD
+    let mut large_common = elf.clone();
+    let (_, _, _, definition) = elf_tables(&elf);
+    large_common[definition + 6..definition + 8].copy_from_slice(&0xff02u16.to_le_bytes());
+    let mut addend = macho.clone();
+    let (section, symbol, rel) = macho_tables(&macho);
+    let new_rel = addend.len().next_multiple_of(4);
+    addend.resize(new_rel + 16, 0);
+    addend[new_rel..new_rel + 8].copy_from_slice(&macho[rel..rel + 8]);
+    put32(&mut addend, new_rel + 4, 0xa4ffffff); // ADDEND -1, followed by BRANCH26
+    addend[new_rel + 8..new_rel + 16].copy_from_slice(&macho[rel..rel + 8]);
+    put32(&mut addend, section + 56, new_rel);
+    put32(&mut addend, section + 60, 2);
+    let mut absolute = macho.clone();
+    absolute[symbol + 4] = 3; // N_ABS | N_EXT
+    absolute[symbol + 5] = 0;
+    put32(&mut absolute, rel + 4, 0x06000000); // UNSIGNED, local R_ABS, 8 bytes
+    let mut indirect = macho.clone();
+    indirect[symbol + 4] = 0x0b; // N_INDR | N_EXT; n_value is target string offset
+    indirect[symbol + 5] = 0;
+    put64(&mut indirect, symbol + 8, u32_at(&macho, symbol));
+    for (bytes, target) in [
+        (&extended, Target::X86_64LinuxGnu),
+        (&elf_tls, Target::X86_64LinuxGnu),
+        (&large_common, Target::X86_64LinuxGnu),
+        (&addend, Target::Aarch64AppleDarwin),
+        (&absolute, Target::Aarch64AppleDarwin),
+        (&indirect, Target::Aarch64AppleDarwin),
+    ] {
+        let result = archive::build(
+            &[Input {
+                name: "valid.o",
+                bytes,
+            }],
+            target,
+        )
+        .unwrap();
+        let file = ArchiveFile::parse(result.as_slice()).unwrap();
+        let symbols = file
+            .symbols()
+            .unwrap()
+            .unwrap()
+            .map(|s| s.unwrap().name().to_vec())
+            .collect::<Vec<_>>();
+        assert_eq!(symbols, [b"exported"]);
+        assert_eq!(
+            file.members()
+                .next()
+                .unwrap()
+                .unwrap()
+                .data(result.as_slice())
+                .unwrap(),
+            bytes
+        );
+    }
+}
