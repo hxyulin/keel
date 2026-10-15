@@ -4,8 +4,8 @@
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
-//! keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -35,9 +35,9 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O)
-  keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
-  keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
+  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel passes
 
@@ -468,9 +468,13 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
             .ok_or("`--emit-object` requires `-o <output.o>`")?;
         let program = keel_codegen::compile_program_with_pipeline(module, target, &pipeline)
             .map_err(|e| e.to_string())?;
-        let object =
-            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-                .map_err(|e| e.to_string())?;
+        let object = match target {
+            Target::Aarch64AppleDarwin => {
+                keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+            }
+            Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(&program),
+        }
+        .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
         let source = keel_codegen::compile_with_pipeline(module, target, &pipeline)
@@ -535,7 +539,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_object_emission_matches_source_path_and_rejects_other_targets() {
+    fn direct_object_emission_matches_source_path_for_both_targets() {
         let dir = std::env::temp_dir().join(format!("keel-object-api-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let source = "func @answer() -> i64 {\nblock0:\n v0 = iconst.i64 42\n return v0\n}\n";
@@ -568,12 +572,12 @@ mod tests {
             keel_asm::assemble_object(&text).unwrap()
         );
         std::fs::remove_file(&output).unwrap();
-        assert!(
-            invoke("x86_64-unknown-linux-gnu", true)
-                .unwrap_err()
-                .contains("requires aarch64")
+        invoke("x86_64-unknown-linux-gnu", true).unwrap();
+        let text = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+        assert_eq!(
+            std::fs::read(&output).unwrap(),
+            keel_asm::x86::assemble_object(&text).unwrap()
         );
-        assert!(!output.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

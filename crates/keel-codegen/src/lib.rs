@@ -167,9 +167,10 @@ pub fn compile_with_pipeline(
     }
 }
 
-/// Produce a shared assembly program without formatting native instructions.
-/// Currently supported for AArch64 Apple Mach-O. Explicit text items preserve
-/// inline assembly and emission paths that have not yet migrated.
+/// Produce a shared assembly program for AArch64 Mach-O or x86-64 ELF.
+/// AArch64 emits native instructions directly; x86 currently parses its Intel
+/// emission into typed instruction items. Explicit text preserves metadata and
+/// inline assembly paths that have not yet migrated.
 pub fn compile_program(
     module: &Module,
     target: Target,
@@ -193,10 +194,13 @@ pub fn compile_program_with_pipeline(
         Target::Aarch64AppleDarwin => {
             aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
         }
-        _ => Err(CodegenError {
-            func: "<target>".into(),
-            message: "structured object emission currently requires aarch64-apple-darwin".into(),
-        }),
+        Target::X86_64LinuxGnu => {
+            let source = x86_64::compile_with_pipeline(module, &x86_64::REGISTERS, pipeline)?;
+            keel_asm_ir::x86::parse_program(&source).map_err(|message| CodegenError {
+                func: "<assembly>".into(),
+                message,
+            })
+        }
     }
 }
 

@@ -105,15 +105,15 @@ commands and flags used at the time.
 
 ## x86-64 Linux
 
-The native Linux path targets x86-64-v2 and the System V ABI, emitting Intel
-syntax for Clang's integrated assembler or GNU `as`, with ELF linking through
+The native Linux path targets x86-64-v2 and the System V ABI. It can emit ELF
+objects in process or Intel syntax for Clang/GNU `as`, with linking through
 Clang. On Linux, preprocess against the Linux system headers:
 
 ```sh
 cargo build --release -p keel
 clang -E -std=c11 hello.c -o hello.i
-target/release/keel cc --target x86_64-unknown-linux-gnu hello.i -o hello.s
-clang hello.s -o hello
+target/release/keel cc --target x86_64-unknown-linux-gnu --emit-object hello.i -o hello.o
+clang hello.o -o hello
 ./hello
 ```
 
@@ -126,10 +126,11 @@ so glibc's `pthread.h` parses and QuickJS and SQLite also pass all four modes.
 The [full macOS/Linux benchmark report](suite/reports/full-platform-benchmarks-20261015.html)
 records the subsequent application measurements.
 
-`--emit-object` and the structured compiler/assembler API currently target
-AArch64 Mach-O. Native x86 instruction encoding and an ELF writer remain to
-be implemented. The x86 backend also diagnoses exceptions, inline assembly
-and selected i128 operations/conversions it cannot lower yet.
+`--emit-object` and the shared `Program` API support AArch64 Mach-O and x86-64
+ELF. Standalone Intel syntax uses `keel asm --target x86_64-unknown-linux-gnu`.
+See [native x86 assembly](docs/native-x86-assembler.md) for the boundary audit,
+coverage, validation and remaining gaps. The x86 backend still diagnoses
+exceptions, inline assembly and selected i128 operations/conversions it cannot lower.
 
 For native compiler checks, use
 `cargo test --workspace --exclude keel-asm --all-targets`. The portable ARM
@@ -284,11 +285,12 @@ and outputs aliasing an input are rejected before any object is written. On
 macOS, names differing only by case are conservatively treated as collisions.
 The batch stops on its first error, keeping objects already written. A single
 input can still use `-o file.o`; `-o` and `--out-dir` are mutually exclusive.
-Use `--` before input names beginning with a dash. This assembler accepts AArch64
-syntax and emits Apple arm64 Mach-O; x86 AT&T/Intel syntax and ELF output require
-separate target support.
+Use `--` before input names beginning with a dash. The default assembler accepts
+AArch64 syntax and emits Apple arm64 Mach-O. Pass
+`--target x86_64-unknown-linux-gnu` for Intel syntax and ELF output; see
+[the native x86 subset](docs/native-x86-assembler.md).
 
-Hand-written assembly can use named `.macro` parameters (`\name` substitution
+Hand-written AArch64 assembly can use named `.macro` parameters (`\name` substitution
 and `\()` concatenation), nested `.rept` blocks, and literal `.if`/`.elseif`/
 `.else` conditionals. See [the standalone example](crates/keel-asm/examples/standalone.s).
 The supported subset and expansion limits are described in
@@ -321,8 +323,11 @@ metadata bypass source formatting and parsing, with normal encoding and feature
 validation. Conditional branches stay structured during far-branch relaxation.
 Only user inline assembly enters the program as source text; inline macros use
 an explicit validated expansion fallback. Assembly text output remains available.
-Direct object emission currently targets AArch64 Mach-O; see
-[the API design](docs/design.md#assembler).
+For x86-64 ELF, pass `Target::X86_64LinuxGnu` to codegen and consume the program
+with `keel_asm::x86::assemble_program_object(&program)`. Its architecture-specific
+instructions are typed; its current generator still formats and parses Intel
+source at the boundary. See [native x86 assembly](docs/native-x86-assembler.md)
+and [the AArch64 API design](docs/design.md#assembler).
 The completed migration covers all 85,988 generated Lua instructions, with zero
 source-text bytes. In the [33-file Lua comparison](suite/reports/compiler-object-api-complete-20261015.html),
 the API is 1.68× faster for codegen plus object generation and 1.48× for the

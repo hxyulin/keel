@@ -182,7 +182,18 @@ fn run_program(
     std::fs::create_dir_all(&dir).unwrap();
     let asm_path = dir.join(format!("{stem}.s"));
     let exe_path = dir.join(&stem);
-    std::fs::write(&asm_path, asm).unwrap();
+    std::fs::write(&asm_path, &asm).unwrap();
+    let link_input = if std::env::var("KEEL_TEST_ASSEMBLER").as_deref() == Ok("native") {
+        if keel_codegen::Target::host() != Some(keel_codegen::Target::X86_64LinuxGnu) {
+            return Err("KEEL_TEST_ASSEMBLER=native currently requires x86-64 Linux".into());
+        }
+        let object = keel_asm::x86::assemble_object(&asm).map_err(|e| e.to_string())?;
+        let object_path = dir.join(format!("{stem}.o"));
+        std::fs::write(&object_path, object).map_err(|e| e.to_string())?;
+        object_path
+    } else {
+        asm_path.clone()
+    };
 
     let cpp_driver = path.with_extension("cpp");
     let mut clang = if cpp_driver.exists() {
@@ -192,7 +203,7 @@ fn run_program(
     } else {
         Command::new("clang")
     };
-    clang.arg("-o").arg(&exe_path).arg(&asm_path).arg("-lm");
+    clang.arg("-o").arg(&exe_path).arg(&link_input).arg("-lm");
     let driver = path.with_extension("c");
     if driver.exists() {
         clang.arg(&driver);

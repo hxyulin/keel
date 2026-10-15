@@ -1,4 +1,7 @@
-//! A small A64 assembler for Apple arm64 Mach-O objects.
+//! Native AArch64 Mach-O and x86-64 Linux ELF assemblers.
+//!
+//! The original root API targets AArch64; [`x86`] exposes Intel syntax and
+//! structured x86 instruction assembly without changing that API.
 //!
 //! Instruction bit layouts come from Arm's machine-readable specification.
 //! Syntax, operand transformations, and object layout are implemented here.
@@ -9,6 +12,7 @@
 mod generated;
 mod macho;
 mod parser;
+pub mod x86;
 
 use std::fmt;
 

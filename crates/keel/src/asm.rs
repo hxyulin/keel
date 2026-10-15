@@ -13,6 +13,7 @@ struct Options {
     output: Option<PathBuf>,
     out_dir: Option<PathBuf>,
     features: TargetFeatures,
+    x86: bool,
 }
 
 impl Options {
@@ -39,6 +40,13 @@ impl Options {
                         return Err("`--out-dir` may only be specified once".into());
                     }
                 }
+                "--target" => {
+                    opts.x86 = match args.next().map(String::as_str) {
+                        Some("x86_64-unknown-linux-gnu" | "x86_64-linux-gnu") => true,
+                        Some("aarch64-apple-darwin") => false,
+                        _ => return Err("assembler --target expects x86_64-unknown-linux-gnu or aarch64-apple-darwin".into()),
+                    };
+                }
                 "--cpu" => {
                     opts.features = match args.next().map(String::as_str) {
                         Some("baseline") => TargetFeatures::default(),
@@ -56,6 +64,9 @@ impl Options {
                 }
                 _ => opts.inputs.push(arg.into()),
             }
+        }
+        if opts.x86 && opts.features != TargetFeatures::default() {
+            return Err("--cpu apple-m5 requires the AArch64 assembler target".into());
         }
         if opts.inputs.is_empty() {
             return Err(crate::USAGE.into());
@@ -155,8 +166,12 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         let text = src
             .text()
             .map_err(|e| format!("{}: {e}", input.display()))?;
-        let object = keel_asm::assemble_object_with_features(text, opts.features)
-            .map_err(|e| format!("{}: {e}", input.display()))?;
+        let object = if opts.x86 {
+            keel_asm::x86::assemble_object(text)
+        } else {
+            keel_asm::assemble_object_with_features(text, opts.features)
+        }
+        .map_err(|e| format!("{}: {e}", input.display()))?;
         drop(src);
         std::fs::write(&output, object).map_err(|e| format!("{}: {e}", output.display()))?;
     }

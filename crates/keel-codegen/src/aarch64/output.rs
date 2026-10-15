@@ -125,7 +125,10 @@ impl Output {
             .items
             .iter()
             .map(|item| match item {
-                Item::Instruction(_) | Item::Symbolic(_) | Item::Branch { .. } => 1,
+                Item::Instruction(_)
+                | Item::X86Instruction(_)
+                | Item::Symbolic(_)
+                | Item::Branch { .. } => 1,
                 Item::Label(_) => 0,
                 Item::Directive(keel_asm_ir::Directive::Integer { width, .. }) => {
                     usize::from(*width).div_ceil(4)

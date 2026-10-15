@@ -193,3 +193,56 @@ fn raw_c_preprocessing_composes_with_native_object_output() {
         &[0xcf, 0xfa, 0xed, 0xfe]
     );
 }
+
+#[test]
+fn linux_object_from_preprocessed_input_needs_no_external_tools() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-linux-native-no-tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.i"), "int main(void) { return 42; }\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_keel"))
+        .current_dir(&dir)
+        .env("PATH", &dir)
+        .args([
+            "cc",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+            "--emit-object",
+            "main.i",
+            "-o",
+            "main.o",
+        ])
+        .output()
+        .unwrap();
+    success(output);
+    assert_eq!(&std::fs::read(dir.join("main.o")).unwrap()[..4], b"\x7fELF");
+}
+
+#[test]
+fn standalone_linux_assembler_needs_no_external_tools() {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cli-linux-asm-no-tools");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("answer.s"),
+        ".intel_syntax noprefix\n.globl answer\nanswer: mov eax,42; ret\n",
+    )
+    .unwrap();
+    success(
+        Command::new(env!("CARGO_BIN_EXE_keel"))
+            .current_dir(&dir)
+            .env("PATH", &dir)
+            .args([
+                "asm",
+                "--target",
+                "x86_64-unknown-linux-gnu",
+                "answer.s",
+                "--out-dir",
+                "objects",
+            ])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        &std::fs::read(dir.join("objects/answer.o")).unwrap()[..4],
+        b"\x7fELF"
+    );
+}

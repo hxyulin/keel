@@ -234,6 +234,13 @@ fn compile(env: &Env, config: &Config, file: &Path, out: &Path) -> Result<(Durat
             run_checked(&argv, out, None)?;
             Ok((start.elapsed(), Duration::ZERO))
         }
+        Compiler::Keel if config.flags.iter().any(|flag| flag == "--emit-object") => {
+            let mut argv = vec![path(&env.keel), "cc".into()];
+            argv.extend(config.flags.iter().cloned());
+            argv.extend([path(file), "-o".into(), object]);
+            run_checked(&argv, out, None)?;
+            Ok((start.elapsed(), Duration::ZERO))
+        }
         Compiler::Keel => {
             let asm = path(&out.join(stem).with_extension("s"));
             let mut argv = vec![path(&env.keel), "cc".into()];

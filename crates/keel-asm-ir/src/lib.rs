@@ -1,18 +1,21 @@
 //! Structured assembly transport, independent of source parsing and object writers.
 //!
-//! Opcode and field identities come from the same pinned Arm data as Keel's
-//! encoder. IDs are Rust API identities, not a stable serialized wire format.
-//! An instruction selects an exact encoding, with numeric field values. The
-//! assembler still validates field ranges, reserved bits and CPU requirements.
+//! AArch64 opcode/field identities come from the same pinned Arm data as
+//! Keel's encoder and select exact encodings with numeric fields. x86 uses
+//! separate opcode and operand identities in [`x86`]. IDs are Rust API
+//! identities, not a stable serialized wire format. Assemblers validate the
+//! instruction family, operand ranges and target requirements.
 //! Explicit text fragments support user-authored inline assembly.
 mod directive;
 mod generated;
+pub mod x86;
 pub use directive::{Cfi, Directive, Expression, SectionKind};
 mod symbolic;
 pub use generated::{FieldId, Opcode};
 use smallvec::SmallVec;
 pub use symbolic::{PageKind, SymbolicInstruction};
 
+/// An exact AArch64 encoding. Also available as [`aarch64::Instruction`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Instruction {
     pub opcode: Opcode,
@@ -29,7 +32,9 @@ impl Instruction {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
+    /// AArch64 instruction, preserving the original shared API.
     Instruction(Instruction),
+    X86Instruction(x86::Instruction),
     Symbolic(SymbolicInstruction),
     Directive(Directive),
     /// A symbolic B/BL; the assembler owns displacement and relocation handling.
@@ -53,6 +58,9 @@ impl Program {
     }
     pub fn instruction(&mut self, instruction: Instruction) {
         self.items.push(Item::Instruction(instruction));
+    }
+    pub fn x86_instruction(&mut self, instruction: x86::Instruction) {
+        self.items.push(Item::X86Instruction(instruction));
     }
     pub fn directive(&mut self, directive: Directive) {
         self.items.push(Item::Directive(directive));
@@ -87,7 +95,9 @@ impl Program {
         let mut stats = ProgramStats::default();
         for item in &self.items {
             match item {
-                Item::Instruction(_) | Item::Symbolic(_) => stats.instructions += 1,
+                Item::Instruction(_) | Item::X86Instruction(_) | Item::Symbolic(_) => {
+                    stats.instructions += 1
+                }
                 Item::Branch { .. } => stats.instructions += 1,
                 Item::Label(_) => stats.labels += 1,
                 Item::Directive(_) => {}
@@ -102,6 +112,11 @@ impl Program {
 pub struct ProgramStats {
     pub instructions: usize,
     pub labels: usize,
-    /// Explicitly textual source, normally user inline assembly.
+    /// Explicit source fragments, including inline assembly or target metadata.
     pub text_bytes: usize,
+}
+
+/// Explicit AArch64 namespace; root exports remain compatible with existing users.
+pub mod aarch64 {
+    pub use super::{FieldId, Instruction, Opcode, PageKind, SymbolicInstruction};
 }
