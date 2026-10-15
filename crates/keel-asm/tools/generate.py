@@ -59,13 +59,19 @@ for tag in ("S", "D"):
     FP_NAMES += [f"{op}_{tag}{bits}_float2int" for op in ("SCVTF", "UCVTF") for bits in (32, 64)]
     FP_NAMES += [f"{op}_{bits}{tag}_float2int" for op in ("FCVTZS", "FCVTZU") for bits in (32, 64)]
 FP_NAMES += ["FCVT_DS_floatdp1", "FCVT_SD_floatdp1", "FMOV_32S_float2int", "FMOV_S32_float2int", "FMOV_64D_float2int", "FMOV_D64_float2int"]
+SIMD_NAMES = [f"{op}_asimdsame_only" for op in (
+    "ADD", "SUB", "MUL", "MLA", "MLS", "SMAX", "SMIN", "UMAX", "UMIN",
+    "CMEQ", "CMGT", "CMGE", "CMHI", "CMHS", "AND", "ORR", "ORN", "EOR",
+    "BIC", "BSL", "BIT", "BIF", "FADD", "FSUB", "FMUL", "FDIV", "FMLA",
+    "FMLS", "FMIN", "FMAX", "FMINNM", "FMAXNM")]
+SIMD_NAMES += [f"{op}_asimdmisc_R" for op in ("ABS", "NEG", "NOT", "FABS", "FNEG", "FSQRT")]
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 

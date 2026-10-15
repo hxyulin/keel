@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 534 instruction forms. Generated requirements retain
+subset currently has 572 instruction forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, and `FEAT_LSE` availability checks; the fixed
 Apple arm64 target enables those features. Encoding conditions are distinct
 from feature requirements: for example, byte register-offset forms exclude
@@ -1275,8 +1275,19 @@ and `addv` reductions (8B/16B, 4H/8H, 4S). `movi` supports all six modified
 immediate forms: byte replication (8B/16B); halfwords (4H/8H) with LSL #0/#8;
 words (2S/4S) with LSL #0/#8/#16/#24 or MSL #8/#16; scalar D and vector 2D
 64-bit masks whose bytes are each 00 or FF. Byte and 64-bit mask forms take
-no shift operand. General vector arithmetic remains unsupported. FP and SIMD
-operand widths and register numbers are checked.
+no shift operand.
+
+General NEON register arithmetic supports matching 8B/16B, 4H/8H, 2S/4S,
+and 2D arrangements for `add/sub`, `abs/neg`, and register comparisons
+`cmeq/cmgt/cmge/cmhi/cmhs`. `mul/mla/mls` and `smax/smin/umax/umin`
+support B/H/S lanes. Bytewise 8B/16B logical operations include
+`and/orr/orn/eor/bic/bsl/bit/bif`, `not/mvn`, and register `mov` (ORR alias).
+Vector FP arithmetic supports 2S/4S/2D `fadd/fsub/fmul/fdiv`, `fmla/fmls`,
+`fmin/fmax/fminnm/fmaxnm`, and `fabs/fneg/fsqrt`. FP16, lane-indexed,
+widening/narrowing, saturating, and shift forms remain unsupported. The
+parser rejects reserved arrangements and mismatched operands before encoding.
+Differential tests cover every supported arrangement and native tests exercise
+integer selection and FP multiply-accumulate/square-root kernels.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
 against their operand roles. `fp` and `lr` name x29 and x30.

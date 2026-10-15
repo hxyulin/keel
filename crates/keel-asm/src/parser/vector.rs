@@ -1,4 +1,4 @@
-//! The two Advanced SIMD forms used by Keel's scalar popcount lowering.
+//! Advanced SIMD register arithmetic, reductions, and modified immediates.
 use super::count;
 use super::storage::{encode_named, lower};
 use crate::FieldId;
@@ -26,8 +26,10 @@ fn vector(text: &str) -> Result<(u32, &str, u32, u32), String> {
         "16b" => (1, 0),
         "4h" => (0, 1),
         "8h" => (1, 1),
+        "2s" => (0, 2),
         "4s" => (1, 2),
-        _ => return Err("unsupported SIMD reduction arrangement".into()),
+        "2d" => (1, 3),
+        _ => return Err("unsupported SIMD arrangement".into()),
     };
     Ok((register, arrangement, q, size))
 }
@@ -43,6 +45,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
         }
         rd
     } else {
+        if size == 3 || (size == 2 && q == 0) {
+            return Err("invalid SIMD reduction arrangement".into());
+        }
         number(
             &d,
             match size {
@@ -65,6 +70,65 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             (FieldId::size, size),
         ],
     )
+}
+
+/// Register-only same-width forms. Restrict each family before encoding:
+/// the machine-readable bit layout alone does not exclude every reserved size.
+pub(super) fn arithmetic(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
+    if !args.first().is_some_and(|s| s.starts_with(['v', 'V'])) {
+        return Ok(None);
+    }
+    let (root, unary, kind) = match op {
+        "mov" => ("orr", true, "logical"),
+        "mvn" => ("not", true, "logical"),
+        "not" => (op, true, "logical"),
+        "and" | "orr" | "orn" | "eor" | "bic" | "bsl" | "bit" | "bif" => (op, false, "logical"),
+        "add" | "sub" | "cmeq" | "cmgt" | "cmge" | "cmhi" | "cmhs" => (op, false, "integer"),
+        "abs" | "neg" => (op, true, "integer"),
+        "mul" | "mla" | "mls" | "smax" | "smin" | "umax" | "umin" => (op, false, "small"),
+        "fadd" | "fsub" | "fmul" | "fdiv" | "fmla" | "fmls" | "fmin" | "fmax" | "fminnm"
+        | "fmaxnm" => (op, false, "fp"),
+        "fabs" | "fneg" | "fsqrt" => (op, true, "fp"),
+        _ => return Ok(None),
+    };
+    let arity = if unary { 2 } else { 3 };
+    count(args, arity, arity)?;
+    let dest = args[0].to_ascii_lowercase();
+    let (rd, arrangement, q, size) = vector(&dest)?;
+    match kind {
+        "logical" if size != 0 => return Err("SIMD logical forms require 8B or 16B".into()),
+        "small" if size == 3 => {
+            return Err("this SIMD arithmetic form does not support D lanes".into());
+        }
+        "fp" if !matches!(arrangement, "2s" | "4s" | "2d") => {
+            return Err("SIMD FP requires 2S, 4S, or 2D".into());
+        }
+        _ => {}
+    }
+    let mut registers = Vec::new();
+    for arg in &args[1..] {
+        let text = arg.to_ascii_lowercase();
+        let (r, a, _, _) = vector(&text)?;
+        if a != arrangement {
+            return Err("SIMD operands require matching arrangements".into());
+        }
+        registers.push(r);
+    }
+    let mut fields = vec![("Rd", rd), ("Rn", registers[0]), ("Q", q)];
+    if !unary || op == "mov" {
+        fields.push(("Rm", *registers.last().unwrap()));
+    }
+    if kind == "fp" {
+        fields.push(("sz", size - 2));
+    } else if kind != "logical" {
+        fields.push(("size", size));
+    }
+    let form = if unary && op != "mov" {
+        "asimdmisc_R"
+    } else {
+        "asimdsame_only"
+    };
+    encode(&format!("{}_{form}", root.to_ascii_uppercase()), &fields).map(Some)
 }
 
 /// Advanced SIMD modified immediates: byte replication, shifted halfwords /
