@@ -1,10 +1,7 @@
 //! Every compiler fixture must assemble through Keel, in addition to the
 //! compiler suites that use Clang for reference assembly and execution.
 #![cfg(all(target_os = "macos", target_arch = "aarch64"))]
-use keel_codegen::{
-    Pools,
-    aarch64::{REGISTERS, compile_with},
-};
+use keel_codegen::{Pools, aarch64::REGISTERS};
 use std::{path::Path, process::Command};
 
 #[test]
@@ -30,25 +27,41 @@ fn all_backend_fixtures_assemble_in_normal_tiny_and_optimized_configurations() {
         {
             continue;
         }
-        for (pools, opt) in [(REGISTERS, false), (tiny, false), (REGISTERS, true)] {
+        use keel_codegen::{SelectionTier, regalloc::AllocationTier};
+        for (pools, opt, selection, allocation) in [
+            (
+                REGISTERS,
+                false,
+                SelectionTier::Baseline,
+                AllocationTier::Full,
+            ),
+            (tiny, false, SelectionTier::Baseline, AllocationTier::Full),
+            (
+                REGISTERS,
+                true,
+                SelectionTier::Baseline,
+                AllocationTier::Full,
+            ),
+            (REGISTERS, false, SelectionTier::Full, AllocationTier::Full),
+            (tiny, true, SelectionTier::Full, AllocationTier::Fast),
+        ] {
             let mut module = keel_ir::parse(&source).unwrap();
             keel_ir::verify_module(&module).unwrap();
             if opt {
                 keel_opt::optimize(&mut module).unwrap();
             }
-            let source = compile_with(&module, &pools).unwrap();
+            let pipeline = keel_codegen::CodegenPipeline {
+                selector: &selection,
+                allocator: &allocation,
+            };
+            let source =
+                keel_codegen::aarch64::compile_with_pipeline(&module, &pools, &pipeline).unwrap();
             let reference = keel_asm::assemble_object(&source).unwrap_or_else(|e| {
                 panic!("{} optimize={opt} pools={pools:?}: {e}", path.display())
             });
-            let program = keel_codegen::aarch64::compile_program_with_pipeline(
-                &module,
-                &pools,
-                &keel_codegen::CodegenPipeline {
-                    selector: &keel_codegen::SelectionTier::Baseline,
-                    allocator: &keel_codegen::regalloc::AllocationTier::Full,
-                },
-            )
-            .unwrap();
+            let program =
+                keel_codegen::aarch64::compile_program_with_pipeline(&module, &pools, &pipeline)
+                    .unwrap();
             let direct =
                 keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
                     .unwrap_or_else(|e| {

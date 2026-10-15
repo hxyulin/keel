@@ -11,7 +11,8 @@ fn typed_program_mixes_symbols_relocations_data_and_unwind_with_source() {
         Opcode::MOVZ_32_movewide,
         [(Rd, 0), (imm16, 42), (hw, 0)],
     ));
-    program.text("b Lreturn\nnop\n");
+    program.branch(false, "Lreturn");
+    program.text("nop\n");
     program.label("Lreturn");
     program.instruction(Instruction::new(Opcode::RET_64R_branch_reg, [(Rn, 30)]));
     program.text(".cfi_endproc\n.data\n.quad _answer\n.subsections_via_symbols\n");
