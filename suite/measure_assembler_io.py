@@ -18,17 +18,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--compiler', type=pathlib.Path, required=True)
     parser.add_argument('--input-dir', type=pathlib.Path, required=True)
+    parser.add_argument('--input-group', default='lua', help='label for files from --input-dir')
     parser.add_argument('--extra-input', type=pathlib.Path, action='append', default=[])
     parser.add_argument('--work-dir', type=pathlib.Path, required=True)
     parser.add_argument('--output', type=pathlib.Path, required=True)
     parser.add_argument('--rounds', type=int, default=21)
+    parser.add_argument('--warmups', type=int, default=2)
     args = parser.parse_args()
-    if args.rounds < 5:
-        parser.error('use at least 5 rounds')
+    if args.rounds < 5 or args.warmups < 1:
+        parser.error('use at least 5 rounds and 1 warmup')
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
     compiler = args.compiler.resolve()
-    sources = [(p, 'lua') for p in sorted(args.input_dir.resolve().glob('*.s'))]
+    sources = [(p, args.input_group) for p in sorted(args.input_dir.resolve().glob('*.s'))]
     if not sources:
         parser.error('no assembly inputs')
     sources += [(p.resolve(), 'large') for p in args.extra_input]
@@ -36,14 +38,14 @@ def main():
               'process_load_at_start': run(['ps', '-axo', 'pid,pcpu,comm']).decode(),
               'compiler_sha256': hashlib.sha256(compiler.read_bytes()).hexdigest(),
               'script_sha256': hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
-              'rounds': args.rounds, 'rows': [],
+              'rounds': args.rounds, 'warmups': args.warmups, 'rows': [],
               'method': 'Warm filesystem cache. Randomized paired read/mmap order per input per round. Complete CLI time, including parsing, encoding and output. Lua total sums serial per-file times, not parallel build wall time. No cache eviction or cold-storage claim.'}
     rng = random.Random(42)
     for index, (path, group) in enumerate(sources):
         outputs = {name: work / f'{index}-{name}.o' for name in ['baseline', 'mmap']}
         commands = {name: [compiler, 'asm', *(['--mmap'] if name == 'mmap' else []),
                            path, '-o', output] for name, output in outputs.items()}
-        for _ in range(2):
+        for _ in range(args.warmups):
             for command in commands.values():
                 run(command)
         assert outputs['baseline'].read_bytes() == outputs['mmap'].read_bytes(), path

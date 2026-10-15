@@ -238,6 +238,26 @@ found no clear overall warm-cache speedup before these parser changes; use
 `--mmap` explicitly when experimenting with stable inputs. These measurements
 do not establish cold-storage behavior or benefits on larger applications.
 
+For synthetic large-file scaling checks:
+
+```sh
+python3 suite/generate_assembler_scale.py --output-dir target/assembler-bench/scale --mib 64 256
+python3 suite/measure_assembler_io.py --compiler target/release/keel \
+  --input-dir target/assembler-bench/scale --input-group synthetic-scale \
+  --work-dir target/assembler-bench/scale-objects --rounds 11 --warmups 1 \
+  --output target/assembler-bench/scale-report.json
+```
+
+The [64/256 MiB scaling run](suite/reports/assembler-mmap-scale-aarch64-2026-10-15.json)
+found less than 1% paired end-to-end speed change on both instruction-dense
+and function-heavy inputs. The function-heavy 256 MiB case had a small
+measurable gain; the instruction-dense case's interval included no gain.
+The [memory check](suite/reports/assembler-mmap-scale-memory-aarch64-2026-10-15.json)
+showed a larger benefit: macOS peak memory footprint dropped by approximately
+the input file size, while peak resident size stayed similar because mapped
+file pages still count toward residency. These generated files are scaling
+inputs, not complete applications; the measurements use a warm filesystem cache.
+
 ## Development
 
 - `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,
