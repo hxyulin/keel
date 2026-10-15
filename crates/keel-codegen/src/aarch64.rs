@@ -822,7 +822,6 @@ impl<'a> FunctionCompiler<'a> {
         writeln!(out, "\t.p2align\t2").unwrap();
         out.label(format!("_{name}"));
         out.label(format!("L{name}_begin"));
-        out.push_str("\n");
         self.allocation_comment();
 
         if self.debug {

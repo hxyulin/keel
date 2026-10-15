@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--compiler', type=Path, default=Path('target/release/keel'))
     parser.add_argument('--profiler', type=Path, default=Path('target/release/examples/profile_pipeline'))
     parser.add_argument('--baseline-compiler', type=Path, help='optional saved compiler before the API change')
+    parser.add_argument('--baseline-commit', help='source commit for the optional baseline binary')
     parser.add_argument('--input-dir', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -51,6 +52,7 @@ def main():
     if args.baseline_compiler:
         commands['before-text'] = []
         report['baseline_compiler_sha256'] = sha(args.baseline_compiler.resolve())
+        report['baseline_commit'] = args.baseline_commit
     for path in inputs:
         profile_command = [profiler, path, args.library_pairs]
         row = {'input': str(path), 'input_sha256': sha(path), 'profile_command': list(map(str, profile_command)),
