@@ -120,9 +120,11 @@ clang hello.s -o hello
 The [NUC bring-up report](suite/reports/x86-linux-bringup-20261015.html) records
 native execution on Ubuntu 24.04 / Intel i7-1360P, with Rust 1.99 and Clang 18.
 Compiler tests, ordinary/optimized C fixtures, both assemblers with debug info,
-and Lua's portable tests in all four compiler/selection modes pass. QuickJS
-and SQLite currently stop at an alignment-changing typedef in glibc's
-`pthread.h`; that frontend feature remains unsupported.
+and Lua's portable tests in all four compiler/selection modes pass. GNU aligned
+typedefs now preserve alignment independently of size and type compatibility,
+so glibc's `pthread.h` parses and QuickJS and SQLite also pass all four modes.
+The [full macOS/Linux benchmark report](suite/reports/full-platform-benchmarks-20261015.html)
+records the subsequent application measurements.
 
 `--emit-object` and the structured compiler/assembler API currently target
 AArch64 Mach-O. Native x86 instruction encoding and an ELF writer remain to

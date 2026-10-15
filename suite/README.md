@@ -267,9 +267,27 @@ cargo suite test lua --release -c keel,keel-O,keel-select,keel-O-select
 ```
 
 Clang/GNU assembly and ELF linking are part of this path; Keel's direct
-`--emit-object` path is currently AArch64 Mach-O only. Lua passes all four
-modes. QuickJS and SQLite encounter the deliberately unsupported aligned
-typedef in glibc's `pthread.h`. The full ARM differential suite requires a
+`--emit-object` path is currently AArch64 Mach-O only. Lua, QuickJS and SQLite pass all four
+modes after adding GNU aligned typedef support for glibc's `pthread.h`. The full ARM differential suite requires a
 reference Clang with the requested CPU/features; the NUC's Clang 18 rejects
 `-mcpu=apple-m5`, so that limitation is recorded separately from compiler
 correctness.
+
+
+## Full macOS and Linux measurements
+
+The [platform benchmark report](reports/full-platform-benchmarks-20261015.html)
+compares all eight workloads on Apple M5 Max/macOS and Intel i7-1360P/Ubuntu.
+Raw suite results, configuration lists, commands and validation logs accompany
+that report. Builds use one job and refresh cached Clang statistics; runtime
+uses one warmup and five measured runs. All 32 configurations run on macOS;
+Linux excludes the two Apple M5 tuning presets. Experimental pass recipes are
+included, not enabled as defaults by this measurement.
+
+These runs compare the same Clang-preprocessed sources, so native preprocessing
+is outside the measured boundary. Keel emits text assembly and Clang assembles
+it on both hosts, including macOS; the direct object API is not measured here.
+Build times are one observation, while runtime samples are sequential by
+configuration rather than paired/randomized. Cross-machine comparisons use
+ratios to each host's Clang baseline; absolute times also reflect the hardware
+and operating system.

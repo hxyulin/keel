@@ -297,3 +297,16 @@ fn macro_dump_preserves_definitions_and_can_be_reused() {
     .unwrap();
     keel_c::compile(&pp, "reused.c", Default::default()).unwrap();
 }
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))]
+#[test]
+fn native_pthread_headers_preserve_the_glibc_unwind_buffer_layout() {
+    let source = "#include <pthread.h>\n\
+        _Static_assert(sizeof(__pthread_unwind_buf_t) == 104, \"size\");\n\
+        _Static_assert(_Alignof(__pthread_unwind_buf_t) == 16, \"alignment\");\n\
+        int f(void) { return sizeof(pthread_t); }\n";
+    let pp = preprocess(source, "pthread.c", &PreprocessOptions::default()).unwrap();
+    let module = keel_c::compile(&pp, "pthread.c", Default::default()).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+}
