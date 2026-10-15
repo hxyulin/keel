@@ -124,7 +124,7 @@ release builds for final timings; use instrumented builds to locate costs.
 See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
 
-## Assembler (initial A64 subset)
+## Assembler (A64 subset)
 
 ```sh
 cargo run -p keel -- asm crates/keel-asm/examples/return42.s -o return42.o
@@ -154,16 +154,45 @@ Scalar LSE atomics include read-modify-write operations and compare-and-swap;
 DMB/DSB/ISB barriers, `ngc`/`ngcs`, `svc`, and SIMD `movi` are supported too.
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
+The generated table currently contains 534 encoding forms, counting register
+widths, addressing modes, and atomic ordering variants separately. This is
+a supported subset, rather than complete A64 or GNU assembler compatibility.
 Data support includes initialized/zero-fill/TLS sections, integer directives,
 pointer tables, and symbol differences. It also supports ordinary CFI unwind
 records, compact unwind for canonical ARM64 frames and leaf functions, DWARF 4
 line tables, and debug sections for types and variables.
 Exception personalities, LSDA tables, and C++ exception propagation are
 supported, along with subsection splitting for linker reordering and dead
-stripping. Literal loads and other unsupported forms still prevent assembling
-arbitrary `keel compile` output.
+stripping. The tests assemble all current backend fixtures and C fixtures
+(including optimization and debug configurations). Literal loads, exclusive
+accesses, general SIMD arithmetic, and other unsupported forms still limit
+arbitrary assembly and inline assembly.
 Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
+
+To measure assembly speed against Clang on Apple Silicon macOS:
+
+```sh
+python3 suite/measure_assembler.py --output target/assembler-bench/report.json
+```
+
+The script builds release binaries, checks instruction bytes against Clang,
+and records randomized paired timings for `keel asm`, `clang -x assembler -c`,
+and the direct `clang -cc1as` entry point. Preprocessing and C compilation are
+outside timing. Inputs cover tiny files, 1K–100K mixed instructions, and
+generated C with 1,000 functions, with/without debug information. These are
+scaling workloads, not an application-suite performance claim. Raw samples,
+tool versions, source hashes, and in-process parse/encode versus Mach-O writer
+timings are retained. The stage profiler can also run separately with
+`cargo run --release -p keel-asm --example profile -- input.s 30`.
+
+For a before/after comparison, copy the release compiler and stage profiler
+before changing the assembler, then pass `--baseline-compiler <copy>` and
+`--baseline-profiler <copy>`. To measure actual suite assembly, prepare it
+with `cargo suite test lua -c keel`, then pass
+`--only-inputs --input-dir target/suite/lua/build/keel`. The report includes
+per-file measurements and summed serial assembly costs; those totals are
+distinct from a parallel build's wall time.
 
 ## Development
 

@@ -207,10 +207,9 @@ struct Encoding {
 /// Every variable field must be supplied once. Fixed bits within partially
 /// variable fields (e.g. MOVZ wN's `hw`) remain constrained by the ISA mask.
 fn encode(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
-    let encoding = generated::ENCODINGS
-        .iter()
-        .find(|e| e.name == name)
-        .ok_or_else(|| format!("unsupported encoding `{name}`"))?;
+    let encoding =
+        generated::encoding(name).ok_or_else(|| format!("unsupported encoding `{name}`"))?;
+    let name = encoding.name;
     if values.len() != encoding.fields.len() {
         return Err(format!("wrong number of fields for `{name}`"));
     }
@@ -246,4 +245,30 @@ fn encode(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
         }
     }
     Ok(word)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_lookup_returns_every_encoding_record() {
+        for expected in generated::ENCODINGS {
+            let actual = generated::encoding(expected.name).unwrap();
+            assert!(std::ptr::eq(actual, expected), "{}", expected.name);
+        }
+        for unsupported in [
+            "",
+            "add",
+            "ADD_64_addsub_imm ",
+            "add_64_addsub_imm",
+            "UNKNOWN",
+        ] {
+            assert!(generated::encoding(unsupported).is_none());
+            assert_eq!(
+                encode(unsupported, &[]),
+                Err(format!("unsupported encoding `{unsupported}`"))
+            );
+        }
+    }
 }

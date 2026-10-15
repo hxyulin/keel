@@ -1141,6 +1141,12 @@ variable fields retain their fixed-bit constraints. Operand interpretation
 remains handwritten: register roles, immediate ranges, shifts, aliases, and
 PC-relative displacements need rules beyond the bit layout.
 
+Encoding-name dispatch is generated alongside the records as a Rust string
+`match`, replacing a linear scan through the encoding table. The records live
+in one static table; every generated arm returns the corresponding record.
+Field range, reserved-bit, and feature checks still run after lookup. A unit
+test checks dispatch for every record and rejects unknown names.
+
 Normal Cargo builds use the checked-in Rust tables and need no network,
 Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
 

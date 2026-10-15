@@ -118,7 +118,7 @@ def generate(data):
         "// Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.",
         "// Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.",
         "// Do not edit; regenerate from isa/a64.json.",
-        "use super::{Encoding, Field, Requirement};", "pub(super) const ENCODINGS: &[Encoding] = &[",
+        "use super::{Encoding, Field, Requirement};", "pub(super) static ENCODINGS: &[Encoding] = &[",
     ]
     for instruction in data["instructions"]:
         conditions = requirements(instruction["condition"])
@@ -149,6 +149,12 @@ def generate(data):
             lines.append(f'Field {{ name: "{name}", start: {start}, width: {width} }},')
         lines.append("], requirements: &[" + ", ".join(conditions) + "] },")
     lines.append("];\n")
+    # Keep dispatch and records in the same order, generated from one source.
+    # Rust lowers this match into a decision tree rather than scanning names.
+    lines.append("pub(super) fn encoding(name: &str) -> Option<&'static Encoding> {\nSome(match name {")
+    for index, instruction in enumerate(data["instructions"]):
+        lines.append(f'"{instruction["name"]}" => &ENCODINGS[{index}],')
+    lines.append("_ => return None,\n})\n}\n")
     return subprocess.run(["rustfmt", "--edition", "2024"], input="\n".join(lines),
                           text=True, capture_output=True, check=True).stdout
 
