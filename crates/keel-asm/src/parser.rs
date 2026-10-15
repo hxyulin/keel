@@ -41,6 +41,7 @@ mod data;
 mod debug;
 mod float;
 mod memory;
+mod preprocess;
 mod relocate;
 mod scalable;
 mod scanning;
@@ -386,6 +387,25 @@ struct DataFixup<'a> {
 }
 
 pub(super) fn assemble(
+    source: &str,
+    metrics: bool,
+    features: crate::TargetFeatures,
+) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
+    match assemble_plain(source, metrics, features) {
+        Err(error) if preprocess::required(&error) => {
+            let expanded = preprocess::expand(source)?;
+            let (assembly, mut locations) = assemble_plain(&expanded.source, metrics, features)
+                .map_err(|error| expanded.remap(error))?;
+            for location in &mut locations {
+                location.line = expanded.original_line(location.line);
+            }
+            Ok((assembly, locations))
+        }
+        result => result,
+    }
+}
+
+fn assemble_plain(
     source: &str,
     metrics: bool,
     features: crate::TargetFeatures,
