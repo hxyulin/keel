@@ -199,3 +199,55 @@ fn keel_types_scopes_and_variables_verify() {
         assert!(info.contains(tag), "missing {tag}");
     }
 }
+
+#[test]
+fn compact_cfi_forms_match_clang_size_and_decoded_rules() {
+    let source = ".text\n.globl _compact_cfi\n_compact_cfi:\n.cfi_startproc\n.cfi_def_cfa sp,16\n.cfi_offset 63,-8\n.cfi_offset d0,-16\n.cfi_offset d31,-24\n.cfi_restore 63\n.cfi_restore d0\n.zero 60\n.cfi_def_cfa_offset 24\n.zero 64\n.cfi_def_cfa_offset 32\n.zero 256\n.cfi_def_cfa_offset 40\n.zero 65536\n.cfi_def_cfa_offset 48\nret\n.cfi_endproc\n";
+    let temp = Temp::new();
+    let input = temp.0.join("compact.s");
+    let reference = temp.0.join("clang.o");
+    let ours = temp.0.join("ours.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .arg("-c")
+        .arg(&input)
+        .arg("-o")
+        .arg(&reference));
+    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
+    let frame_size = |path: &std::path::Path| {
+        let bytes = std::fs::read(path).unwrap();
+        let object = object::File::parse(bytes.as_slice()).unwrap();
+        object.section_by_name("__eh_frame").unwrap().size()
+    };
+    assert_eq!(frame_size(&ours), frame_size(&reference));
+    let decoded = dump(&ours, "--eh-frame");
+    let expected = dump(&reference, "--eh-frame");
+    let rows = |text: &str| {
+        let mut first = None;
+        text.lines()
+            .filter_map(|line| {
+                let (address, rule) = line.trim().strip_prefix("0x")?.split_once(": ")?;
+                let address = u64::from_str_radix(address, 16).ok()?;
+                let start = *first.get_or_insert(address);
+                Some((address - start, rule.to_string()))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(!rows(&decoded).is_empty());
+    assert_eq!(rows(&decoded), rows(&expected));
+    for opcode in [
+        "advance_loc:",
+        "advance_loc1:",
+        "advance_loc2:",
+        "advance_loc4:",
+        "offset:",
+        "offset_extended:",
+        "restore:",
+        "restore_extended:",
+    ] {
+        assert!(
+            decoded.contains(&format!("DW_CFA_{opcode}")),
+            "{opcode}: {decoded}"
+        );
+    }
+}

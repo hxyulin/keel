@@ -41,6 +41,26 @@ pub(super) fn uleb(mut n: u64, out: &mut impl Extend<u8>) {
         }
     }
 }
+/// The CIE uses a code-alignment factor of one, so deltas are byte offsets.
+/// Prefer the primary opcode, then the narrowest extended advance operand.
+fn advance(delta: u64, out: &mut Vec<u8>) -> Result<(), &'static str> {
+    let delta = u32::try_from(delta).map_err(|_| "CFI address advance exceeds 32 bits")?;
+    match delta {
+        0 => {}
+        1..=63 => out.push(0x40 | delta as u8),
+        64..=255 => out.extend_from_slice(&[0x02, delta as u8]),
+        256..=65535 => {
+            out.push(0x03);
+            out.extend_from_slice(&(delta as u16).to_le_bytes());
+        }
+        _ => {
+            out.push(0x04);
+            out.extend_from_slice(&delta.to_le_bytes());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn sleb(mut n: i64, out: &mut impl Extend<u8>) {
     loop {
         let b = (n & 127) as u8;
@@ -263,14 +283,23 @@ impl<'a> Debug<'a> {
                     return Err("CFI offset must be a nonpositive multiple of 8".into());
                 }
                 let r = reg(r)?;
-                bytes.push(0x05);
-                uleb(r, &mut bytes);
+                if r < 64 {
+                    bytes.push(0x80 | r as u8);
+                } else {
+                    bytes.push(0x05);
+                    uleb(r, &mut bytes);
+                }
                 uleb(n.unsigned_abs() / 8, &mut bytes);
                 rule = Rule::Offset(r, n);
             }
             (".cfi_restore", [r]) => {
-                bytes.push(0x06);
-                uleb(reg(r)?, &mut bytes);
+                let r = reg(r)?;
+                if r < 64 {
+                    bytes.push(0xc0 | r as u8);
+                } else {
+                    bytes.push(0x06);
+                    uleb(r, &mut bytes);
+                }
             }
             (".cfi_same_value", [r]) => {
                 bytes.push(0x08);
@@ -433,19 +462,8 @@ impl<'a> Debug<'a> {
                     let mut position = frame.start;
                     for (address, event) in frame.events {
                         let delta = address - position;
-                        if delta != 0 {
-                            bytes.push(0x04);
-                            bytes.extend_from_slice(
-                                &u32::try_from(delta)
-                                    .map_err(|_| {
-                                        Error::new(
-                                            frame.line,
-                                            "CFI address advance exceeds 32 bits",
-                                        )
-                                    })?
-                                    .to_le_bytes(),
-                            );
-                        }
+                        advance(delta, &mut bytes)
+                            .map_err(|message| Error::new(frame.line, message))?;
                         bytes.extend(event);
                         position = address;
                     }
@@ -608,5 +626,35 @@ impl References<'_, '_> {
             addend: 0,
         });
         bytes.extend_from_slice(&[0; 8]);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::advance;
+
+    #[test]
+    fn cfi_advances_use_the_narrowest_operand_and_reject_overflow() {
+        for (delta, expected) in [
+            (0, vec![]),
+            (1, vec![0x41]),
+            (63, vec![0x7f]),
+            (64, vec![0x02, 64]),
+            (255, vec![0x02, 255]),
+            (256, vec![0x03, 0, 1]),
+            (65535, vec![0x03, 255, 255]),
+            (65536, vec![0x04, 0, 0, 1, 0]),
+            (u32::MAX as u64, vec![0x04, 255, 255, 255, 255]),
+        ] {
+            let mut bytes = Vec::new();
+            advance(delta, &mut bytes).unwrap();
+            assert_eq!(bytes, expected, "delta {delta}");
+        }
+        let mut bytes = Vec::new();
+        assert_eq!(
+            advance(u32::MAX as u64 + 1, &mut bytes),
+            Err("CFI address advance exceeds 32 bits")
+        );
+        assert!(bytes.is_empty());
     }
 }
