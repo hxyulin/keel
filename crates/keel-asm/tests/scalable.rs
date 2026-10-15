@@ -166,7 +166,6 @@ fn invalid_or_out_of_scope_scalable_forms_are_diagnosed() {
         "lastb w0, p0/m, z0.s",
         "smstart all",
         "smstop #1",
-        "zero {za0.s}",
         "fmopa za4.s, p0/m, p0/m, z0.s, z1.s",
         "fmopa za0.d, p0/m, p0/m, z0.d, z1.d",
         "fmops za0.s, p8/m, p0/m, z0.s, z1.s",

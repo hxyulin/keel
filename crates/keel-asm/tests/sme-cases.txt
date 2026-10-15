@@ -1,0 +1,64 @@
+# Named SME/SME2 cases corresponding to isa/sme.txt.
+# Encoding-name inventory derived from Arm AARCHMRS 2025-12.
+# Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.
+# Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.
+addha_za_pp_z_32	addha za0.s, p0/m, p7/m, z31.s
+addha_za_pp_z_64	addha za0.d, p0/m, p7/m, z31.d
+addsvl_r_ri_	addsvl sp, x30, #-32
+addva_za_pp_z_32	addva za0.s, p0/m, p7/m, z31.s
+addva_za_pp_z_64	addva za0.d, p0/m, p7/m, z31.d
+bfmopa_za32_pp_zz_	bfmopa za0.s, p0/m, p7/m, z31.h, z0.h
+bfmopa_za_pp_zz_16	bfmopa za0.h, p0/m, p7/m, z31.h, z0.h
+bfmops_za32_pp_zz_	bfmops za0.s, p0/m, p7/m, z31.h, z0.h
+bfmops_za_pp_zz_16	bfmops za0.h, p0/m, p7/m, z31.h, z0.h
+fmopa_za32_pp_zz_16	fmopa za0.s, p0/m, p7/m, z31.h, z0.h
+fmopa_za_pp_zz_16	fmopa za0.h, p0/m, p7/m, z31.h, z0.h
+fmopa_za_pp_zz_32	fmopa za0.s, p0/m, p7/m, z31.s, z0.s
+fmopa_za_pp_zz_64	fmopa za0.d, p0/m, p7/m, z31.d, z0.d
+fmops_za32_pp_zz_16	fmops za0.s, p0/m, p7/m, z31.h, z0.h
+fmops_za_pp_zz_16	fmops za0.h, p0/m, p7/m, z31.h, z0.h
+fmops_za_pp_zz_32	fmops za0.s, p0/m, p7/m, z31.s, z0.s
+fmops_za_pp_zz_64	fmops za0.d, p0/m, p7/m, z31.d, z0.d
+ld1b_za_p_rrr_	ld1b {za0v.b[w15, 0]}, p7/z, [sp, x30, lsl #0]
+ld1d_za_p_rrr_	ld1d {za7v.d[w15, 0]}, p7/z, [sp, x30, lsl #3]
+ld1h_za_p_rrr_	ld1h {za1v.h[w15, 0]}, p7/z, [sp, x30, lsl #1]
+ld1q_za_p_rrr_	ld1q {za15v.q[w15, 0]}, p7/z, [sp, x30, lsl #4]
+ld1w_za_p_rrr_	ld1w {za3v.s[w15, 0]}, p7/z, [sp, x30, lsl #2]
+ldr_za_ri_	ldr za[w15, 15], [sp, #15, mul vl]
+mova_z_p_rza_b	mova z31.b, p7/m, za0v.b[w15, 0]
+mova_z_p_rza_d	mova z31.d, p7/m, za7v.d[w15, 0]
+mova_z_p_rza_h	mova z31.h, p7/m, za1v.h[w15, 0]
+mova_z_p_rza_q	mova z31.q, p7/m, za15v.q[w15, 0]
+mova_z_p_rza_w	mova z31.s, p7/m, za3v.s[w15, 0]
+mova_za_p_rz_b	mova za0v.b[w15, 0], p7/m, z31.b
+mova_za_p_rz_d	mova za7v.d[w15, 0], p7/m, z31.d
+mova_za_p_rz_h	mova za1v.h[w15, 0], p7/m, z31.h
+mova_za_p_rz_q	mova za15v.q[w15, 0], p7/m, z31.q
+mova_za_p_rz_w	mova za3v.s[w15, 0], p7/m, z31.s
+rdsvl_r_i_	rdsvl x30, #31
+smopa_za32_pp_zz_16	smopa za0.s, p0/m, p7/m, z31.h, z0.h
+smopa_za_pp_zz_32	smopa za0.s, p0/m, p7/m, z31.b, z0.b
+smopa_za_pp_zz_64	smopa za0.d, p0/m, p7/m, z31.h, z0.h
+smops_za32_pp_zz_16	smops za0.s, p0/m, p7/m, z31.h, z0.h
+smops_za_pp_zz_32	smops za0.s, p0/m, p7/m, z31.b, z0.b
+smops_za_pp_zz_64	smops za0.d, p0/m, p7/m, z31.h, z0.h
+st1b_za_p_rrr_	st1b {za0v.b[w15, 0]}, p7, [sp, x30, lsl #0]
+st1d_za_p_rrr_	st1d {za7v.d[w15, 0]}, p7, [sp, x30, lsl #3]
+st1h_za_p_rrr_	st1h {za1v.h[w15, 0]}, p7, [sp, x30, lsl #1]
+st1q_za_p_rrr_	st1q {za15v.q[w15, 0]}, p7, [sp, x30, lsl #4]
+st1w_za_p_rrr_	st1w {za3v.s[w15, 0]}, p7, [sp, x30, lsl #2]
+str_za_ri_	str za[w15, 15], [sp, #15, mul vl]
+sumopa_za_pp_zz_32	sumopa za0.s, p0/m, p7/m, z31.b, z0.b
+sumopa_za_pp_zz_64	sumopa za0.d, p0/m, p7/m, z31.h, z0.h
+sumops_za_pp_zz_32	sumops za0.s, p0/m, p7/m, z31.b, z0.b
+sumops_za_pp_zz_64	sumops za0.d, p0/m, p7/m, z31.h, z0.h
+umopa_za32_pp_zz_16	umopa za0.s, p0/m, p7/m, z31.h, z0.h
+umopa_za_pp_zz_32	umopa za0.s, p0/m, p7/m, z31.b, z0.b
+umopa_za_pp_zz_64	umopa za0.d, p0/m, p7/m, z31.h, z0.h
+umops_za32_pp_zz_16	umops za0.s, p0/m, p7/m, z31.h, z0.h
+umops_za_pp_zz_32	umops za0.s, p0/m, p7/m, z31.b, z0.b
+umops_za_pp_zz_64	umops za0.d, p0/m, p7/m, z31.h, z0.h
+usmopa_za_pp_zz_32	usmopa za0.s, p0/m, p7/m, z31.b, z0.b
+usmopa_za_pp_zz_64	usmopa za0.d, p0/m, p7/m, z31.h, z0.h
+usmops_za_pp_zz_32	usmops za0.s, p0/m, p7/m, z31.b, z0.b
+usmops_za_pp_zz_64	usmops za0.d, p0/m, p7/m, z31.h, z0.h

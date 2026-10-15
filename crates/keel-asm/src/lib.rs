@@ -209,6 +209,7 @@ pub struct TargetFeatures {
     sve: bool,
     sme: bool,
     numeric: u16,
+    matrix: u8,
 }
 impl TargetFeatures {
     /// Permit SVE encodings. This does not imply SME.
@@ -220,6 +221,36 @@ impl TargetFeatures {
     /// This does not enable non-streaming SVE or SME2.
     pub const fn with_sme(mut self) -> Self {
         self.sme = true;
+        self
+    }
+    /// Permit SME2, including SME and streaming vector instructions.
+    pub const fn with_sme2(mut self) -> Self {
+        self.sme = true;
+        self.matrix |= 1;
+        self
+    }
+    /// Permit double-precision SME arithmetic, independently of SME2.
+    pub const fn with_sme_f64f64(mut self) -> Self {
+        self.sme = true;
+        self.matrix |= 2;
+        self
+    }
+    /// Permit 16-bit integer outer products into 64-bit SME tiles.
+    pub const fn with_sme_i16i64(mut self) -> Self {
+        self.sme = true;
+        self.matrix |= 4;
+        self
+    }
+    /// Permit non-widening FP16 SME arithmetic, including SME2.
+    pub const fn with_sme_f16f16(mut self) -> Self {
+        self = self.with_sme2();
+        self.matrix |= 8;
+        self
+    }
+    /// Permit non-widening BF16 SME arithmetic, including SME2.
+    pub const fn with_sme_b16b16(mut self) -> Self {
+        self = self.with_sme2();
+        self.matrix |= 16;
         self
     }
     /// Permit half-precision arithmetic.
@@ -268,7 +299,8 @@ impl TargetFeatures {
         self
     }
     /// Select the M5 features currently modeled by this assembler: the Apple
-    /// baseline, all nine non-scalable numeric extensions, and SME. This does
+    /// baseline, all nine non-scalable numeric extensions, SME/SME2, and the four
+    /// optional SME matrix element types. This does
     /// not enable ordinary SVE or claim coverage of unimplemented M5 families.
     /// Selection is for encoding only; execution still needs OS/hardware checks.
     pub const fn apple_m5() -> Self {
@@ -276,12 +308,23 @@ impl TargetFeatures {
             sve: false,
             sme: true,
             numeric: (1 << 9) - 1,
+            matrix: 31,
         }
     }
     fn supports(self, feature: &str) -> bool {
         TARGET_FEATURES.contains(&feature)
             || (feature == "FEAT_SVE" && self.sve)
             || (feature == "FEAT_SME" && self.sme)
+            || [
+                "FEAT_SME2",
+                "FEAT_SME_F64F64",
+                "FEAT_SME_I16I64",
+                "FEAT_SME_F16F16",
+                "FEAT_SME_B16B16",
+            ]
+            .iter()
+            .position(|f| *f == feature)
+            .is_some_and(|index| self.matrix & (1 << index) != 0)
             || NUMERIC_FEATURES
                 .iter()
                 .position(|f| *f == feature)
@@ -486,10 +529,36 @@ mod tests {
         }
         assert!(m5.supports("FEAT_SME"));
         assert!(!m5.supports("FEAT_SVE"));
-        assert!(!m5.supports("FEAT_SME2")); // Not modeled by this increment.
+        assert!(m5.supports("FEAT_SME2"));
+        assert!(!m5.supports("FEAT_SME2p1"));
         for feature in NUMERIC_FEATURES {
             assert!(!TargetFeatures::default().supports(feature));
         }
+    }
+
+    #[test]
+    fn every_selected_sme_record_has_a_matching_gated_case() {
+        use std::collections::BTreeSet;
+        let expected: BTreeSet<_> = include_str!("../isa/sme.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+            .collect();
+        let mut covered = BTreeSet::new();
+        for line in include_str!("../tests/sme-cases.txt")
+            .lines()
+            .filter(|s| !s.starts_with('#'))
+        {
+            let (name, source) = line.split_once('\t').unwrap();
+            assert!(covered.insert(name), "duplicate SME case {name}");
+            let bytes = assemble_with_features(source, TargetFeatures::apple_m5())
+                .unwrap_or_else(|e| panic!("{name}: {source}: {e}"))
+                .text;
+            let word = u32::from_le_bytes(bytes.try_into().unwrap());
+            let encoding = generated::encoding(name).unwrap();
+            assert_eq!(word & encoding.mask, encoding.base, "{name}: {source}");
+            assert!(assemble(source).is_err(), "SME leaked into default: {name}");
+        }
+        assert_eq!(covered, expected);
     }
 
     #[test]

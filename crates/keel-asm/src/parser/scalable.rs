@@ -1,5 +1,7 @@
 //! Explicitly opted-in SVE/SME forms. Assembly validates feature availability;
 //! execution mode, OS support, and ZA lifetime remain caller responsibilities.
+mod matrix;
+
 use super::{count, integer, reg, shift, unsigned};
 use crate::{TargetFeatures, encode_with_features};
 
@@ -64,6 +66,9 @@ pub(super) fn instruction(
     args: &[&str],
     features: TargetFeatures,
 ) -> Result<Option<u32>, String> {
+    if let Some(word) = matrix::instruction(op, args, features)? {
+        return Ok(Some(word));
+    }
     // Lowercase only operands handled here; ordinary instructions keep their
     // existing syntax and feature validation paths.
     let scalable_dest = args.first().is_some_and(|s| s.starts_with(['z', 'Z']));
@@ -80,8 +85,6 @@ pub(super) fn instruction(
             | "cntw"
             | "cntd"
             | "lastb"
-            | "fmopa"
-            | "fmops"
     ) && !(scalable_dest
         && matches!(
             op,
@@ -216,25 +219,6 @@ pub(super) fn instruction(
             (
                 "lastb_r_p_z_".into(),
                 vec![("Rd", rd.number), ("Pg", pg), ("Zn", zn), ("size", size)],
-            )
-        }
-        "fmopa" | "fmops" => {
-            count(&a, 5, 5)?;
-            let (za, size) = lane(a[0], "za", 3)?;
-            let (zn, sn) = lane(a[3], "z", 31)?;
-            let (zm, sm) = lane(a[4], "z", 31)?;
-            if size != 2 || sn != 2 || sm != 2 {
-                return Err("outer products currently require S tiles and S vectors".into());
-            }
-            (
-                format!("{op}_za_pp_zz_32"),
-                vec![
-                    ("ZAda", za),
-                    ("Pn", predicate(a[1])?),
-                    ("Pm", predicate(a[2])?),
-                    ("Zn", zn),
-                    ("Zm", zm),
-                ],
             )
         }
         _ => {

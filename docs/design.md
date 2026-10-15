@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1319 instruction/alias forms. Generated requirements retain
+subset currently has 1377 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks, plus the numeric feature predicates described below;
 the fixed Apple arm64 target enables only FP, AdvSIMD,
@@ -1337,7 +1337,8 @@ python3 crates/keel-asm/tools/neon_cases.py --check
 **M5 numeric extensions.** `TargetFeatures` provides independent opt-ins
 `with_fp16/with_fhm/with_bf16/with_dotprod/with_i8mm/with_rdm/with_fcma`,
 plus `with_jscvt` and `with_frintts`. `TargetFeatures::apple_m5()` selects the
-baseline, these nine numeric features, and SME; it does not enable ordinary
+baseline, these nine numeric features, SME/SME2, and the optional SME
+FP64, I16-to-I64, non-widening FP16, and non-widening BF16 types; it does not enable ordinary
 SVE or imply implementation of other M5 instruction families. This follows
 LLVM's [M5 feature definition](https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/lib/Target/AArch64/AArch64Processors.td).
 Existing APIs and CLI assembly default to the fixed Apple baseline.
@@ -1431,15 +1432,42 @@ and `-march=armv8-a+sme`; no default target features are broadened. Native
 SME testing first checks the OS flag, then runs a leaf with balanced mode
 transitions and preserved D8–D15. On this session's Apple M5 Max / Darwin
 27.0.0, SME and SME2 flags were 1; NEON and streaming SME tests passed.
-Non-streaming SVE was not executed. The native SME test verifies vector
-arithmetic and length results; matrix outer products have byte comparisons
-and an execution smoke test, without matrix-result verification yet.
+Non-streaming SVE was not executed.
 
-Remaining scalable coverage includes predicated arithmetic, scalable memory,
-vector shifts/conversions, ZA tile transfers and partial clearing, additional
-matrix types, and SME2/SVE2 instructions. Remaining ordinary M5 coverage
-includes crypto, pointer authentication, and newer scalar ISA. These are explicit coverage boundaries, not complete
-A64/SVE/SME support.
+The matrix increment adds 60 selected Arm records (two overlap the initial
+FP32 forms), inventoried in `isa/sme.txt` with one named encoding case per
+record in `tests/sme-cases.txt`. `tools/sme_cases.py --check` reproduces the
+cases; the regular Arm generator imports the records from the same pinned,
+checksum-verified archive and retains their exact feature predicates.
+It supports:
+
+- FP32/FP64, widening FP16/BF16, non-widening FP16/BF16 outer products;
+  signed/unsigned/mixed 8-bit-to-32-bit and 16-bit-to-64-bit products;
+  SME2 signed/unsigned 16-bit-to-32-bit products, each with add/subtract forms.
+- `addha/addva` for S/D tiles; partial `zero` lists of B/H/S/D tiles.
+- Predicated horizontal/vertical `mov/mova` between Z vectors and ZA slices
+  for B/H/S/D/Q, using W12–W15 selectors and element-dependent offsets.
+- Predicated `ld1b/h/w/d/q` and `st1b/h/w/d/q` ZA slice transfers, with base
+  or scaled X-register offsets; whole-ZA vector `ldr/str` with matching ZA
+  and `mul vl` offsets; `rdsvl/addsvl` with signed 6-bit multipliers.
+
+`with_sme2()` implies SME. The independent `with_sme_f64f64()` and
+`with_sme_i16i64()` builders enable SME and their named matrix extension.
+`with_sme_f16f16()` and `with_sme_b16b16()` also enable SME2. SME2 alone
+permits none of these four optional types. No builder enables ordinary SVE.
+
+Clang comparisons use `-mcpu=apple-m5` only for the reference assembler.
+Native tests check each relevant `hw.optional.arm.FEAT_*` flag before entering
+streaming mode. They verify FP32, FP64, FP16, signed I8-to-I32,
+I16-to-I32, and I16-to-I64 matrix results after a store/clear/reload round trip.
+Leaves preserve D8–D15, make no calls while streaming, enter with inactive
+ZA, and exit with both state bits clear. They exercise only advertised ISA.
+
+Remaining scalable coverage includes predicated Z arithmetic and memory,
+vector shifts/conversions, grouped SME2 arithmetic/transfers, SME2.1, and
+SVE2 instructions. Remaining ordinary M5 coverage includes crypto, pointer
+authentication, and newer scalar ISA. These are explicit coverage boundaries,
+not complete A64/SVE/SME support.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
 against their operand roles. `fp` and `lr` name x29 and x30.

@@ -37418,6 +37418,141 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         ])],
     },
     Encoding {
+        name: "addha_za_pp_z_32",
+        base: 0xc0900000,
+        mask: 0xffff001c,
+        fields: &[
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "addha_za_pp_z_64",
+        base: 0xc0d00000,
+        mask: 0xffff0018,
+        fields: &[
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "addsvl_r_ri_",
+        base: 0x04205800,
+        mask: 0xffe0f800,
+        fields: &[
+            Field {
+                name: "Rn",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "imm6",
+                start: 5,
+                width: 6,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "addva_za_pp_z_32",
+        base: 0xc0910000,
+        mask: 0xffff001c,
+        fields: &[
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "addva_za_pp_z_64",
+        base: 0xc0d10000,
+        mask: 0xffff0018,
+        fields: &[
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
         name: "and_z_zz_",
         base: 0x04203000,
         mask: 0xffe0fc00,
@@ -37442,6 +37577,138 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             Requirement::All(&[Requirement::Feature("FEAT_SVE")]),
             Requirement::All(&[Requirement::Feature("FEAT_SME")]),
         ])],
+    },
+    Encoding {
+        name: "bfmopa_za32_pp_zz_",
+        base: 0x81800000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "bfmopa_za_pp_zz_16",
+        base: 0x81a00008,
+        mask: 0xffe0001e,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_B16B16")],
+    },
+    Encoding {
+        name: "bfmops_za32_pp_zz_",
+        base: 0x81800010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "bfmops_za_pp_zz_16",
+        base: 0x81a00018,
+        mask: 0xffe0001e,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_B16B16")],
     },
     Encoding {
         name: "cntb_r_s_",
@@ -37639,6 +37906,72 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         ],
     },
     Encoding {
+        name: "fmopa_za32_pp_zz_16",
+        base: 0x81a00000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "fmopa_za_pp_zz_16",
+        base: 0x81800008,
+        mask: 0xffe0001e,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_F16F16")],
+    },
+    Encoding {
         name: "fmopa_za_pp_zz_32",
         base: 0x80800000,
         mask: 0xffe0001c,
@@ -37672,6 +38005,105 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         requirements: &[Requirement::Feature("FEAT_SME")],
     },
     Encoding {
+        name: "fmopa_za_pp_zz_64",
+        base: 0x80c00000,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_F64F64")],
+    },
+    Encoding {
+        name: "fmops_za32_pp_zz_16",
+        base: 0x81a00010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "fmops_za_pp_zz_16",
+        base: 0x81800018,
+        mask: 0xffe0001e,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_F16F16")],
+    },
+    Encoding {
         name: "fmops_za_pp_zz_32",
         base: 0x80800010,
         mask: 0xffe0001c,
@@ -37703,6 +38135,39 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             },
         ],
         requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "fmops_za_pp_zz_64",
+        base: 0x80c00010,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_F64F64")],
     },
     Encoding {
         name: "fmul_z_zz_",
@@ -37804,6 +38269,594 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         ])],
     },
     Encoding {
+        name: "ld1b_za_p_rrr_",
+        base: 0xe0000000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "off4",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "ld1d_za_p_rrr_",
+        base: 0xe0c00000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 1,
+                width: 3,
+            },
+            Field {
+                name: "o1",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "ld1h_za_p_rrr_",
+        base: 0xe0400000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 3,
+                width: 1,
+            },
+            Field {
+                name: "off3",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "ld1q_za_p_rrr_",
+        base: 0xe1c00000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "ld1w_za_p_rrr_",
+        base: 0xe0800000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 2,
+                width: 2,
+            },
+            Field {
+                name: "off2",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "ldr_za_ri_",
+        base: 0xe1000000,
+        mask: 0xffff9c10,
+        fields: &[
+            Field {
+                name: "Rv",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "off4",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_z_p_rza_b",
+        base: 0xc0020000,
+        mask: 0xffff0200,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "off4",
+                start: 5,
+                width: 4,
+            },
+            Field {
+                name: "Zd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_z_p_rza_d",
+        base: 0xc0c20000,
+        mask: 0xffff0200,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "ZAn",
+                start: 6,
+                width: 3,
+            },
+            Field {
+                name: "o1",
+                start: 5,
+                width: 1,
+            },
+            Field {
+                name: "Zd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_z_p_rza_h",
+        base: 0xc0420000,
+        mask: 0xffff0200,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "ZAn",
+                start: 8,
+                width: 1,
+            },
+            Field {
+                name: "off3",
+                start: 5,
+                width: 3,
+            },
+            Field {
+                name: "Zd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_z_p_rza_q",
+        base: 0xc0c30000,
+        mask: 0xffff0200,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "ZAn",
+                start: 5,
+                width: 4,
+            },
+            Field {
+                name: "Zd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_z_p_rza_w",
+        base: 0xc0820000,
+        mask: 0xffff0200,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "ZAn",
+                start: 7,
+                width: 2,
+            },
+            Field {
+                name: "off2",
+                start: 5,
+                width: 2,
+            },
+            Field {
+                name: "Zd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_za_p_rz_b",
+        base: 0xc0000000,
+        mask: 0xffff0010,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "off4",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_za_p_rz_d",
+        base: 0xc0c00000,
+        mask: 0xffff0010,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAd",
+                start: 1,
+                width: 3,
+            },
+            Field {
+                name: "o1",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_za_p_rz_h",
+        base: 0xc0400000,
+        mask: 0xffff0010,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAd",
+                start: 3,
+                width: 1,
+            },
+            Field {
+                name: "off3",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_za_p_rz_q",
+        base: 0xc0c10000,
+        mask: 0xffff0010,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAd",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "mova_za_p_rz_w",
+        base: 0xc0800000,
+        mask: 0xffff0010,
+        fields: &[
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAd",
+                start: 2,
+                width: 2,
+            },
+            Field {
+                name: "off2",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
         name: "orr_z_zz_",
         base: 0x04603000,
         mask: 0xffe0fc00,
@@ -37870,6 +38923,24 @@ pub(super) static ENCODINGS: &[Encoding] = &[
         ])],
     },
     Encoding {
+        name: "rdsvl_r_i_",
+        base: 0x04bf5800,
+        mask: 0xfffff800,
+        fields: &[
+            Field {
+                name: "imm6",
+                start: 5,
+                width: 6,
+            },
+            Field {
+                name: "Rd",
+                start: 0,
+                width: 5,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
         name: "rdvl_r_i_",
         base: 0x04bf5000,
         mask: 0xfffff800,
@@ -37889,6 +38960,432 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             Requirement::All(&[Requirement::Feature("FEAT_SVE")]),
             Requirement::All(&[Requirement::Feature("FEAT_SME")]),
         ])],
+    },
+    Encoding {
+        name: "smopa_za32_pp_zz_16",
+        base: 0xa0800008,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME2")],
+    },
+    Encoding {
+        name: "smopa_za_pp_zz_32",
+        base: 0xa0800000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "smopa_za_pp_zz_64",
+        base: 0xa0c00000,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "smops_za32_pp_zz_16",
+        base: 0xa0800018,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME2")],
+    },
+    Encoding {
+        name: "smops_za_pp_zz_32",
+        base: 0xa0800010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "smops_za_pp_zz_64",
+        base: 0xa0c00010,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "st1b_za_p_rrr_",
+        base: 0xe0200000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "off4",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "st1d_za_p_rrr_",
+        base: 0xe0e00000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 1,
+                width: 3,
+            },
+            Field {
+                name: "o1",
+                start: 0,
+                width: 1,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "st1h_za_p_rrr_",
+        base: 0xe0600000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 3,
+                width: 1,
+            },
+            Field {
+                name: "off3",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "st1q_za_p_rrr_",
+        base: 0xe1e00000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "st1w_za_p_rrr_",
+        base: 0xe0a00000,
+        mask: 0xffe00010,
+        fields: &[
+            Field {
+                name: "Rm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "V",
+                start: 15,
+                width: 1,
+            },
+            Field {
+                name: "Rs",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Pg",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAt",
+                start: 2,
+                width: 2,
+            },
+            Field {
+                name: "off2",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "str_za_ri_",
+        base: 0xe1200000,
+        mask: 0xffff9c10,
+        fields: &[
+            Field {
+                name: "Rv",
+                start: 13,
+                width: 2,
+            },
+            Field {
+                name: "Rn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "off4",
+                start: 0,
+                width: 4,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
     },
     Encoding {
         name: "sub_z_zz_",
@@ -37920,6 +39417,468 @@ pub(super) static ENCODINGS: &[Encoding] = &[
             Requirement::All(&[Requirement::Feature("FEAT_SVE")]),
             Requirement::All(&[Requirement::Feature("FEAT_SME")]),
         ])],
+    },
+    Encoding {
+        name: "sumopa_za_pp_zz_32",
+        base: 0xa0a00000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "sumopa_za_pp_zz_64",
+        base: 0xa0e00000,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "sumops_za_pp_zz_32",
+        base: 0xa0a00010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "sumops_za_pp_zz_64",
+        base: 0xa0e00010,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "umopa_za32_pp_zz_16",
+        base: 0xa1800008,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME2")],
+    },
+    Encoding {
+        name: "umopa_za_pp_zz_32",
+        base: 0xa1a00000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "umopa_za_pp_zz_64",
+        base: 0xa1e00000,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "umops_za32_pp_zz_16",
+        base: 0xa1800018,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME2")],
+    },
+    Encoding {
+        name: "umops_za_pp_zz_32",
+        base: 0xa1a00010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "umops_za_pp_zz_64",
+        base: 0xa1e00010,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "usmopa_za_pp_zz_32",
+        base: 0xa1800000,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "usmopa_za_pp_zz_64",
+        base: 0xa1c00000,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
+    },
+    Encoding {
+        name: "usmops_za_pp_zz_32",
+        base: 0xa1800010,
+        mask: 0xffe0001c,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 2,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME")],
+    },
+    Encoding {
+        name: "usmops_za_pp_zz_64",
+        base: 0xa1c00010,
+        mask: 0xffe00018,
+        fields: &[
+            Field {
+                name: "Zm",
+                start: 16,
+                width: 5,
+            },
+            Field {
+                name: "Pm",
+                start: 13,
+                width: 3,
+            },
+            Field {
+                name: "Pn",
+                start: 10,
+                width: 3,
+            },
+            Field {
+                name: "Zn",
+                start: 5,
+                width: 5,
+            },
+            Field {
+                name: "ZAda",
+                start: 0,
+                width: 3,
+            },
+        ],
+        requirements: &[Requirement::Feature("FEAT_SME_I16I64")],
     },
     Encoding {
         name: "zero_za_i_",
@@ -39236,25 +41195,83 @@ pub(super) fn encoding(name: &str) -> Option<&'static Encoding> {
         "ZIP1_asimdperm_only" => &ENCODINGS[1297],
         "ZIP2_asimdperm_only" => &ENCODINGS[1298],
         "add_z_zz_" => &ENCODINGS[1299],
-        "and_z_zz_" => &ENCODINGS[1300],
-        "cntb_r_s_" => &ENCODINGS[1301],
-        "cntd_r_s_" => &ENCODINGS[1302],
-        "cnth_r_s_" => &ENCODINGS[1303],
-        "cntw_r_s_" => &ENCODINGS[1304],
-        "dup_z_i_" => &ENCODINGS[1305],
-        "eor_z_zz_" => &ENCODINGS[1306],
-        "fadd_z_zz_" => &ENCODINGS[1307],
-        "fmopa_za_pp_zz_32" => &ENCODINGS[1308],
-        "fmops_za_pp_zz_32" => &ENCODINGS[1309],
-        "fmul_z_zz_" => &ENCODINGS[1310],
-        "fsub_z_zz_" => &ENCODINGS[1311],
-        "lastb_r_p_z_" => &ENCODINGS[1312],
-        "orr_z_zz_" => &ENCODINGS[1313],
-        "pfalse_p_" => &ENCODINGS[1314],
-        "ptrue_p_s_" => &ENCODINGS[1315],
-        "rdvl_r_i_" => &ENCODINGS[1316],
-        "sub_z_zz_" => &ENCODINGS[1317],
-        "zero_za_i_" => &ENCODINGS[1318],
+        "addha_za_pp_z_32" => &ENCODINGS[1300],
+        "addha_za_pp_z_64" => &ENCODINGS[1301],
+        "addsvl_r_ri_" => &ENCODINGS[1302],
+        "addva_za_pp_z_32" => &ENCODINGS[1303],
+        "addva_za_pp_z_64" => &ENCODINGS[1304],
+        "and_z_zz_" => &ENCODINGS[1305],
+        "bfmopa_za32_pp_zz_" => &ENCODINGS[1306],
+        "bfmopa_za_pp_zz_16" => &ENCODINGS[1307],
+        "bfmops_za32_pp_zz_" => &ENCODINGS[1308],
+        "bfmops_za_pp_zz_16" => &ENCODINGS[1309],
+        "cntb_r_s_" => &ENCODINGS[1310],
+        "cntd_r_s_" => &ENCODINGS[1311],
+        "cnth_r_s_" => &ENCODINGS[1312],
+        "cntw_r_s_" => &ENCODINGS[1313],
+        "dup_z_i_" => &ENCODINGS[1314],
+        "eor_z_zz_" => &ENCODINGS[1315],
+        "fadd_z_zz_" => &ENCODINGS[1316],
+        "fmopa_za32_pp_zz_16" => &ENCODINGS[1317],
+        "fmopa_za_pp_zz_16" => &ENCODINGS[1318],
+        "fmopa_za_pp_zz_32" => &ENCODINGS[1319],
+        "fmopa_za_pp_zz_64" => &ENCODINGS[1320],
+        "fmops_za32_pp_zz_16" => &ENCODINGS[1321],
+        "fmops_za_pp_zz_16" => &ENCODINGS[1322],
+        "fmops_za_pp_zz_32" => &ENCODINGS[1323],
+        "fmops_za_pp_zz_64" => &ENCODINGS[1324],
+        "fmul_z_zz_" => &ENCODINGS[1325],
+        "fsub_z_zz_" => &ENCODINGS[1326],
+        "lastb_r_p_z_" => &ENCODINGS[1327],
+        "ld1b_za_p_rrr_" => &ENCODINGS[1328],
+        "ld1d_za_p_rrr_" => &ENCODINGS[1329],
+        "ld1h_za_p_rrr_" => &ENCODINGS[1330],
+        "ld1q_za_p_rrr_" => &ENCODINGS[1331],
+        "ld1w_za_p_rrr_" => &ENCODINGS[1332],
+        "ldr_za_ri_" => &ENCODINGS[1333],
+        "mova_z_p_rza_b" => &ENCODINGS[1334],
+        "mova_z_p_rza_d" => &ENCODINGS[1335],
+        "mova_z_p_rza_h" => &ENCODINGS[1336],
+        "mova_z_p_rza_q" => &ENCODINGS[1337],
+        "mova_z_p_rza_w" => &ENCODINGS[1338],
+        "mova_za_p_rz_b" => &ENCODINGS[1339],
+        "mova_za_p_rz_d" => &ENCODINGS[1340],
+        "mova_za_p_rz_h" => &ENCODINGS[1341],
+        "mova_za_p_rz_q" => &ENCODINGS[1342],
+        "mova_za_p_rz_w" => &ENCODINGS[1343],
+        "orr_z_zz_" => &ENCODINGS[1344],
+        "pfalse_p_" => &ENCODINGS[1345],
+        "ptrue_p_s_" => &ENCODINGS[1346],
+        "rdsvl_r_i_" => &ENCODINGS[1347],
+        "rdvl_r_i_" => &ENCODINGS[1348],
+        "smopa_za32_pp_zz_16" => &ENCODINGS[1349],
+        "smopa_za_pp_zz_32" => &ENCODINGS[1350],
+        "smopa_za_pp_zz_64" => &ENCODINGS[1351],
+        "smops_za32_pp_zz_16" => &ENCODINGS[1352],
+        "smops_za_pp_zz_32" => &ENCODINGS[1353],
+        "smops_za_pp_zz_64" => &ENCODINGS[1354],
+        "st1b_za_p_rrr_" => &ENCODINGS[1355],
+        "st1d_za_p_rrr_" => &ENCODINGS[1356],
+        "st1h_za_p_rrr_" => &ENCODINGS[1357],
+        "st1q_za_p_rrr_" => &ENCODINGS[1358],
+        "st1w_za_p_rrr_" => &ENCODINGS[1359],
+        "str_za_ri_" => &ENCODINGS[1360],
+        "sub_z_zz_" => &ENCODINGS[1361],
+        "sumopa_za_pp_zz_32" => &ENCODINGS[1362],
+        "sumopa_za_pp_zz_64" => &ENCODINGS[1363],
+        "sumops_za_pp_zz_32" => &ENCODINGS[1364],
+        "sumops_za_pp_zz_64" => &ENCODINGS[1365],
+        "umopa_za32_pp_zz_16" => &ENCODINGS[1366],
+        "umopa_za_pp_zz_32" => &ENCODINGS[1367],
+        "umopa_za_pp_zz_64" => &ENCODINGS[1368],
+        "umops_za32_pp_zz_16" => &ENCODINGS[1369],
+        "umops_za_pp_zz_32" => &ENCODINGS[1370],
+        "umops_za_pp_zz_64" => &ENCODINGS[1371],
+        "usmopa_za_pp_zz_32" => &ENCODINGS[1372],
+        "usmopa_za_pp_zz_64" => &ENCODINGS[1373],
+        "usmops_za_pp_zz_32" => &ENCODINGS[1374],
+        "usmops_za_pp_zz_64" => &ENCODINGS[1375],
+        "zero_za_i_" => &ENCODINGS[1376],
         _ => return None,
     })
 }
