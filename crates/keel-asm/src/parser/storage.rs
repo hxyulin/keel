@@ -1,5 +1,6 @@
 //! Small, borrowed storage for the common parser path. No syntax limits are
 //! imposed by the inline capacities: unusually long inputs fall back to Vec.
+use crate::FieldId;
 use std::{borrow::Cow, fmt, fmt::Write, ops::Deref};
 
 pub(super) fn lower(text: &str) -> Cow<'_, str> {
@@ -36,7 +37,7 @@ impl<T: AsRef<str>> fmt::Display for Upper<T> {
 /// and all its field validation; only avoid allocating its temporary name.
 pub(super) fn encode_named(
     name: fmt::Arguments<'_>,
-    fields: &[(&str, u32)],
+    fields: &[(FieldId, u32)],
 ) -> Result<u32, String> {
     struct Name {
         bytes: [u8; 128],
@@ -138,9 +139,12 @@ mod tests {
         assert_eq!(
             encode_named(
                 format_args!("MOVZ_{}_movewide", 32),
-                &[("Rd", 32), ("imm16", 0), ("hw", 0)]
+                &[(FieldId::Rd, 32), (FieldId::imm16, 0), (FieldId::hw, 0)]
             ),
-            crate::encode("MOVZ_32_movewide", &[("Rd", 32), ("imm16", 0), ("hw", 0)])
+            crate::encode(
+                "MOVZ_32_movewide",
+                &[(FieldId::Rd, 32), (FieldId::imm16, 0), (FieldId::hw, 0)]
+            )
         );
     }
 

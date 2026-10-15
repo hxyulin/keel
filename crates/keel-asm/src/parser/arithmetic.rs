@@ -1,12 +1,18 @@
 use super::control::condition;
 use super::storage::{Operands, encode_named, lower, upper};
+use super::text::Trim;
 use super::{
     Kind, Reg, count, instruction as base_instruction, is_integer, reg, same_width, shift, unsigned,
 };
+use crate::FieldId;
 use crate::encode;
 
 pub(super) fn bits_immediate(text: &str, bits: u32) -> Result<u64, String> {
-    let text = text.trim().strip_prefix('#').unwrap_or(text.trim()).trim();
+    let text = text
+        .trim_fast()
+        .strip_prefix('#')
+        .unwrap_or(text.trim_fast())
+        .trim_fast();
     let (negative, digits) = if let Some(s) = text.strip_prefix('-') {
         (true, s)
     } else {
@@ -81,9 +87,9 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
                     return encode_named(
                         format_args!("{op}_{}_movewide", d.bits),
                         &[
-                            ("Rd", d.number),
-                            ("hw", lane / 16),
-                            ("imm16", (pattern >> lane) as u32),
+                            (FieldId::Rd, d.number),
+                            (FieldId::hw, lane / 16),
+                            (FieldId::imm16, (pattern >> lane) as u32),
                         ],
                     );
                 }
@@ -151,11 +157,11 @@ pub(super) fn extended(op: &str, args: &[&str]) -> Result<u32, String> {
             if flags { "S" } else { "" }
         ),
         &[
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("Rm", m.number),
-            ("option", option),
-            ("imm3", amount),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::Rm, m.number),
+            (FieldId::option, option),
+            (FieldId::imm3, amount),
         ],
     )
 }
@@ -190,13 +196,13 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 }
                 let (bit, immr, imms) = bitmask(bits_immediate(args[2], d.bits)?, d.bits)?;
                 let mut fields = vec![
-                    ("Rd", d.number),
-                    ("Rn", n.number),
-                    ("immr", immr),
-                    ("imms", imms),
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n.number),
+                    (FieldId::immr, immr),
+                    (FieldId::imms, imms),
                 ];
                 if d.bits == 64 {
-                    fields.push(("N", bit));
+                    fields.push((FieldId::N, bit));
                 }
                 encode_named(
                     format_args!(
@@ -228,11 +234,11 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 encode_named(
                     format_args!("{}_{}_log_shift", upper(op), d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("Rm", m.number),
-                        ("shift", shift),
-                        ("imm6", amount),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::Rm, m.number),
+                        (FieldId::shift, shift),
+                        (FieldId::imm6, amount),
                     ],
                 )
             }
@@ -273,9 +279,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             encode_named(
                 format_args!("{}_{}_{form}", upper(op), r[0].bits),
                 &[
-                    ("Rd", r[0].number),
-                    ("Rn", r[1].number),
-                    ("Rm", r[2].number),
+                    (FieldId::Rd, r[0].number),
+                    (FieldId::Rn, r[1].number),
+                    (FieldId::Rm, r[2].number),
                 ],
             )
         }
@@ -287,7 +293,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             encode_named(
                 format_args!("{}_{}_dp_1src", upper(op), r[0].bits),
-                &[("Rd", r[0].number), ("Rn", r[1].number)],
+                &[(FieldId::Rd, r[0].number), (FieldId::Rn, r[1].number)],
             )
         }
         "mul" | "mneg" | "madd" | "msub" => {
@@ -305,10 +311,10 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     r[0].bits
                 ),
                 &[
-                    ("Rd", r[0].number),
-                    ("Rn", r[1].number),
-                    ("Rm", r[2].number),
-                    ("Ra", if alias { 31 } else { r[3].number }),
+                    (FieldId::Rd, r[0].number),
+                    (FieldId::Rn, r[1].number),
+                    (FieldId::Rm, r[2].number),
+                    (FieldId::Ra, if alias { 31 } else { r[3].number }),
                 ],
             )
         }
@@ -332,12 +338,12 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 return Err("invalid widening/high multiply register widths".into());
             }
             let mut fields = vec![
-                ("Rd", r[0].number),
-                ("Rn", r[1].number),
-                ("Rm", r[2].number),
+                (FieldId::Rd, r[0].number),
+                (FieldId::Rn, r[1].number),
+                (FieldId::Rm, r[2].number),
             ];
             let name = if long {
-                fields.push(("Ra", if accumulate { r[3].number } else { 31 }));
+                fields.push((FieldId::Ra, if accumulate { r[3].number } else { 31 }));
                 format!(
                     "{}MADDL_64WA_dp_3src",
                     if op.starts_with('s') { "S" } else { "U" }
@@ -392,24 +398,29 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             };
             encode_named(
                 format_args!("{}_{}_condsel", upper(canonical), d.bits),
-                &[("Rd", d.number), ("Rn", n), ("Rm", m), ("cond", cc)],
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n),
+                    (FieldId::Rm, m),
+                    (FieldId::cond, cc),
+                ],
             )
         }
         "ccmp" | "ccmn" => {
             count(args, 4, 4)?;
             let n = reg(args[0], false, true)?;
             let mut fields = vec![
-                ("Rn", n.number),
-                ("nzcv", unsigned(args[2], 15)?),
-                ("cond", condition(args[3])?),
+                (FieldId::Rn, n.number),
+                (FieldId::nzcv, unsigned(args[2], 15)?),
+                (FieldId::cond, condition(args[3])?),
             ];
             let form = if is_integer(args[1]) {
-                fields.push(("imm5", unsigned(args[1], 31)?));
+                fields.push((FieldId::imm5, unsigned(args[1], 31)?));
                 "imm"
             } else {
                 let m = reg(args[1], false, true)?;
                 same_width(n, m)?;
-                fields.push(("Rm", m.number));
+                fields.push((FieldId::Rm, m.number));
                 "reg"
             };
             encode_named(
@@ -455,7 +466,7 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
     } else {
         same_width(d, n)?;
     }
-    let mut fields = vec![("Rd", d.number), ("Rn", n.number)];
+    let mut fields = vec![(FieldId::Rd, d.number), (FieldId::Rn, n.number)];
     let (canonical, immr, imms) = if extension {
         (
             if op.starts_with('s') { "SBFM" } else { "UBFM" },
@@ -480,7 +491,7 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 (n.number, first)
             };
-            fields.extend_from_slice(&[("Rm", m), ("imms", amount)]);
+            fields.extend_from_slice(&[(FieldId::Rm, m), (FieldId::imms, amount)]);
             return encode_named(format_args!("EXTR_{}_extract", d.bits), &fields);
         }
         if shift_op {
@@ -514,6 +525,6 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
             }
         }
     };
-    fields.extend_from_slice(&[("immr", immr), ("imms", imms)]);
+    fields.extend_from_slice(&[(FieldId::immr, immr), (FieldId::imms, imms)]);
     encode_named(format_args!("{canonical}_{}M_bitfield", d.bits), &fields)
 }

@@ -1,6 +1,8 @@
 use super::control::condition;
 use super::storage::{encode_named, lower, upper};
+use super::text::Trim;
 use super::{count, reg};
+use crate::FieldId;
 
 fn fp(text: &str) -> Result<(u32, &'static str), String> {
     let text = lower(text);
@@ -30,10 +32,10 @@ fn registers(args: &[&str]) -> Result<(Vec<u32>, &'static str), String> {
     Ok((pairs.iter().map(|r| r.0).collect(), tag))
 }
 fn immediate(text: &str) -> Result<f64, String> {
-    text.trim()
+    text.trim_fast()
         .strip_prefix('#')
-        .unwrap_or(text.trim())
-        .trim()
+        .unwrap_or(text.trim_fast())
+        .trim_fast()
         .parse::<f64>()
         .map_err(|_| format!("invalid floating-point immediate `{text}`"))
 }
@@ -61,7 +63,10 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 let (d, tag) = fp(args[0])?;
                 return encode_named(
                     format_args!("FMOV_{tag}_floatimm"),
-                    &[("Rd", d), ("imm8", float_immediate(immediate(args[1])?)?)],
+                    &[
+                        (FieldId::Rd, d),
+                        (FieldId::imm8, float_immediate(immediate(args[1])?)?),
+                    ],
                 );
             }
             match (fp(args[0]), fp(args[1])) {
@@ -71,7 +76,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     }
                     encode_named(
                         format_args!("FMOV_{}_floatdp1", d.1),
-                        &[("Rd", d.0), ("Rn", n.0)],
+                        &[(FieldId::Rd, d.0), (FieldId::Rn, n.0)],
                     )
                 }
                 (Ok(d), Err(_)) => {
@@ -81,7 +86,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     }
                     encode_named(
                         format_args!("FMOV_{}{}_float2int", d.1, n.bits),
-                        &[("Rd", d.0), ("Rn", n.number)],
+                        &[(FieldId::Rd, d.0), (FieldId::Rn, n.number)],
                     )
                 }
                 (Err(_), Ok(n)) => {
@@ -91,7 +96,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     }
                     encode_named(
                         format_args!("FMOV_{}{}_float2int", d.bits, n.1),
-                        &[("Rd", d.number), ("Rn", n.0)],
+                        &[(FieldId::Rd, d.number), (FieldId::Rn, n.0)],
                     )
                 }
                 _ => Err("fmov requires a floating-point register".into()),
@@ -102,7 +107,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             let (r, tag) = registers(args)?;
             encode_named(
                 format_args!("{}_{tag}_floatdp1", upper(op)),
-                &[("Rd", r[0]), ("Rn", r[1])],
+                &[(FieldId::Rd, r[0]), (FieldId::Rn, r[1])],
             )
         }
         "fadd" | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fcsel" => {
@@ -112,9 +117,13 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 if op == "fcsel" { 4 } else { 3 },
             )?;
             let (r, tag) = registers(&args[..3])?;
-            let mut fields = vec![("Rd", r[0]), ("Rn", r[1]), ("Rm", r[2])];
+            let mut fields = vec![
+                (FieldId::Rd, r[0]),
+                (FieldId::Rn, r[1]),
+                (FieldId::Rm, r[2]),
+            ];
             let form = if op == "fcsel" {
-                fields.push(("cond", condition(args[3])?));
+                fields.push((FieldId::cond, condition(args[3])?));
                 "floatsel"
             } else {
                 "floatdp2"
@@ -126,13 +135,18 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             let (r, tag) = registers(args)?;
             encode_named(
                 format_args!("{}_{tag}_floatdp3", upper(op)),
-                &[("Rd", r[0]), ("Rn", r[1]), ("Rm", r[2]), ("Ra", r[3])],
+                &[
+                    (FieldId::Rd, r[0]),
+                    (FieldId::Rn, r[1]),
+                    (FieldId::Rm, r[2]),
+                    (FieldId::Ra, r[3]),
+                ],
             )
         }
         "fcmp" | "fcmpe" => {
             count(args, 2, 2)?;
             let (n, tag) = fp(args[0])?;
-            let mut fields = vec![("Rn", n)];
+            let mut fields = vec![(FieldId::Rn, n)];
             let zero = if args[1].starts_with('#') {
                 if immediate(args[1])?.to_bits() != 0 {
                     return Err("floating-point comparisons only accept immediate #0.0".into());
@@ -143,7 +157,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 if m.1 != tag {
                     return Err("FP comparison register widths must match".into());
                 }
-                fields.push(("Rm", m.0));
+                fields.push((FieldId::Rm, m.0));
                 ""
             };
             encode_named(format_args!("{}_{tag}{zero}_floatcmp", upper(op)), &fields)
@@ -157,7 +171,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             encode_named(
                 format_args!("FCVT_{}{}_floatdp1", d.1, n.1),
-                &[("Rd", d.0), ("Rn", n.0)],
+                &[(FieldId::Rd, d.0), (FieldId::Rn, n.0)],
             )
         }
         "scvtf" | "ucvtf" => {
@@ -166,7 +180,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             let n = reg(args[1], false, true)?;
             encode_named(
                 format_args!("{}_{}{}_float2int", upper(op), d.1, n.bits),
-                &[("Rd", d.0), ("Rn", n.number)],
+                &[(FieldId::Rd, d.0), (FieldId::Rn, n.number)],
             )
         }
         "fcvtzs" | "fcvtzu" => {
@@ -175,7 +189,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             let n = fp(args[1])?;
             encode_named(
                 format_args!("{}_{}{}_float2int", upper(op), d.bits, n.1),
-                &[("Rd", d.number), ("Rn", n.0)],
+                &[(FieldId::Rd, d.number), (FieldId::Rn, n.0)],
             )
         }
         _ => Err(format!("unsupported instruction `{op}`")),

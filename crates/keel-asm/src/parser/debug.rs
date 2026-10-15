@@ -2,6 +2,7 @@
 //! until the Mach-O linker applies the ordinary pointer/difference relocations.
 use super::compact::{self, Rule};
 use super::data::{self, Location};
+use super::text::Trim;
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use std::collections::BTreeMap;
@@ -52,7 +53,7 @@ pub(super) fn sleb(mut n: i64, out: &mut impl Extend<u8>) {
     }
 }
 pub(super) fn string(s: &str) -> Result<Vec<u8>, String> {
-    let s = s.trim();
+    let s = s.trim_fast();
     if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {
         return Err("expected quoted string".into());
     }

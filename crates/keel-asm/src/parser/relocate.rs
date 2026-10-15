@@ -2,7 +2,9 @@
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
 use super::storage::{encode_named, upper};
+use super::text::Trim;
 use super::{count, integer, is_integer, reg, symbol};
+use crate::FieldId;
 use crate::{Relocation, RelocationKind};
 
 pub(super) struct Expression<'a> {
@@ -11,19 +13,19 @@ pub(super) struct Expression<'a> {
     pub addend: i64,
 }
 fn addend(text: &str) -> Result<i64, String> {
-    let text = text.trim();
+    let text = text.trim_fast();
     let sign = text.chars().next().ok_or("missing symbol addend")?;
     if !['+', '-'].contains(&sign) {
         return Err("symbol addend requires + or -".into());
     }
-    integer(&format!("{sign}{}", text[1..].trim()))
+    integer(&format!("{sign}{}", text[1..].trim_fast()))
 }
 fn plain(text: &str) -> Result<(&str, i64), String> {
     let (name, tail) = match text.find(['+', '-']) {
         Some(index) => (&text[..index], &text[index..]),
         None => (text, ""),
     };
-    let name = name.trim();
+    let name = name.trim_fast();
     symbol(name)?;
     Ok((name, if tail.is_empty() { 0 } else { addend(tail)? }))
 }
@@ -34,7 +36,7 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             Some(index) => (&tail[..index], addend(&tail[index..])?),
             None => (tail, 0),
         };
-        let modifier = modifier.trim().to_ascii_uppercase();
+        let modifier = modifier.trim_fast().to_ascii_uppercase();
         if ![
             "PAGE",
             "PAGEOFF",
@@ -99,7 +101,11 @@ pub(super) fn address_word(op: &str, destination: &str, delta: i64) -> Result<u3
     let bits = (immediate as u32) & 0x1f_ffff;
     encode_named(
         format_args!("{}_only_pcreladdr", upper(op)),
-        &[("Rd", d.number), ("immlo", bits & 3), ("immhi", bits >> 2)],
+        &[
+            (FieldId::Rd, d.number),
+            (FieldId::immlo, bits & 3),
+            (FieldId::immhi, bits >> 2),
+        ],
     )
 }
 

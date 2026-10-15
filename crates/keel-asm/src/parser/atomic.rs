@@ -2,6 +2,7 @@
 //! distinct Arm encoding records; no ordering bits are inferred or discarded.
 use super::storage::{encode_named, lower, upper};
 use super::{count, memory, reg, same_width, unsigned};
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     if matches!(op, "dmb" | "dsb" | "isb") {
@@ -30,7 +31,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
                 upper(op),
                 if op == "isb" { "BI" } else { "BO" }
             ),
-            &[("CRm", crm)],
+            &[(FieldId::CRm, crm)],
         )
         .map(Some);
     }
@@ -81,7 +82,11 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
     let tag = format!("{}{}", if root == "cas" { "C" } else { "" }, rs.bits);
     encode_named(
         format_args!("{}{}{width}_{tag}_{form}", upper(name), upper(order)),
-        &[("Rs", rs.number), ("Rt", rt.number), ("Rn", rn.number)],
+        &[
+            (FieldId::Rs, rs.number),
+            (FieldId::Rt, rt.number),
+            (FieldId::Rn, rn.number),
+        ],
     )
     .map(Some)
 }

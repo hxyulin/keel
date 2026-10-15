@@ -1,5 +1,6 @@
 use super::storage::{encode_named, lower, upper};
 use super::{count, reg, unsigned};
+use crate::FieldId;
 use crate::encode;
 use bumpalo::{Bump, collections::Vec as BumpVec};
 
@@ -27,9 +28,9 @@ pub(super) fn condition(text: &str) -> Result<u32, String> {
 
 pub(super) struct Branch<'a> {
     pub encoding: &'static str,
-    pub field: &'static str,
+    pub field: FieldId,
     pub width: u32,
-    pub fields: BumpVec<'a, (&'static str, u32)>,
+    pub fields: BumpVec<'a, (FieldId, u32)>,
     pub target: &'a str,
 }
 
@@ -46,7 +47,7 @@ pub(super) fn branch<'a>(
             } else {
                 "B_only_branch_imm"
             },
-            "imm26",
+            FieldId::imm26,
             26,
             bumpalo::vec![in arena;],
             args[0],
@@ -55,9 +56,9 @@ pub(super) fn branch<'a>(
         count(args, 1, 1)?;
         (
             "B_only_condbranch",
-            "imm19",
+            FieldId::imm19,
             19,
-            bumpalo::vec![in arena; ("cond", condition(cc)?)],
+            bumpalo::vec![in arena; (FieldId::cond, condition(cc)?)],
             args[0],
         )
     } else if op == "cbz" || op == "cbnz" {
@@ -70,9 +71,9 @@ pub(super) fn branch<'a>(
                 (_, 64) => "CBNZ_64_compbranch",
                 _ => "CBNZ_32_compbranch",
             },
-            "imm19",
+            FieldId::imm19,
             19,
-            bumpalo::vec![in arena; ("Rt", r.number)],
+            bumpalo::vec![in arena; (FieldId::Rt, r.number)],
             args[1],
         )
     } else if op == "tbz" || op == "tbnz" {
@@ -85,9 +86,9 @@ pub(super) fn branch<'a>(
             } else {
                 "TBNZ_only_testbranch"
             },
-            "imm14",
+            FieldId::imm14,
             14,
-            bumpalo::vec![in arena; ("Rt", r.number), ("b5", bit >> 5), ("b40", bit & 31)],
+            bumpalo::vec![in arena; (FieldId::Rt, r.number), (FieldId::b5, bit >> 5), (FieldId::b40, bit & 31)],
             args[2],
         )
     } else {
@@ -111,7 +112,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 "SVC_EX_exception"
             },
-            &[("imm16", unsigned(args[0], 65535)?)],
+            &[(FieldId::imm16, unsigned(args[0], 65535)?)],
         );
     }
     let r = reg(args[0], false, true)?;
@@ -120,6 +121,6 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     }
     encode_named(
         format_args!("{}_64_branch_reg", upper(op)),
-        &[("Rn", r.number)],
+        &[(FieldId::Rn, r.number)],
     )
 }

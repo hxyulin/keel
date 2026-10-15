@@ -1,5 +1,6 @@
 //! Data sections and deferred symbol expressions. Zero-fill reserves virtual
 //! space without allocating bytes; all offsets remain relative to a section.
+use super::text::Trim;
 use super::{count, symbol, unsigned};
 use crate::{Assembly, Section, SectionContents, SectionKind};
 
@@ -175,7 +176,7 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
         subtract: None,
         constant: 0,
     };
-    let mut rest = text.trim();
+    let mut rest = text.trim_fast();
     let mut first = true;
     while !rest.is_empty() {
         let sign = match rest.as_bytes()[0] {
@@ -191,7 +192,7 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             _ => return Err("expected + or - in data expression".into()),
         };
         let end = rest.find(['+', '-']).unwrap_or(rest.len());
-        let term = rest[..end].trim();
+        let term = rest[..end].trim_fast();
         if term.is_empty() {
             return Err("missing data expression term".into());
         }

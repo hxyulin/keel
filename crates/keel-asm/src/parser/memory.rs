@@ -2,7 +2,9 @@
 //! offsets in source; scaling and signed field packing happen only at encoding.
 use super::storage::Operands;
 use super::storage::{encode_named, lower, upper};
+use super::text::Trim;
 use super::{Kind, Reg, count, integer, is_integer, reg, unsigned};
+use crate::FieldId;
 
 /// Keep bracketed addresses together when splitting instruction operands.
 /// This also catches malformed addresses before they reach an encoder.
@@ -20,7 +22,7 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
             ']' if !bracket => return Err("unexpected closing memory bracket".into()),
             ']' => bracket = false,
             ',' if !bracket => {
-                result.push(text[start..index].trim());
+                result.push(text[start..index].trim_fast());
                 start = index + 1;
             }
             _ => {}
@@ -29,7 +31,7 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
     if bracket {
         return Err("unclosed memory bracket".into());
     }
-    result.push(text[start..].trim());
+    result.push(text[start..].trim_fast());
     Ok(result)
 }
 
@@ -55,7 +57,7 @@ struct Address {
 
 fn address(args: &[&str]) -> Result<Address, String> {
     count(args, 1, 2)?;
-    let text = args[0].trim();
+    let text = args[0].trim_fast();
     let (text, pre) = if let Some(text) = text.strip_suffix('!') {
         (text.trim_end(), true)
     } else {
@@ -260,11 +262,11 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     };
     writeback_overlap(&t, &address)?;
     let mut fields = [
-        ("Rt", t.number),
-        ("Rn", address.base.number),
-        ("", 0),
-        ("", 0),
-        ("", 0),
+        (FieldId::Rt, t.number),
+        (FieldId::Rn, address.base.number),
+        (FieldId::Rd, 0),
+        (FieldId::Rd, 0),
+        (FieldId::Rd, 0),
     ];
     let mut field_count = 3;
     let (encoding_op, tag, form) = match address.offset {
@@ -281,7 +283,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                         && offset % i64::from(bytes) == 0
                         && offset / i64::from(bytes) <= 4095 =>
                 {
-                    fields[2] = ("imm12", (offset / i64::from(bytes)) as u32);
+                    fields[2] = (FieldId::imm12, (offset / i64::from(bytes)) as u32);
                     (op, "pos")
                 }
                 Mode::Offset => (
@@ -301,7 +303,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 ),
             };
             if form != "pos" {
-                fields[2] = ("imm9", signed_scaled(offset, 1, 9)?);
+                fields[2] = (FieldId::imm9, signed_scaled(offset, 1, 9)?);
             }
             (encoding_op, t.tag, form)
         }
@@ -320,8 +322,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             // For byte transfers, explicit #0 sets S=1; omitted shift sets S=0.
             let scaled = u32::from(shift.is_some() && amount == scale);
-            fields[2] = ("Rm", index.number);
-            fields[3] = ("S", scaled);
+            fields[2] = (FieldId::Rm, index.number);
+            fields[3] = (FieldId::S, scaled);
             field_count = 4;
             let tag = if bytes == 1 {
                 if option == 3 {
@@ -333,7 +335,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                         "32BL"
                     }
                 } else {
-                    fields[4] = ("option", option);
+                    fields[4] = (FieldId::option, option);
                     field_count = 5;
                     if t.class == Class::Fp {
                         "B"
@@ -344,7 +346,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     }
                 }
             } else {
-                fields[4] = ("option", option);
+                fields[4] = (FieldId::option, option);
                 field_count = 5;
                 t.tag
             };
@@ -382,10 +384,10 @@ fn pair(op: &str, args: &[&str]) -> Result<u32, String> {
     encode_named(
         format_args!("{}_{}_ldstpair_{form}", upper(op), a.tag),
         &[
-            ("Rt", a.number),
-            ("Rt2", b.number),
-            ("Rn", address.base.number),
-            ("imm7", imm7),
+            (FieldId::Rt, a.number),
+            (FieldId::Rt2, b.number),
+            (FieldId::Rn, address.base.number),
+            (FieldId::imm7, imm7),
         ],
     )
 }
@@ -405,7 +407,7 @@ fn ordered(op: &str, args: &[&str]) -> Result<u32, String> {
     let order = if op.starts_with("ld") { "LR" } else { "SL" };
     encode_named(
         format_args!("{}_{order}{}_ldstord", upper(op), t.bits),
-        &[("Rt", t.number), ("Rn", address.base.number)],
+        &[(FieldId::Rt, t.number), (FieldId::Rn, address.base.number)],
     )
 }
 

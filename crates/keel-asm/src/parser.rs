@@ -30,6 +30,8 @@
 //! an entire arena-backed assembly. Nonfinal LEB passes still build and discard
 //! owned Assemblies. `assemble_object` still writes via Assembly and returns an
 //! independently owned Vec, paying that existing intermediate-output cost.
+use self::text::Trim;
+use crate::FieldId;
 mod arithmetic;
 mod atomic;
 mod atoms;
@@ -42,6 +44,7 @@ mod memory;
 mod relocate;
 mod scanning;
 mod storage;
+mod text;
 mod vector;
 
 use super::{Assembly, Error, Symbol, encode};
@@ -117,7 +120,7 @@ fn same_width(a: Reg, b: Reg) -> Result<(), String> {
     }
 }
 fn integer(s: &str) -> Result<i64, String> {
-    let s = s.trim().strip_prefix('#').unwrap_or(s.trim());
+    let s = s.trim_fast().strip_prefix('#').unwrap_or(s.trim_fast());
     let (negative, digits) = if let Some(s) = s.strip_prefix('-') {
         (true, s)
     } else {
@@ -198,7 +201,11 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             }
             encode_named(
                 format_args!("{}_{}_movewide", upper(op), d.bits),
-                &[("Rd", d.number), ("imm16", imm), ("hw", amount / 16)],
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::imm16, imm),
+                    (FieldId::hw, amount / 16),
+                ],
             )
         }
         "add" | "sub" | "adds" | "subs" => {
@@ -237,10 +244,10 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                         if flags { "S" } else { "" }
                     ),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("imm12", imm),
-                        ("sh", amount / 12),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::imm12, imm),
+                        (FieldId::sh, amount / 12),
                     ],
                 )
             } else {
@@ -263,11 +270,11 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 encode_named(
                     format_args!("{}_{}_addsub_shift", upper(op), d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("Rm", m.number),
-                        ("shift", shift),
-                        ("imm6", amount),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::Rm, m.number),
+                        (FieldId::shift, shift),
+                        (FieldId::imm6, amount),
                     ],
                 )
             }
@@ -296,11 +303,11 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 encode_named(
                     format_args!("ORR_{}_log_shift", d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", 31),
-                        ("Rm", n.number),
-                        ("shift", 0),
-                        ("imm6", 0),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, 31),
+                        (FieldId::Rm, n.number),
+                        (FieldId::shift, 0),
+                        (FieldId::imm6, 0),
                     ],
                 )
             }
@@ -311,7 +318,7 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             if n.bits != 64 {
                 return Err("ret requires a 64-bit register".into());
             }
-            encode("RET_64R_branch_reg", &[("Rn", n.number)])
+            encode("RET_64R_branch_reg", &[(FieldId::Rn, n.number)])
         }
         "nop" => {
             count(a, 0, 0)?;
@@ -419,12 +426,12 @@ fn assemble_pass(
     for (index, raw) in scanning::Lines::new(source).enumerate() {
         let line = index + 1;
         let err = |message| Error::new(line, message);
-        let mut s = raw.trim();
+        let mut s = raw.trim_fast();
         while let Some((name, rest)) = s
             .split_once(':')
-            .filter(|(name, _)| !name.trim().contains(['"', ' ', '\t']))
+            .filter(|(name, _)| !name.trim_fast().contains(['"', ' ', '\t']))
         {
-            let name = name.trim();
+            let name = name.trim_fast();
             symbol(name).map_err(err)?;
             if labels
                 .insert(
@@ -439,16 +446,16 @@ fn assemble_pass(
                 return Err(err(format!("duplicate label `{name}`")));
             }
             label_order.push((name, labels[name]));
-            s = rest.trim();
+            s = rest.trim_fast();
         }
         if s.is_empty() {
             continue;
         }
         if let Some((name, expression)) = s
             .split_once('=')
-            .filter(|(name, _)| symbol(name.trim()).is_ok())
+            .filter(|(name, _)| symbol(name.trim_fast()).is_ok())
         {
-            let name = name.trim();
+            let name = name.trim_fast();
             symbol(name).map_err(err)?;
             if aliases
                 .insert(name, (line, data::expression(expression).map_err(err)?))
@@ -459,7 +466,7 @@ fn assemble_pass(
             continue;
         }
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
-        let operands = operands.trim();
+        let operands = operands.trim_fast();
         let op = lower(op);
         if debug
             .directive(
