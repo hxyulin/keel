@@ -177,6 +177,9 @@ fn is_integer(s: &str) -> bool {
 }
 
 fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
+    if let Some(word) = vector::extra(op, a)? {
+        return Ok(word);
+    }
     if let Some(word) = vector::arithmetic(op, a)? {
         return Ok(word);
     }

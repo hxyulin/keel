@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 625 instruction/alias forms. Generated requirements retain
+subset currently has 1098 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks; the fixed Apple arm64 target enables only FP, AdvSIMD,
 and LSE. Optional features require an explicit library opt-in described below.
@@ -1293,6 +1293,21 @@ widening/narrowing, saturating, and shift forms remain unsupported. The
 parser rejects reserved arrangements and mismatched operands before encoding.
 Differential tests cover every supported arrangement and native tests exercise
 integer selection and FP multiply-accumulate/square-root kernels.
+
+The baseline NEON inventory in `crates/keel-asm/isa/neon.txt` lists 519
+Advanced SIMD encoding forms from the pinned archive, including scalar SIMD
+and structured memory. Importing these records is distinct from implementing
+every operand form. The integer increment adds lane `dup/ins/smov/umov` and
+`mov` aliases; `zip/uzp/trn`, `ext`, and `tbl/tbx`; signed/unsigned saturating,
+halving, rounding, pairwise, and absolute-difference arithmetic; register and
+immediate shifts; widening/narrowing with high-half variants; pairwise
+widening; and polynomial byte multiply. Lane bounds, size restrictions,
+consecutive wrapping register lists, and shift ranges are checked.
+Differential tests cover arrangements and boundary fields; native tests check
+table lookups, signed widening/shifts, and saturating narrowing. The FP,
+reduction, indexed-arithmetic, and structured-memory remainder of this
+inventory is the next increment. Optional FP16 arithmetic, BF16, dot-product,
+and other numeric extensions remain a separate M5 capability phase.
 
 **Optional SVE/SME coverage and Apple availability (2026-10-15).** NEON
 (Advanced SIMD) uses fixed-width V registers; SVE uses scalable Z/P registers;

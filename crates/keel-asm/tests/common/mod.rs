@@ -57,7 +57,15 @@ pub fn compare_clang_with_features(
     let bytes = std::fs::read(output).unwrap();
     let reference = object::File::parse(bytes.as_slice()).unwrap();
     let reference = reference.section_by_name("__text").unwrap();
-    let assembly = keel_asm::assemble_with_features(source, features).unwrap();
+    let assembly = keel_asm::assemble_with_features(source, features).unwrap_or_else(|e| {
+        panic!(
+            "{e}: {}",
+            source
+                .lines()
+                .nth(e.line.saturating_sub(1))
+                .unwrap_or("<object>")
+        );
+    });
     assert_eq!(
         assembly.text,
         reference.data().unwrap(),

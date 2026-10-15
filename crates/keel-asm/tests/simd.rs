@@ -70,7 +70,6 @@ fn neon_reserved_sizes_and_mismatched_operands_are_rejected() {
         "smax v0.2d, v1.2d, v2.2d",
         "umax v0.2d, v1.2d, v2.2d",
         "and v0.4s, v1.4s, v2.4s",
-        "mov v0.2d, v1.2d",
         "fadd v0.8h, v1.8h, v2.8h",
         "fmul v0.16b, v1.16b, v2.16b",
         "fdiv v0.1d, v1.1d, v2.1d",

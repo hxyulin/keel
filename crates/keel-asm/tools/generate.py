@@ -76,13 +76,14 @@ SCALABLE_NAMES = ["SMSTART", "SMSTOP", "zero_za_i_", "ptrue_p_s_", "pfalse_p_", 
 SCALABLE_NAMES += [f"{op}_z_zz_" for op in ("add", "sub", "and", "orr", "eor", "fadd", "fsub", "fmul")]
 SCALABLE_NAMES += [f"{op}_r_s_" for op in ("cntb", "cnth", "cntw", "cntd")]
 SCALABLE_NAMES += [f"{op}_za_pp_zz_32" for op in ("fmopa", "fmops")]
+NEON_NAMES = (ROOT / "isa/neon.txt").read_text().splitlines()
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + NEON_NAMES + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 
@@ -136,7 +137,7 @@ def requirements(node):
         if node["op"] in ("==", "!=", "IN"):
             assert node["left"]["_type"] == "AST.Identifier"
             field = node["left"]["value"]
-            assert field in ("option", "size", "op1", "op2", "CRm")
+            assert field in ("option", "size", "op1", "op2", "CRm", "immh", "Rm")
             right = node["right"]
             if node["op"] == "IN":
                 assert right["_type"] == "AST.Set" and right["values"]

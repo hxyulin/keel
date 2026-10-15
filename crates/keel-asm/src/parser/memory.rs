@@ -14,6 +14,7 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
     }
     let mut result = Operands::new();
     let mut bracket = false;
+    let mut brace = false;
     let mut start = 0;
     for (index, c) in text.char_indices() {
         match c {
@@ -21,15 +22,20 @@ pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
             '[' => bracket = true,
             ']' if !bracket => return Err("unexpected closing memory bracket".into()),
             ']' => bracket = false,
-            ',' if !bracket => {
+            '{' if brace => return Err("nested register lists are not supported".into()),
+            '{' => brace = true,
+            '}' if !brace => return Err("unexpected closing register-list brace".into()),
+            '}' => brace = false,
+            ',' if !bracket && !brace => {
                 result.push(text[start..index].trim_fast());
+
                 start = index + 1;
             }
             _ => {}
         }
     }
-    if bracket {
-        return Err("unclosed memory bracket".into());
+    if bracket || brace {
+        return Err("unclosed operand bracket or brace".into());
     }
     result.push(text[start..].trim_fast());
     Ok(result)
