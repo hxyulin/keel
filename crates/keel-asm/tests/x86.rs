@@ -197,6 +197,21 @@ fn instruction_bytes_match_reference_assemblers() {
         "movaps [r12],xmm9",
         "movaps xmm9,xmm10",
         "movd xmm9,r10d",
+        "add al,17",
+        "or ax,128",
+        "adc eax,128",
+        "sbb rax,128",
+        "and eax,65535",
+        "sub rax,128",
+        "xor al,255",
+        "cmp eax,1000",
+        "test al,1",
+        "test ax,1",
+        "test eax,1",
+        "test rax,1",
+        "add eax,127",
+        "sub rax,-128",
+        "cmp ax,127",
         "movq r10,xmm9",
         "movq xmm9,r10",
         "movq xmm9,xmm10",
@@ -869,5 +884,33 @@ fn temporary_absolute_symbols_survive_converted_pc_relative_differences() {
     }
     for name in [".Lresolved_only", ".Lresolved_minus"] {
         assert!(!file.symbols().any(|symbol| symbol.name() == Ok(name)));
+    }
+}
+
+#[test]
+fn parser_fast_paths_keep_case_quotes_and_spilled_lists() {
+    assert_eq!(
+        text("ADD RAX, RCX\nMOVAPS XMM15, XMM14"),
+        text("add rax, rcx\nmovaps xmm15, xmm14")
+    );
+    let source = ".data\n.byte 1,2,3,4,5,6,7\n.asciz \"a,b;:#//\",\"escaped\\\";quote\"\n";
+    let bytes = assemble_object(source).unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    assert_eq!(
+        file.section_by_name(".data").unwrap().data().unwrap(),
+        b"\x01\x02\x03\x04\x05\x06\x07a,b;:#//\0escaped\";quote\0"
+    );
+    use keel_asm_ir::x86::Register;
+    assert_eq!(Register::parse("r0008D"), Register::parse("r8d"));
+    assert_eq!(Register::parse("XMM0015"), Register::parse("xmm15"));
+    assert!(Register::parse("rax ").is_none());
+}
+
+#[test]
+fn elf_output_is_deterministic_across_symbol_hash_seeds() {
+    let source = ".text\n.globl f\nf: jne .Lend\nmov eax,1\n.p2align 4\n.Lend: ret\n.size f,.-f\n.data\n.quad f\n.set alias,f\n.quad alias\n.comm common,16,8\n";
+    let expected = assemble_object(source).unwrap();
+    for _ in 0..8 {
+        assert_eq!(assemble_object(source).unwrap(), expected);
     }
 }

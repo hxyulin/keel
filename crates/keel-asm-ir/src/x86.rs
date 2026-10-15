@@ -1,5 +1,15 @@
 //! x86 identities are independent of the pinned AArch64 encoding IDs.
 use crate::Expression;
+use smallvec::SmallVec;
+use std::borrow::Cow;
+
+fn lowercase(s: &str) -> Cow<'_, str> {
+    if s.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(s.to_ascii_lowercase())
+    } else {
+        Cow::Borrowed(s)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Opcode {
@@ -260,7 +270,8 @@ pub struct Register {
 }
 impl Register {
     pub fn parse(s: &str) -> Option<Self> {
-        let s = s.to_ascii_lowercase();
+        let s = lowercase(s);
+        let s = s.as_ref();
         if s == "rip" {
             return Some(Self {
                 class: RegisterClass::Rip,
@@ -281,27 +292,51 @@ impl Register {
                 high_byte: false,
             });
         }
-        for (width, names) in [
-            (64, "rax rcx rdx rbx rsp rbp rsi rdi"),
-            (32, "eax ecx edx ebx esp ebp esi edi"),
-            (16, "ax cx dx bx sp bp si di"),
-            (8, "al cl dl bl spl bpl sil dil"),
-        ] {
-            if let Some(n) = names.split_whitespace().position(|name| name == s) {
-                return Some(Self {
-                    class: RegisterClass::Gpr,
-                    number: n as u8,
-                    width,
-                    high_byte: false,
-                });
-            }
-        }
-        if let Some(n) = ["ah", "ch", "dh", "bh"].iter().position(|name| *name == s) {
+        let named = match s {
+            "rax" => Some((0, 64, false)),
+            "rcx" => Some((1, 64, false)),
+            "rdx" => Some((2, 64, false)),
+            "rbx" => Some((3, 64, false)),
+            "rsp" => Some((4, 64, false)),
+            "rbp" => Some((5, 64, false)),
+            "rsi" => Some((6, 64, false)),
+            "rdi" => Some((7, 64, false)),
+            "eax" => Some((0, 32, false)),
+            "ecx" => Some((1, 32, false)),
+            "edx" => Some((2, 32, false)),
+            "ebx" => Some((3, 32, false)),
+            "esp" => Some((4, 32, false)),
+            "ebp" => Some((5, 32, false)),
+            "esi" => Some((6, 32, false)),
+            "edi" => Some((7, 32, false)),
+            "ax" => Some((0, 16, false)),
+            "cx" => Some((1, 16, false)),
+            "dx" => Some((2, 16, false)),
+            "bx" => Some((3, 16, false)),
+            "sp" => Some((4, 16, false)),
+            "bp" => Some((5, 16, false)),
+            "si" => Some((6, 16, false)),
+            "di" => Some((7, 16, false)),
+            "al" => Some((0, 8, false)),
+            "cl" => Some((1, 8, false)),
+            "dl" => Some((2, 8, false)),
+            "bl" => Some((3, 8, false)),
+            "spl" => Some((4, 8, false)),
+            "bpl" => Some((5, 8, false)),
+            "sil" => Some((6, 8, false)),
+            "dil" => Some((7, 8, false)),
+            "ah" => Some((4, 8, true)),
+            "ch" => Some((5, 8, true)),
+            "dh" => Some((6, 8, true)),
+            "bh" => Some((7, 8, true)),
+            _ => None,
+        };
+        if let Some((number, width, high_byte)) = named {
             return Some(Self {
                 class: RegisterClass::Gpr,
-                number: n as u8 + 4,
-                width: 8,
-                high_byte: true,
+                number,
+                width,
+                high_byte,
             });
         }
         if let Some(rest) = s.strip_prefix('r') {
@@ -364,8 +399,15 @@ pub struct Instruction {
 
 /// Split at delimiters outside strings and address brackets.
 pub fn split(s: &str, delimiter: char) -> Vec<&str> {
+    split_inline(s, delimiter).into_vec()
+}
+/// Inline storage for the short operand/directive lists in ordinary assembly.
+pub fn split_inline(s: &str, delimiter: char) -> SmallVec<[&str; 4]> {
+    if !s.contains(delimiter) {
+        return smallvec::smallvec![s.trim()];
+    }
     let (mut quoted, mut escaped, mut depth, mut start) = (false, false, 0, 0);
-    let mut parts = Vec::new();
+    let mut parts = SmallVec::new();
     for (i, c) in s.char_indices() {
         if escaped {
             escaped = false;
@@ -500,7 +542,7 @@ pub fn address(s: &str) -> Result<Address, String> {
                 .ok_or("expression overflow")?;
             continue;
         }
-        let parts = split(term, '@');
+        let parts = split_inline(term, '@');
         let name = symbol(parts[0])?;
         if parts.len() > 2 {
             return Err("multiple relocation modifiers".into());
@@ -509,7 +551,7 @@ pub fn address(s: &str) -> Result<Address, String> {
             if out.modifier != Modifier::None {
                 return Err("multiple relocation modifiers".into());
             }
-            out.modifier = match modifier.to_ascii_lowercase().as_str() {
+            out.modifier = match lowercase(modifier).as_ref() {
                 "plt" => Modifier::Plt,
                 "gotpcrel" => Modifier::GotPcRel,
                 "tpoff" => Modifier::TpOff,
@@ -599,7 +641,7 @@ fn operand(s: &str) -> Result<Operand, String> {
         terms.push((sign, body[start..].trim()));
         let mut remaining = String::new();
         for (sign, term) in terms {
-            let factors = split(term, '*');
+            let factors = split_inline(term, '*');
             let scaled = if factors.len() == 2 {
                 if let Some(r) = Register::parse(factors[0]) {
                     Some((r, integer(factors[1])?))
@@ -668,12 +710,12 @@ impl Instruction {
             (false, s.trim())
         };
         let (mnemonic, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
-        let opcode = Opcode::parse(&mnemonic.to_ascii_lowercase())
+        let opcode = Opcode::parse(&lowercase(mnemonic))
             .ok_or_else(|| format!("unsupported x86 instruction `{mnemonic}`"))?;
         let operands = if operands.trim().is_empty() {
             Vec::new()
         } else {
-            split(operands, ',')
+            split_inline(operands, ',')
                 .into_iter()
                 .map(operand)
                 .collect::<Result<_, _>>()?
@@ -711,13 +753,13 @@ pub fn parse_program(source: &str) -> Result<crate::Program, String> {
                 break;
             }
         }
-        for statement in split(&source[..end], ';') {
+        for statement in split_inline(&source[..end], ';') {
             let mut s = statement.trim();
             if s.is_empty() {
                 continue;
             }
             // A colon in fs:/gs: is part of an instruction, not a label.
-            let labels = split(s, ':');
+            let labels = split_inline(s, ':');
             if labels.len() > 1
                 && (labels[0].starts_with('"') || !labels[0].contains(char::is_whitespace))
             {
@@ -747,7 +789,7 @@ pub fn parse_program(source: &str) -> Result<crate::Program, String> {
             if s.is_empty() {
                 continue;
             }
-            if s.starts_with('.') || split(s, '=').len() == 2 {
+            if s.starts_with('.') || split_inline(s, '=').len() == 2 {
                 p.text(s);
                 p.text("\n")
             } else {

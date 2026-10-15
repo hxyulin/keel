@@ -412,22 +412,40 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             if let I(imm) = b {
                 let small =
                     op != Test && w != 8 && constant(imm).is_some_and(|n| (-128..128).contains(&n));
-                e.rm(
-                    0,
-                    &[if op == Test {
-                        if w == 8 { 0xf6 } else { 0xf7 }
-                    } else if w == 8 {
-                        0x80
-                    } else if small {
-                        0x83
+                if !small
+                    && matches!(a, R(r) if r.class == RegisterClass::Gpr && r.number == 0 && !r.high_byte)
+                {
+                    // AL/AX/EAX/RAX have an immediate form without ModRM.
+                    // Keep sign-extended imm8 group forms when those are shorter.
+                    if w == 16 {
+                        e.bytes.push(0x66);
+                    }
+                    if w == 64 {
+                        e.bytes.push(0x48);
+                    }
+                    e.bytes.push(if op == Test {
+                        if w == 8 { 0xa8 } else { 0xa9 }
                     } else {
-                        0x81
-                    }],
-                    w,
-                    group,
-                    a,
-                    None,
-                )?;
+                        group * 8 + 4 + u8::from(w != 8)
+                    });
+                } else {
+                    e.rm(
+                        0,
+                        &[if op == Test {
+                            if w == 8 { 0xf6 } else { 0xf7 }
+                        } else if w == 8 {
+                            0x80
+                        } else if small {
+                            0x83
+                        } else {
+                            0x81
+                        }],
+                        w,
+                        group,
+                        a,
+                        None,
+                    )?;
+                }
                 e.imm(
                     imm,
                     if small || w == 8 {

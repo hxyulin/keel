@@ -12,7 +12,7 @@ use object::{
     Architecture, BinaryFormat, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct Section {
     name: String,
@@ -60,7 +60,7 @@ struct Fix {
 #[derive(Default)]
 struct Assembler {
     sections: Vec<Section>,
-    symbols: BTreeMap<String, Sym>,
+    symbols: HashMap<String, Sym>,
     fixes: Vec<Fix>,
     current: usize,
     cfi: Option<metadata::Frame>,
@@ -98,7 +98,35 @@ fn parse_source(source: &str, first: usize, items: &mut Vec<(Item, usize)>) -> R
     Ok(())
 }
 
+/// In-process diagnostic timings. Normal assembly compiles out stage timing.
+#[derive(Default, Debug)]
+pub struct Profile {
+    pub parse_ms: f64,
+    pub layout_ms: Vec<f64>,
+    pub branch_check_ms: Vec<f64>,
+    pub discard_ms: Vec<f64>,
+    pub widened: Vec<usize>,
+    pub object_ms: f64,
+    pub items: usize,
+}
+/// Assemble once and collect stage timings, excluding file I/O.
+pub fn profile_object(source: &str) -> Result<(Vec<u8>, Profile), Error> {
+    let mut profile = Profile::default();
+    let start = std::time::Instant::now();
+    let mut items = Vec::new();
+    parse_source(source, 1, &mut items)?;
+    profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
+    profile.items = items.len();
+    let object = assemble_items_inner::<true>(&items, &mut profile)?;
+    Ok((object, profile))
+}
 fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
+    assemble_items_inner::<false>(items, &mut Profile::default())
+}
+fn assemble_items_inner<const PROFILE: bool>(
+    items: &[(Item, usize)],
+    profile: &mut Profile,
+) -> Result<Vec<u8>, Error> {
     // Start optimistically short, then only widen. Alignment (especially max-skip)
     // is not monotonic: recheck *every* remaining short branch after each layout.
     // At least one branch widens per retry, so this terminates without cycles.
@@ -115,6 +143,7 @@ fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
     let mut encodings = vec![None; items.len()];
     let mut encoded_bytes = Vec::new();
     loop {
+        let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
         let mut branches = Vec::new();
         for (index, (item, line)) in items.iter().enumerate() {
@@ -138,7 +167,13 @@ fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
                 branches.push((index, fix));
             }
         }
-        let mut changed = false;
+        if let Some(start) = start {
+            profile
+                .layout_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        let start = PROFILE.then(std::time::Instant::now);
+        let mut changed = 0;
         for (index, fix) in branches {
             let f = &a.fixes[fix];
             let name = f.address.expression.add.as_deref().unwrap();
@@ -150,11 +185,28 @@ fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
                     });
             if !fits {
                 short[index] = false;
-                changed = true;
+                changed += 1;
             }
         }
-        if !changed {
-            return a.object();
+        if let Some(start) = start {
+            profile
+                .branch_check_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+            profile.widened.push(changed);
+        }
+        let start = PROFILE.then(std::time::Instant::now);
+        if changed == 0 {
+            let object = a.object()?;
+            if let Some(start) = start {
+                profile.object_ms = start.elapsed().as_secs_f64() * 1000.0;
+            }
+            return Ok(object);
+        }
+        drop(a);
+        if let Some(start) = start {
+            profile
+                .discard_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
         }
     }
 }
@@ -529,7 +581,7 @@ impl Assembler {
         self.bytes(&b)
     }
     fn directive(&mut self, s: &str, line: usize) -> Result<(), String> {
-        let assignment = x86::split(s, '=');
+        let assignment = x86::split_inline(s, '=');
         if assignment.len() == 2 {
             let name = x86::symbol(assignment[0])?;
             let expression = self.capture_dot(x86::address(assignment[1])?.expression)?;
@@ -540,7 +592,7 @@ impl Assembler {
             .split_once(char::is_whitespace)
             .unwrap_or((s.trim(), ""));
         let args = args.trim();
-        let parts = x86::split(args, ',');
+        let parts = x86::split_inline(args, ',');
         let num = |s: &str| -> Result<u64, String> {
             u64::try_from(x86::integer(s)?).map_err(|_| "expected nonnegative integer".into())
         };
@@ -864,7 +916,10 @@ impl Assembler {
             .collect();
         let mut omitted = BTreeSet::new();
         let mut symbols = BTreeMap::new();
-        for (name, s) in &self.symbols {
+        // Lookup order is irrelevant during layout; ELF symbol order is stable.
+        let mut entries: Vec<_> = self.symbols.iter().collect();
+        entries.sort_unstable_by_key(|(name, _)| *name);
+        for (name, s) in entries {
             let (section, value) = if s.alias.is_some() {
                 let (sec, value) = self.eval_symbol(name, 0).map_err(err)?;
                 (
