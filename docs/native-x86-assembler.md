@@ -28,13 +28,16 @@ unchanged. `x86::Opcode`, `Register`, `Memory`, `Address`, `Operand`, and
 Each assembler explicitly rejects the other architecture's instruction items.
 `Program` remains the common transport and counts both instruction families.
 
-The x86 SysV generator already emits Intel source, unlike AArch64's structured
-sink. Its object API currently parses that source into typed instruction items;
-ELF metadata directives remain explicit text. This is a transitional boundary:
-there is no subprocess or temporary assembly file, but there is still formatting
-and parsing overhead. A future direct x86 sink can remove it without changing
-the encoder or ELF writer. Shared byte, integer, expression, section, file,
-location, CFI and zero-fill directives also have native consumers.
+The x86 SysV generator constructs typed instructions, numeric registers and
+memory operands directly. Both `compile_program[_with_pipeline]` and the CLI's
+`--emit-object` path pass this program to the assembler without formatting or
+parsing assembly source. Text output serializes the same typed instructions as
+Intel syntax. ELF sections, symbol types/sizes, data, source locations, CFI and
+DWARF (including TLS offsets) also use typed directives. Compiler-produced x86
+programs contain zero text bytes; standalone assembly and explicit API text
+fragments retain the source parser. The x86 compiler still rejects inline
+assembly. The assembler borrows structured items across layout passes instead
+of cloning the complete program.
 
 The encoder implements REX, legacy prefixes, ModRM, SIB, immediate and displacement
 sizing. The `object` crate serializes ELF64 section headers, string tables,
@@ -243,8 +246,9 @@ encodings with Clang.
 
 A prototype that skipped byte emission on intermediate layout passes did not
 improve the large-input timings and was removed. The current implementation still
-rebuilds per-pass state; neither a globally minimal branch layout nor a direct
-structured x86 compiler sink is implemented by this change.
+rebuilds per-pass state; a globally minimal branch layout is not implemented by this change.
+The subsequent structured-emission follow-up below removes the compiler's text
+round trip.
 
 To inspect the remaining stages without instrumenting normal assembly:
 
@@ -300,3 +304,83 @@ aliases, padding and max-skip alignment. Formatting and strict Clippy pass with
 the existing lint allowances recorded in the report. The measurement helper now
 accepts explicit binary revisions instead of embedding the original experiment's
 base revision.
+
+## Structured x86 emission follow-up
+
+The compiler now uses a typed x86 output sink for every generated instruction
+and directive. Text and native object output share lowering; only text output
+formats Intel syntax. The native route no longer constructs register names,
+memory expressions, mnemonic strings or the complete assembly file. ELF data,
+DWARF globals/TLS offsets, CFI, source locations, labels and symbol metadata use
+typed items too. CFI consumes numeric rules directly. The assembler borrows the
+program's items during iterative layout instead of cloning every instruction.
+
+The existing public API now takes this direct route:
+
+```rust
+let program = keel_codegen::compile_program(
+    &module,
+    keel_codegen::Target::X86_64LinuxGnu,
+)?;
+let object = keel_asm::x86::assemble_program_object(&program)?;
+```
+
+`compile_program_with_pipeline` retains selection/allocation controls. The CLI's
+`compile` and `cc --emit-object` use this API automatically. Standalone assembly
+continues to parse source. Text output may use different equivalent spellings
+(quoted symbols, numeric CFI register IDs and decimal immediates). The instruction
+formatter preserves widths, high-byte registers, lock flags, segments, scaled
+indices and relocation modifiers; symbolic non-branch immediates use `offset`
+to distinguish them from Intel memory operands.
+
+Backend fixtures require zero source-text bytes and byte-identical objects from
+structured emission and reassembled text. Debug fixtures check actual ELF section
+names. An independent comparison of the old/new compilers produced 106 identical
+fixture objects in baseline/optimized modes, and Clang accepted all 106 new text
+files. This old/new comparison caught and corrected a debug section-name migration
+error that a comparison between the two new paths would have missed.
+
+`suite/measure_x86_structured.py` measures the complete preprocessed-C-to-object
+pipeline on Mac or Linux, always targeting Linux x86 ELF. It compares prebuilt
+old/new compilers and the new compiler followed by Clang assembly, validates
+identical old/new objects in four modes, and records raw samples and hashes:
+
+```sh
+python3 suite/measure_x86_structured.py --before /path/to/keel-before \
+  --after /path/to/keel-after --prepared /path/to/prepared/target/suite \
+  --out /path/to/isolated/benchmark --pairs 7 \
+  --before-revision 23e141e --after-revision 8b9e0b6
+```
+
+Add `--cpu 2` on the otherwise idle NUC to pin the process and its children.
+These are complete object-generation timings, unlike the standalone assembler
+measurements above. They include C compilation, startup, reads and writes;
+linking and application runtime are excluded. Clang compiles no C in this
+comparison: it assembles the same new Keel output.
+
+The [structured-emission report](../suite/reports/native-x86-structured-20261015.json)
+compares `23e141e` with `8b9e0b6` in seven alternating warm paired batches:
+
+| Host / input mode | Keel before | Structured Keel | New Keel text + Clang | Paired time reduction |
+| --- | ---: | ---: | ---: | ---: |
+| Linux NUC / baseline | 2.658 s | 1.996 s | 5.615 s | 24.9% |
+| Linux NUC / optimized | 3.086 s | 2.475 s | 5.830 s | 19.8% |
+| Mac M5 Max / baseline | 1.682 s | 1.270 s | 2.320 s | 24.7% |
+| Mac M5 Max / optimized | 2.069 s | 1.696 s | 2.800 s | 18.3% |
+
+On each host, all **176 old/new application objects are byte-identical** across
+baseline, optimized, debug and optimized-selection modes. This includes code,
+relocations and metadata; the gain does not come from omitting features. The Mac
+benchmark cross-compiles Linux objects and does not execute them. Linux execution
+passes all 424 native fixture variants plus spills and all 12 application builds
+(176 objects, 44 test invocations), including Lua, QuickJS and SQLite. GNU ELF/DWARF
+readers, GDB source lines/locals/backtraces and libgcc unwinding pass too.
+
+The complete Mac assembler run passes 204 checks; codegen library/selection/tuning
+checks pass 30, and driver checks pass 17. Linux's selected assembler run passes
+47 checks, including 159 structured/source IR fixture comparisons and 80 C/debug
+comparisons with zero text bytes. Follow-up `146e501` implements the new shared
+partial-CFA updates on AArch64 too; all eight structured checks pass on Mac and
+Linux after that change. The measured x86 implementation remains `8b9e0b6`.
+Strict Clippy passes with the existing lint categories listed in the report.
+No new runtime speed claim is made: old/new machine code and objects match.

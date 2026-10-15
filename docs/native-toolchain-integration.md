@@ -32,8 +32,9 @@ SSE, atomics, ELF relocations, DWARF line data, and CFI. It uses Intel syntax an
 does not provide general AVX, x87, or AT&T compatibility. A subsequent x86 layout
 follow-up adds safe same-section JMP/Jcc relaxation and omits unneeded temporary
 ELF symbols; see the assembler scope document for its
-binding and layout rules. The code generator still formats and reparses its
-x86 instruction stream internally before native encoding.
+binding and layout rules. A further structured-emission follow-up removes the
+compiler's x86 text round trip: instructions and ELF metadata now reach the
+assembler as typed items, while standalone Intel syntax remains available.
 
 The macOS linker is an explicit `keel link` command for arm64 Mach-O executable
 output. It supports the tested archives, dyld imports/fixups, initializers,
