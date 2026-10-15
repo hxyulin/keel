@@ -64,6 +64,14 @@ impl super::Opcode {
                 avx: true,
                 ..Features::default()
             },
+            Andn | Bextr | Blsi | Blsmsk | Blsr | Tzcnt => Features {
+                bmi1: true,
+                ..Features::default()
+            },
+            Shlx | Shrx | Sarx | Rorx | Bzhi | Pext | Pdep | Mulx => Features {
+                bmi2: true,
+                ..Features::default()
+            },
             _ => Features::default(),
         }
     }

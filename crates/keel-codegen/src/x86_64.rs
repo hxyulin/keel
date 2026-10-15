@@ -2238,6 +2238,57 @@ impl<'a> FunctionCompiler<'a> {
                 );
             }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr | BinaryOp::Rotl | BinaryOp::Rotr => {
+                if self.features.bmi2 {
+                    if imm.is_none()
+                        && matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr)
+                    {
+                        let mut b = self.use_reg(args[1], S1);
+                        // Only narrow types need an explicit modulo mask. Copy
+                        // the count before masking, preserving any live input.
+                        if let Some(bits) = narrow_bits(ty) {
+                            if b != S1 {
+                                self.emit(Opcode::Mov, [asm_arg(&r32(S1)), asm_arg(&r32(b))]);
+                            }
+                            self.emit(Opcode::And, [asm_arg(&r32(S1)), asm_arg(&(bits - 1))]);
+                            b = S1;
+                        }
+                        let a = match op {
+                            BinaryOp::Ushr => self.extend(S0, a, ty, false),
+                            BinaryOp::Sshr => self.extend(S0, a, ty, true),
+                            _ => a,
+                        };
+                        let mnemonic = match op {
+                            BinaryOp::Shl => Opcode::Shlx,
+                            BinaryOp::Ushr => Opcode::Shrx,
+                            _ => Opcode::Sarx,
+                        };
+                        self.emit(
+                            mnemonic,
+                            [
+                                asm_arg(&wide(d, ty)),
+                                asm_arg(&wide(a, ty)),
+                                asm_arg(&wide(b, ty)),
+                            ],
+                        );
+                        return;
+                    }
+                    if let Some(k) = imm
+                        && narrow_bits(ty).is_none()
+                        && matches!(op, BinaryOp::Rotl | BinaryOp::Rotr)
+                    {
+                        let bits = if wide_ty(ty) == Type::I64 { 64 } else { 32 };
+                        let count = if op == BinaryOp::Rotl { -k } else { k } & (bits - 1);
+                        self.emit(
+                            Opcode::Rorx,
+                            [
+                                asm_arg(&wide(d, ty)),
+                                asm_arg(&wide(a, ty)),
+                                asm_arg(&count),
+                            ],
+                        );
+                        return;
+                    }
+                }
                 let mnemonic = match op {
                     BinaryOp::Shl => Opcode::Shl,
                     BinaryOp::Ushr => Opcode::Shr,
@@ -2437,6 +2488,20 @@ impl<'a> FunctionCompiler<'a> {
             }
             // `bsf` gives the index of the lowest set bit. A narrow value
             // gets a bit set just above it, which is the answer for zero.
+            UnaryOp::Ctz if self.features.bmi1 => {
+                if let Some(bits) = narrow_bits(ty) {
+                    // Sentinel forces zero to return the IR type's width;
+                    // bits above it cannot influence the first set bit.
+                    self.emit(Opcode::Mov, [asm_arg(&r32(S0)), asm_arg(&r32(a))]);
+                    self.emit(Opcode::Or, [asm_arg(&r32(S0)), asm_arg(&(1u32 << bits))]);
+                    self.emit(Opcode::Tzcnt, [asm_arg(&r32(d)), asm_arg(&r32(S0))]);
+                } else {
+                    self.emit(
+                        Opcode::Tzcnt,
+                        [asm_arg(&reg(d, width)), asm_arg(&reg(a, width))],
+                    );
+                }
+            }
             UnaryOp::Ctz => match narrow_bits(ty) {
                 Some(bits) => {
                     self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(a)))]);

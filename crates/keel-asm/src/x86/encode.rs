@@ -1,4 +1,6 @@
 mod vex;
+#[path = "bmi.rs"]
+mod bmi;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
@@ -247,6 +249,11 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
     }
     let err = || format!("unsupported operands for {op:?}: {o:?}");
     match (op, o.as_slice()) {
+        (
+            Andn | Bextr | Blsi | Blsmsk | Blsr | Tzcnt | Shlx | Shrx | Sarx | Rorx | Bzhi | Pext
+            | Pdep | Mulx,
+            _,
+        ) => bmi::encode(&mut e, op, o)?,
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
