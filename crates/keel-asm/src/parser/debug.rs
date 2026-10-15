@@ -1,5 +1,6 @@
 //! DWARF line programs and call-frame records. Addresses are section-relative
 //! until the Mach-O linker applies the ordinary pointer/difference relocations.
+use super::compact::{self, Rule};
 use super::data::{self, Location};
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use std::collections::BTreeMap;
@@ -23,6 +24,7 @@ struct Frame {
     end: u64,
     line: usize,
     events: Vec<(u64, Vec<u8>)>,
+    rules: Vec<Rule>,
     saved: usize,
     personality: Option<String>,
     lsda: Option<String>,
@@ -194,6 +196,7 @@ impl Debug {
                 end: address,
                 line,
                 events: Vec::new(),
+                rules: Vec::new(),
                 saved: 0,
                 personality: None,
                 lsda: None,
@@ -225,6 +228,7 @@ impl Debug {
             .filter(|s| !s.is_empty())
             .collect();
         let mut bytes = Vec::new();
+        let mut rule = Rule::Other;
         match (op, args.as_slice()) {
             (".cfi_personality", [encoding, name]) | (".cfi_lsda", [encoding, name]) => {
                 let personality = op == ".cfi_personality";
@@ -245,26 +249,33 @@ impl Debug {
                 return Ok(true);
             }
             (".cfi_def_cfa", [r, n]) => {
+                let r = reg(r)?;
+                let n = n.parse().map_err(|_| "invalid CFA offset")?;
                 bytes.push(0x0c);
-                uleb(reg(r)?, &mut bytes);
-                uleb(n.parse().map_err(|_| "invalid CFA offset")?, &mut bytes);
+                uleb(r, &mut bytes);
+                uleb(n, &mut bytes);
+                rule = Rule::Cfa(r, n);
             }
             (".cfi_def_cfa_register", [r]) => {
                 bytes.push(0x0d);
                 uleb(reg(r)?, &mut bytes);
             }
             (".cfi_def_cfa_offset", [n]) => {
+                let n = n.parse().map_err(|_| "invalid CFA offset")?;
                 bytes.push(0x0e);
-                uleb(n.parse().map_err(|_| "invalid CFA offset")?, &mut bytes);
+                uleb(n, &mut bytes);
+                rule = Rule::CfaOffset(n);
             }
             (".cfi_offset", [r, n]) => {
                 let n: i64 = n.parse().map_err(|_| "invalid saved-register offset")?;
                 if n > 0 || n % 8 != 0 {
                     return Err("CFI offset must be a nonpositive multiple of 8".into());
                 }
+                let r = reg(r)?;
                 bytes.push(0x05);
-                uleb(reg(r)?, &mut bytes);
+                uleb(r, &mut bytes);
                 uleb(n.unsigned_abs() / 8, &mut bytes);
+                rule = Rule::Offset(r, n);
             }
             (".cfi_restore", [r]) => {
                 bytes.push(0x06);
@@ -291,6 +302,7 @@ impl Debug {
             }
             _ => return Err(format!("unsupported CFI directive or operands `{op}`")),
         }
+        frame.rules.push(rule);
         frame.events.push((address, bytes));
         Ok(true)
     }
@@ -309,6 +321,15 @@ impl Debug {
             counter: 0,
         };
         if !self.frames.is_empty() {
+            if a.sections
+                .iter()
+                .any(|s| s.segment == "__TEXT" && s.name == "__eh_frame" && s.size() != 0)
+            {
+                return Err(Error::new(
+                    0,
+                    "cannot mix CFI with explicit __eh_frame contents",
+                ));
+            }
             // Darwin's linker builds its runtime unwind index from these
             // entries. DWARF mode asks it to find the corresponding FDE.
             let compact = data::select(a, "__LD", "__compact_unwind", SectionKind::Debug)
@@ -321,106 +342,129 @@ impl Debug {
             }
             a.sections[compact - 1].alignment = 3;
             let mut index = Vec::new();
-            for frame in &self.frames {
+            let encodings: Vec<_> = self
+                .frames
+                .iter()
+                .map(|frame| compact::encoding(&frame.rules, frame.personality.as_deref()))
+                .collect();
+            for (frame, encoding) in self.frames.iter().zip(&encodings) {
                 references.address(&mut index, compact, frame.start, false, a);
                 let length = u32::try_from(frame.end - frame.start).map_err(|_| {
                     Error::new(frame.line, "unwind function length exceeds 32 bits")
                 })?;
                 index.extend_from_slice(&length.to_le_bytes());
-                index.extend_from_slice(&0x0300_0000u32.to_le_bytes());
-                index.extend_from_slice(&[0; 16]);
+                let encoding = encoding
+                    .map(|e| e | if frame.lsda.is_some() { 0x4000_0000 } else { 0 })
+                    .unwrap_or(0x0300_0000);
+                index.extend_from_slice(&encoding.to_le_bytes());
+                if encoding & 0x0f00_0000 != 0x0300_0000 {
+                    if let Some(personality) = &frame.personality {
+                        references.symbol(&mut index, compact, personality.clone(), false, a);
+                    } else {
+                        index.extend_from_slice(&[0; 8]);
+                    }
+                    if let Some(lsda) = &frame.lsda {
+                        references.symbol(&mut index, compact, lsda.clone(), false, a);
+                    } else {
+                        index.extend_from_slice(&[0; 8]);
+                    }
+                } else {
+                    index.extend_from_slice(&[0; 16]);
+                }
             }
             a.sections[compact - 1].contents = crate::SectionContents::Bytes(index);
-            let section = data::select(a, "__TEXT", "__eh_frame", SectionKind::EhFrame)
-                .map_err(|s| Error::new(0, s))?;
-            if a.sections[section - 1].size() != 0 {
-                return Err(Error::new(
-                    0,
-                    "cannot mix CFI with explicit __eh_frame contents",
-                ));
-            }
-            a.sections[section - 1].alignment = 3;
-            let mut bytes = Vec::new();
-            let mut cies = BTreeMap::new();
-            for frame in self.frames {
-                let key = (frame.personality.clone(), frame.lsda.is_some());
-                let cie = if let Some(cie) = cies.get(&key) {
-                    *cie
-                } else {
-                    let cie = bytes.len();
-                    bytes.extend_from_slice(&[0; 8]);
-                    bytes.push(1);
-                    bytes.push(b'z');
-                    if frame.personality.is_some() {
-                        bytes.push(b'P');
+            if encodings.iter().any(Option::is_none) {
+                let section = data::select(a, "__TEXT", "__eh_frame", SectionKind::EhFrame)
+                    .map_err(|s| Error::new(0, s))?;
+                a.sections[section - 1].alignment = 3;
+                let mut bytes = Vec::new();
+                let mut cies = BTreeMap::new();
+                for (frame, encoding) in self.frames.into_iter().zip(encodings) {
+                    if encoding.is_some() {
+                        continue;
                     }
-                    if frame.lsda.is_some() {
-                        bytes.push(b'L');
+                    let key = (frame.personality.clone(), frame.lsda.is_some());
+                    let cie = if let Some(cie) = cies.get(&key) {
+                        *cie
+                    } else {
+                        let cie = bytes.len();
+                        bytes.extend_from_slice(&[0; 8]);
+                        bytes.push(1);
+                        bytes.push(b'z');
+                        if frame.personality.is_some() {
+                            bytes.push(b'P');
+                        }
+                        if frame.lsda.is_some() {
+                            bytes.push(b'L');
+                        }
+                        bytes.extend_from_slice(b"R\0");
+                        bytes.extend_from_slice(&[1, 0x78, 30]);
+                        let augmentation = 1
+                            + usize::from(frame.lsda.is_some())
+                            + if frame.personality.is_some() { 5 } else { 0 };
+                        uleb(augmentation as u64, &mut bytes);
+                        if let Some(personality) = &frame.personality {
+                            bytes.push(0x9b); // indirect, PC-relative signed 32-bit GOT pointer
+                            a.relocations.push(Relocation {
+                                section,
+                                size: 4,
+                                subtract_symbol: None,
+                                offset: bytes.len() as u32,
+                                symbol: personality.clone(),
+                                kind: RelocationKind::PointerToGot,
+                                addend: 0,
+                            });
+                            bytes.extend_from_slice(&[0; 4]);
+                        }
+                        if frame.lsda.is_some() {
+                            bytes.push(0x10);
+                        }
+                        bytes.push(0x10); // PC-relative native-width FDE address
+                        bytes.extend_from_slice(&[0x0c, 31, 0]);
+                        while !bytes.len().is_multiple_of(4) {
+                            bytes.push(0);
+                        }
+                        let len = (bytes.len() - cie - 4) as u32;
+                        bytes[cie..cie + 4].copy_from_slice(&len.to_le_bytes());
+                        cies.insert(key, cie);
+                        cie
+                    };
+                    let start = bytes.len();
+                    bytes.extend_from_slice(&[0; 4]);
+                    bytes.extend_from_slice(&((start + 4 - cie) as u32).to_le_bytes());
+                    references.address(&mut bytes, section, frame.start, true, a);
+                    bytes.extend_from_slice(&(frame.end - frame.start).to_le_bytes());
+                    bytes.push(if frame.lsda.is_some() { 8 } else { 0 });
+                    if let Some(lsda) = &frame.lsda {
+                        references.symbol(&mut bytes, section, lsda.clone(), true, a);
                     }
-                    bytes.extend_from_slice(b"R\0");
-                    bytes.extend_from_slice(&[1, 0x78, 30]);
-                    let augmentation = 1
-                        + usize::from(frame.lsda.is_some())
-                        + if frame.personality.is_some() { 5 } else { 0 };
-                    uleb(augmentation as u64, &mut bytes);
-                    if let Some(personality) = &frame.personality {
-                        bytes.push(0x9b); // indirect, PC-relative signed 32-bit GOT pointer
-                        a.relocations.push(Relocation {
-                            section,
-                            size: 4,
-                            subtract_symbol: None,
-                            offset: bytes.len() as u32,
-                            symbol: personality.clone(),
-                            kind: RelocationKind::PointerToGot,
-                            addend: 0,
-                        });
-                        bytes.extend_from_slice(&[0; 4]);
+                    let mut position = frame.start;
+                    for (address, event) in frame.events {
+                        let delta = address - position;
+                        if delta != 0 {
+                            bytes.push(0x04);
+                            bytes.extend_from_slice(
+                                &u32::try_from(delta)
+                                    .map_err(|_| {
+                                        Error::new(
+                                            frame.line,
+                                            "CFI address advance exceeds 32 bits",
+                                        )
+                                    })?
+                                    .to_le_bytes(),
+                            );
+                        }
+                        bytes.extend(event);
+                        position = address;
                     }
-                    if frame.lsda.is_some() {
-                        bytes.push(0x10);
-                    }
-                    bytes.push(0x10); // PC-relative native-width FDE address
-                    bytes.extend_from_slice(&[0x0c, 31, 0]);
-                    while !bytes.len().is_multiple_of(4) {
+                    while bytes.len() % 8 != 0 {
                         bytes.push(0);
                     }
-                    let len = (bytes.len() - cie - 4) as u32;
-                    bytes[cie..cie + 4].copy_from_slice(&len.to_le_bytes());
-                    cies.insert(key, cie);
-                    cie
-                };
-                let start = bytes.len();
-                bytes.extend_from_slice(&[0; 4]);
-                bytes.extend_from_slice(&((start + 4 - cie) as u32).to_le_bytes());
-                references.address(&mut bytes, section, frame.start, true, a);
-                bytes.extend_from_slice(&(frame.end - frame.start).to_le_bytes());
-                bytes.push(if frame.lsda.is_some() { 8 } else { 0 });
-                if let Some(lsda) = &frame.lsda {
-                    references.symbol(&mut bytes, section, lsda.clone(), true, a);
+                    let len = (bytes.len() - start - 4) as u32;
+                    bytes[start..start + 4].copy_from_slice(&len.to_le_bytes());
                 }
-                let mut position = frame.start;
-                for (address, event) in frame.events {
-                    let delta = address - position;
-                    if delta != 0 {
-                        bytes.push(0x04);
-                        bytes.extend_from_slice(
-                            &u32::try_from(delta)
-                                .map_err(|_| {
-                                    Error::new(frame.line, "CFI address advance exceeds 32 bits")
-                                })?
-                                .to_le_bytes(),
-                        );
-                    }
-                    bytes.extend(event);
-                    position = address;
-                }
-                while bytes.len() % 8 != 0 {
-                    bytes.push(0);
-                }
-                let len = (bytes.len() - start - 4) as u32;
-                bytes[start..start + 4].copy_from_slice(&len.to_le_bytes());
+                a.sections[section - 1].contents = crate::SectionContents::Bytes(bytes);
             }
-            a.sections[section - 1].contents = crate::SectionContents::Bytes(bytes);
         }
         if !self.rows.is_empty() {
             if self.files.keys().copied().ne(1..=self.files.len() as u32) {

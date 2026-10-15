@@ -1,5 +1,6 @@
 mod arithmetic;
 mod atoms;
+mod compact;
 mod control;
 mod data;
 mod debug;

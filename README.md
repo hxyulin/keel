@@ -82,7 +82,8 @@ Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
 Data support includes initialized/zero-fill/TLS sections, integer directives,
 pointer tables, and symbol differences. It also supports ordinary CFI unwind
-records, DWARF 4 line tables, and debug sections for types and variables.
+records, compact unwind for canonical ARM64 frames and leaf functions, DWARF 4
+line tables, and debug sections for types and variables.
 Exception personalities, LSDA tables, and C++ exception propagation are
 supported, along with subsection splitting for linker reordering and dead
 stripping. Literal loads and other unsupported forms still prevent assembling

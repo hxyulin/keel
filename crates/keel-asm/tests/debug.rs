@@ -107,7 +107,7 @@ fn stack_unwinding_crosses_assembled_frame() {
     let obj = temp.0.join("frame.o");
     let c = temp.0.join("main.c");
     let exe = temp.0.join("run");
-    let source = ".globl _frame\n_frame:\n.cfi_startproc\nstp x29,x30,[sp,#-16]!\nmov x29,sp\n.cfi_def_cfa x29,16\n.cfi_offset x29,-16\n.cfi_offset x30,-8\nbl _capture\nldp x29,x30,[sp],#16\nret\n.cfi_endproc\n";
+    let source = ".globl _frame\n_frame:\n.cfi_startproc\nstp x29,x30,[sp,#-16]!\nmov x29,sp\n.cfi_def_cfa x29,16\n.cfi_offset x29,-16\n.cfi_offset x30,-8\n.cfi_remember_state\n.cfi_restore_state\nbl _capture\nldp x29,x30,[sp],#16\nret\n.cfi_endproc\n";
     std::fs::write(&obj, assemble_object(source).unwrap()).unwrap();
     std::fs::write(
         &c,

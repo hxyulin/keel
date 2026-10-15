@@ -475,7 +475,8 @@ from Apple arm64 that matter to a frontend:
   locations: C++ exceptions and debuggers unwind through keel frames with
   it. The system assembler can turn it into compact unwind info when
   saved registers follow Apple's pairing, or `__eh_frame` otherwise. Keel's
-  assembler currently emits `__eh_frame` for its supported CFI rules.
+  assembler also selects compact encodings for representable ARM64 layouts,
+  retaining `__eh_frame` for the rest.
 - **Variables and types.** The module has a table of source-level types
   (`dtype dt0 = base "int" signed 4`, pointers, structs and unions with
   byte or bit-field members, arrays, typedefs, `const` and `volatile`,
@@ -1189,10 +1190,37 @@ address-indexed CFA and saved-register rules. Supported rules include
 numbers 0–30, SP is 31, and D/V registers are 64–95. The assembler emits
 DWARF CIE/FDE records in `__TEXT,__eh_frame`, using PC-relative pointers and
 Mach-O symbol-difference relocations. Apple’s linker and libunwind consume
-these records. The assembler also emits `__LD,__compact_unwind` index entries
-in DWARF mode so the linker includes each FDE in its runtime unwind index.
-Replacing FDEs with compact encodings for common frame layouts remains a
-future optimization. `.cfi_personality 155, symbol` attaches an indirect,
+these records. Each function has a `__LD,__compact_unwind` entry. For
+representable layouts it contains an ARM64 frame or frameless encoding,
+with absolute personality and LSDA pointer relocations when present. Other
+layouts use DWARF mode so the linker includes their FDEs in the runtime unwind
+index. Functions with compact encodings omit their FDEs; when all functions
+qualify, the assembler does not create an `__eh_frame` section.
+
+Compact frame mode requires CFA = X29 + 16, X29 saved at CFA - 16, and X30
+at CFA - 8. Optional X19/X20 through X27/X28 and D8/D9 through D14/D15 pairs
+must be packed immediately below FP/LR in increasing register-pair order,
+with all integer pairs before FP pairs. Within a pair, the lower-numbered
+register must have the higher address (X19 at CFA - 24, X20 at CFA - 32).
+Absent pairs consume no space. Selection uses register/offset semantics rather
+than CFI directive order. Frameless mode supports functions with no saved
+registers and one `.cfi_def_cfa_offset` declaration: 0–65520 bytes, aligned
+to 16 bytes. A procedure with no CFI rules has zero stack adjustment.
+
+Single-register saves, reversed pairs, gaps, nonstandard CFA rules, duplicate
+rules, and state changes retain DWARF. Keel's current code generator places
+its paired registers in the opposite order, so those functions retain DWARF;
+its simple FP-only functions can use compact frame mode. Compact personality
+support is limited to the system C++ and Objective-C routines
+(`___gxx_personality_v0` and `___objc_personality_v0`), preserving the limited
+Darwin personality-index slots. Custom personalities always retain a CIE/FDE.
+Tests compare all 512 canonical pair subsets, leaf stack-size boundaries,
+and canonical personality records with Clang. Mixed compact/DWARF objects
+are checked independently. A native exception test with no assembly FDEs
+verifies restoration of integer and FP callee-saved registers through compact
+frames, including after function reordering and dead stripping.
+
+For DWARF fallback, `.cfi_personality 155, symbol` attaches an indirect,
 PC-relative signed-32-bit personality reference through the GOT;
 `.cfi_lsda 16, symbol` attaches a PC-relative native-width LSDA pointer.
 Unsupported encodings and duplicate personality/LSDA directives are errors.
@@ -1239,4 +1267,4 @@ unwind tables. On macOS, the linker records an object-file debug map and
 line rows and data encodings against Clang, verify Keel’s types/scopes/variables
 with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
 assembled frame. Cross-atom conditional branches and ADR remain errors;
-compact unwind encoding remains a separate optimization.
+unrepresentable layouts retain their DWARF unwind records.
