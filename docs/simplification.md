@@ -208,3 +208,22 @@ while canonicalization makes existing rules and lowering easier to apply.
 Repeated passes cannot substitute for either one. The next simplification
 families are Boolean absorption/cancellation, broader integer cast chains,
 integer algebraic cancellation, and conditional range facts for CFG cleanup.
+
+## Boolean identities
+
+Instruction combining now handles bitwise absorption (`x & (x | y) = x`,
+`x | (x & y) = x`), repeated AND/OR operands across one nested operation,
+XOR cancellation (`x ^ (x ^ y) = y`), and complement pairs (`x & ~x = 0`,
+`x | ~x = -1`, `x ^ ~x = -1`). Matching resolves inner aliases and accepts
+both operand positions. These are bitvector identities for all integer widths;
+they do not interpret arbitrary integers as Boolean truth values. They introduce
+no new instructions. DCE removes unused intermediates while preserving loads,
+other effects and traps. Local worklist notifications expose chained identities.
+
+Tests exhaust all i8 pairs for nested rules, cover wider edges and i128 structure,
+check complements and near misses, and run native cases under both selectors
+and allocators with restricted registers. Each incremental benchmark here uses
+three paired runtime and compile samples and one warmup; these short screens
+can expose regressions but do not establish small application speedups.
+
+The [incremental Boolean report](../suite/reports/boolean-aarch64-2026-10-15.json) records 0 fewer IR instructions, +0 text bytes, runtime ratio 1.0053, and compile-time ratio 0.9936. These three-pair results are screening measurements, not an established runtime gain.

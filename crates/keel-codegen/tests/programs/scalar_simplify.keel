@@ -1,0 +1,11 @@
+; expect: exit 0
+; opt-passes: canonicalize, simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
+func @scalar_simplify(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = or v0, v1
+    v3 = and v2, v0
+    v4 = xor v1, v0
+    v5 = xor v4, v0
+    v6 = xor v3, v5
+    return v6
+}

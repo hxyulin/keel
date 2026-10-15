@@ -32,6 +32,59 @@ fn zero(ty: Type) -> Fold {
     Fold::Data(InstData::Iconst { ty, imm: 0 })
 }
 
+fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
+    let ValueDef::Result(inst, 0) = func.value_def(func.resolve(value)) else {
+        return None;
+    };
+    let InstData::Binary { op, args } = *func.inst_data(inst) else {
+        return None;
+    };
+    Some((op, args.map(|v| func.resolve(v))))
+}
+
+fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Option<Fold> {
+    if !matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::Xor) {
+        return None;
+    }
+    for (a, b) in [(a, b), (b, a)] {
+        if let ValueDef::Result(inst, 0) = func.value_def(b)
+            && let InstData::Unary {
+                op: UnaryOp::Bnot,
+                arg,
+            } = *func.inst_data(inst)
+            && func.resolve(arg) == a
+        {
+            return Some(if op == BinaryOp::And {
+                zero(ty)
+            } else {
+                Fold::Data(InstData::Iconst { ty, imm: -1 })
+            });
+        }
+        if let Some((inner, args)) = binary(func, b) {
+            let other = if args[0] == a {
+                Some(args[1])
+            } else if args[1] == a {
+                Some(args[0])
+            } else {
+                None
+            };
+            if let Some(other) = other {
+                match (op, inner) {
+                    (BinaryOp::And, BinaryOp::Or) | (BinaryOp::Or, BinaryOp::And) => {
+                        return Some(Fold::Value(a));
+                    }
+                    (BinaryOp::Xor, BinaryOp::Xor) => return Some(Fold::Value(other)),
+                    (BinaryOp::And, BinaryOp::And) | (BinaryOp::Or, BinaryOp::Or) => {
+                        return Some(Fold::Value(b));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    None
+}
+
 fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
@@ -92,6 +145,9 @@ fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
                 }
                 BinaryOp::Ptradd if y == Some(0) => return Some(Fold::Value(a)),
                 _ => {}
+            }
+            if let Some(fold) = boolean(func, op, a, b, ty) {
+                return Some(fold);
             }
             let power = match op {
                 BinaryOp::Imul => y.or(x),
