@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1440 instruction/alias forms. Generated requirements retain
+subset currently has 1486 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks, plus the numeric feature predicates described below;
 the fixed Apple arm64 target enables only FP, AdvSIMD,
@@ -1488,12 +1488,64 @@ and all 64 bytes of a ZT0 load/store/zero round trip.
 Leaves preserve D8–D15, make no calls while streaming, enter with inactive
 ZA, and exit with both state bits clear. They exercise only advertised ISA.
 
-Remaining scalable coverage includes predicated Z arithmetic and memory,
-vector shifts/conversions, SME2 grouped Z arithmetic, integer/BF16 ZA dot
-products and multiply-accumulates, widening ZA multiply-accumulates, lookup
-operations, and SME2.1 (including `movaz`). These instruction forms remain
-unimplemented. SME2.1 is not enabled by the current M5 profile; ordinary SVE2
-remains unmodeled. Remaining ordinary M5 coverage includes crypto, pointer
+The practical-kernel increment adds 46 streaming-compatible forms, selected
+by `STREAMING_NAMES` in the Arm generator and covered by
+`tests/streaming-cases.txt` (`tools/streaming_cases.py --check`):
+
+- `whilelt/whilele/whilelo/whilels` for P0–P15 B/H/S/D, using matching W or X
+  operands (including ZR). These build predicates for partial vectors.
+- Contiguous `ld1b/h/w/d`, including zero extension to larger elements;
+  signed-extending `ld1sb/sh/sw`; truncating `st1b/h/w` and `st1d`.
+  Each supports a single braced/unbraced Z register, P0–P7 (loads require
+  `/z`), base X/SP, signed four-bit `mul vl` offsets, or X0–X30 indexes
+  shifted by the memory transfer width. Extending loads and truncating
+  stores retain Arm's architectural `mul vl` scaling.
+- `addvl` with X/SP and signed six-bit multipliers; `dup` from W/WSP for
+  B/H/S or X/SP for D (ZR is not the register-31 spelling for this form).
+
+Every form retains its upstream `SVE || SME` requirement, including the
+register-index encodings' exclusion of Rm=31. Neither default assembly nor
+the M5 profile enables ordinary SVE. Native testing enters streaming mode
+only after the OS advertises SME. Additional execution tests verify signed
+extension, truncation, and untouched output tails for every active length
+up to the host vector length.
+
+`tests/fixtures/sme-kernels/{fp32,bf16,int8}.s` are complete correctness
+fixtures for packed matrix multiplication, with loops over row tiles,
+column tiles, and K blocks. They use direct Z loads, `whilelo` predicates,
+outer products, and masked Z stores. Inputs are packed as
+A[K-block][M][group] and B[K-block][N][group], with groups of one FP32,
+two BF16, or four INT8 values (always four bytes); incomplete K groups are
+zero padded. Output is row-major FP32 or INT32. All three require only SME,
+not SME2 or the optional non-streaming numeric features. They are ordinary
+PCS leaves with inactive ZA on entry, balanced streaming/ZA transitions,
+and preserved D8–D15. Their private fixture ABI takes pointers plus M, N,
+and the number of K blocks; it is not a new public library API.
+
+The native driver compares every output element against scalar references
+in 216 cases: three types, eight dimension pairs relative to the runtime
+streaming vector length, and nine K sizes. Cases include zero dimensions,
+zero K, odd K, partial row/column tiles, exact tiles, and multiple tiles.
+Signed inputs and exactly representable quarter-valued FP/BF16 data make
+expected results exact. Input panels have no row/column tail padding and
+end at inaccessible guard pages; output ends at a guard page and has a
+checked prefix canary. Clang byte comparisons cover all three kernels;
+C reference code is compiled without optional ISA flags. These validate
+end-to-end assembly and bounds, not tuning, throughput, arbitrary numerical
+edge cases, or compatibility with most third-party SME2 kernels.
+
+```sh
+python3 crates/keel-asm/tools/streaming_cases.py --check
+cargo test -p keel-asm --test streaming --test sme_kernels
+```
+
+Remaining scalable coverage includes predicated Z arithmetic, gather/scatter
+and fault-first memory, vector shifts/conversions, SME2 grouped Z arithmetic
+and loads/stores with predicate counters, integer/BF16 ZA dot products and
+multiply-accumulates, widening ZA multiply-accumulates, lookup operations,
+and SME2.1 (including `movaz`). These instruction forms remain unimplemented.
+SME2.1 is not enabled by the current M5 profile; ordinary SVE2 remains
+unmodeled. Remaining ordinary M5 coverage includes crypto, pointer
 authentication, and newer scalar ISA. These are explicit coverage boundaries,
 not complete A64/SVE/SME support.
 
