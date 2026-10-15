@@ -19,6 +19,3 @@ keel-c = { path = "../keel-c" }
 keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }
 keel-asm = { path = "../keel-asm" }
-
-[dev-dependencies]
-ascii = "1"
