@@ -358,6 +358,13 @@ tls: .zero 8
                 (at, r.flags(), target, addend)
             })
             .collect();
+        // There is no PLT entry for an absolute symbol: GNU as uses PC32
+        // where Clang uses PLT32. Both mean S + A - P for this target.
+        for (_, flags, target, _) in &mut entries {
+            if target == "*ABS*" && *flags == (object::RelocationFlags::Elf { r_type: 4 }) {
+                *flags = object::RelocationFlags::Elf { r_type: 2 };
+            }
+        }
         entries.sort_by_key(|entry| entry.0);
         entries
     }
@@ -379,6 +386,12 @@ tls: .zero 8
     }
     #[cfg(target_os = "linux")]
     {
+        // GNU as rejects absolute symbols with @GOTPCREL; Clang accepts this
+        // form and is the reference for it above. Compare GNU's shared syntax.
+        let gnu_source = source.replace("mov rcx,[rip+absolute@GOTPCREL]\n", "");
+        std::fs::write(&input, &gnu_source).unwrap();
+        let ours_bytes = assemble_object(&gnu_source).unwrap();
+        let ours = object::File::parse(&*ours_bytes).unwrap();
         let gnu = temp.join("gnu.o");
         let result = Command::new("as")
             .args(["--64", "-mrelax-relocations=no", "-o"])
@@ -507,7 +520,10 @@ ret
     );
     for (name, object) in [("ours", ours), ("reference", reference)] {
         let exe = temp.join(name);
+        // GNU ld's GOT relaxation rejects absolute targets in PIE output;
+        // retain the GOT load in both objects for this execution regression.
         let result = Command::new("clang")
+            .arg("-Wl,--no-relax")
             .arg(object)
             .arg("-o")
             .arg(&exe)
