@@ -47,6 +47,61 @@ fn immediate_product_input_is_materialized_after_fusion() {
 
 #[test]
 fn duplicate_immediate_operand_keeps_its_register_definition() {
+    // Return the materialization line only when it initializes the register
+    // consumed by the following immediate add. Ignore IR comments/directives.
+    fn materialization(output: &str, target: Target) -> Option<usize> {
+        let instructions: Vec<_> = output
+            .lines()
+            .enumerate()
+            .filter_map(|(line, text)| {
+                let text = text.trim();
+                let (mnemonic, operands) = text.split_once(char::is_whitespace)?;
+                (!mnemonic.starts_with(['.', '#', ';']) && mnemonic != "//").then(|| {
+                    (
+                        line,
+                        mnemonic,
+                        operands.split(',').map(str::trim).collect::<Vec<_>>(),
+                    )
+                })
+            })
+            .collect();
+        instructions.windows(2).find_map(|pair| {
+            let [(line, definition, operands), (_, operation, inputs)] = pair else {
+                unreachable!()
+            };
+            if *operation != "add" {
+                return None;
+            }
+            let initialized = match target {
+                Target::Aarch64AppleDarwin => {
+                    *definition == "movz"
+                        && operands.len() == 2
+                        && operands[1] == "#0x7"
+                        && inputs.len() == 3
+                        && inputs[1] == operands[0]
+                        && inputs[2] == "#7"
+                }
+                Target::X86_64LinuxGnu => {
+                    if *definition != "mov" || operands.len() != 2 || inputs.len() != 2 {
+                        return None;
+                    }
+                    // A 32-bit write zero-extends into the corresponding 64-bit
+                    // add input, for both legacy and numbered registers.
+                    let register = inputs[0].strip_prefix('r')?;
+                    let narrow = if register.starts_with(|c: char| c.is_ascii_digit()) {
+                        format!("r{register}d")
+                    } else {
+                        format!("e{register}")
+                    };
+                    (operands[0] == inputs[0] || operands[0] == narrow)
+                        && operands[1] == "7"
+                        && inputs[1] == "7"
+                }
+            };
+            initialized.then_some(*line)
+        })
+    }
+
     let source = "func @f() -> i64 {
 block0:
  v0 = iconst.i64 7
@@ -55,9 +110,20 @@ block0:
 }";
     for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
         let output = asm(source, target);
-        // Both targets spell the definition in hex and the add immediate in
-        // decimal, so this checks that the register input is initialized.
-        assert!(output.contains("0x7"), "{output}");
+        let line = materialization(&output, target)
+            .unwrap_or_else(|| panic!("add input lacks its constant definition:\n{output}"));
+        // The original missing-definition bug must fail even with the IR's
+        // constant comment and the add immediate still present.
+        let missing_definition = output
+            .lines()
+            .enumerate()
+            .filter_map(|(index, text)| (index != line).then_some(text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            materialization(&missing_definition, target).is_none(),
+            "accepted an uninitialized add input:\n{missing_definition}"
+        );
     }
 }
 #[test]
