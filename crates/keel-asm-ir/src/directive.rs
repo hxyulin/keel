@@ -99,6 +99,15 @@ pub enum Directive {
         flags: u64,
         nobits: bool,
     },
+    /// ELF merge/string entry size and optional COMDAT signature. The original
+    /// `ElfSection` remains available for sections without these attributes.
+    ElfSectionMetadata {
+        name: String,
+        flags: u64,
+        nobits: bool,
+        entry_size: u64,
+        group: Option<String>,
+    },
     /// ELF STT_FUNC when true, otherwise STT_OBJECT.
     ElfType {
         name: String,
@@ -189,6 +198,40 @@ impl fmt::Display for Directive {
                     }
                 }
                 write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })
+            }
+            Self::ElfSectionMetadata {
+                name,
+                flags,
+                nobits,
+                entry_size,
+                group,
+            } => {
+                f.write_str(".section\t")?;
+                quoted(f, name.as_bytes())?;
+                f.write_str(",\"")?;
+                for (bit, c) in [
+                    (1, 'w'),
+                    (2, 'a'),
+                    (4, 'x'),
+                    (0x10, 'M'),
+                    (0x20, 'S'),
+                    (0x200, 'G'),
+                    (0x400, 'T'),
+                ] {
+                    if flags & bit != 0 {
+                        write!(f, "{c}")?;
+                    }
+                }
+                write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })?;
+                if flags & 0x10 != 0 {
+                    write!(f, ",{entry_size}")?;
+                }
+                if let Some(signature) = group {
+                    f.write_str(",")?;
+                    quoted(f, signature.as_bytes())?;
+                    f.write_str(",comdat")?;
+                }
+                Ok(())
             }
             Self::ElfType { name, function } => {
                 f.write_str(".type\t")?;

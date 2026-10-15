@@ -54,7 +54,8 @@ locked atomics, fences and traps. Addressing includes high registers, signed
 displacements, scaled indices, RIP-relative symbols, FS/GS and absolute disp32.
 
 ELF handling includes PROGBITS/NOBITS, writable/executable/allocated/TLS flags,
-local/global/weak/hidden symbols, types/sizes, common definitions, section-relative
+mergeable/string entry sizes, COMDAT section groups (including relocation
+members), local/global/weak/hidden symbols, types/sizes, common definitions, section-relative
 aliases and same-section symbol differences. Relocations include `64`, `PC32`,
 `PLT32`, `GOTPCREL`, `32`, `32S`, `16`, `8`, `TPOFF32`, `GOTTPOFF` and `DTPOFF64`.
 PC-relative instruction addends account for trailing immediate bytes.
@@ -64,6 +65,19 @@ Data directives, strings, space, alignment, constant LEB128, `.set`, `.file`,
 compiler retains its relocations; the assembler generates DWARF 4 line tables
 and `.eh_frame` CIE/FDE records. CFI register numbers in shared directives use
 x86 DWARF numbering. Source CFI accepts x86 register names too.
+
+ELF section declarations accept `a`, `w`, `x`, `T`, `M`, `S`, and `G` flags.
+For example, `.section .rodata.cst8,"aM",@progbits,8` sets `sh_entsize` to 8;
+`.section .rodata.str1.1,"aMS",@progbits,1` describes byte strings.
+`.section .text.foo,"axG",@progbits,foo,comdat` and
+`.section .rodata.foo,"aMG",@progbits,8,foo,comdat` share a COMDAT group.
+`%progbits`/`%nobits` spellings and quoted names/signatures are accepted too.
+Repeated declarations must agree on attributes; distinct groups may use the same
+section name. `M` requires a positive entry size, `S` requires `M`, and `G`
+requires a signature and explicit `comdat` selection. Merge/string NOBITS
+sections, other group selection kinds, and additional section arguments are
+rejected. Typed callers can use `Directive::ElfSectionMetadata`; the existing
+`ElfSection` API is unchanged.
 
 ## Limits and performance boundaries
 
@@ -81,8 +95,8 @@ synthesize large-code-model thunks.
 
 This is a backend-oriented assembler, not a replacement for all GNU assembler
 syntax. AVX/AVX-512, x87, arbitrary vector instructions, AT&T syntax, macros,
-preprocessing, include files, numeric directional labels, section groups/COMDAT,
-mergeable section entry sizes, arbitrary expression arithmetic, symbolic LEB128,
+preprocessing, include files, numeric directional labels, non-COMDAT section groups,
+arbitrary expression arithmetic, symbolic LEB128,
 exception personality/LSDA directives and general-dynamic TLS are not implemented.
 Unsupported directives and operands return errors; they are not silently dropped.
 
@@ -103,6 +117,14 @@ Native suite configurations are opt-in (`keel-native`, `keel-O-native`,
 `keel-g-native`, `keel-O-select-native`); existing suite baselines are unchanged.
 
 ## Validation
+
+`cargo test -p keel-asm --test x86_sections` checks merge entry sizes, COMDAT
+membership/signatures, shared and distinct section names, typed/text equivalence,
+deterministic output and malformed declarations. It compares normalized ELF
+metadata with Clang and (on Linux) GNU as. The Linux-only execution check links
+duplicate strong definitions in a multi-section COMDAT with both same-tool and
+mixed native/reference objects, verifying that code, companion data and its
+relocation coalesce together.
 
 `cargo test -p keel-asm --test x86` contains byte-level Clang/GNU as comparisons, local
 branch/difference checks, ELF symbol/section/relocation assertions, mixed-ISA

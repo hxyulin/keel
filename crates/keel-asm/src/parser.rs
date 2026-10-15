@@ -505,6 +505,7 @@ fn assemble_pass(
                 d.validate().map_err(err)?;
                 match d {
                     D::ElfSection { .. }
+                    | D::ElfSectionMetadata { .. }
                     | D::ElfType { .. }
                     | D::Size { .. }
                     | D::X86Integer { .. } => {

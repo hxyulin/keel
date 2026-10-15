@@ -2,15 +2,16 @@
 //! Parsed items are laid out until optimistic short branches fit their final layout.
 mod encode;
 mod metadata;
+mod sections;
 use crate::Error;
 pub use keel_asm_ir::x86::Features;
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
 };
-use object::write::{Object, Relocation, Symbol, SymbolSection};
+use object::write::{Comdat, Object, Relocation, Symbol, SymbolSection};
 use object::{
-    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionFlags, SectionKind,
+    Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -19,6 +20,8 @@ struct Section {
     name: String,
     flags: u64,
     nobits: bool,
+    entry_size: u64,
+    group: Option<String>,
     align: u64,
     data: Vec<u8>,
     size: u64,
@@ -304,9 +307,26 @@ impl Assembler {
         self.sections[self.current].size
     }
     fn section(&mut self, name: &str, flags: Option<u64>, nobits: bool) -> Result<(), String> {
-        if let Some(i) = self.sections.iter().position(|s| s.name == name) {
-            if flags.is_some_and(|f| f != self.sections[i].flags)
-                || (nobits || matches!(name, ".bss" | ".tbss")) != self.sections[i].nobits
+        self.section_metadata(name, flags, nobits, 0, None)
+    }
+    fn section_metadata(
+        &mut self,
+        name: &str,
+        flags: Option<u64>,
+        nobits: bool,
+        entry_size: u64,
+        group: Option<String>,
+    ) -> Result<(), String> {
+        let nobits = nobits || matches!(name, ".bss" | ".tbss");
+        if let Some(i) = self
+            .sections
+            .iter()
+            .position(|s| s.name == name && s.group == group)
+        {
+            let s = &self.sections[i];
+            // A bare .section name switches back without redeclaring attributes.
+            if flags
+                .is_some_and(|f| f != s.flags || nobits != s.nobits || entry_size != s.entry_size)
             {
                 return Err(format!("conflicting section attributes for {name}"));
             }
@@ -320,11 +340,14 @@ impl Assembler {
             ".tbss" | ".tdata" => 0x403,
             _ => 0,
         });
+        sections::validate(name, flags, nobits, entry_size, group.as_deref())?;
         self.current = self.sections.len();
         self.sections.push(Section {
             name: name.into(),
             flags,
-            nobits: nobits || matches!(name, ".bss" | ".tbss"),
+            nobits,
+            entry_size,
+            group,
             align: 1,
             data: Vec::new(),
             size: 0,
@@ -486,6 +509,13 @@ impl Assembler {
                 flags,
                 nobits,
             } => self.section(name, Some(*flags), *nobits),
+            Directive::ElfSectionMetadata {
+                name,
+                flags,
+                nobits,
+                entry_size,
+                group,
+            } => self.section_metadata(name, Some(*flags), *nobits, *entry_size, group.clone()),
             Directive::ElfType { name, function } => {
                 self.symbols.entry(name.clone()).or_default().kind = if *function {
                     SymbolKind::Text
@@ -660,48 +690,14 @@ impl Assembler {
             ".intel_syntax" if args == "noprefix" => Ok(()),
             ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
             ".section" => {
-                let name = if parts[0].starts_with('"') {
-                    x86::symbol(parts[0])?
-                } else if !parts[0].is_empty()
-                    && parts[0]
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                {
-                    parts[0].to_string()
-                } else {
-                    return Err("invalid ELF section name".into());
-                };
-                let mut flags = None;
-                let mut nobits = name == ".bss" || name == ".tbss";
-                if parts.len() > 3 {
-                    return Err("section groups/entry sizes are unsupported".into());
-                }
-                if let Some(s) = parts.get(1) {
-                    let mut f = 0;
-                    for b in x86::unquote(s)? {
-                        f |= match b {
-                            b'a' => 2,
-                            b'w' => 1,
-                            b'x' => 4,
-                            b'T' => 0x400,
-                            _ => {
-                                return Err(format!(
-                                    "unsupported ELF section flag `{}`",
-                                    b as char
-                                ));
-                            }
-                        }
-                    }
-                    flags = Some(f)
-                }
-                if let Some(t) = parts.get(2) {
-                    match *t {
-                        "@progbits" | "%progbits" => {}
-                        "@nobits" | "%nobits" => nobits = true,
-                        _ => return Err(format!("unsupported section type `{t}`")),
-                    }
-                }
-                self.section(&name, flags, nobits)
+                let section = sections::parse(&parts)?;
+                self.section_metadata(
+                    &section.name,
+                    section.flags,
+                    section.nobits,
+                    section.entry_size,
+                    section.group,
+                )
             }
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {
@@ -917,6 +913,24 @@ impl Assembler {
                 }
             }
         }
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, section) in self.sections.iter().enumerate() {
+            if let Some(signature) = &section.group {
+                groups.entry(signature.clone()).or_default().push(i);
+            }
+        }
+        let synthetic_signatures: BTreeSet<_> = groups
+            .keys()
+            .filter(|name| {
+                self.symbols
+                    .get(*name)
+                    .is_none_or(|s| s.section.is_none() && s.alias.is_none() && s.common.is_none())
+            })
+            .cloned()
+            .collect();
+        for signature in groups.keys() {
+            self.symbols.entry(signature.clone()).or_default();
+        }
         let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         let mut sections = Vec::new();
         for s in &self.sections {
@@ -1006,18 +1020,21 @@ impl Assembler {
                 && s.common.is_none()
                 && !tls
                 && !identity.contains(name.as_str())
+                && !groups.contains_key(name)
                 && (section.is_some() || s.alias.is_some())
                 && self.local_symbol(name, 0)
             {
                 omitted.insert(name.clone());
                 continue;
             }
+            let synthetic = synthetic_signatures.contains(name);
+            let undefined = section.is_none() && s.alias.is_none() && !synthetic;
             let symbol = Symbol {
                 name: name.as_bytes().to_vec(),
                 value,
                 size,
                 kind: if tls { SymbolKind::Tls } else { s.kind },
-                scope: if s.global || section.is_none() && s.alias.is_none() {
+                scope: if s.global || undefined {
                     SymbolScope::Linkage
                 } else {
                     SymbolScope::Compilation
@@ -1025,13 +1042,15 @@ impl Assembler {
                 weak: s.weak,
                 section: match section {
                     Some(i) => SymbolSection::Section(sections[i]),
-                    None if s.alias.is_some() => SymbolSection::Absolute,
+                    // A temporary placeholder, patched to the generated .group
+                    // section after serialization. Keep it out of layout/evaluation.
+                    None if synthetic || s.alias.is_some() => SymbolSection::Absolute,
                     None => SymbolSection::Undefined,
                 },
                 flags: SymbolFlags::Elf {
                     st_info: ((if s.weak {
                         2
-                    } else if s.global || section.is_none() && s.alias.is_none() {
+                    } else if s.global || undefined {
                         1
                     } else {
                         0
@@ -1054,6 +1073,13 @@ impl Assembler {
                 object.add_symbol(symbol)
             };
             symbols.insert(name.clone(), id);
+        }
+        for (signature, members) in &groups {
+            object.add_comdat(Comdat {
+                kind: ComdatKind::Any,
+                symbol: symbols[signature],
+                sections: members.iter().map(|&i| sections[i]).collect(),
+            });
         }
         for f in &self.fixes {
             let expr = &f.address.expression;
@@ -1153,6 +1179,9 @@ impl Assembler {
                     .copy_from_slice(&s.data);
             }
         }
-        object.write().map_err(|e| err(e.to_string()))
+        let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
+        sections::finalize(&mut bytes, &self.sections, &groups, &synthetic_signatures)
+            .map_err(err)?;
+        Ok(bytes)
     }
 }
