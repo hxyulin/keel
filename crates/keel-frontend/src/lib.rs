@@ -32,6 +32,7 @@
 use keel_ir::{
     Block, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value,
 };
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 keel_ir::entity!(
@@ -40,6 +41,61 @@ keel_ir::entity!(
     "var"
 );
 
+/// Sparse definitions within one block. Most blocks use only a handful of
+/// variables; keep four inline and spill only the definitions actually used.
+/// Wide blocks use a map so reverse-order definitions cannot cause quadratic
+/// insertion work. Neither representation allocates a variable-by-block matrix.
+enum Definitions {
+    Small(SmallVec<[(Variable, Value); 4]>),
+    Large(HashMap<Variable, Value>),
+}
+
+impl Default for Definitions {
+    fn default() -> Self {
+        Self::Small(SmallVec::new())
+    }
+}
+
+impl Definitions {
+    fn get(&self, var: Variable) -> Option<Value> {
+        match self {
+            Self::Small(entries) => entries
+                .binary_search_by_key(&var, |&(var, _)| var)
+                .ok()
+                .map(|i| entries[i].1),
+            Self::Large(entries) => entries.get(&var).copied(),
+        }
+    }
+
+    fn insert(&mut self, var: Variable, value: Value) {
+        match self {
+            Self::Small(entries) => match entries.binary_search_by_key(&var, |&(var, _)| var) {
+                Ok(i) => entries[i].1 = value,
+                Err(i) if entries.len() < 32 => entries.insert(i, (var, value)),
+                Err(_) => {
+                    let mut map = HashMap::with_capacity(64);
+                    map.extend(std::mem::take(entries));
+                    map.insert(var, value);
+                    *self = Self::Large(map);
+                }
+            },
+            Self::Large(entries) => {
+                entries.insert(var, value);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct BlockState {
+    /// None for blocks not yet registered with the SSA builder (including
+    /// gaps created through raw Function access).
+    sealed: Option<bool>,
+    defs: Definitions,
+    incomplete: Vec<(Variable, Value)>,
+    preds: Vec<(Inst, usize)>,
+}
+
 pub struct FunctionBuilder<'f> {
     func: &'f mut Function,
     cfg_changed: bool,
@@ -47,13 +103,8 @@ pub struct FunctionBuilder<'f> {
     /// The location instructions built from now on get.
     srcloc: Option<SourceLoc>,
     var_types: Vec<Type>,
-    /// The latest definition of each variable in each block.
-    defs: HashMap<(Variable, Block), Value>,
-    sealed: HashMap<Block, bool>,
-    /// Parameters added to unsealed blocks, filled in by `seal_block`.
-    incomplete: HashMap<Block, Vec<(Variable, Value)>>,
-    /// Branch edges into each sealed block: (branch, destination index).
-    preds: HashMap<Block, Vec<(Inst, usize)>>,
+    /// SSA state indexed directly by block, with sparse variable definitions.
+    blocks: Vec<BlockState>,
     /// Every parameter the builder added, for the final trivial-parameter
     /// cleanup.
     added_params: Vec<(Block, Value)>,
@@ -75,10 +126,7 @@ impl<'f> FunctionBuilder<'f> {
             current: None,
             srcloc: None,
             var_types: Vec::new(),
-            defs: HashMap::new(),
-            sealed: HashMap::new(),
-            incomplete: HashMap::new(),
-            preds: HashMap::new(),
+            blocks: Vec::new(),
             added_params: Vec::new(),
             incoming: Vec::new(),
             indexed_terms: Vec::new(),
@@ -122,7 +170,7 @@ impl<'f> FunctionBuilder<'f> {
 
     pub fn create_block(&mut self) -> Block {
         let block = self.func.create_block();
-        self.sealed.insert(block, false);
+        self.block_state(block).sealed = Some(false);
         block
     }
 
@@ -160,7 +208,7 @@ impl<'f> FunctionBuilder<'f> {
         let (want, got) = (self.var_types[var.index()], self.func.value_type(value));
         assert_eq!(want, got, "{var} has type {want}, assigned a {got}");
         let block = self.current_block();
-        self.defs.insert((var, block), value);
+        self.block_state(block).defs.insert(var, value);
     }
 
     /// The value of `var` at the end of the current block so far.
@@ -172,7 +220,7 @@ impl<'f> FunctionBuilder<'f> {
     /// Declares that every branch into `block` has been built, and fills
     /// in the parameters added while it was unsealed.
     pub fn seal_block(&mut self, block: Block) {
-        if self.sealed.insert(block, true) == Some(true) {
+        if self.block_state(block).sealed.replace(true) == Some(true) {
             return;
         }
         self.sync_preds();
@@ -183,8 +231,8 @@ impl<'f> FunctionBuilder<'f> {
         // Blocks are created in layout order. Construction may visit them
         // in a different order; keep SSA arguments/values deterministic.
         preds.sort_unstable_by_key(|&(inst, dest)| (self.func.inst_block(inst), dest));
-        self.preds.insert(block, preds);
-        for (var, param) in self.incomplete.remove(&block).unwrap_or_default() {
+        self.blocks[block.index()].preds = preds;
+        for (var, param) in std::mem::take(&mut self.blocks[block.index()].incomplete) {
             self.add_param_args(var, block, param);
         }
     }
@@ -200,7 +248,7 @@ impl<'f> FunctionBuilder<'f> {
     /// others were removed. Every block must be sealed.
     pub fn finalize(mut self) {
         assert!(
-            self.sealed.values().all(|&s| s),
+            self.blocks.iter().all(|s| s.sealed != Some(false)),
             "finalize needs every block sealed"
         );
         loop {
@@ -220,17 +268,28 @@ impl<'f> FunctionBuilder<'f> {
         }
     }
 
+    fn block_state(&mut self, block: Block) -> &mut BlockState {
+        if self.blocks.len() <= block.index() {
+            self.blocks
+                .resize_with(block.index() + 1, BlockState::default);
+        }
+        &mut self.blocks[block.index()]
+    }
+
     fn read(&mut self, var: Variable, block: Block) -> Value {
-        if let Some(&value) = self.defs.get(&(var, block)) {
+        if let Some(value) = self.blocks.get(block.index()).and_then(|s| s.defs.get(var)) {
             return self.func.resolve(value);
         }
         let ty = self.var_types[var.index()];
-        let value = if !self.sealed[&block] {
+        let value = if !self.blocks[block.index()]
+            .sealed
+            .expect("unregistered SSA block")
+        {
             let param = self.add_param(block, ty);
-            self.incomplete.entry(block).or_default().push((var, param));
+            self.blocks[block.index()].incomplete.push((var, param));
             param
         } else {
-            match self.preds[&block].as_slice() {
+            match self.blocks[block.index()].preds.as_slice() {
                 [] => self.zero(block, ty),
                 &[(branch, _)] => {
                     let pred = self.func.inst_block(branch);
@@ -240,12 +299,12 @@ impl<'f> FunctionBuilder<'f> {
                     // Define the parameter first, so a loop that reaches
                     // this block again finds it instead of recursing.
                     let param = self.add_param(block, ty);
-                    self.defs.insert((var, block), param);
+                    self.blocks[block.index()].defs.insert(var, param);
                     self.add_param_args(var, block, param)
                 }
             }
         };
-        self.defs.insert((var, block), value);
+        self.block_state(block).defs.insert(var, value);
         value
     }
 
@@ -278,7 +337,11 @@ impl<'f> FunctionBuilder<'f> {
     /// Passes each predecessor's value of `var` to `param`, then removes
     /// `param` if it is trivial. Returns what `param` stands for.
     fn add_param_args(&mut self, var: Variable, block: Block, param: Value) -> Value {
-        for (branch, i) in self.preds[&block].clone() {
+        // Reading can add/remove SSA parameters, but sealed predecessor
+        // edges stay fixed. Copy one edge at a time instead of allocating a
+        // clone of the predecessor vector for every new parameter.
+        for edge in 0..self.blocks[block.index()].preds.len() {
+            let (branch, i) = self.blocks[block.index()].preds[edge];
             let pred = self.func.inst_block(branch);
             let value = self.read(var, pred);
             let index = self.param_index(block, param);
@@ -302,7 +365,7 @@ impl<'f> FunctionBuilder<'f> {
     fn try_remove_trivial(&mut self, block: Block, param: Value) -> Value {
         let index = self.param_index(block, param);
         let mut same = None;
-        for &(branch, i) in &self.preds[&block] {
+        for &(branch, i) in &self.blocks[block.index()].preds {
             let arg = self
                 .func
                 .resolve(self.func.inst_data(branch).branch_dests()[i].args[index]);
@@ -318,7 +381,7 @@ impl<'f> FunctionBuilder<'f> {
         let ty = self.func.value_type(param);
         let same = same.unwrap_or_else(|| self.zero(block, ty));
         self.func.remove_block_param(block, index);
-        for &(branch, i) in &self.preds[&block] {
+        for &(branch, i) in &self.blocks[block.index()].preds {
             self.func.inst_data_mut(branch).branch_dests_mut()[i]
                 .args
                 .remove(index);
@@ -385,6 +448,54 @@ impl<'f> FunctionBuilder<'f> {
 mod tests {
     use super::*;
     use keel_ir::{BlockCall, InstData, Signature};
+
+    #[test]
+    fn sparse_definitions_survive_updates_spilling_and_promotion() {
+        let mut defs = Definitions::default();
+        let mut reference = HashMap::new();
+        for (i, key) in [900_000, 7, 40_000, 42].into_iter().enumerate() {
+            defs.insert(Variable::new(key), Value::new(i));
+            reference.insert(Variable::new(key), Value::new(i));
+        }
+        assert!(matches!(&defs, Definitions::Small(entries) if !entries.spilled()));
+        // Updates and sparse IDs must not consume more slots or force a spill.
+        defs.insert(Variable::new(900_000), Value::new(12));
+        reference.insert(Variable::new(900_000), Value::new(12));
+        assert!(
+            matches!(&defs, Definitions::Small(entries) if entries.len() == 4 && !entries.spilled())
+        );
+        assert_eq!(defs.get(Variable::new(899_999)), None);
+        // Reverse insertion exercises sorted movement and the wide-block
+        // fallback; repeated overwrites must preserve the latest definition.
+        for i in (0..96).rev().chain(0..96) {
+            let var = Variable::new(i * 1_001);
+            let value = Value::new(i + reference.len());
+            defs.insert(var, value);
+            reference.insert(var, value);
+            for (&key, &want) in &reference {
+                assert_eq!(defs.get(key), Some(want));
+            }
+        }
+        assert!(matches!(&defs, Definitions::Large(entries) if entries.len() == reference.len()));
+    }
+
+    #[test]
+    fn raw_block_gaps_do_not_register_unused_ssa_state() {
+        let mut func = Function::new("gaps", Signature::new(&[], &[Type::I64]));
+        let raw_entry = func.create_block();
+        let zero = func.ins(InsertPoint::End(raw_entry)).iconst(Type::I64, 0);
+        func.ins(InsertPoint::End(raw_entry)).return_(&[zero]);
+        let mut b = FunctionBuilder::new(&mut func);
+        let block = b.create_block();
+        let var = b.declare_var(Type::I64);
+        b.switch_to_block(block);
+        b.seal_block(block);
+        let result = b.use_var(var);
+        b.ins().return_(&[result]);
+        assert_eq!(b.blocks[raw_entry.index()].sealed, None);
+        b.finalize();
+        keel_ir::verify(&func).unwrap();
+    }
 
     // Compare the incremental index to the original full scan after every
     // operation, including edits that bypass FunctionBuilder::ins().

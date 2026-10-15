@@ -33,6 +33,7 @@ def main():
     p.add_argument('--output', type=pathlib.Path, required=True)
     p.add_argument('--work-dir', type=pathlib.Path, required=True)
     p.add_argument('--rounds', type=int, default=9)
+    p.add_argument('--resume', action='store_true', help='Extend an existing complete paired run, retaining every sample')
     args = p.parse_args()
     binaries = {name: pathlib.Path(path).resolve() for name, path in (s.split('=', 1) for s in args.variant)}
     assert 'baseline' in binaries and args.rounds >= 5
@@ -49,6 +50,22 @@ def main():
               'sources': {str(path): sha(path) for path in sorted(pathlib.Path('crates/keel-c/src').glob('*.rs'))},
               'inputs': source['inputs'], 'binaries': {k: {'path': str(v), 'sha256': sha(v)} for k, v in binaries.items()},
               'validation': {}, 'samples': [], 'summaries': {}, 'aggregate': {}}
+    completed = 0
+    if args.resume:
+        previous = json.loads(args.output.read_text())
+        for key in ['git_head', 'input_profile_sha256', 'sources', 'inputs', 'binaries', 'seed']:
+            assert previous[key] == report[key], f'resume changed {key}'
+        completed = previous['rounds']
+        assert completed < args.rounds
+        assert len(previous['samples']) == completed * len(inputs) * 4 * len(binaries)
+        for index in range(completed):
+            keys = {(s['app'], s['debug'], s['mode'], s['variant']) for s in previous['samples'] if s['round'] == index}
+            assert len(keys) == len(inputs) * 4 * len(binaries)
+        report['samples'] = previous['samples']
+        report['measurement_sessions'] = previous.get('measurement_sessions', [
+            {'first_round': 0, 'rounds': completed, 'script_sha256': previous['script_sha256']}]) + [
+            {'first_round': completed, 'rounds': args.rounds - completed, 'script_sha256': report['script_sha256']}]
+        report['extension_note'] = 'Extended complete paired run without discarding any samples; initial intervals were widened by large latency spikes in both variants.'
     for app, paths in inputs.items():
         for debug in [False, True]:
             hashes = {}
@@ -67,6 +84,8 @@ def main():
     for round_index in range(args.rounds):
         jobs = [(app, debug, mode) for app in inputs for debug in [False, True] for mode in ['baseline', 'staged']]
         rng.shuffle(jobs)
+        if round_index < completed:
+            continue
         for app, debug, mode in jobs:
             paths = inputs[app]
             shift = round_index % len(paths)

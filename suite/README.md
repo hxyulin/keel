@@ -951,3 +951,89 @@ report; they are excluded from latency measurement. Four new six-second stack
 captures cover all three applications plus SQLite with debug info. Raw profiles,
 summary data, source/binary hashes, and a standalone interactive HTML report
 are retained under `suite/reports/c-frontend-ssa-index-*`.
+
+### Compact SSA variable definitions (2026-10-15)
+
+This pass starts at `f39567e`, after incoming-edge indexing. The diagnostic
+`suite/investigate_ssa_definitions.py` inspects the old definition table before
+final trivial-parameter cleanup. Across whole applications, Lua stores 36,187
+(variable, block) definitions, QuickJS 162,649, and SQLite 363,887. A full dense
+variable-by-block matrix would contain 588,729, 604,744, and 2,249,605 cells,
+respectively. Most blocks use few variables: all Lua/QuickJS blocks and all but
+522 SQLite blocks have at most 32 definitions. The diagnostic report retains
+occupancy histograms, largest functions, source instrumentation, and hashes;
+the diagnostic binary is excluded from latency measurements.
+
+`FunctionBuilder` now indexes sealed flags, incomplete parameters, and sealed
+predecessor lists directly by block. Variable definitions stay sparse within a
+block: four entries fit inline in `SmallVec`, sorted lists spill as needed up to
+32 entries, and wider blocks promote to a `HashMap<Variable, Value>` to bound
+reverse-insertion costs. This removes pair hashing from the common read path
+without allocating a variable-by-block matrix. `smallvec` was already present
+in the lockfile at 1.16.3; it is now a direct frontend dependency. No new API or
+SSA semantic changes are introduced. Alias resolution and recursive predecessor
+reads retain their behavior. Parameter argument construction copies one fixed
+predecessor edge at a time, avoiding a cloned edge vector for every parameter.
+
+All 83 C frontend, driver, and SSA tests pass. New coverage checks sparse IDs,
+repeated definitions, inline growth, map promotion, and unregistered raw block
+gaps, alongside the existing loop, alias/trivial-parameter, and raw CFG tests.
+
+Build/freeze baseline examples at `f39567e` in a separate checkout, then build
+current examples with the same release/debug-symbol settings used above.
+The details report records source, manifest, lockfile, and binary hashes.
+
+```sh
+python3 suite/investigate_ssa_definitions.py \
+  --base f39567e --profile suite/reports/c-frontend-stages-20261015.json \
+  --work-dir target/frontend-profile/ssa-reads \
+  --output suite/reports/c-frontend-ssa-definitions-20261015.json
+# The diagnostic restores source; rebuild ordinary examples before freezing/timing.
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile --example profile_allocations
+python3 suite/measure_c_frontend.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --variant baseline=target/frontend-profile/ssa-reads/profile-baseline \
+  --variant compact=target/frontend-profile/ssa-reads/profile-compact \
+  --rounds 18 --work-dir target/frontend-profile/ssa-reads/paired \
+  --output suite/reports/c-frontend-ssa-reads-20261015.json
+python3 suite/measure_frontend_storage.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --baseline target/frontend-profile/ssa-index/allocations-indexed \
+  --candidate target/frontend-profile/ssa-reads/allocations-compact \
+  --candidate-name compact \
+  --output suite/reports/c-frontend-ssa-reads-storage-20261015.json
+python3 suite/capture_frontend_stacks.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --binary target/frontend-profile/ssa-reads/profile-compact \
+  --output suite/reports/c-frontend-ssa-reads-stacks-20261015.json
+python3 suite/render_ssa_index.py --kind reads \
+  --profile suite/reports/c-frontend-ssa-reads-20261015.json \
+  --storage suite/reports/c-frontend-ssa-reads-storage-20261015.json \
+  --output suite/reports/c-frontend-ssa-reads-20261015.html
+```
+
+The paired timing run was extended from nine to eighteen rounds because large
+latency spikes in both variants widened the initial confidence interval.
+`measure_c_frontend.py --resume --rounds 18` verifies the same binaries, inputs,
+C sources, commit, and complete prior rounds before appending work. Every initial
+sample is retained; the final report records both measurement sessions. There
+is no outlier filtering. Timings, allocation counters, and stack sampling run
+serially in separate phases.
+
+The final eighteen-pair result is **6.5% less normal-mode frontend time**
+(equal-application geometric mean; 95% paired bootstrap interval 6.3–6.8%).
+Normal compile medians are Lua 44.90 → 43.03 ms, QuickJS 104.89 → 97.93 ms, and
+SQLite 146.46 → 133.24 ms. IR-generation medians are 10.47 → 8.92 ms,
+41.87 → 35.06 ms, and 71.62 → 58.13 ms: **16.6% less IR-generation time**
+across applications, up to 18.8% for SQLite. With debug info, total frontend time
+falls 0.9% (95% interval 0.5–1.2%) and IR-generation time falls 3.5%. That path
+uses stack slots for locals instead of SSA variables (`irgen.rs` local storage
+selection), so the opportunity from definition-table changes is smaller.
+Normal allocation/reallocation calls fall 2.8–4.8%. RSS observations are roughly
+flat; the report makes no general peak-memory reduction claim.
+
+All 176 cross-variant normal/debug IR snapshots are byte-identical and verified.
+The final report retains all 432 batches / 6,336 measured file calls, including
+the first nine rounds. Storage instrumentation and four six-second stack
+captures run separately from latency measurement. Saved timing, memory, stack,
+provenance, and interactive HTML reports are `c-frontend-ssa-reads-*`.

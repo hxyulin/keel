@@ -1,4 +1,4 @@
-"""Render the paired SSA incoming-edge index comparison as standalone HTML."""
+"""Render paired SSA builder optimizations as standalone HTML."""
 import argparse
 import json
 import pathlib
@@ -9,15 +9,22 @@ def main():
     p.add_argument('--profile', type=pathlib.Path, required=True)
     p.add_argument('--storage', type=pathlib.Path, required=True)
     p.add_argument('--output', type=pathlib.Path, required=True)
+    p.add_argument('--kind', choices=['index', 'reads'], default='index')
     args = p.parse_args()
     profile = json.loads(args.profile.read_text())
     storage = json.loads(args.storage.read_text())
-    data = dict(aggregate=profile['aggregate'], summaries=profile['summaries'], memory={})
+    variant = 'compact' if args.kind == 'reads' else 'indexed'
+    # Normalize the display schema; the saved measurements retain variant names.
+    data = dict(aggregate={k.replace(variant + ':', 'indexed:'): v for k, v in profile['aggregate'].items()},
+                summaries={}, memory={})
+    for key, row in profile['summaries'].items():
+        data['summaries'][key] = dict(variants={'baseline': row['variants']['baseline'],
+            'indexed': row['variants'][variant]}, comparisons={'indexed': row['comparisons'][variant]})
     for key, row in storage['applications'].items():
         data['memory'][key] = {
-            name: dict(calls=row[name]['totals']['alloc'] + row[name]['totals']['realloc'],
-                       bytes=row[name]['totals']['requested_bytes'], rss=row[name]['peak_rss_bytes'])
-            for name in ['baseline', 'indexed']}
+            name: dict(calls=row[source]['totals']['alloc'] + row[source]['totals']['realloc'],
+                       bytes=row[source]['totals']['requested_bytes'], rss=row[source]['peak_rss_bytes'])
+            for name, source in [('baseline', 'baseline'), ('indexed', variant)]}
     html = '''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 *{box-sizing:border-box}body{margin:0;font:14px/1.5 var(--font-sans,system-ui);color:var(--foreground,#ddd)}
@@ -61,6 +68,22 @@ document.getElementById('charts').innerHTML=rows.map(r=>{const b=r.s.variants.ba
 document.getElementById('times').innerHTML=rows.map(r=>{const b=r.s.variants.baseline.compile_median_ms,c=r.s.variants.indexed.compile_median_ms,p=r.s.comparisons.indexed;return `<tr><td><strong>${labels[r.app]}</strong></td><td>${f(b)} → ${f(c)}</td><td>${pct(1-p.median_ratio)}</td><td>${pct(1-p.ratio_ci95[1])}–${pct(1-p.ratio_ci95[0])}</td></tr>`}).join('');
 document.getElementById('memory').innerHTML=rows.map(r=>{const b=r.m.baseline,c=r.m.indexed;return `<tr><td><strong>${labels[r.app]}</strong></td><td>${delta(c.calls/b.calls-1)}</td><td>${delta(c.bytes/b.bytes-1)}</td><td>${f(b.rss/2**20)} → ${f(c.rss/2**20)}</td></tr>`}).join('');
 }document.getElementById('mode').addEventListener('change',render);render();console.log('Two variants; six application/mode groups; controls ready.');</script></body></html>'''
+    if args.kind == 'reads':
+        html = html.replace('SSA: index incoming edges as control flow grows', 'SSA: compact variable definitions')
+        html = html.replace('Incoming-edge index', 'Compact definition tables').replace('>81</div>', '>83</div>')
+        start = html.index("<p>Each source block's outgoing edges")
+        end = html.index('<h3>Allocation and memory checks</h3>', start)
+        html = html[:start] + '''<p>Block-indexed state replaces hash maps for sealed flags, pending parameters, and predecessor lists. Each block keeps four variable definitions inline. Sorted lists grow as variables are used; above 32 entries, a sparse hash map bounds insertion cost.</p>
+<p>SSA parameter construction reads fixed predecessor edges one at a time, removing a vector clone per parameter. Alias resolution, loop sealing, and parameter elimination retain their behavior. Storage stays proportional to actual definitions rather than allocating a block-by-variable matrix.</p>
+<p class="muted">Debug-info generation keeps locals in stack slots rather than SSA variables, so this path benefits less from the definition-table changes.</p>
+''' + html[end:]
+        html = html.replace('Regression coverage includes loops, duplicate destinations, raw destination rewrites, removal/movement, and source visitation order.',
+                            'Regression coverage includes sparse variable IDs, repeated updates, inline growth, wide-block promotion, raw block gaps, loops, and trivial-parameter elimination.')
+        html = html.replace('Baseline: 7528fb6, which already includes the lexer and arena/interner work.',
+                            'Baseline: f39567e, which already includes incoming-edge indexing, the lexer rewrite, and arena/interner work.')
+    html = html.replace('Nine paired serial rounds', str(profile['rounds']) + ' paired serial rounds')
+    if profile.get('extension_note'):
+        html = html.replace('Inputs are preprocessed and resident.', 'The run was extended from 9 to 18 pairs after large latency spikes; every original sample is retained. Inputs are preprocessed and resident.')
     args.output.write_text(html.replace('__DATA__', json.dumps(data, separators=(',', ':'))))
 
 
