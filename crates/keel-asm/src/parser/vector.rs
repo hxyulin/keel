@@ -153,6 +153,7 @@ mod fp;
 mod indexed;
 mod integer;
 mod memory;
+mod numeric;
 mod permute;
 
 #[derive(Debug, Clone, Copy)]
@@ -343,9 +344,24 @@ pub(super) fn extra(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     logical(op, &args)
 }
 
+pub(super) fn numeric(
+    op: &str,
+    args: &[&str],
+    features: crate::TargetFeatures,
+) -> Result<Option<u32>, String> {
+    numeric::instruction(op, args, features)
+}
+
 /// Shared operand rules may describe fields fixed in the scalar variant.
 /// Each caller validates legal shapes before omitting those fixed fields.
 fn finish(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
+    finish_with_features(name, values, crate::TargetFeatures::default())
+}
+fn finish_with_features(
+    name: &str,
+    values: &[(&str, u32)],
+    features: crate::TargetFeatures,
+) -> Result<u32, String> {
     let encoding = crate::generated::encoding(name)
         .ok_or_else(|| format!("unsupported SIMD form `{name}`"))?;
     let fields: Vec<_> = values
@@ -353,7 +369,7 @@ fn finish(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
         .copied()
         .filter(|(n, _)| encoding.fields.iter().any(|f| f.name == *n))
         .collect();
-    encode(name, &fields)
+    crate::encode_with_features(name, &fields, features)
 }
 
 fn immediate_fields(imm: u32) -> Vec<(&'static str, u32)> {

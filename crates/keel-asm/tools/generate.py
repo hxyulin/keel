@@ -78,13 +78,17 @@ SCALABLE_NAMES += [f"{op}_r_s_" for op in ("cntb", "cnth", "cntw", "cntd")]
 SCALABLE_NAMES += [f"{op}_za_pp_zz_32" for op in ("fmopa", "fmops")]
 NEON_NAMES = [line for line in (ROOT / "isa/neon.txt").read_text().splitlines()
               if line and not line.startswith("#")]
+NUMERIC_FEATURES = {"FEAT_FP16", "FEAT_FHM", "FEAT_BF16", "FEAT_DotProd", "FEAT_I8MM",
+                    "FEAT_RDM", "FEAT_FCMA", "FEAT_JSCVT", "FEAT_FRINTTS"}
+NUMERIC_NAMES = [line for line in (ROOT / "isa/m5-numeric.txt").read_text().splitlines()
+                 if line and not line.startswith("#")]
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + NEON_NAMES + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + NUMERIC_NAMES + NEON_NAMES + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 
@@ -122,6 +126,11 @@ def import_archive(path):
                            if "_" in name and name.split("_")[1].startswith(("asimd", "asisd"))
                            and feature_names(record["condition"]) == {"FEAT_AdvSIMD"})
     assert NEON_NAMES == baseline_neon, "baseline NEON inventory differs from pinned Arm archive"
+    numeric = sorted(name for name, record in records.items()
+                     if feature_names(record["condition"]) & NUMERIC_FEATURES
+                     and feature_names(record["condition"]) <= NUMERIC_FEATURES | {"FEAT_FP", "FEAT_AdvSIMD"})
+    assert NUMERIC_NAMES == numeric, "M5 numeric inventory differs from pinned Arm archive"
+
 
     subset = {
         "source_url": URL, "archive_sha256": SHA256, "_meta": data["_meta"],
@@ -141,7 +150,7 @@ def requirements(node):
         assert node["name"] == "IsFeatureImplemented" and node["parameters"] == []
         assert len(node["arguments"]) == 1 and node["arguments"][0]["_type"] == "AST.Identifier"
         feature = node["arguments"][0]["value"]
-        assert feature in ("FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE", "FEAT_SVE", "FEAT_SME")
+        assert feature in {"FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE", "FEAT_SVE", "FEAT_SME"} | NUMERIC_FEATURES
         return [f'Requirement::Feature("{feature}")']
     if node.get("_type") == "AST.UnaryOp" and node["op"] == "!":
         return [f'Requirement::Not(&Requirement::All(&[{", ".join(requirements(node["expr"]))}]))']

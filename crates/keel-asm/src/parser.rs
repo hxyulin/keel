@@ -758,7 +758,10 @@ fn assemble_pass(
         }
         let word = match scalable::instruction(&op, &args, features).map_err(err)? {
             Some(word) => word,
-            None => instruction(&op, &args).map_err(err)?,
+            None => match vector::numeric(&op, &args, features).map_err(err)? {
+                Some(word) => word,
+                None => instruction(&op, &args).map_err(err)?,
+            },
         };
         result.text.extend_from_slice(&word.to_le_bytes());
     }

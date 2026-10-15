@@ -208,6 +208,7 @@ use generated::FieldId;
 pub struct TargetFeatures {
     sve: bool,
     sme: bool,
+    numeric: u16,
 }
 impl TargetFeatures {
     /// Permit SVE encodings. This does not imply SME.
@@ -221,10 +222,70 @@ impl TargetFeatures {
         self.sme = true;
         self
     }
+    /// Permit half-precision arithmetic.
+    pub const fn with_fp16(mut self) -> Self {
+        self.numeric |= 1 << 0;
+        self
+    }
+    /// Permit widening FP16 multiply-accumulate.
+    pub const fn with_fhm(mut self) -> Self {
+        self.numeric |= 1 << 1;
+        self
+    }
+    /// Permit BF16 conversions and arithmetic.
+    pub const fn with_bf16(mut self) -> Self {
+        self.numeric |= 1 << 2;
+        self
+    }
+    /// Permit integer dot products.
+    pub const fn with_dotprod(mut self) -> Self {
+        self.numeric |= 1 << 3;
+        self
+    }
+    /// Permit integer matrix multiply and mixed-sign dot products.
+    pub const fn with_i8mm(mut self) -> Self {
+        self.numeric |= 1 << 4;
+        self
+    }
+    /// Permit rounding doubling multiply-accumulate.
+    pub const fn with_rdm(mut self) -> Self {
+        self.numeric |= 1 << 5;
+        self
+    }
+    /// Permit complex arithmetic (H forms also require FP16).
+    pub const fn with_fcma(mut self) -> Self {
+        self.numeric |= 1 << 6;
+        self
+    }
+    /// Permit JavaScript-compatible floating-point conversion.
+    pub const fn with_jscvt(mut self) -> Self {
+        self.numeric |= 1 << 7;
+        self
+    }
+    /// Permit bounded 32/64-bit FP rounding.
+    pub const fn with_frintts(mut self) -> Self {
+        self.numeric |= 1 << 8;
+        self
+    }
+    /// Select the M5 features currently modeled by this assembler: the Apple
+    /// baseline, all nine non-scalable numeric extensions, and SME. This does
+    /// not enable ordinary SVE or claim coverage of unimplemented M5 families.
+    /// Selection is for encoding only; execution still needs OS/hardware checks.
+    pub const fn apple_m5() -> Self {
+        Self {
+            sve: false,
+            sme: true,
+            numeric: (1 << 9) - 1,
+        }
+    }
     fn supports(self, feature: &str) -> bool {
         TARGET_FEATURES.contains(&feature)
             || (feature == "FEAT_SVE" && self.sve)
             || (feature == "FEAT_SME" && self.sme)
+            || NUMERIC_FEATURES
+                .iter()
+                .position(|f| *f == feature)
+                .is_some_and(|index| self.numeric & (1 << index) != 0)
     }
 }
 
@@ -311,6 +372,18 @@ impl Requirement {
     }
 
 }
+
+const NUMERIC_FEATURES: &[&str] = &[
+    "FEAT_FP16",
+    "FEAT_FHM",
+    "FEAT_BF16",
+    "FEAT_DotProd",
+    "FEAT_I8MM",
+    "FEAT_RDM",
+    "FEAT_FCMA",
+    "FEAT_JSCVT",
+    "FEAT_FRINTTS",
+];
 
 // Fixed Apple Silicon target: scalar FP, Advanced SIMD, and LSE atomics.
 const TARGET_FEATURES: &[&str] = &["FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE"];

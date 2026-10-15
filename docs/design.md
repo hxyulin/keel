@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1098 instruction/alias forms. Generated requirements retain
+subset currently has 1315 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks; the fixed Apple arm64 target enables only FP, AdvSIMD,
 and LSE. Optional features require an explicit library opt-in described below.
@@ -1332,6 +1332,30 @@ exhaustive test of every operand combination. Regenerate the inventory cases:
 python3 crates/keel-asm/tools/neon_cases.py
 python3 crates/keel-asm/tools/neon_cases.py --check
 ```
+
+**M5 numeric extensions.** `TargetFeatures` provides independent opt-ins
+`with_fp16/with_fhm/with_bf16/with_dotprod/with_i8mm/with_rdm/with_fcma`,
+plus `with_jscvt` and `with_frintts`. `TargetFeatures::apple_m5()` selects the
+baseline, these nine numeric features, and SME; it does not enable ordinary
+SVE or imply implementation of other M5 instruction families. This follows
+LLVM's [M5 feature definition](https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/lib/Target/AArch64/AArch64Processors.td).
+Existing APIs and CLI assembly retain the fixed Apple baseline.
+
+`isa/m5-numeric.txt` inventories 217 non-scalable records from the pinned
+archive whose feature predicates select these extensions without requiring
+other optional features. The importer checks that inventory against the
+archive and retains all feature conditions. The first increment implements
+SDOT/UDOT/USDOT/SUDOT, SMMLA/UMMLA/USMMLA, BF16 conversion/dot/matrix and
+bottom/top multiply-accumulate, SQRDMLAH/SQRDMLSH, FCMLA/FCADD, widening
+FP16 FMLAL/FMLSL variants, FJCVTZS, and FRINT32/64Z/X. Indexed forms validate
+group sizes, lane bounds, restricted multiplier registers, and rotations.
+H-element complex arithmetic additionally requires FP16. Full FP16
+arithmetic is the remaining increment in this inventory.
+
+Clang comparisons use the explicit `-mcpu=apple-m5` reference target. Native
+numeric tests query each required `hw.optional.arm.FEAT_*` flag before
+execution. This session's M5 Max advertises all nine. Encoding selection
+never probes the host or silently changes the default target.
 
 **Optional SVE/SME coverage and Apple availability (2026-10-15).** NEON
 (Advanced SIMD) uses fixed-width V registers; SVE uses scalable Z/P registers;
