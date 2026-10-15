@@ -411,9 +411,11 @@ fn assemble_pass(
     // Each symbolic LEB pass gets a fresh arena; `previous` is independently owned.
     let arena = Bump::new();
     let mut symbolic_leb = false;
+    let mut has_build_version = false;
     let mut leb_differences = BumpVec::new_in(&arena);
     let mut label_order = BumpVec::new_in(&arena);
     let mut result = Assembly {
+        build_version: crate::BuildVersion::default(),
         subsections_via_symbols: false,
         text: Vec::new(),
         text_alignment: 2,
@@ -489,6 +491,14 @@ fn assemble_pass(
             )
             .map_err(err)?
         {
+            continue;
+        }
+        if op == ".build_version" {
+            if has_build_version {
+                return Err(err("duplicate .build_version".into()));
+            }
+            result.build_version = data::build_version(operands).map_err(err)?;
+            has_build_version = true;
             continue;
         }
         if op == ".ascii" || op == ".asciz" {

@@ -453,7 +453,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     ] {
         u32le(&mut out, value);
     }
-    for value in [0x32, 24, 1, 11 << 16, 0, 0] {
+    let build = assembly.build_version;
+    for value in [0x32, 24, build.platform, build.minimum, build.sdk, 0] {
         u32le(&mut out, value);
     }
     debug_assert_eq!(out.len(), 32 + command_size);

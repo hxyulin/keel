@@ -152,9 +152,27 @@ impl Section {
     }
 }
 
+/// Mach-O LC_BUILD_VERSION deployment target and SDK (packed xxxx.yy.zz).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuildVersion {
+    pub platform: u32,
+    pub minimum: u32,
+    pub sdk: u32,
+}
+impl Default for BuildVersion {
+    fn default() -> Self {
+        Self {
+            platform: 1,
+            minimum: 11 << 16,
+            sdk: 0,
+        }
+    }
+}
+
 /// Encoded text, extra data sections, and symbols before writing the object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assembly {
+    pub build_version: BuildVersion,
     /// Permit the Mach-O linker to reorder/dead-strip symbol-defined atoms.
     pub subsections_via_symbols: bool,
     pub text: Vec<u8>,

@@ -260,3 +260,41 @@ pub(super) fn allocation<'a>(args: &[&'a str], tls: bool) -> Result<(&'a str, u6
     let alignment = unsigned(values[2], 16)?;
     Ok((values[0], size, alignment))
 }
+
+/// Clang emits the SDK clause after whitespace, without a comma delimiter.
+pub(super) fn build_version(text: &str) -> Result<crate::BuildVersion, String> {
+    let (target, sdk) = text
+        .split_once("sdk_version")
+        .map_or((text, None), |(a, b)| (a, Some(b)));
+    let args = super::memory::operands(target)?;
+    super::count(&args, 3, 4)?;
+    let platform = match args[0] {
+        "macos" => 1,
+        "ios" => 2,
+        "tvos" => 3,
+        "watchos" => 4,
+        "bridgeos" => 5,
+        "macCatalyst" => 6,
+        "iossimulator" => 7,
+        "tvossimulator" => 8,
+        "watchossimulator" => 9,
+        "driverkit" => 10,
+        "xros" => 11,
+        "xrossimulator" => 12,
+        _ => return Err("unsupported build-version platform".into()),
+    };
+    fn version(args: &[&str]) -> Result<u32, String> {
+        super::count(args, 2, 3)?;
+        Ok((super::unsigned(args[0], 65535)? << 16)
+            | (super::unsigned(args[1], 255)? << 8)
+            | args.get(2).map_or(Ok(0), |s| super::unsigned(s, 255))?)
+    }
+    Ok(crate::BuildVersion {
+        platform,
+        minimum: version(&args[1..])?,
+        sdk: sdk
+            .map(|s| super::memory::operands(s).and_then(|a| version(&a)))
+            .transpose()?
+            .unwrap_or(0),
+    })
+}
