@@ -3,18 +3,18 @@
 //!
 //! Scalars:
 //!
-//! - Named integers and pointers go in x0–x7, floats in v0–v7, each class
-//!   counted on its own: `f(i64, f64, i64)` uses x0, d0 and x1.
+//! - Named integers and pointers go in x0–x7, floats and vectors in v0–v7.
+//!   Each class is counted on its own: `f(i64, f64, i64)` uses x0, d0 and x1.
 //! - Once a class runs out, its arguments go on the stack in order, each at
 //!   its natural size and alignment: Apple packs them, where standard AAPCS64
 //!   gives each its own 8-byte slot.
-//! - Variadic arguments always go on the stack, each in its own 8-byte slot
-//!   (Apple's `va_list` is a pointer stepping 8 bytes at a time).
+//! - Variadic arguments always go on the stack. Promoted scalars use 8-byte
+//!   slots; 128-bit vectors use 16-byte slots aligned to 16.
 //!
 //! Structs (`byval`), by [`classify`]:
 //!
-//! - A homogeneous float aggregate (one to four floats of one type, however
-//!   nested) goes one member per FP register, if enough are left. Otherwise
+//! - A homogeneous aggregate of one to four floats of one type, or short
+//!   vectors of one size, goes one member per FP register if enough remain. Otherwise
 //!   it goes on the stack at its natural size and alignment, and the FP
 //!   registers are closed to later arguments.
 //! - Any other struct of up to 16 bytes goes in one or two general-purpose
@@ -23,7 +23,7 @@
 //! - A bigger struct is copied by the caller, and its address is passed
 //!   like a pointer argument.
 //!
-//! Struct results (`sret`) come back the same way: an aggregate of floats
+//! Struct results (`sret`) come back the same way: a homogeneous aggregate
 //! in v0–v3, a small struct in x0 and x1, and anything bigger through
 //! memory whose address the caller passes in x8.
 
@@ -33,7 +33,7 @@ use keel_ir::{Layout, Purpose, Type};
 /// How a struct crosses a call.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum StructClass {
-    /// `count` floats of type `ty`, one per FP register.
+    /// `count` floats or short vectors of type `ty`, one per FP register.
     Hfa { ty: Type, count: u32 },
     /// Up to 16 bytes in `count` general-purpose registers.
     Gprs { count: u32 },
@@ -44,9 +44,11 @@ pub enum StructClass {
 pub fn classify(layout: &Layout) -> StructClass {
     let leaves = layout.leaves();
     if let Some(&(_, ty)) = leaves.first()
-        && ty.is_float()
+        && (ty.is_float() || ty.is_vector())
         && leaves.len() <= 4
-        && leaves.iter().all(|&(_, t)| t == ty)
+        && leaves
+            .iter()
+            .all(|&(_, t)| t == ty || ty.is_vector() && t.is_vector() && t.bytes() == ty.bytes())
     {
         return StructClass::Hfa {
             ty,
@@ -145,7 +147,7 @@ impl Cursor {
                 None => Slot::Stack(self.stack(16, 16)),
             };
         }
-        let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() {
+        let (next, class): (_, fn(u8) -> Loc) = if ty.is_float() || ty.is_vector() {
             (&mut self.floats, Loc::FReg)
         } else {
             (&mut self.ints, Loc::Reg)
@@ -200,6 +202,9 @@ pub fn arg_locs(args: &[ArgKind], named: usize) -> (Vec<ArgLoc>, u32) {
         .iter()
         .enumerate()
         .map(|(i, arg)| match *arg {
+            ArgKind::Value(ty) if i >= named && ty.is_vector() => {
+                ArgLoc::Value(Slot::Stack(cursor.stack(16, 16)))
+            }
             _ if i >= named => ArgLoc::Value(Slot::Stack(cursor.stack(8, 8))),
             ArgKind::Value(ty) => ArgLoc::Value(cursor.scalar(ty)),
             ArgKind::ByVal(layout) => cursor.by_val(layout),

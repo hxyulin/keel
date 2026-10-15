@@ -41,8 +41,8 @@
 //! everywhere. Spill slots are shared by values whose intervals do not
 //! overlap, holes ignored.
 //!
-//! Integers and pointers go in general-purpose registers, floats in the
-//! SIMD/FP registers: two register classes that never interfere. One scan
+//! Integers and pointers go in general-purpose registers, floats and vectors
+//! in SIMD/FP registers: two register classes that never interfere. One scan
 //! handles both; each interval only competes for registers of its class.
 //!
 //! An `i128` is two 64-bit halves, each with its own interval over the same
@@ -67,8 +67,9 @@
 //!
 //! A call clobbers the caller-saved registers. An interval that is live
 //! across one (live just before it and just after it) may only take a
-//! callee-saved register, or be spilled. A value with a hole where the call
-//! is does not cross it. The call's arguments end at the
+//! callee-saved register, or be spilled. Vectors always spill across calls:
+//! neither supported ABI preserves a full 128-bit SIMD register.
+//! A value with a hole where the call is does not cross it. The call's arguments end at the
 //! call and its result starts after it, so neither counts as crossing it.
 //!
 //! A call that returns twice, like `setjmp`, returns the second time from
@@ -289,6 +290,7 @@ struct Interval {
     crosses_call: bool,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
+    vector: bool,
 }
 
 impl Interval {
@@ -513,6 +515,7 @@ fn build_intervals(
                 ranges: list.clone(),
                 crosses_call,
                 float: ty.is_float() || ty.is_vector(),
+                vector: ty.is_vector(),
             });
         }
     }
@@ -574,7 +577,11 @@ fn linear_scan(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let allowed: Vec<Loc> = if cur.crosses_call {
+        let allowed: Vec<Loc> = if cur.crosses_call && cur.vector {
+            // Both supported ABIs preserve no complete 128-bit SIMD register.
+            // AArch64 v8-v15 preserve only their low 64 bits.
+            Vec::new()
+        } else if cur.crosses_call {
             callee_saved.iter().map(|&r| class(r)).collect()
         } else {
             caller_saved

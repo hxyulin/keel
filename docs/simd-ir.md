@@ -9,9 +9,8 @@ aggregate layout. Lane zero occupies the lowest-addressed bytes in memory.
 
 These are target-independent IR operations. Parsing, verification, typed builders,
 printing, operand rewriting and generic optimization support them. The x86-64 Linux
-backend now compiles every operation below, with packed SSE/SSE2 instructions for
-common cases and scalar lane expansion for the rest. AArch64 native vector lowering
-remains unsupported and returns an explicit diagnostic. The C frontend does not yet
+and AArch64 Apple backends compile every operation below, with packed SSE/SSE2 or
+NEON instructions for common cases and shared scalar lane expansion for the rest. The C frontend does not yet
 produce these vector values automatically; this support is available to IR clients.
 There is no automatic vectorization or SIMD performance claim here.
 
@@ -30,8 +29,9 @@ block0(v0: ptr, v1: i32):
 Vector loads and stores use the existing memory instructions and flags, including
 unaligned accesses. Loads read all 16 bytes, stores write all 16 bytes, and their
 trapping/volatile behavior is unchanged. Vectors can also appear as block arguments and function arguments/results.
-The x86 backend implements their SysV scalar-vector ABI. Vector fields in byval/sret
-aggregate layouts remain rejected until SSEUP classification is implemented. Atomic accesses, `va_arg`, scalar conditions and scalar arithmetic
+The backends implement the SysV x86 scalar-vector ABI and Apple arm64 vector ABI.
+AArch64 also supports vector fields in byval/sret aggregates; x86 aggregate vector
+fields remain rejected until SSEUP classification is implemented. Atomic accesses, `va_arg`, scalar conditions and scalar arithmetic
 continue to require their existing scalar types.
 
 ## Operations
@@ -132,3 +132,49 @@ text inputs, including mask/result shapes and every lane index.
 Validation: `cargo test -p keel-codegen --test vector_x86 --test vector_ir` and
 `cargo test -p keel-asm --test x86_packed`. Linux x86-64 executes the runtime
 harnesses; other hosts check emission and cross-compile the ABI harness.
+
+## AArch64 NEON lowering and Apple calling convention
+
+Packed integer operations include add/subtract at every lane width, multiply at
+8/16/32 bits, bitwise operations, negation, CLZ through 32 bits, byte popcount,
+and byte reversal within 16/32/64-bit lanes. Both float shapes use packed
+add/subtract/multiply/divide, NaN-propagating min/max, negation, absolute value,
+square root and all four rounding operations. These use typed instruction
+encodings directly, with no text assembly fallback.
+
+Comparisons, lane selection, shifts, shuffles, splat/extract/insert, bitcasts,
+copy-sign, 64-bit multiplication and the remaining integer unary operations use
+the same scalar legalization as x86. This is complete operation coverage, not
+complete packed-instruction coverage. SVE/SME and scalable vector IR are not part
+of these six fixed-width types.
+
+Values occupy one 128-bit Q register or a 16-byte spill slot. Copies, parallel
+copy cycles, unaligned accesses and spills preserve all bits. Large unaligned
+spill offsets materialize an address when immediate Q addressing cannot encode
+them; dynamic stack allocation retains a stable frame base. Vectors live across
+calls spill because [AAPCS64 preserves only the low 64 bits of v8–v15](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst).
+Scalar floating values can still use those callee-saved registers.
+
+Named vector arguments share v0–v7 with scalar floats; overflow arguments use
+16-byte stack slots aligned to 16. Results use v0. Direct/indirect calls,
+register-only tail calls, block argument cycles and external variadic calls are
+supported. Apple variadic vectors go on the stack with size/alignment 16;
+IR vector `va_arg` remains unsupported. Homogeneous vector aggregates of one to
+four 128-bit members use one vector register per member, or the stack when the
+FP bank has insufficient registers. Lane types do not affect homogeneity.
+Larger aggregates use the existing indirect-copy and x8 result-address convention.
+These rules follow [AAPCS64](https://github.com/ARM-software/abi-aa/blob/main/aapcs64/aapcs64.rst)
+with [Apple's arm64 ABI changes](https://developer.apple.com/documentation/xcode/writing-arm64-code-for-apple-platforms).
+
+Native Mac tests execute every operation and shape under three selection tiers,
+both allocation tiers, and normal/tiny register pools. Clang C harnesses check
+unaligned memory, integer boundaries, NaNs/signed zero, noncanonical masks, i128
+bitcasts, calls, stack arguments, variadics, return values, register pressure,
+and clobbering the upper halves of v8–v15. Aggregate tests cover one through five
+members, mixed lane types, FP-bank exhaustion, and dynamic stack allocation with
+large unaligned spills. Packed instruction bytes match Clang, and typed versus
+parsed Keel Mach-O objects match with zero text IR emission.
+
+Validation: `cargo test -p keel-codegen --test vector_aarch64 --test vector_ir`.
+AArch64 macOS executes the runtime harnesses; other hosts check emission and
+instruction encodings.
