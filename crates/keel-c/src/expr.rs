@@ -395,7 +395,9 @@ impl Parser {
             let (ty, sugar) = self.type_name_sugar()?;
             self.expect(")")?;
             if self.is("{") {
-                let lit = self.compound_literal(ty, loc)?.with_sugar(sugar.clone());
+                let lit = self
+                    .compound_literal(ty, sugar.clone(), loc)?
+                    .with_sugar(sugar.clone());
                 if let ExprKind::CompoundLit(id, _) = &lit.kind {
                     self.fs.as_mut().unwrap().locals[*id].sugar = sugar;
                     self.mark_in_memory(*id);
@@ -452,14 +454,14 @@ impl Parser {
                 self.advance();
                 let (ty, alignment) = if self.is("(") && self.type_follows(1) {
                     self.advance();
-                    let ty = self.type_name()?;
+                    let (ty, sugar) = self.type_name_sugar()?;
                     self.expect(")")?;
                     if self.is("{") {
-                        let e = self.compound_literal(ty, loc)?;
+                        let e = self.compound_literal(ty, sugar.clone(), loc)?;
                         let align = self.expr_alignment(&e);
                         (e.ty, align)
                     } else {
-                        let align = self.align_of(&ty);
+                        let align = self.type_alignment(&ty, &sugar);
                         (ty, align)
                     }
                 } else {
@@ -1541,16 +1543,18 @@ impl Parser {
 
     /// `(type){...}`: an unnamed object, local in a function and static
     /// at file scope.
-    fn compound_literal(&mut self, ty: Ty, loc: Loc) -> R<Expr> {
+    fn compound_literal(&mut self, ty: Ty, sugar: Sugar, loc: Loc) -> R<Expr> {
         let (init, ty) = self.initializer(&ty)?;
         if self.fs.is_none() {
             let name = self.unique_name("__compound_literal");
             let g = self.add_static(name, ty.clone(), init, false);
+            self.globals[g].align = self.type_alignment(&ty, &sugar);
+            self.globals[g].sugar = sugar;
             return Ok(mk(ExprKind::Global(g), ty, loc));
         }
         // The name cannot clash: it is not an identifier.
         let name = self.unique_name("compound literal");
-        let id = self.new_local(name, ty.clone(), Sugar::Plain, true);
+        let id = self.new_local(name, ty.clone(), sugar, true);
         Ok(mk(ExprKind::CompoundLit(id, Box::new(init)), ty, loc))
     }
 

@@ -392,7 +392,7 @@ impl<'p> Gen<'p> {
             } else {
                 let types = fg.g.types();
                 let size = types.size(&local.ty).max(1);
-                let align = local.align.max(types.align(&local.ty));
+                let align = local.align;
                 let reserve = size
                     .checked_add(if align > 16 { align - 1 } else { 0 })
                     .and_then(|n| u32::try_from(n).ok())
@@ -524,7 +524,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
-        let align = global.align.max(types.align(&global.ty)).max(1) as u32;
+        let align = global.align.max(1) as u32;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
         let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);

@@ -140,6 +140,15 @@ impl Sugar {
         }
     }
 
+    /// Alignment attached to an alias, inherited through qualifiers and arrays.
+    pub fn alignment(&self, defs: &[TypedefDef]) -> Option<u64> {
+        match self {
+            Self::Typedef(i) => defs[*i].align.or_else(|| defs[*i].sugar.alignment(defs)),
+            Self::Const(s) | Self::Volatile(s) | Self::Array(s) => s.alignment(defs),
+            _ => None,
+        }
+    }
+
     pub fn is_volatile(&self, defs: &[TypedefDef]) -> bool {
         match self {
             Self::Volatile(_) => true,
@@ -198,6 +207,8 @@ pub struct TypedefDef {
     pub name: String,
     pub ty: Ty,
     pub sugar: Sugar,
+    /// GNU typedef alignment does not change size or type compatibility.
+    pub align: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -484,6 +495,7 @@ pub type StructField = (Option<String>, Ty, Sugar, Option<u32>, Option<u64>, boo
 /// aligns the next to its type.
 pub fn layout_struct(
     types: &Types,
+    typedefs: &[TypedefDef],
     is_union: bool,
     fields: Vec<StructField>,
     max_align: Option<u64>,
@@ -494,7 +506,9 @@ pub fn layout_struct(
     let mut align: u64 = 1;
     let mut packed_accesses = Vec::new();
     for (name, ty, sugar, width, requested_align, packed) in fields {
-        let natural = types.align(&ty);
+        let natural = sugar
+            .alignment(typedefs)
+            .unwrap_or_else(|| types.align(&ty));
         // Explicit GNU alignment overrides packed layout, but pragma pack
         // caps even an explicitly aligned member.
         let falign = if packed { 1 } else { natural }

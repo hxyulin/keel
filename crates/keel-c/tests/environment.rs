@@ -57,6 +57,16 @@ fn derived_abi_macros_match_clang_for_each_target() {
             {
                 continue;
             }
+            if name == "__BOOL_WIDTH__" {
+                // Clang 18 reports storage bits (8); newer Clang reports
+                // value bits (1). Keel consistently reports value bits.
+                assert_eq!(value, "1");
+                assert!(matches!(
+                    reference.get(name).map(String::as_str),
+                    Some("1" | "8")
+                ));
+                continue;
+            }
             if let Some(expected) = reference.get(name) {
                 assert_eq!(value, expected, "{}: {name}", target.triple());
                 compared += 1;

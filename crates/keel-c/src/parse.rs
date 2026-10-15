@@ -418,8 +418,14 @@ impl Parser {
         self.types().align(ty)
     }
 
-    fn object_alignment(&self, ty: &Ty, attrs: Attrs, loc: Loc) -> R<u64> {
-        let natural = self.align_of(ty);
+    pub(crate) fn type_alignment(&self, ty: &Ty, sugar: &Sugar) -> u64 {
+        sugar
+            .alignment(&self.typedefs)
+            .unwrap_or_else(|| self.align_of(ty))
+    }
+
+    fn object_alignment(&self, ty: &Ty, sugar: &Sugar, attrs: Attrs, loc: Loc) -> R<u64> {
+        let natural = self.type_alignment(ty, sugar);
         if let Some(a) = attrs.alignas
             && a != 0
             && a < natural
@@ -437,9 +443,9 @@ impl Parser {
             ExprKind::Local(id) | ExprKind::CompoundLit(id, _) => {
                 self.fs.as_ref().unwrap().locals[*id].align
             }
-            ExprKind::Global(g) => self.globals[*g].align.max(self.align_of(&e.ty)),
+            ExprKind::Global(g) => self.globals[*g].align,
             ExprKind::Member { align, .. } => *align,
-            _ => self.align_of(&e.ty),
+            _ => self.type_alignment(&e.ty, &e.sugar),
         }
     }
 
@@ -499,7 +505,7 @@ impl Parser {
         volatile: bool,
     ) -> LocalId {
         let in_memory = volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar();
-        let align = self.align_of(&ty);
+        let align = self.type_alignment(&ty, &sugar);
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
             name: name.clone(),
@@ -674,18 +680,14 @@ impl Parser {
             let is_const = d.is_const || (spec.is_const && base);
             let is_volatile = d.is_volatile || (spec.is_volatile && base);
             if spec.storage == Storage::Typedef {
-                if attrs.alignas.is_some()
-                    || attrs.aligned.is_some_and(|a| a != self.align_of(&d.ty))
-                {
-                    return Err(Error::new(
-                        name_loc,
-                        "alignment-changing typedef attributes are not supported",
-                    ));
+                if attrs.alignas.is_some() {
+                    return Err(Error::new(name_loc, "`_Alignas` cannot apply to a typedef"));
                 }
                 self.typedefs.push(TypedefDef {
                     name: name.clone(),
                     ty: d.ty,
                     sugar: d.sugar,
+                    align: attrs.aligned,
                 });
                 self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
             } else if let Ty::Func(fty) = &d.ty {
@@ -705,7 +707,7 @@ impl Parser {
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
                 let id = self.new_local(name.clone(), d.ty.clone(), d.sugar.clone(), is_volatile);
-                let align = self.object_alignment(&d.ty, attrs, name_loc)?;
+                let align = self.object_alignment(&d.ty, &d.sugar, attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
                 let mut init = inferred_init;
@@ -778,7 +780,7 @@ impl Parser {
         inferred_init: Option<Init>,
     ) -> R<()> {
         let name = d.name.as_ref().unwrap().0.clone();
-        let align = self.object_alignment(&d.ty, d.attrs, d.name.as_ref().unwrap().1)?;
+        let align = self.object_alignment(&d.ty, &d.sugar, d.attrs, d.name.as_ref().unwrap().1)?;
         let local_static = !file_scope && spec.storage == Storage::Static;
         let g = if local_static {
             let func = &self.fs.as_ref().unwrap().name;
@@ -1137,8 +1139,8 @@ impl Parser {
                     self.advance();
                     self.expect("(")?;
                     let n = if self.is_typename() {
-                        let ty = self.type_name()?;
-                        self.align_of(&ty)
+                        let (ty, sugar) = self.type_name_sugar()?;
+                        self.type_alignment(&ty, &sugar)
                     } else {
                         self.alignment_constant(true)?
                     };
@@ -1493,6 +1495,15 @@ impl Parser {
             };
             self.expect("]")?;
             let (elem, sugar) = self.type_suffix(ty, sugar)?;
+            if !self
+                .size_of(&elem)
+                .is_multiple_of(self.type_alignment(&elem, &sugar))
+            {
+                return Err(Error::new(
+                    self.loc(),
+                    "array element size is not a multiple of its alignment",
+                ));
+            }
             return Ok((Ty::Array(Rc::new(elem), len), sugar.wrap(Sugar::Array)));
         }
         Ok((ty, sugar))
@@ -1636,7 +1647,7 @@ impl Parser {
             if self.eat(";") {
                 // An anonymous struct or union member.
                 if matches!(spec.ty, Ty::Struct(_)) {
-                    self.object_alignment(&spec.ty, spec.attrs, floc)?;
+                    self.object_alignment(&spec.ty, &spec.sugar, spec.attrs, floc)?;
                     fields.push((
                         None,
                         spec.ty,
@@ -1670,7 +1681,7 @@ impl Parser {
                     None
                 };
                 self.attributes(&mut member_attrs)?;
-                self.object_alignment(&ty, member_attrs, floc)?;
+                self.object_alignment(&ty, &sugar, member_attrs, floc)?;
                 if width.is_some() && member_attrs.alignas.is_some() {
                     return Err(Error::new(floc, "`_Alignas` cannot apply to a bit-field"));
                 }
@@ -1692,8 +1703,9 @@ impl Parser {
         for field in &mut fields {
             field.5 |= attrs.packed;
         }
-        let (members, mut size, mut align) = layout_struct(&self.types(), is_union, fields, pack)
-            .map_err(|message| Error::new(loc, message))?;
+        let (members, mut size, mut align) =
+            layout_struct(&self.types(), &self.typedefs, is_union, fields, pack)
+                .map_err(|message| Error::new(loc, message))?;
         if let Some(a) = attrs.aligned {
             align = align.max(a);
             size = size.next_multiple_of(align);

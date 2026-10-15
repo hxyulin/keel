@@ -932,8 +932,12 @@ fn rejected() {
             "error: alignment must be an integer constant",
         ),
         (
-            "typedef int I __attribute__((aligned(16)));",
-            "error: alignment-changing typedef attributes are not supported",
+            "_Alignas(16) typedef int I;",
+            "error: `_Alignas` cannot apply to a typedef",
+        ),
+        (
+            "typedef int Wide __attribute__((aligned(16))); Wide xs[2];",
+            "error: array element size is not a multiple of its alignment",
         ),
         (
             "int f(void) __attribute__((aligned(32)));",

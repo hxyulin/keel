@@ -1,5 +1,7 @@
 #ifndef __KEEL_LIMITS_H
 #define __KEEL_LIMITS_H
+/* glibc must not search for another compiler limits.h after this one. */
+#define _GCC_LIMITS_H_
 #if __STDC_HOSTED__ && __has_include_next(<limits.h>)
 #include_next <limits.h>
 #endif
