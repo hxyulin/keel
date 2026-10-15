@@ -2,6 +2,7 @@
 //! See docs/macos-linker.md and docs/elf-linker.md.
 //! `link` is host-independent and returns an unsigned executable image. On macOS,
 //! `write_signed` installs it atomically after Apple's ad-hoc codesign succeeds.
+pub mod archive;
 pub mod elf;
 mod read;
 mod tbd;
