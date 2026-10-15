@@ -12,6 +12,7 @@ pub mod regalloc;
 pub mod select;
 mod sysv;
 pub mod tuning;
+mod vector;
 pub mod x86_64;
 
 pub use regalloc::Pools;
@@ -81,7 +82,12 @@ impl CodegenPipeline<'_> {
 
 /// Plan target instructions and the operands that remain live for allocation.
 /// `folds` describes operands encoded directly by the target emitter.
+pub mod x86_features;
+
 pub trait InstructionSelector {
+    fn x86_features(&self) -> keel_asm_ir::x86::Features {
+        keel_asm_ir::x86::Features::default()
+    }
     fn validate_target(&self, _target: Target) -> Result<(), &'static str> {
         Ok(())
     }
@@ -168,9 +174,8 @@ pub fn compile_with_pipeline(
 }
 
 /// Produce a shared assembly program for AArch64 Mach-O or x86-64 ELF.
-/// AArch64 emits native instructions directly; x86 currently parses its Intel
-/// emission into typed instruction items. Explicit text preserves metadata and
-/// inline assembly paths that have not yet migrated.
+/// Both backends emit typed instructions and metadata directly. Explicit text
+/// fragments are reserved for supported user inline assembly.
 pub fn compile_program(
     module: &Module,
     target: Target,
@@ -195,11 +200,7 @@ pub fn compile_program_with_pipeline(
             aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
         }
         Target::X86_64LinuxGnu => {
-            let source = x86_64::compile_with_pipeline(module, &x86_64::REGISTERS, pipeline)?;
-            keel_asm_ir::x86::parse_program(&source).map_err(|message| CodegenError {
-                func: "<assembly>".into(),
-                message,
-            })
+            x86_64::compile_program_with_pipeline(module, &x86_64::REGISTERS, pipeline)
         }
     }
 }
@@ -229,15 +230,7 @@ impl Format {
     pub(crate) fn symbol(self, name: &str) -> String {
         match self {
             Format::MachO => format!("_{name}"),
-            Format::Elf => data::asm_string(name),
-        }
-    }
-
-    /// The section directive's operands for DWARF section `.debug_<name>`.
-    pub(crate) fn debug_section(self, name: &str) -> String {
-        match self {
-            Format::MachO => format!("__DWARF,__debug_{name},regular,debug"),
-            Format::Elf => format!(".debug_{name},\"\",@progbits"),
+            Format::Elf => name.to_owned(),
         }
     }
 }

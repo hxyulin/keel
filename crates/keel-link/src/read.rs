@@ -57,6 +57,7 @@ pub(crate) struct Object {
     pub sections: Vec<Section>,
     pub symbols: Vec<Symbol>,
     pub minimum: u32,
+    pub debug_bytes: Option<Vec<u8>>,
 }
 impl Object {
     pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
@@ -101,13 +102,21 @@ impl Object {
                             return fail("section alignment exceeds 64 KiB");
                         }
                         let kind = flags & 255;
-                        if !matches!(kind, 0 | 1 | 2 | 3 | 4 | 5 | 9 | 0xb | 0xe) {
+                        if kind == 0x15 {
+                            return fail(
+                                "legacy TLS initializer pointer sections are unsupported; use compiler-generated guarded TLS initialization",
+                            );
+                        }
+                        if !matches!(
+                            kind,
+                            0 | 1 | 2 | 3 | 4 | 5 | 9 | 0xb | 0xe | 0x11 | 0x12 | 0x13
+                        ) {
                             return fail(format!(
-                                "unsupported section type {kind:#x} in {} (TLS/ObjC/indirect sections require the system linker)",
+                                "unsupported section type {kind:#x} in {} (unsupported TLS/ObjC/indirect section form)",
                                 r.string(s, 16)?
                             ));
                         }
-                        let zero = kind == 1 || kind == 0xc;
+                        let zero = kind == 1 || kind == 0x12;
                         if len > 512 * 1024 * 1024 {
                             return fail("section exceeds basic linker's 512 MiB limit");
                         }
@@ -200,8 +209,13 @@ impl Object {
             if kind & 0xe0 != 0 || !matches!(kind & 0xe, 0 | 2 | 0xe) {
                 return fail("STABS/indirect symbols are unsupported");
             }
-            if desc & (0x40 | 0x80) != 0 || (kind & 0xe != 0 && desc & 0x100 != 0) {
-                return fail("weak/coalesced/resolver symbols require the system linker");
+            if kind & 0xe != 0 && desc & 0x100 != 0 {
+                return fail("resolver symbols require the system linker");
+            }
+            if desc & 0x80 != 0 && kind & 0xe != 0 && (kind & 0xe != 0xe || kind & 1 == 0) {
+                return fail(
+                    "weak definitions require external section symbols; local/absolute weak definitions are unsupported",
+                );
             }
             let value = r.u64(s + 8)?;
             if kind & 0xe != 0xe && section != 0 {
@@ -229,11 +243,16 @@ impl Object {
                 value,
             });
         }
+        let debug_bytes = sections
+            .iter()
+            .any(|s| s.segment == "__DWARF")
+            .then(|| bytes.to_vec());
         Ok(Self {
             name: name.into(),
             sections,
             symbols,
             minimum,
+            debug_bytes,
         })
     }
 }

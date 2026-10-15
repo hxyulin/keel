@@ -36,13 +36,13 @@
 //!    This is the scan of Wimmer & Franz, "Linear Scan Register Allocation
 //!    on SSA Form" (CGO 2010), without its interval splitting.
 //!
-//! A spilled value lives in an 8-byte stack slot for its whole life; there
-//! is no interval splitting, so a value spilled anywhere is spilled
+//! A spilled scalar lives in an 8-byte stack slot, a vector in 16 bytes, for
+//! its whole life. There is no interval splitting, so a value spilled anywhere is spilled
 //! everywhere. Spill slots are shared by values whose intervals do not
 //! overlap, holes ignored.
 //!
-//! Integers and pointers go in general-purpose registers, floats in the
-//! SIMD/FP registers: two register classes that never interfere. One scan
+//! Integers and pointers go in general-purpose registers, floats and vectors
+//! in SIMD/FP registers: two register classes that never interfere. One scan
 //! handles both; each interval only competes for registers of its class.
 //!
 //! An `i128` is two 64-bit halves, each with its own interval over the same
@@ -67,8 +67,9 @@
 //!
 //! A call clobbers the caller-saved registers. An interval that is live
 //! across one (live just before it and just after it) may only take a
-//! callee-saved register, or be spilled. A value with a hole where the call
-//! is does not cross it. The call's arguments end at the
+//! callee-saved register, or be spilled. Vectors always spill across calls:
+//! neither supported ABI preserves a full 128-bit SIMD register.
+//! A value with a hole where the call is does not cross it. The call's arguments end at the
 //! call and its result starts after it, so neither counts as crossing it.
 //!
 //! A call that returns twice, like `setjmp`, returns the second time from
@@ -115,7 +116,7 @@ pub struct Allocation {
     /// `None` for values with no interval: those defined in unreachable
     /// code, and aliases.
     pub locs: [Vec<Option<Loc>>; 2],
-    /// Number of 8-byte spill slots the frame needs.
+    /// Number of 8-byte spill units the frame needs; each vector uses two.
     pub spill_slots: u32,
     /// The callee-saved registers handed out, sorted, which the prologue
     /// must save.
@@ -242,7 +243,7 @@ fn allocate_tier(
     };
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let mut spilled = linear_scan(&intervals, pools, &mut locs, hints);
-    let spill_slots = assign_spill_slots(&mut spilled, &mut locs);
+    let spill_slots = assign_spill_slots(func, &mut spilled, &mut locs);
 
     let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
         let mut regs: Vec<u8> = locs
@@ -289,6 +290,7 @@ struct Interval {
     crosses_call: bool,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
+    vector: bool,
 }
 
 impl Interval {
@@ -512,7 +514,8 @@ fn build_intervals(
                 half,
                 ranges: list.clone(),
                 crosses_call,
-                float: ty.is_float(),
+                float: ty.is_float() || ty.is_vector(),
+                vector: ty.is_vector(),
             });
         }
     }
@@ -574,7 +577,11 @@ fn linear_scan(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let allowed: Vec<Loc> = if cur.crosses_call {
+        let allowed: Vec<Loc> = if cur.crosses_call && cur.vector {
+            // Both supported ABIs preserve no complete 128-bit SIMD register.
+            // AArch64 v8-v15 preserve only their low 64 bits.
+            Vec::new()
+        } else if cur.crosses_call {
             callee_saved.iter().map(|&r| class(r)).collect()
         } else {
             caller_saved
@@ -635,20 +642,33 @@ fn linear_scan(
 /// Gives each spilled interval a stack slot, reusing the slots of intervals
 /// that have ended: linear scan again, with as many "registers" as needed.
 /// Returns the number of slots.
-fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
+fn assign_spill_slots(
+    func: &Function,
+    spilled: &mut [Interval],
+    locs: &mut [Vec<Option<Loc>>; 2],
+) -> u32 {
     profiling::scope!("spill-slot-assignment");
     spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
-    // (end, slot) of slots in use.
-    let mut active: Vec<(u32, u32)> = Vec::new();
     let mut count = 0;
-    for iv in spilled.iter() {
-        active.retain(|&(end, _)| end >= iv.start());
-        let slot = (0..)
-            .find(|&s| active.iter().all(|&(_, used)| used != s))
-            .expect("some slot is free");
-        active.push((iv.end(), slot));
-        count = count.max(slot + 1);
-        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+    // Keep scalar and vector pools separate: a slot's width stays constant
+    // even when non-overlapping values reuse it. Vector slots take two units.
+    for vector in [false, true] {
+        let mut active: Vec<(u32, u32)> = Vec::new();
+        let base = count;
+        let units = if vector { 2 } else { 1 };
+        for iv in spilled
+            .iter()
+            .filter(|iv| func.value_type(iv.value).is_vector() == vector)
+        {
+            active.retain(|&(end, _)| end >= iv.start());
+            let slot = (base..)
+                .step_by(units as usize)
+                .find(|&s| active.iter().all(|&(_, used)| used != s))
+                .expect("some slot is free");
+            active.push((iv.end(), slot));
+            count = count.max(slot + units);
+            locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+        }
     }
     count
 }

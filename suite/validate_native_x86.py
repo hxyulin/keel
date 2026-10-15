@@ -31,6 +31,7 @@ def main():
                         help="prepared target/suite directory, read only")
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--configs", default="baseline,opt,debug,opt-select")
+    parser.add_argument("--target-features", help="explicit x86 ISA features, e.g. avx,bmi1,bmi2")
     args = parser.parse_args()
     compiler = args.compiler.resolve()
     prepared = args.prepared.resolve()
@@ -41,7 +42,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     configs = {"baseline": [], "opt": ["-O"], "debug": ["-g"],
                "opt-select": ["-O", "--isel", "all"]}
-    report = {"compiler": str(compiler), "prepared": str(prepared), "runs": []}
+    report = {"compiler": str(compiler), "prepared": str(prepared), "target_features":args.target_features, "runs": []}
     for suite, binary, libs, source_dir in [
         ("lua", "lua", ["-lm", "-ldl"], "lua-5.4.7-tests"),
         ("quickjs", "qjs", ["-lm", "-lpthread", "-ldl"], "quickjs-2024-01-13"),
@@ -56,7 +57,7 @@ def main():
         else:
             fixtures.mkdir(parents=True, exist_ok=True)
         for config in args.configs.split(","):
-            flags = configs[config]
+            flags = configs[config] + (["--target-features",args.target_features] if args.target_features is not None else [])
             out = work / suite / config
             out.mkdir(parents=True, exist_ok=True)
             entry = {"suite": suite, "config": config, "compilation": [], "tests": []}

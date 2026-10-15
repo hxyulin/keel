@@ -61,3 +61,46 @@ run([compiler, 'compile', '--emit-object', 'frame.keel', '-o', 'frame.o'], 'fram
 run(['clang', '-g', '-fno-omit-frame-pointer', 'driver.c', 'frame.o', '-o', 'unwind'], 'frame-link.log')
 run(['./unwind'], 'unwind.log')
 print('PASS ELF/DWARF readers, GDB source line/locals/backtrace, libgcc unwind through Keel frame')
+
+# Branch resizing must update CFI advances, the FDE range, line addresses,
+# section-based data relocations and a jump-table difference together.
+(work / 'relaxed.c').write_text('''int walk(void);
+int keel_frame(void) {
+    int frames = walk();
+    if (frames < 0) return 0;
+    return frames + 1;
+}
+''')
+run([compiler, 'cc', '-g', 'relaxed.c', '-o', 'relaxed.s'], 'relaxed-source.log')
+source = (work / 'relaxed.s').read_text()
+assert '.cfi_startproc' in source
+source = source.replace('.cfi_startproc', '''.cfi_startproc
+.Lrelaxstart:
+jmp .Lrelaxalias
+.zero 13
+.p2align 4,0x90,15
+.Lrelaxbody:
+''', 1)
+source += '''
+.set .Lrelaxalias,.Lrelaxbody
+.data
+.quad .Lrelaxalias
+.long .Lrelaxbody-.Lrelaxstart
+'''
+(work / 'relaxed.s').write_text(source)
+run([compiler, 'asm', '--target', 'x86_64-unknown-linux-gnu', 'relaxed.s', '-o', 'relaxed.o'],
+    'relaxed-compile.log')
+run(['clang', '-c', 'relaxed.s', '-o', 'relaxed-clang.o'], 'relaxed-clang-compile.log')
+for name, obj in [('native', 'relaxed.o'), ('clang', 'relaxed-clang.o')]:
+    exe = 'relaxed-' + name
+    run(['clang', '-g', '-fno-omit-frame-pointer', 'driver.c', obj, '-o', exe], exe + '-link.log')
+    run(['./' + exe], exe + '-unwind.log')
+    for mode in ['--debug-dump=decodedline', '--debug-dump=frames', '-Wr', '-Ws']:
+        text = run(['readelf', mode, obj], exe + '-readelf-' + mode.replace('=', '-') + '.log')
+        if 'Warning:' in text or 'Error:' in text:
+            raise RuntimeError(text)
+    gdb = run(['gdb', '-batch', '-ex', 'break relaxed.c:3', '-ex', 'run', '-ex', 'bt',
+               './' + exe], exe + '-gdb.log')
+    if 'relaxed.c:3' not in gdb or 'main' not in gdb:
+        raise RuntimeError(gdb)
+print('PASS relaxed branches/aliases/alignment: source breakpoint/backtrace and libgcc unwind (native/Clang)')

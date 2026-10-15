@@ -86,7 +86,11 @@ impl Segment {
             u64le(v, s.address);
             u64le(v, s.size as u64);
             for n in [
-                if s.flags & 255 == 1 { 0 } else { s.file as u32 },
+                if matches!(s.flags & 255, 1 | 0x12) {
+                    0
+                } else {
+                    s.file as u32
+                },
                 s.alignment,
                 0,
                 0,
@@ -128,7 +132,17 @@ impl Linker {
                 .filter(|(_, s)| s.segment == seg)
                 .map(|(id, _)| id)
                 .collect();
-            ids.sort_by_key(|&id| (self.outputs[id].flags & 255 == 1, id));
+            ids.sort_by_key(|&id| {
+                (
+                    match self.outputs[id].flags & 255 {
+                        0x11 => 1,
+                        0x12 => 2,
+                        1 => 3,
+                        _ => 0,
+                    },
+                    id,
+                )
+            });
             let start = file;
             let vmstart = address;
             if seg == "__TEXT" {
@@ -136,8 +150,22 @@ impl Linker {
                 address += PAGE as u64;
             }
             let mut file_end = file;
+            let tls_alignment = ids
+                .iter()
+                .filter(|&&id| matches!(self.outputs[id].flags & 255, 0x11 | 0x12))
+                .map(|&id| self.outputs[id].alignment)
+                .max()
+                .unwrap_or(0);
+            let mut tls_started = false;
             for &id in &ids {
                 let s = &mut self.outputs[id];
+                if !tls_started && matches!(s.flags & 255, 0x11 | 0x12) {
+                    // dyld uses offsets into a malloc-backed TLS template.
+                    // Preserve section alignment relative to the template base,
+                    // not only relative to the executable's image base.
+                    s.alignment = s.alignment.max(tls_alignment);
+                    tls_started = true;
+                }
                 let a = 1 << s.alignment;
                 // Segment starts are at least 16 KiB aligned, and all section
                 // alignments above that are handled in VM and file together.
@@ -146,7 +174,7 @@ impl Linker {
                 s.address = address;
                 s.ordinal = ordinal as u8;
                 ordinal += 1;
-                if s.flags & 255 != 1 {
+                if !matches!(s.flags & 255, 1 | 0x12) {
                     file += pad;
                     s.file = file;
                     file += s.size;
@@ -195,9 +223,13 @@ impl Linker {
         for (&addr, &(import, addend)) in &self.binds {
             let (symbol, ordinal) = &self.imports[import];
             let (seg, off) = segment_offset(&segments, addr)?;
-            binding.push(0x20);
-            uleb(&mut binding, *ordinal as u64);
-            binding.push(0x40);
+            if *ordinal < 0 {
+                binding.push(0x30 | (*ordinal as u8 & 15));
+            } else {
+                binding.push(0x20);
+                uleb(&mut binding, *ordinal as u64);
+            }
+            binding.push(0x40 | u8::from(self.weak_imports.contains(&import)));
             binding.extend_from_slice(symbol.as_bytes());
             binding.push(0);
             binding.push(0x51);
@@ -208,8 +240,29 @@ impl Linker {
             binding.push(0x90);
         }
         binding.push(0);
+        let mut weak_binding = Vec::new();
+        // dyld requires weak binding records in symbol-name order.
+        for name in &self.weak_names {
+            let strong = matches!(self.globals.get(name), Some(Target::Definition(o, s)) if self.objects[*o].symbols[*s].desc & 0x80 == 0);
+            weak_binding.push(0x40 | if strong { 8 } else { 0 });
+            weak_binding.extend_from_slice(name.as_bytes());
+            weak_binding.push(0);
+            for (&addr, (symbol, addend)) in &self.weak_binds {
+                if symbol != name {
+                    continue;
+                }
+                let (seg, off) = segment_offset(&segments, addr)?;
+                weak_binding.push(0x51);
+                weak_binding.push(0x60);
+                sleb(&mut weak_binding, *addend);
+                weak_binding.push(0x70 | seg);
+                uleb(&mut weak_binding, off);
+                weak_binding.push(0x90);
+            }
+        }
+        weak_binding.push(0);
         let exports = self.exports()?;
-        for data in [&rebase, &binding, &exports] {
+        for data in [&rebase, &binding, &exports, &weak_binding] {
             let off = file + linkedit.len();
             ranges.push((off as u32, data.len() as u32));
             linkedit.extend_from_slice(data);
@@ -217,6 +270,8 @@ impl Linker {
         }
         let mut strings = vec![0];
         let mut symbols = Vec::new();
+        let debug_objects = self.debug_map(&mut symbols, &mut strings)?;
+        let locals = (symbols.len() / 16) as u32;
         let mut indices = BTreeMap::new();
         let mut defined = 0;
         for (symbol, &target) in &self.globals {
@@ -232,7 +287,7 @@ impl Linker {
                     let symbol = &self.objects[oi].symbols[si];
                     let section = &self.objects[oi].sections[symbol.section - 1];
                     (
-                        15,
+                        15 | (symbol.kind & 0x10),
                         self.outputs[section.output.ok_or("export in discarded section")?].ordinal,
                     )
                 }
@@ -240,12 +295,16 @@ impl Linker {
                 Target::Header => (15, 1),
                 Target::Import(_) => unreachable!(),
             };
-            indices.insert(symbol.clone(), defined);
+            indices.insert(symbol.clone(), locals + defined);
             defined += 1;
-            nlist(&mut symbols, &mut strings, symbol, kind, sect, 0, addr);
+            let desc = match target {
+                Target::Definition(o, s) => self.objects[o].symbols[s].desc & 0x80,
+                _ => 0,
+            };
+            nlist(&mut symbols, &mut strings, symbol, kind, sect, desc, addr);
         }
         for (i, (symbol, ordinal)) in self.imports.iter().enumerate() {
-            indices.insert(symbol.clone(), defined + i as u32);
+            indices.insert(symbol.clone(), locals + defined + i as u32);
             if *ordinal > 253 {
                 return fail("more than 253 dylib ordinals unsupported");
             }
@@ -255,7 +314,12 @@ impl Linker {
                 symbol,
                 1,
                 0,
-                (*ordinal as u16) << 8,
+                ((*ordinal as u16 & 255) << 8)
+                    | if self.weak_imports.contains(&i) {
+                        0x40
+                    } else {
+                        0
+                    },
                 0,
             );
         }
@@ -295,8 +359,8 @@ impl Linker {
                 ranges[0].1,
                 ranges[1].0,
                 ranges[1].1,
-                0,
-                0,
+                ranges[3].0,
+                ranges[3].1,
                 0,
                 0,
                 ranges[2].0,
@@ -318,10 +382,10 @@ impl Linker {
             0xb,
             &[
                 0,
-                0,
-                0,
+                locals,
+                locals,
                 defined,
-                defined,
+                locals + defined,
                 self.imports.len() as u32,
                 0,
                 0,
@@ -372,6 +436,21 @@ impl Linker {
             return fail("load commands exceed reserved header page");
         }
         let mut bytes = Vec::new();
+        let mut flags = 0x200085; // MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
+        if self
+            .weak_names
+            .iter()
+            .any(|name| matches!(self.globals.get(name), Some(Target::Definition(_, _))))
+        {
+            // Also needed for NON_WEAK_DEFINITION records overriding dylib weak definitions.
+            flags |= 0x8000; // MH_WEAK_DEFINES
+        }
+        if !self.weak_binds.is_empty() {
+            flags |= 0x10000;
+        } // MH_BINDS_TO_WEAK
+        if self.outputs.iter().any(|s| s.flags & 255 == 0x13) {
+            flags |= 0x800000;
+        } // MH_HAS_TLV_DESCRIPTORS
         for n in [
             0xfeedfacf,
             0x100000c,
@@ -379,7 +458,7 @@ impl Linker {
             2,
             (segments.len() + 7 + self.options.dylibs.len()) as u32,
             commands.len() as u32,
-            0x200085,
+            flags,
             0,
         ] {
             u32le(&mut bytes, n);
@@ -387,7 +466,7 @@ impl Linker {
         bytes.extend_from_slice(&commands);
         bytes.resize(file, 0);
         for s in &self.outputs {
-            if s.flags & 255 != 1 {
+            if !matches!(s.flags & 255, 1 | 0x12) {
                 bytes[s.file..s.file + s.data.len()].copy_from_slice(&s.data);
             }
         }
@@ -398,9 +477,117 @@ impl Linker {
         bytes[uuid_offset + 6] = (bytes[uuid_offset + 6] & 15) | 0x80; // UUID version 8
         bytes[uuid_offset + 8] = (bytes[uuid_offset + 8] & 63) | 0x80;
         Ok(Executable {
+            debug_objects,
             bytes,
             warnings: self.warnings,
         })
+    }
+    /// Darwin's debug map relocates object DWARF via N_OSO/N_FUN/N_GSYM
+    /// records. Retain exact input snapshots, including archive members, so the
+    /// reusable byte-oriented API never depends on diagnostic input names.
+    fn debug_map(&self, symbols: &mut Vec<u8>, strings: &mut Vec<u8>) -> Result<Vec<DebugObject>> {
+        let mut debug_objects = Vec::new();
+        if let Some(directory) = &self.options.debug_directory {
+            for (oi, object) in self.objects.iter().enumerate() {
+                let Some(bytes) = &object.debug_bytes else {
+                    continue;
+                };
+                use sha2::{Digest, Sha256};
+                let hash: String = Sha256::digest(bytes)
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect();
+                let path = directory.join(format!("object-{oi:05}-{hash}.o"));
+                nlist(symbols, strings, &object.name, 0x64, 0, 0, 0); // N_SO
+                nlist(symbols, strings, path.to_str().unwrap(), 0x66, 0, 1, 0); // N_OSO; zero timestamp means no staleness check
+                for (si, symbol) in object.symbols.iter().enumerate() {
+                    let common =
+                        symbol.kind & 0xe == 0 && symbol.kind & 1 != 0 && symbol.value != 0;
+                    if common {
+                        let target = self.symbol_target(oi, si)?;
+                        let ordinal = match target {
+                            Target::Common(_) => self.outputs[self.common_section].ordinal,
+                            Target::Definition(o, sym) => {
+                                let definition = &self.objects[o].symbols[sym];
+                                if definition.section == 0 {
+                                    0
+                                } else {
+                                    let section = &self.objects[o].sections[definition.section - 1];
+                                    self.outputs[section
+                                        .output
+                                        .ok_or("debug common resolves to discarded section")?]
+                                    .ordinal
+                                }
+                            }
+                            Target::Header => 1,
+                            Target::Import(_) => return fail("debug common resolves to an import"),
+                        };
+                        nlist(
+                            symbols,
+                            strings,
+                            &symbol.name,
+                            0x20,
+                            ordinal,
+                            0,
+                            self.address(target)?,
+                        );
+                        continue;
+                    }
+                    if symbol.kind & 0xe != 0xe
+                        || symbol.name.starts_with("ltmp")
+                        || symbol.name.starts_with('L')
+                    {
+                        continue;
+                    }
+                    if symbol.kind & 1 != 0
+                        && !matches!(self.globals.get(&symbol.name), Some(Target::Definition(o,s)) if *o == oi && *s == si)
+                    {
+                        continue;
+                    }
+                    let section = &object.sections[symbol.section - 1];
+                    let Some(out) = section.output else {
+                        continue;
+                    };
+                    let code = section.flags & 0x80000400 != 0;
+                    nlist(
+                        symbols,
+                        strings,
+                        &symbol.name,
+                        if code {
+                            0x24
+                        } else if symbol.kind & 1 != 0 {
+                            0x20
+                        } else {
+                            0x26
+                        },
+                        self.outputs[out].ordinal,
+                        0,
+                        self.symbol_address(oi, symbol)?,
+                    );
+                    if code {
+                        let end = object
+                            .symbols
+                            .iter()
+                            .filter(|s| {
+                                s.section == symbol.section
+                                    && s.value > symbol.value
+                                    && !s.name.starts_with("ltmp")
+                                    && !s.name.starts_with('L')
+                            })
+                            .map(|s| s.value)
+                            .min()
+                            .unwrap_or(section.address + section.size as u64);
+                        nlist(symbols, strings, "", 0x24, 0, 0, end - symbol.value);
+                    }
+                }
+                nlist(symbols, strings, "", 0x64, 1, 0, 0);
+                debug_objects.push(DebugObject {
+                    path,
+                    bytes: bytes.clone(),
+                });
+            }
+        }
+        Ok(debug_objects)
     }
     fn reloc_target(&self, oi: usize, r: &Reloc) -> Result<(Option<Target>, u64)> {
         if r.external {
@@ -513,7 +700,36 @@ impl Linker {
                         value = value.wrapping_sub(self.objects[oi].sections[r.symbol - 1].address);
                     }
                     value = value.wrapping_add(raw);
-                    if !metadata && !difference {
+                    // The third word of a TLV descriptor is an offset in the
+                    // image's contiguous TLS template, never an ASLR pointer.
+                    let tls_offset = s.flags & 255 == 0x13 && r.offset % 24 == 16;
+                    if tls_offset {
+                        let template = self
+                            .outputs
+                            .iter()
+                            .filter(|s| matches!(s.flags & 255, 0x11 | 0x12))
+                            .map(|s| s.address)
+                            .min()
+                            .ok_or("TLV descriptor without template")?;
+                        let target_section = if r.external {
+                            match target {
+                                Some(Target::Definition(o, sym)) => self.objects[o]
+                                    .sections
+                                    .get(self.objects[o].symbols[sym].section.wrapping_sub(1))
+                                    .ok_or("TLV template needs a section definition")?,
+                                _ => return fail("TLV template must be a local definition"),
+                            }
+                        } else {
+                            &self.objects[oi].sections[r.symbol - 1]
+                        };
+                        if !matches!(target_section.flags & 255, 0x11 | 0x12) {
+                            return fail("TLV offset must reference TLS template data");
+                        }
+                        value = value
+                            .checked_sub(template)
+                            .ok_or("TLV offset precedes template")?;
+                    }
+                    if !metadata && !difference && !tls_offset {
                         if let Some(Target::Import(import)) = target {
                             self.binds.insert(location, (import, raw as i64));
                             value = 0;
@@ -529,6 +745,12 @@ impl Linker {
                             }
                         }
                     }
+                    if !metadata && !difference && !tls_offset && r.external {
+                        let name = &self.objects[oi].symbols[r.symbol].name;
+                        if target.is_some_and(|t| self.coalesces(t, name)) {
+                            self.weak_binds.insert(location, (name.clone(), raw as i64));
+                        }
+                    }
                     if r.width == 4
                         && !((value as i64) >= i32::MIN as i64 && (value as i64) <= u32::MAX as i64)
                     {
@@ -537,27 +759,43 @@ impl Linker {
                     data[r.offset..r.offset + r.width]
                         .copy_from_slice(&value.to_le_bytes()[..r.width]);
                 }
-                2..=7 => {
+                2..=9 => {
                     if !r.external || r.width != 4 {
                         return fail(
                             "instruction/GOT relocations require external symbol indexes and width 4",
                         );
                     }
+                    if matches!(r.kind, 8 | 9)
+                        && let Some(Target::Definition(o, sym)) = target
+                    {
+                        let definition = &self.objects[o].symbols[sym];
+                        if self.objects[o]
+                            .sections
+                            .get(definition.section.wrapping_sub(1))
+                            .is_none_or(|s| s.flags & 255 != 0x13)
+                        {
+                            return fail("TLVP relocation must reference a TLS descriptor");
+                        }
+                    }
                     let symbol = &self.objects[oi].symbols[r.symbol].name;
-                    if matches!(r.kind, 2 | 3 | 5 | 7) != r.pc {
+                    if matches!(r.kind, 2 | 3 | 5 | 7 | 8) != r.pc {
                         return fail("invalid PC-relative relocation flag");
                     }
                     let word = Reader(&data).u32(r.offset)?;
-                    if matches!(r.kind, 5..=7) {
+                    if matches!(r.kind, 5..=9) {
                         value = self.outputs[self.got_section].address
                             + *self
                                 .got
                                 .get(&self.got_key(oi, r.symbol)?)
                                 .ok_or("missing GOT slot")? as u64
                                 * 8;
-                    } else if matches!(target, Some(Target::Import(_))) {
+                    } else if matches!(target, Some(Target::Import(_)))
+                        || target.is_some_and(|t| self.coalesces(t, symbol))
+                    {
                         if r.kind != 2 {
-                            return fail("direct page reference to import requires GOT relocation");
+                            return fail(
+                                "direct page reference to imported/coalesced symbol requires GOT relocation",
+                            );
                         }
                         value = self.outputs[self.stub_section].address
                             + self.stubs[symbol] as u64 * 12;
@@ -574,7 +812,7 @@ impl Linker {
                             }
                             (word & 0xfc000000) | ((delta >> 2) as u32 & 0x3ffffff)
                         }
-                        3 | 5 => {
+                        3 | 5 | 8 => {
                             if word & 0x9f000000 != 0x90000000 {
                                 return fail("PAGE21 does not address ADRP");
                             }
@@ -591,7 +829,7 @@ impl Linker {
                                 | (((page as u32) & 3) << 29)
                                 | (((page as u32) & 0x1ffffc) << 3)
                         }
-                        4 | 6 => {
+                        4 | 6 | 9 => {
                             let scale = if word & 0x3b000000 == 0x39000000 {
                                 if word & 0x04800000 == 0x04800000 {
                                     4
@@ -627,7 +865,7 @@ impl Linker {
                 }
                 _ => {
                     return fail(format!(
-                        "unsupported arm64 relocation type {} at {:#x} (TLS/authentication require system linker)",
+                        "unsupported arm64 relocation type {} at {:#x} (unsupported TLS/authentication form)",
                         r.kind, r.offset
                     ));
                 }
@@ -656,6 +894,9 @@ impl Linker {
                     self.address(target)?
                 }
             };
+            if self.coalesces(target, symbol) {
+                self.weak_binds.insert(addr, (symbol.clone(), 0));
+            }
             self.outputs[self.got_section].data[index * 8..index * 8 + 8]
                 .copy_from_slice(&value.to_le_bytes());
         }
@@ -694,7 +935,18 @@ impl Linker {
             let absolute =
                 matches!(target,Target::Definition(o,s) if self.objects[o].symbols[s].kind&0xe==2);
             let mut term = Vec::new();
-            uleb(&mut term, if absolute { 2 } else { 0 });
+            let tls = matches!(target, Target::Definition(o, sym) if self.objects[o].symbols[sym].section != 0 && self.objects[o].sections[self.objects[o].symbols[sym].section - 1].flags & 255 == 0x13);
+            let weak = matches!(target, Target::Definition(o,s) if self.objects[o].symbols[s].desc & 0x80 != 0);
+            uleb(
+                &mut term,
+                (if absolute {
+                    2
+                } else if tls {
+                    1
+                } else {
+                    0
+                }) | if weak { 4 } else { 0 },
+            );
             uleb(
                 &mut term,
                 self.address(target)? - if absolute { 0 } else { BASE },

@@ -26,10 +26,22 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let mut libraries = vec!["System".to_owned()];
     let mut output = PathBuf::from("a.out");
     let mut root = None;
+    let mut debug_directory = None;
+    let mut dsym: Option<PathBuf> = None;
     let mut minimum = 11 << 16;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--debug-map" => {
+                debug_directory = Some(PathBuf::from(
+                    args.next().ok_or("--debug-map requires a directory")?,
+                ))
+            }
+            "--dsym" => {
+                dsym = Some(PathBuf::from(
+                    args.next().ok_or("--dsym requires an output path")?,
+                ))
+            }
             "-o" => output = args.next().ok_or("-o requires a path")?.into(),
             "--sysroot" | "-syslibroot" => {
                 root = Some(PathBuf::from(
@@ -98,18 +110,51 @@ pub fn run(args: &[String]) -> Result<(), String> {
         .iter()
         .map(|(name, bytes)| keel_link::Input { name, bytes })
         .collect();
+    if dsym.is_some() && debug_directory.is_none() {
+        debug_directory = Some(output.with_extension("debug-objects"));
+    }
+    let debug_directory = debug_directory
+        .map(|p| {
+            if p.is_absolute() {
+                Ok(p)
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(p))
+                    .map_err(|e| e.to_string())
+            }
+        })
+        .transpose()?;
     let executable = keel_link::link(
         &inputs,
         keel_link::Options {
             dylibs,
             minimum_macos: minimum,
             sdk_version: sdk_version(&root),
+            debug_directory,
         },
     )?;
     for warning in &executable.warnings {
         eprintln!("keel link: warning: {warning}");
     }
-    keel_link::write_signed(&executable, &output)
+    keel_link::write_signed(&executable, &output)?;
+    if let Some(path) = dsym {
+        let result = std::process::Command::new("/usr/bin/dsymutil")
+            .arg(&output)
+            .arg("-o")
+            .arg(path)
+            .output()
+            .map_err(|e| format!("dsymutil: {e}"))?;
+        if !result.status.success() {
+            return Err(format!(
+                "dsymutil failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            ));
+        }
+        if !result.stderr.is_empty() {
+            eprint!("{}", String::from_utf8_lossy(&result.stderr));
+        }
+    }
+    Ok(())
 }
 fn version(s: &str) -> Result<u32, String> {
     let parts = s

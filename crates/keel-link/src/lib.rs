@@ -30,6 +30,11 @@ pub struct Options {
     pub dylibs: Vec<Dylib>,
     pub minimum_macos: u32,
     pub sdk_version: u32,
+    /// Absolute directory for retained copies of debug inputs. No input name is
+    /// treated as a filesystem path. `write_signed` materializes these artifacts.
+    /// Use a distinct directory for each executable; keep it for debug-map use,
+    /// or explicitly run dsymutil before removing it.
+    pub debug_directory: Option<std::path::PathBuf>,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -37,10 +42,17 @@ impl Default for Options {
             dylibs: Vec::new(),
             minimum_macos: 11 << 16,
             sdk_version: 0,
+            debug_directory: None,
         }
     }
 }
+pub struct DebugObject {
+    pub path: std::path::PathBuf,
+    pub bytes: Vec<u8>,
+}
 pub struct Executable {
+    /// Exact object snapshots referenced by the native Darwin debug map.
+    pub debug_objects: Vec<DebugObject>,
     pub bytes: Vec<u8>,
     pub warnings: Vec<String>,
 }
@@ -67,7 +79,10 @@ pub(crate) struct Linker {
     objects: Vec<Object>,
     outputs: Vec<OutputSection>,
     globals: BTreeMap<String, Target>,
-    imports: Vec<(String, usize)>,
+    imports: Vec<(String, i32)>,
+    weak_imports: BTreeSet<usize>,
+    weak_names: BTreeSet<String>,
+    weak_binds: BTreeMap<u64, (String, i64)>,
     got: BTreeMap<String, usize>,
     stubs: BTreeMap<String, usize>,
     got_targets: BTreeMap<String, Target>,
@@ -82,6 +97,11 @@ pub(crate) struct Linker {
 }
 
 pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
+    if let Some(directory) = &options.debug_directory
+        && (!directory.is_absolute() || directory.to_str().is_none_or(|p| p.contains('\0')))
+    {
+        return fail("debug directory must be an absolute UTF-8 path without NUL bytes");
+    }
     if options.minimum_macos < 11 << 16 {
         return fail("arm64 executables require macOS 11 or newer");
     }
@@ -147,6 +167,9 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         outputs: Vec::new(),
         globals: BTreeMap::new(),
         imports: Vec::new(),
+        weak_imports: BTreeSet::new(),
+        weak_names: BTreeSet::new(),
+        weak_binds: BTreeMap::new(),
         got: BTreeMap::new(),
         stubs: BTreeMap::new(),
         got_targets: BTreeMap::new(),
@@ -211,18 +234,30 @@ impl Linker {
                     }
                     continue;
                 }
-                if self
-                    .globals
-                    .insert(s.name.clone(), Target::Definition(oi, si))
-                    .is_some()
-                {
-                    return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
+                if s.desc & 0x80 != 0 {
+                    self.weak_names.insert(s.name.clone());
                 }
+                if let Some(&previous) = self.globals.get(&s.name) {
+                    let weak = matches!(previous, Target::Definition(o, sym) if self.objects[o].symbols[sym].desc & 0x80 != 0);
+                    if s.desc & 0x80 != 0 {
+                        continue;
+                    }
+                    if !weak {
+                        return fail(format!("{}: duplicate definition `{}`", o.name, s.name));
+                    }
+                }
+                self.globals
+                    .insert(s.name.clone(), Target::Definition(oi, si));
             }
         }
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
                 let s = self.objects[oi].sections[si].clone();
+                if s.flags & 255 == 0x13 && !s.size.is_multiple_of(24) {
+                    return fail(
+                        "arm64 TLS descriptors must be 8-byte aligned triples of pointers",
+                    );
+                }
                 if s.segment == "__DWARF" {
                     continue;
                 }
@@ -253,7 +288,11 @@ impl Linker {
                     &seg,
                     &s.name.clone(),
                     s.flags & !(0x300 | 0x02000000),
-                    s.alignment,
+                    if s.flags & 255 == 0x13 {
+                        s.alignment.max(3)
+                    } else {
+                        s.alignment
+                    },
                 )?;
                 let s = &mut self.objects[oi].sections[si];
                 let out = &mut self.outputs[id];
@@ -262,7 +301,7 @@ impl Linker {
                 if end > 512 * 1024 * 1024 {
                     return fail("merged section exceeds 512 MiB");
                 }
-                if s.flags & 255 != 1 {
+                if !matches!(s.flags & 255, 1 | 0x12) {
                     out.data.resize(offset, 0);
                     out.data.extend_from_slice(&s.data);
                 }
@@ -270,12 +309,13 @@ impl Linker {
                 s.output = Some(id);
                 s.offset = offset;
             }
-            if self.objects[oi]
-                .sections
-                .iter()
-                .any(|s| s.segment == "__DWARF")
+            if self.options.debug_directory.is_none()
+                && self.objects[oi]
+                    .sections
+                    .iter()
+                    .any(|s| s.segment == "__DWARF")
             {
-                self.warnings.push(format!("{}: DWARF input omitted; native output does not yet support source debugging/dSYM",self.objects[oi].name));
+                self.warnings.push(format!("{}: DWARF input omitted; request --debug-map or --dsym to retain source debugging",self.objects[oi].name));
             }
         }
         self.common_section = self.output("__DATA", "__common", 1, 3)?;
@@ -305,24 +345,68 @@ impl Linker {
             if self.globals.contains_key(&name) {
                 continue;
             }
-            let ordinal=self.options.dylibs.iter().position(|d|d.exports.contains(&name)).ok_or_else(||format!("undefined symbol `{name}`: absent from input definitions and selected macOS arm64 TBD interfaces"))?+1;
+            let weak = self
+                .objects
+                .iter()
+                .flat_map(|o| &o.symbols)
+                .filter(|s| s.name == name && s.kind & 0xe == 0 && s.value == 0)
+                .all(|s| s.desc & 0x40 != 0);
+            let ordinal = match self
+                .options
+                .dylibs
+                .iter()
+                .enumerate()
+                .filter(|(_, d)| d.exports.contains(&name))
+                .min_by_key(|(_, d)| d.weak_exports.contains(&name))
+                .map(|(i, _)| i)
+            {
+                Some(i) => (i + 1) as i32,
+                None if weak => -2, // weak flat lookup: dyld writes zero if absent
+                None => {
+                    return fail(format!(
+                        "undefined symbol `{name}`: absent from input definitions and selected macOS arm64 TBD interfaces"
+                    ));
+                }
+            };
             let id = self.imports.len();
+            if weak {
+                self.weak_imports.insert(id);
+            }
+            if ordinal > 0
+                && self.options.dylibs[ordinal as usize - 1]
+                    .weak_exports
+                    .contains(&name)
+            {
+                self.weak_names.insert(name.clone());
+            }
             self.imports.push((name.clone(), ordinal));
             self.globals.insert(name, Target::Import(id));
         }
+        for dylib in &self.options.dylibs {
+            self.weak_names.extend(
+                dylib
+                    .weak_exports
+                    .iter()
+                    .filter(|n| matches!(self.globals.get(*n), Some(Target::Definition(_, _))))
+                    .cloned(),
+            );
+        }
+        // Private extern definitions coalesce statically, never across images.
+        self.weak_names.retain(|name| !matches!(self.globals.get(name), Some(Target::Definition(o,s)) if self.objects[*o].symbols[*s].kind & 0x10 != 0));
         for (oi, o) in self.objects.iter().enumerate() {
             for s in &o.sections {
                 if s.segment == "__DWARF" {
                     continue;
                 }
                 for r in &s.relocs {
-                    if r.external && matches!(r.kind, 2 | 5 | 6 | 7) {
+                    if r.external && matches!(r.kind, 2 | 5 | 6 | 7 | 8 | 9) {
                         let sym = o
                             .symbols
                             .get(r.symbol)
                             .ok_or("relocation symbol index out of range")?;
                         if r.kind != 2
                             || matches!(self.symbol_target(oi, r.symbol)?, Target::Import(_))
+                            || self.coalesces(self.symbol_target(oi, r.symbol)?, &sym.name)
                         {
                             let next = self.got.len();
                             self.got.entry(self.got_key(oi, r.symbol)?).or_insert(next);
@@ -332,7 +416,8 @@ impl Linker {
                             );
                         }
                         if r.kind == 2
-                            && matches!(self.symbol_target(oi, r.symbol)?, Target::Import(_))
+                            && (matches!(self.symbol_target(oi, r.symbol)?, Target::Import(_))
+                                || self.coalesces(self.symbol_target(oi, r.symbol)?, &sym.name))
                         {
                             let next = self.stubs.len();
                             self.stubs.entry(sym.name.clone()).or_insert(next);
@@ -371,6 +456,16 @@ impl Linker {
         self.outputs[self.unwind_section].size = reserve;
         self.outputs[self.unwind_section].data = vec![0; reserve];
         Ok(())
+    }
+    fn coalesces(&self, target: Target, name: &str) -> bool {
+        match target {
+            Target::Definition(o, s) => {
+                self.objects[o].symbols[s].desc & 0x80 != 0
+                    && self.objects[o].symbols[s].kind & 0x10 == 0
+            }
+            Target::Import(_) => self.weak_names.contains(name),
+            _ => false,
+        }
     }
     fn got_key(&self, oi: usize, si: usize) -> Result<String> {
         let s = self.objects[oi]
@@ -433,6 +528,17 @@ pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
     {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
+        for object in &executable.debug_objects {
+            std::fs::create_dir_all(
+                object
+                    .path
+                    .parent()
+                    .ok_or("debug object has no directory")?,
+            )
+            .map_err(|e| e.to_string())?;
+            std::fs::write(&object.path, &object.bytes)
+                .map_err(|e| format!("debug object {}: {e}", object.path.display()))?;
+        }
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

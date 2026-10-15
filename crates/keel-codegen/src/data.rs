@@ -2,7 +2,7 @@
 
 use crate::Format;
 use crate::metadata::{Directive, Expression, SectionKind, Sink};
-use keel_ir::{DataInit, DataItem, DataObject, Type};
+use keel_ir::{DataInit, DataItem, DataObject};
 use std::fmt::Write;
 
 /// `s` as a quoted assembler string.
@@ -28,14 +28,6 @@ pub(crate) fn asm_string(s: &str) -> String {
 /// - constant without pointers: `__TEXT,__const`, read-only from the start.
 ///
 /// Objects are exported (`.globl`) unless local, like functions.
-pub(crate) fn emit_data(out: &mut String, format: Format, data: &DataObject, init: &DataInit) {
-    if format == Format::Elf {
-        emit_elf(out, data, init)
-    } else {
-        emit_macho(out, data, init)
-    }
-}
-
 pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
     let name = Format::MachO.symbol(&data.name);
     let alignment = init.align.trailing_zeros();
@@ -113,64 +105,55 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
 /// thread's copy is made from; the code finds its copy from the thread
 /// pointer. Each symbol gets its type and size, which debuggers and
 /// `nm` show.
-fn emit_elf(out: &mut String, data: &DataObject, init: &DataInit) {
-    let name = asm_string(&data.name);
-    let section = match (data.thread_local, init.constant, init.is_zero()) {
-        (true, _, true) => ".tbss,\"awT\",@nobits",
-        (true, _, false) => ".tdata,\"awT\",@progbits",
-        (false, false, true) => ".bss",
-        (false, false, false) => ".data",
-        (false, true, _) if init.has_relocations() => ".data.rel.ro,\"aw\",@progbits",
-        (false, true, _) => ".rodata",
+pub(crate) fn emit_elf(out: &mut impl Sink, data: &DataObject, init: &DataInit) {
+    let name = data.name.clone();
+    let (section, flags, nobits) = match (data.thread_local, init.constant, init.is_zero()) {
+        (true, _, true) => (".tbss", 0x403, true),
+        (true, _, false) => (".tdata", 0x403, false),
+        (false, false, true) => (".bss", 3, true),
+        (false, false, false) => (".data", 3, false),
+        (false, true, _) if init.has_relocations() => (".data.rel.ro", 3, false),
+        _ => (".rodata", 2, false),
     };
-    writeln!(out, "\t.section\t{section}").unwrap();
+    out.directive(Directive::ElfSection {
+        name: section.into(),
+        flags,
+        nobits,
+    });
     if !data.local {
-        writeln!(out, "\t.globl\t{name}").unwrap();
+        out.directive(Directive::Global(name.clone()));
     }
-    let log2_align = init.align.trailing_zeros();
-    writeln!(
-        out,
-        "\t.type\t{name},@object\n\t.size\t{name}, {}\n\t.p2align\t{log2_align}\n{name}:",
-        init.size()
-    )
-    .unwrap();
-    if section.contains("nobits") || section == ".bss" {
-        writeln!(out, "\t.zero\t{}", init.size()).unwrap();
+    out.directive(Directive::ElfType {
+        name: name.clone(),
+        function: false,
+    });
+    out.directive(Directive::Size {
+        name: name.clone(),
+        expression: Expression::constant(init.size().into()),
+    });
+    out.align(init.align.trailing_zeros());
+    out.label(name);
+    if nobits {
+        out.directive(Directive::Space(init.size()));
     } else {
-        emit_items(out, Format::Elf, init);
+        emit_elf_items(out, init);
     }
 }
 
-/// The bytes of a data object, as directives.
-fn emit_items(out: &mut String, format: Format, init: &DataInit) {
+fn emit_elf_items(out: &mut impl Sink, init: &DataInit) {
     for item in &init.items {
         match item {
-            DataItem::Bytes(bytes) if bytes.is_empty() => {}
-            DataItem::Bytes(bytes) => {
-                let list: Vec<String> = bytes.iter().map(|b| b.to_string()).collect();
-                writeln!(out, "\t.byte\t{}", list.join(", ")).unwrap();
-            }
-            // The directives truncate to their width, and the verifier has
-            // checked the value fits, so the bits are right either way.
+            DataItem::Bytes(b) => out.bytes(b),
             DataItem::Int { ty, value } => {
-                let directive = match ty {
-                    Type::I8 => ".byte",
-                    Type::I16 => ".short",
-                    Type::I32 => ".long",
-                    _ => ".quad",
-                };
-                let bits = 8 * ty.bytes().unwrap_or(8);
-                let unsigned = (*value as u64) & (u64::MAX >> (64 - bits));
-                writeln!(out, "\t{directive}\t{unsigned}").unwrap();
+                let width = ty.bytes().unwrap_or(8);
+                let bits = 8 * width;
+                out.number(width as u8, (*value as u64) & (u64::MAX >> (64 - bits)));
             }
-            DataItem::Zero(0) => {}
-            DataItem::Zero(n) => writeln!(out, "\t.space\t{n}").unwrap(),
-            DataItem::Ptr { symbol, addend: 0 } => {
-                writeln!(out, "\t.quad\t{}", format.symbol(symbol)).unwrap()
-            }
-            DataItem::Ptr { symbol, addend } => {
-                writeln!(out, "\t.quad\t{}+{addend}", format.symbol(symbol)).unwrap()
-            }
+            DataItem::Zero(n) => out.directive(Directive::Space(u64::from(*n))),
+            DataItem::Ptr { symbol, addend } => out.integer(
+                8,
+                Expression::symbol(symbol).with_addend(i128::from(*addend)),
+            ),
         }
     }
 }

@@ -41,8 +41,11 @@ explicitly marked future work.
 
 ## Types
 
-- Values: `i8 i16 i32 i64 i128 f32 f64 ptr`; vector types (`i32x4`…) later.
-- Signedness is on operations, not types. Comparisons return `i8` 0/1.
+- Scalar values: `i8 i16 i32 i64 i128 f32 f64 ptr`. Fixed 128-bit SIMD values:
+  `i8x16 i16x8 i32x4 i64x2 f32x4 f64x2`; see [SIMD IR](simd-ir.md) for operations,
+  lane semantics and the current native lowering boundary.
+- Signedness is on operations, not types. Scalar comparisons return `i8` 0/1;
+  vector comparisons return integer vectors with all-ones/zero lanes.
 - `ptr` is opaque. Memory is untyped bytes. `ptrtoint.i64` and
   `inttoptr.ptr` convert between a pointer and its address.
 - There are no aggregate values: a struct lives in memory and is handled
@@ -1345,8 +1348,10 @@ linker for now.
 **In-process machine interface.** `keel-codegen` and `keel-asm` both depend on
 `keel-asm-ir`; neither production crate depends on the other. This shared crate
 owns `Program`, `Item`, `Instruction` and generated AArch64 `Opcode`/`FieldId`
-identities. It has no source parser or object writer. Its opcode indices and
-the assembler's encoding records are generated together from the pinned Arm
+identities, plus separate x86 opcode/operand identities. It has no object writer;
+its x86 module also provides a source parser for standalone Intel syntax.
+AArch64 opcode indices and the assembler's encoding records are generated
+together from the pinned Arm
 archive and tested for exact correspondence. These indices are not a stable
 serialized format. Retain its bundled Arm license when distributing the tables.
 
@@ -1367,7 +1372,8 @@ LEB128, zero-fill, source locations and CFI. Expressions own their symbols and
 numeric addends. Symbol differences and symbolic LEB128 use the same fixups and
 iterative layout as source assembly. Typed CFI and source CFI apply the same
 frame rules. Data/DWARF emission uses a common metadata sink for text and native
-output; the x86 text backends retain their ELF behavior.
+output. The x86 ELF backend uses the same typed metadata boundary, including
+ELF sections, symbol types/sizes and DTPOFF64 debug references.
 
 The AArch64 compiler now emits every generated instruction and metadata directive
 through these typed paths. Register widths and memory operands are numeric before
@@ -1386,8 +1392,10 @@ before materialization. This fallback preserves the existing macro workflow.
 
 `compile` and `cc --emit-object -o output.o` compose these stages without
 intermediate assembly files. Existing assembly output remains the default;
-`--emit-ir` is incompatible with `--emit-object`. Object emission currently
-rejects x86 targets. The owned program retains its items through assembly;
+`--emit-ir` is incompatible with `--emit-object`. The x86 Linux path also emits
+typed instructions and metadata directly, with no intermediate assembly text.
+Its standalone syntax remains Intel, and its compiler rejects inline assembly.
+The owned program retains its items through assembly;
 a future streaming sink could avoid retaining that intermediate representation.
 
 Source accepts LF, CRLF and bare CR line endings, Darwin `;` and `//` comments,

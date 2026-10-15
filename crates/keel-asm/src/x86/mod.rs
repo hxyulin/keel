@@ -1,23 +1,27 @@
 //! Native x86-64 ELF assembler. Intel syntax is parsed once into `keel-asm-ir`.
-//! The initial layout uses near branches, avoiding unstable short-branch layout.
+//! Parsed items are laid out until optimistic short branches fit their final layout.
 mod encode;
 mod metadata;
+mod sections;
 use crate::Error;
+pub use keel_asm_ir::x86::Features;
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
 };
-use object::write::{Object, Relocation, Symbol, SymbolSection};
+use object::write::{Comdat, Object, Relocation, Symbol, SymbolSection};
 use object::{
-    Architecture, BinaryFormat, Endianness, RelocationFlags, SectionFlags, SectionKind,
+    Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 struct Section {
     name: String,
     flags: u64,
     nobits: bool,
+    entry_size: u64,
+    group: Option<String>,
     align: u64,
     data: Vec<u8>,
     size: u64,
@@ -60,7 +64,7 @@ struct Fix {
 #[derive(Default)]
 struct Assembler {
     sections: Vec<Section>,
-    symbols: BTreeMap<String, Sym>,
+    symbols: HashMap<String, Sym>,
     fixes: Vec<Fix>,
     current: usize,
     cfi: Option<metadata::Frame>,
@@ -71,23 +75,193 @@ struct Assembler {
 
 /// Assemble standalone Intel syntax as a Linux relocatable ELF64 object.
 pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
-    let mut a = Assembler::new()?;
-    a.source(source, 1)?;
-    a.object()
+    assemble_object_with_features(source, x86::Features::default())
+}
+pub fn assemble_object_with_features(
+    source: &str,
+    features: x86::Features,
+) -> Result<Vec<u8>, Error> {
+    let mut items = Vec::new();
+    parse_source(source, 1, &mut items)?;
+    validate_features(&items, features)?;
+    assemble_items(&items)
 }
 /// Consume x86 instructions and shared directives. Diagnostic positions refer
 /// to program items; positions inside explicit text refer to its source lines.
 pub fn assemble_program_object(program: &Program) -> Result<Vec<u8>, Error> {
-    let mut a = Assembler::new()?;
+    assemble_program_object_with_features(program, x86::Features::default())
+}
+pub fn assemble_program_object_with_features(
+    program: &Program,
+    features: x86::Features,
+) -> Result<Vec<u8>, Error> {
+    let mut items = Vec::with_capacity(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
-        let line = index + 1;
         if let Item::Text(source) = item {
-            a.source(source, line)?
+            let mut parsed = Vec::new();
+            parse_source(source, index + 1, &mut parsed)?;
+            items.extend(
+                parsed
+                    .into_iter()
+                    .map(|(item, line)| (std::borrow::Cow::Owned(item), line)),
+            );
         } else {
-            a.item(item, line).map_err(|e| Error::new(line, e))?
+            items.push((std::borrow::Cow::Borrowed(item), index + 1));
         }
     }
-    a.object()
+    validate_features(&items, features)?;
+    assemble_items(&items)
+}
+fn validate_features<T: std::borrow::Borrow<Item>>(
+    items: &[(T, usize)],
+    features: x86::Features,
+) -> Result<(), Error> {
+    for (item, line) in items {
+        if let Item::X86Instruction(i) = item.borrow() {
+            let required = i.opcode.required_features();
+            if !features.contains(required) {
+                return Err(Error::new(
+                    *line,
+                    format!(
+                        "{} requires x86 target features: {}",
+                        i.opcode,
+                        required.names().collect::<Vec<_>>().join(",")
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+fn parse_source(source: &str, first: usize, items: &mut Vec<(Item, usize)>) -> Result<(), Error> {
+    for (index, source) in source.lines().enumerate() {
+        let line = first + index;
+        let p = x86::parse_program(source)
+            .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
+        items.extend(p.items.into_iter().map(|item| (item, line)));
+    }
+    Ok(())
+}
+
+/// In-process diagnostic timings. Normal assembly compiles out stage timing.
+#[derive(Default, Debug)]
+pub struct Profile {
+    pub parse_ms: f64,
+    pub layout_ms: Vec<f64>,
+    pub branch_check_ms: Vec<f64>,
+    pub discard_ms: Vec<f64>,
+    pub widened: Vec<usize>,
+    pub object_ms: f64,
+    pub items: usize,
+}
+/// Assemble once and collect stage timings, excluding file I/O.
+pub fn profile_object(source: &str) -> Result<(Vec<u8>, Profile), Error> {
+    profile_object_with_features(source, Features::default())
+}
+pub fn profile_object_with_features(
+    source: &str,
+    features: Features,
+) -> Result<(Vec<u8>, Profile), Error> {
+    let mut profile = Profile::default();
+    let start = std::time::Instant::now();
+    let mut items = Vec::new();
+    parse_source(source, 1, &mut items)?;
+    validate_features(&items, features)?;
+    profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
+    profile.items = items.len();
+    let object = assemble_items_inner::<true, _>(&items, &mut profile)?;
+    Ok((object, profile))
+}
+fn assemble_items<T: std::borrow::Borrow<Item>>(items: &[(T, usize)]) -> Result<Vec<u8>, Error> {
+    assemble_items_inner::<false, _>(items, &mut Profile::default())
+}
+fn assemble_items_inner<const PROFILE: bool, T: std::borrow::Borrow<Item>>(
+    items: &[(T, usize)],
+    profile: &mut Profile,
+) -> Result<Vec<u8>, Error> {
+    // Start optimistically short, then only widen. Alignment (especially max-skip)
+    // is not monotonic: recheck *every* remaining short branch after each layout.
+    // At least one branch widens per retry, so this terminates without cycles.
+    let mut short: Vec<bool> = items
+        .iter()
+        .map(|(item, _)| {
+            matches!(item.borrow(),
+        Item::X86Instruction(i) if matches!(i.opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_))
+            && matches!(i.operands.as_slice(), [x86::Operand::Immediate(address)]
+                if address.modifier == Modifier::None && address.expression.add.is_some()
+                    && address.expression.subtract.is_none()))
+        })
+        .collect();
+    let mut encodings = vec![None; items.len()];
+    let mut encoded_bytes = Vec::new();
+    loop {
+        let start = PROFILE.then(std::time::Instant::now);
+        let mut a = Assembler::new()?;
+        let mut branches = Vec::new();
+        for (index, (item, line)) in items.iter().enumerate() {
+            let item = item.borrow();
+            let fix = a.fixes.len();
+            let result = if let Item::Text(t) = item {
+                t.lines()
+                    .try_for_each(|directive| a.directive(directive, *line))
+            } else if let Item::X86Instruction(i) = item {
+                a.instruction_encoding(
+                    i,
+                    *line,
+                    short[index],
+                    &mut encodings[index],
+                    &mut encoded_bytes,
+                )
+            } else {
+                a.item(item, *line)
+            };
+            result.map_err(|e| Error::new(*line, e))?;
+            if short[index] {
+                branches.push((index, fix));
+            }
+        }
+        if let Some(start) = start {
+            profile
+                .layout_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+        let start = PROFILE.then(std::time::Instant::now);
+        let mut changed = 0;
+        for (index, fix) in branches {
+            let f = &a.fixes[fix];
+            let name = f.address.expression.add.as_deref().unwrap();
+            let fits = a.local_symbol(name, 0)
+                && a.eval(&f.address.expression, 0)
+                    .is_ok_and(|(section, value)| {
+                        section == Some(f.section)
+                            && (-128..=127).contains(&(value - i128::from(f.offset)))
+                    });
+            if !fits {
+                short[index] = false;
+                changed += 1;
+            }
+        }
+        if let Some(start) = start {
+            profile
+                .branch_check_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+            profile.widened.push(changed);
+        }
+        let start = PROFILE.then(std::time::Instant::now);
+        if changed == 0 {
+            let object = a.object()?;
+            if let Some(start) = start {
+                profile.object_ms = start.elapsed().as_secs_f64() * 1000.0;
+            }
+            return Ok(object);
+        }
+        drop(a);
+        if let Some(start) = start {
+            profile
+                .discard_ms
+                .push(start.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
 }
 impl Assembler {
     fn new() -> Result<Self, Error> {
@@ -96,26 +270,27 @@ impl Assembler {
             .map_err(|e| Error::new(0, e))?;
         Ok(a)
     }
-    fn source(&mut self, source: &str, first: usize) -> Result<(), Error> {
-        for (index, source) in source.lines().enumerate() {
-            let line = first + index;
-            let p = x86::parse_program(source)
-                .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
-            for item in &p.items {
-                let result = if let Item::Text(t) = item {
-                    t.lines()
-                        .try_for_each(|directive| self.directive(directive, line))
-                } else {
-                    self.item(item, line)
-                };
-                result.map_err(|e| Error::new(line, e))?;
-            }
+    // Binding-sensitive expressions must reach the linker, including aliases
+    // whose underlying definition is interposable.
+    fn local_symbol(&self, name: &str, depth: usize) -> bool {
+        if depth > 64 {
+            return false;
         }
-        Ok(())
+        self.symbols.get(name).is_some_and(|s| {
+            !s.global
+                && !s.weak
+                && s.alias.as_ref().is_none_or(|e| {
+                    e.add
+                        .as_deref()
+                        .is_none_or(|n| self.local_symbol(n, depth + 1))
+                        && e.subtract
+                            .as_deref()
+                            .is_none_or(|n| self.local_symbol(n, depth + 1))
+                })
+        })
     }
     fn item(&mut self, item: &Item, line: usize) -> Result<(), String> {
         match item {
-            Item::X86Instruction(i) => self.instruction(i, line),
             Item::Label(n) => self.label(n),
             Item::Directive(d) => self.shared_directive(d, line),
             _ => Err("AArch64 instruction/branch in x86 program".into()),
@@ -132,9 +307,26 @@ impl Assembler {
         self.sections[self.current].size
     }
     fn section(&mut self, name: &str, flags: Option<u64>, nobits: bool) -> Result<(), String> {
-        if let Some(i) = self.sections.iter().position(|s| s.name == name) {
-            if flags.is_some_and(|f| f != self.sections[i].flags)
-                || (nobits || matches!(name, ".bss" | ".tbss")) != self.sections[i].nobits
+        self.section_metadata(name, flags, nobits, 0, None)
+    }
+    fn section_metadata(
+        &mut self,
+        name: &str,
+        flags: Option<u64>,
+        nobits: bool,
+        entry_size: u64,
+        group: Option<String>,
+    ) -> Result<(), String> {
+        let nobits = nobits || matches!(name, ".bss" | ".tbss");
+        if let Some(i) = self
+            .sections
+            .iter()
+            .position(|s| s.name == name && s.group == group)
+        {
+            let s = &self.sections[i];
+            // A bare .section name switches back without redeclaring attributes.
+            if flags
+                .is_some_and(|f| f != s.flags || nobits != s.nobits || entry_size != s.entry_size)
             {
                 return Err(format!("conflicting section attributes for {name}"));
             }
@@ -148,11 +340,14 @@ impl Assembler {
             ".tbss" | ".tdata" => 0x403,
             _ => 0,
         });
+        sections::validate(name, flags, nobits, entry_size, group.as_deref())?;
         self.current = self.sections.len();
         self.sections.push(Section {
             name: name.into(),
             flags,
-            nobits: nobits || matches!(name, ".bss" | ".tbss"),
+            nobits,
+            entry_size,
+            group,
             align: 1,
             data: Vec::new(),
             size: 0,
@@ -198,9 +393,19 @@ impl Assembler {
         sym.value = value;
         Ok(())
     }
-    fn instruction(&mut self, i: &x86::Instruction, line: usize) -> Result<(), String> {
+    fn instruction_encoding(
+        &mut self,
+        i: &x86::Instruction,
+        line: usize,
+        short: bool,
+        cached: &mut Option<std::ops::Range<usize>>,
+        encoded_bytes: &mut Vec<u8>,
+    ) -> Result<(), String> {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
+        }
+        if let Some(range) = cached {
+            return self.bytes(&encoded_bytes[range.clone()]);
         }
         // Intel operands known to be absolute at this point are constants.
         // Forward references remain symbolic, including later absolute aliases.
@@ -231,7 +436,16 @@ impl Assembler {
                 address.expression = Expression::constant(value);
             }
         }
-        let e = encode::encode(folded.as_ref().unwrap_or(i))?;
+        let e = encode::encode(folded.as_ref().unwrap_or(i), short)?;
+        // Cache only symbol-free encodings, in one compact byte arena. Keeping
+        // a heap allocation and symbolic fixups for every instruction costs
+        // more memory/cache traffic than reencoding the symbolic minority.
+        // Folded absolute expressions can depend on layout and are never cached.
+        if folded.is_none() && e.fixups.is_empty() {
+            let start = encoded_bytes.len();
+            encoded_bytes.extend_from_slice(&e.bytes);
+            *cached = Some(start..encoded_bytes.len());
+        }
         let at = self.offset();
         for f in e.fixups {
             self.fixes.push(Fix {
@@ -287,6 +501,35 @@ impl Assembler {
     }
     fn shared_directive(&mut self, d: &Directive, line: usize) -> Result<(), String> {
         match d {
+            Directive::X86Integer { width, address } if matches!(width, 1 | 2 | 4 | 8) => {
+                self.integer(*width, address.clone(), line)
+            }
+            Directive::ElfSection {
+                name,
+                flags,
+                nobits,
+            } => self.section(name, Some(*flags), *nobits),
+            Directive::ElfSectionMetadata {
+                name,
+                flags,
+                nobits,
+                entry_size,
+                group,
+            } => self.section_metadata(name, Some(*flags), *nobits, *entry_size, group.clone()),
+            Directive::ElfType { name, function } => {
+                self.symbols.entry(name.clone()).or_default().kind = if *function {
+                    SymbolKind::Text
+                } else {
+                    SymbolKind::Data
+                };
+                Ok(())
+            }
+            Directive::Size { name, expression } => {
+                let e = self.capture_dot(expression.clone())?;
+                self.symbols.entry(name.clone()).or_default().size = Some(e);
+                Ok(())
+            }
+
             Directive::Section {
                 segment,
                 name,
@@ -338,20 +581,7 @@ impl Assembler {
                 });
                 Ok(())
             }
-            Directive::Cfi(cfi) => {
-                use keel_asm_ir::Cfi;
-                match cfi {
-                    Cfi::Start => metadata::cfi(self, ".cfi_startproc", ""),
-                    Cfi::End => metadata::cfi(self, ".cfi_endproc", ""),
-                    Cfi::DefCfa { register, offset } => {
-                        metadata::cfi(self, ".cfi_def_cfa", &format!("{register},{offset}"))
-                    }
-                    Cfi::Offset { register, offset } => {
-                        metadata::cfi(self, ".cfi_offset", &format!("{register},{offset}"))
-                    }
-                    _ => Err("x86 exception personality/LSDA directives are unsupported".into()),
-                }
-            }
+            Directive::Cfi(cfi) => metadata::shared_cfi(self, cfi),
             Directive::ZeroFill {
                 symbol,
                 size,
@@ -440,7 +670,7 @@ impl Assembler {
         self.bytes(&b)
     }
     fn directive(&mut self, s: &str, line: usize) -> Result<(), String> {
-        let assignment = x86::split(s, '=');
+        let assignment = x86::split_inline(s, '=');
         if assignment.len() == 2 {
             let name = x86::symbol(assignment[0])?;
             let expression = self.capture_dot(x86::address(assignment[1])?.expression)?;
@@ -451,7 +681,7 @@ impl Assembler {
             .split_once(char::is_whitespace)
             .unwrap_or((s.trim(), ""));
         let args = args.trim();
-        let parts = x86::split(args, ',');
+        let parts = x86::split_inline(args, ',');
         let num = |s: &str| -> Result<u64, String> {
             u64::try_from(x86::integer(s)?).map_err(|_| "expected nonnegative integer".into())
         };
@@ -460,48 +690,14 @@ impl Assembler {
             ".intel_syntax" if args == "noprefix" => Ok(()),
             ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
             ".section" => {
-                let name = if parts[0].starts_with('"') {
-                    x86::symbol(parts[0])?
-                } else if !parts[0].is_empty()
-                    && parts[0]
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-                {
-                    parts[0].to_string()
-                } else {
-                    return Err("invalid ELF section name".into());
-                };
-                let mut flags = None;
-                let mut nobits = name == ".bss" || name == ".tbss";
-                if parts.len() > 3 {
-                    return Err("section groups/entry sizes are unsupported".into());
-                }
-                if let Some(s) = parts.get(1) {
-                    let mut f = 0;
-                    for b in x86::unquote(s)? {
-                        f |= match b {
-                            b'a' => 2,
-                            b'w' => 1,
-                            b'x' => 4,
-                            b'T' => 0x400,
-                            _ => {
-                                return Err(format!(
-                                    "unsupported ELF section flag `{}`",
-                                    b as char
-                                ));
-                            }
-                        }
-                    }
-                    flags = Some(f)
-                }
-                if let Some(t) = parts.get(2) {
-                    match *t {
-                        "@progbits" | "%progbits" => {}
-                        "@nobits" | "%nobits" => nobits = true,
-                        _ => return Err(format!("unsupported section type `{t}`")),
-                    }
-                }
-                self.section(&name, flags, nobits)
+                let section = sections::parse(&parts)?;
+                self.section_metadata(
+                    &section.name,
+                    section.flags,
+                    section.nobits,
+                    section.entry_size,
+                    section.group,
+                )
             }
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {
@@ -576,9 +772,6 @@ impl Assembler {
                 if parts.len() > 3 {
                     return Err("too many alignment operands".into());
                 }
-                if parts.get(1).is_some_and(|s| !s.is_empty() && *s != "0") {
-                    return Err("nonzero alignment fill is unsupported".into());
-                }
                 let n = num(parts[0])?;
                 let power = if op == ".p2align" {
                     u32::try_from(n).map_err(|_| "alignment too large")?
@@ -589,7 +782,11 @@ impl Assembler {
                     n.trailing_zeros()
                 };
                 let max = parts.get(2).map(|s| num(s)).transpose()?;
-                let fill = parts.get(1).filter(|s| !s.is_empty()).map(|_| 0);
+                let fill = parts
+                    .get(1)
+                    .filter(|s| !s.is_empty())
+                    .map(|s| x86::integer(s).map(|n| n as u8))
+                    .transpose()?;
                 self.align_fill(power, max, fill)
             }
             ".byte" | ".short" | ".word" | ".long" | ".int" | ".quad" => {
@@ -716,6 +913,42 @@ impl Assembler {
                 }
             }
         }
+        let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, section) in self.sections.iter().enumerate() {
+            if let Some(signature) = &section.group {
+                groups.entry(signature.clone()).or_default().push(i);
+            }
+        }
+        // A signature may also be an ordinary external relocation target.
+        // Only group-only names may receive a synthetic .group definition.
+        let ordinary_references: BTreeSet<_> = if groups.is_empty() {
+            BTreeSet::new()
+        } else {
+            self.fixes
+                .iter()
+                .map(|f| &f.address.expression)
+                .chain(
+                    self.symbols
+                        .values()
+                        .flat_map(|s| s.alias.iter().chain(s.size.iter())),
+                )
+                .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
+                .map(String::as_str)
+                .collect()
+        };
+        let synthetic_signatures: BTreeSet<_> = groups
+            .keys()
+            .filter(|name| {
+                !ordinary_references.contains(name.as_str())
+                    && self.symbols.get(*name).is_none_or(|s| {
+                        s.section.is_none() && s.alias.is_none() && s.common.is_none()
+                    })
+            })
+            .cloned()
+            .collect();
+        for signature in groups.keys() {
+            self.symbols.entry(signature.clone()).or_default();
+        }
         let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         let mut sections = Vec::new();
         for s in &self.sections {
@@ -745,8 +978,47 @@ impl Assembler {
             }
             sections.push(id);
         }
+        let has_merge_sections = self.sections.iter().any(|s| s.flags & 0x10 != 0);
+        let identity: BTreeSet<_> = self
+            .fixes
+            .iter()
+            .filter(|f| {
+                // A 32-bit data difference against this section becomes PC32
+                // below. An absolute positive symbol still needs its identity
+                // in that relocation, just like an explicit PC-relative fixup.
+                let pc_relative = matches!(f.kind, 2 | 4)
+                    || f.kind == 10
+                        && f.width == 4
+                        && f.address
+                            .expression
+                            .subtract
+                            .as_deref()
+                            .is_some_and(|name| {
+                                self.eval_symbol(name, 0)
+                                    .is_ok_and(|(section, _)| section == Some(f.section))
+                            });
+                let merge_target = has_merge_sections
+                    && f.address.expression.add.as_deref().is_some_and(|name| {
+                        self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
+                            section.is_some_and(|i| self.sections[i].flags & 0x10 != 0)
+                        })
+                    });
+                merge_target
+                    || f.address.modifier != Modifier::None
+                    || pc_relative
+                        && f.address.expression.add.as_deref().is_some_and(|name| {
+                            self.eval_symbol(name, 0)
+                                .is_ok_and(|(section, _)| section.is_none())
+                        })
+            })
+            .filter_map(|f| f.address.expression.add.as_deref())
+            .collect();
+        let mut omitted = BTreeSet::new();
         let mut symbols = BTreeMap::new();
-        for (name, s) in &self.symbols {
+        // Lookup order is irrelevant during layout; ELF symbol order is stable.
+        let mut entries: Vec<_> = self.symbols.iter().collect();
+        entries.sort_unstable_by_key(|(name, _)| *name);
+        for (name, s) in entries {
             let (section, value) = if s.alias.is_some() {
                 let (sec, value) = self.eval_symbol(name, 0).map_err(err)?;
                 (
@@ -767,12 +1039,28 @@ impl Assembler {
             };
             let tls = s.kind == SymbolKind::Tls
                 || section.is_some_and(|i| self.sections[i].flags & 0x400 != 0);
+            if name.starts_with(".L")
+                && !s.global
+                && !s.weak
+                && !s.hidden
+                && s.common.is_none()
+                && !tls
+                && !identity.contains(name.as_str())
+                && !groups.contains_key(name)
+                && (section.is_some() || s.alias.is_some())
+                && self.local_symbol(name, 0)
+            {
+                omitted.insert(name.clone());
+                continue;
+            }
+            let synthetic = synthetic_signatures.contains(name);
+            let undefined = section.is_none() && s.alias.is_none() && !synthetic;
             let symbol = Symbol {
                 name: name.as_bytes().to_vec(),
                 value,
                 size,
                 kind: if tls { SymbolKind::Tls } else { s.kind },
-                scope: if s.global || section.is_none() && s.alias.is_none() {
+                scope: if s.global || undefined {
                     SymbolScope::Linkage
                 } else {
                     SymbolScope::Compilation
@@ -780,13 +1068,15 @@ impl Assembler {
                 weak: s.weak,
                 section: match section {
                     Some(i) => SymbolSection::Section(sections[i]),
-                    None if s.alias.is_some() => SymbolSection::Absolute,
+                    // A temporary placeholder, patched to the generated .group
+                    // section after serialization. Keep it out of layout/evaluation.
+                    None if synthetic || s.alias.is_some() => SymbolSection::Absolute,
                     None => SymbolSection::Undefined,
                 },
                 flags: SymbolFlags::Elf {
                     st_info: ((if s.weak {
                         2
-                    } else if s.global || section.is_none() && s.alias.is_none() {
+                    } else if s.global || undefined {
                         1
                     } else {
                         0
@@ -810,6 +1100,13 @@ impl Assembler {
             };
             symbols.insert(name.clone(), id);
         }
+        for (signature, members) in &groups {
+            object.add_comdat(Comdat {
+                kind: ComdatKind::Any,
+                symbol: symbols[signature],
+                sections: members.iter().map(|&i| sections[i]).collect(),
+            });
+        }
         for f in &self.fixes {
             let expr = &f.address.expression;
             let mut kind = f.kind;
@@ -829,9 +1126,9 @@ impl Assembler {
                 && defined.is_some_and(|(s, _)| s.is_none())
             {
                 defined.map(|(_, n)| n + addend)
-            } else if matches!(kind, 2 | 4)
+            } else if matches!(kind, 2 | 4 | 15)
                 && defined.is_some_and(|(s, _)| s == Some(f.section))
-                && !self.symbols[&name].global
+                && self.local_symbol(&name, 0)
             {
                 defined.map(|(_, n)| n + addend - i128::from(f.offset))
             } else {
@@ -839,7 +1136,7 @@ impl Assembler {
             };
             if let Some(value) = absolute {
                 let bits = u32::from(f.width) * 8;
-                let signed = matches!(kind, 2 | 4 | 11 | 23);
+                let signed = matches!(kind, 2 | 4 | 15 | 11 | 23);
                 if value < -(1i128 << (bits - 1)) || value >= (1i128 << (bits - u32::from(signed)))
                 {
                     return Err(Error::new(
@@ -867,7 +1164,14 @@ impl Assembler {
                 addend += i128::from(f.offset) - value;
             }
             // Relocations against section-relative aliases use their underlying section symbol.
-            let symbol = if self.symbols[&name].alias.is_some() {
+            let symbol = if (omitted.contains(&name) || self.symbols[&name].alias.is_some())
+                && !identity.contains(name.as_str())
+                && f.address.modifier == Modifier::None
+                && self.local_symbol(&name, 0)
+                && self.symbols[&name].kind != SymbolKind::Tls
+                && !defined.is_some_and(|(section, _)| {
+                    section.is_some_and(|sec| self.sections[sec].flags & 0x400 != 0)
+                }) {
                 let (sec, value) = defined.ok_or_else(|| Error::new(f.line, "unresolved alias"))?;
                 if let Some(sec) = sec {
                     addend += value;
@@ -902,6 +1206,9 @@ impl Assembler {
                     .copy_from_slice(&s.data);
             }
         }
-        object.write().map_err(|e| err(e.to_string()))
+        let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
+        sections::finalize(&mut bytes, &self.sections, &groups, &synthetic_signatures)
+            .map_err(err)?;
+        Ok(bytes)
     }
 }

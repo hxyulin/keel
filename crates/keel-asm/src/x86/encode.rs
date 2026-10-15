@@ -1,3 +1,7 @@
+#[path = "bmi.rs"]
+mod bmi;
+mod vex;
+
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
     Address, Instruction, Memory, Modifier, Opcode::*, Operand, Register, RegisterClass,
@@ -85,21 +89,23 @@ impl Encoding {
         }
         Ok(())
     }
-    fn branch(&mut self, a: &Address, plt: bool) -> Result<(), String> {
+    fn branch(&mut self, a: &Address, plt: bool, width: u8) -> Result<(), String> {
         if !matches!(a.modifier, Modifier::None | Modifier::Plt) {
             return Err("invalid branch relocation modifier".into());
         }
         self.fixups.push(Fixup {
             offset: self.bytes.len(),
-            width: 4,
+            width,
             address: a.clone(),
-            kind: if plt || a.modifier == Modifier::Plt {
+            kind: if width == 1 {
+                15
+            } else if plt || a.modifier == Modifier::Plt {
                 4
             } else {
                 2
             },
         });
-        self.number(0, 4);
+        self.number(0, width);
         Ok(())
     }
     /// Emit legacy prefixes, REX, opcode and ModRM/SIB. `reg` is an opcode extension or register field.
@@ -211,7 +217,7 @@ impl Encoding {
     }
 }
 
-pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
+pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
     validate(i)?;
     let mut e = Encoding::default();
     let o = &i.operands;
@@ -243,6 +249,11 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
     }
     let err = || format!("unsupported operands for {op:?}: {o:?}");
     match (op, o.as_slice()) {
+        (
+            Andn | Bextr | Blsi | Blsmsk | Blsr | Tzcnt | Shlx | Shrx | Sarx | Rorx | Bzhi | Pext
+            | Pdep | Mulx,
+            _,
+        ) => bmi::encode(&mut e, op, o)?,
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
@@ -286,12 +297,23 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
             None,
         )?,
         (Call | Jmp, [I(a)]) => {
-            e.bytes.push(if op == Call { 0xe8 } else { 0xe9 });
-            e.branch(a, true)?;
+            let short = short && op == Jmp;
+            e.bytes.push(if op == Call {
+                0xe8
+            } else if short {
+                0xeb
+            } else {
+                0xe9
+            });
+            e.branch(a, true, if short { 1 } else { 4 })?;
         }
         (Jcc(cc), [I(a)]) if cc < 16 => {
-            e.bytes.extend([0x0f, 0x80 + cc]);
-            e.branch(a, false)?;
+            if short {
+                e.bytes.push(0x70 + cc);
+            } else {
+                e.bytes.extend([0x0f, 0x80 + cc]);
+            }
+            e.branch(a, false, if short { 1 } else { 4 })?;
         }
         (Call | Jmp, [a])
             if (gpr(a) && width(a) == 64) || matches!(a,M(m) if matches!(m.width,0|64)) =>
@@ -399,22 +421,40 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
             if let I(imm) = b {
                 let small =
                     op != Test && w != 8 && constant(imm).is_some_and(|n| (-128..128).contains(&n));
-                e.rm(
-                    0,
-                    &[if op == Test {
-                        if w == 8 { 0xf6 } else { 0xf7 }
-                    } else if w == 8 {
-                        0x80
-                    } else if small {
-                        0x83
+                if !small
+                    && matches!(a, R(r) if r.class == RegisterClass::Gpr && r.number == 0 && !r.high_byte)
+                {
+                    // AL/AX/EAX/RAX have an immediate form without ModRM.
+                    // Keep sign-extended imm8 group forms when those are shorter.
+                    if w == 16 {
+                        e.bytes.push(0x66);
+                    }
+                    if w == 64 {
+                        e.bytes.push(0x48);
+                    }
+                    e.bytes.push(if op == Test {
+                        if w == 8 { 0xa8 } else { 0xa9 }
                     } else {
-                        0x81
-                    }],
-                    w,
-                    group,
-                    a,
-                    None,
-                )?;
+                        group * 8 + 4 + u8::from(w != 8)
+                    });
+                } else {
+                    e.rm(
+                        0,
+                        &[if op == Test {
+                            if w == 8 { 0xf6 } else { 0xf7 }
+                        } else if w == 8 {
+                            0x80
+                        } else if small {
+                            0x83
+                        } else {
+                            0x81
+                        }],
+                        w,
+                        group,
+                        a,
+                        None,
+                    )?;
+                }
                 e.imm(
                     imm,
                     if small || w == 8 {
@@ -635,13 +675,19 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
             };
             e.rm(0, &bytes, w, r.number, a, Some(r))?;
         }
-        _ => encode_sse(&mut e, i).map_err(|_| err())?,
+        _ => {
+            if op.required_features().avx {
+                vex::encode(&mut e, i)?;
+            } else {
+                encode_sse(&mut e, i).map_err(|_| err())?;
+            }
+        }
     }
     // PC-relative relocation addends are measured from the relocated field,
     // but the CPU uses the end of the entire instruction (including immediates).
     let len = e.bytes.len();
     for fix in &mut e.fixups {
-        if matches!(fix.kind, 2 | 4 | 9 | 22) {
+        if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
             fix.address.expression.constant -= (len - fix.offset) as i128;
         }
     }
@@ -680,6 +726,26 @@ fn encode_sse(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
         Movsd => (0xf2, 0x10, 64, true),
         Movaps => (0, 0x28, 128, true),
         Movups => (0, 0x10, 128, true),
+        Paddb => (0x66, 0xfc, 128, false),
+        Paddw => (0x66, 0xfd, 128, false),
+        Paddd => (0x66, 0xfe, 128, false),
+        Paddq => (0x66, 0xd4, 128, false),
+        Psubb => (0x66, 0xf8, 128, false),
+        Psubw => (0x66, 0xf9, 128, false),
+        Psubd => (0x66, 0xfa, 128, false),
+        Psubq => (0x66, 0xfb, 128, false),
+        Pmullw => (0x66, 0xd5, 128, false),
+        Addps => (0x0, 0x58, 128, false),
+        Addpd => (0x66, 0x58, 128, false),
+        Subps => (0x0, 0x5c, 128, false),
+        Subpd => (0x66, 0x5c, 128, false),
+        Mulps => (0x0, 0x59, 128, false),
+        Mulpd => (0x66, 0x59, 128, false),
+        Divps => (0x0, 0x5e, 128, false),
+        Divpd => (0x66, 0x5e, 128, false),
+        Sqrtps => (0x0, 0x51, 128, false),
+        Sqrtpd => (0x66, 0x51, 128, false),
+
         Movapd => (0x66, 0x28, 128, true),
         Movupd => (0x66, 0x10, 128, true),
         Addss => (0xf3, 0x58, 32, false),

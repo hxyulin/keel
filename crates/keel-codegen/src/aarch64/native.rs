@@ -30,6 +30,9 @@ impl Reg {
     pub fn s(n: impl Number) -> Self {
         Self::scalar('s', n)
     }
+    pub fn q(n: impl Number) -> Self {
+        Self::scalar('q', n)
+    }
     pub fn d(n: impl Number) -> Self {
         Self::scalar('d', n)
     }
@@ -53,13 +56,14 @@ impl Reg {
     };
     pub fn bits(self) -> u32 {
         match self.class {
+            'q' => 128,
             'w' | 's' => 32,
             'b' => 8,
             _ => 64,
         }
     }
     pub fn fp(self) -> bool {
-        matches!(self.class, 's' | 'd' | 'b' | 'v')
+        matches!(self.class, 's' | 'd' | 'b' | 'v' | 'q')
     }
 }
 pub(super) trait Prefix {
@@ -264,6 +268,7 @@ fn ins(op: &str, tag: &str, form: &str, fields: impl IntoIterator<Item = (F, u32
 }
 fn tag(r: Reg) -> &'static str {
     match r.class {
+        'q' => "Q",
         's' => "S",
         'd' => "D",
         'w' => "32",

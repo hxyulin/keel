@@ -329,3 +329,36 @@ fn invalid_typed_metadata_and_symbols_are_rejected_with_and_without_macro_fallba
         }
     }
 }
+
+#[test]
+fn partial_cfa_updates_are_typed_for_both_targets() {
+    use keel_asm_ir::{Cfi, Directive};
+    for x86 in [false, true] {
+        let mut p = Program::new();
+        p.text(".text\nf:\n");
+        p.directive(Directive::Cfi(Cfi::Start));
+        p.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
+        p.directive(Directive::Cfi(Cfi::DefCfaRegister(if x86 {
+            6
+        } else {
+            29
+        })));
+        p.text("ret\n");
+        p.directive(Directive::Cfi(Cfi::End));
+        let source = format!(
+            ".text\nf:\n.cfi_startproc\n.cfi_def_cfa_offset 16\n.cfi_def_cfa_register {}\nret\n.cfi_endproc\n",
+            if x86 { "rbp" } else { "x29" }
+        );
+        if x86 {
+            assert_eq!(
+                keel_asm::x86::assemble_program_object(&p).unwrap(),
+                keel_asm::x86::assemble_object(&source).unwrap()
+            );
+        } else {
+            assert_eq!(
+                assemble_program_object(&p, TargetFeatures::default()).unwrap(),
+                assemble_object(&source).unwrap()
+            );
+        }
+    }
+}

@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 pub struct Dylib {
     pub install_name: String,
     pub exports: BTreeSet<String>,
+    /// Exports participating in dyld process-wide weak coalescing.
+    pub weak_exports: BTreeSet<String>,
 }
 fn scalar(v: &Value, key: &str) -> Result<String> {
     v[key]
@@ -68,6 +70,7 @@ impl Dylib {
         }
         let install_name = first.ok_or("empty TBD file")?;
         let mut exports = BTreeSet::new();
+        let mut weak_exports = BTreeSet::new();
         let mut visited = BTreeSet::new();
         let mut todo = vec![install_name.clone()];
         while let Some(install) = todo.pop() {
@@ -79,7 +82,9 @@ impl Dylib {
                     .strip_prefix('/')
                     .ok_or("relative TBD reexport unsupported")?;
                 let path = root.join(relative).with_extension("tbd");
-                exports.extend(Self::load(&path, root, seen)?.exports);
+                let child = Self::load(&path, root, seen)?;
+                exports.extend(child.exports);
+                weak_exports.extend(child.weak_exports);
                 continue;
             };
             if !compatible(v)? {
@@ -90,8 +95,11 @@ impl Dylib {
                     for group in groups {
                         if compatible(group)? {
                             exports.extend(list(group, "symbols")?);
-                            exports.extend(list(group, "weak-symbols")?);
-                            // TLS and ObjC exports deliberately are not ordinary symbols.
+                            let weak = list(group, "weak-symbols")?;
+                            exports.extend(weak.iter().cloned());
+                            weak_exports.extend(weak);
+                            exports.extend(list(group, "thread-local-symbols")?);
+                            // TLV imports bind descriptor addresses; Objective-C synthesis remains unsupported.
                         }
                     }
                 }
@@ -108,6 +116,7 @@ impl Dylib {
         Ok(Self {
             install_name,
             exports,
+            weak_exports,
         })
     }
 }
@@ -131,6 +140,8 @@ exports:
     symbols: [_wrong]
   - targets: [arm64-macos]
     symbols: [_right]
+    weak-symbols: [_weak]
+    thread-local-symbols: [_thread]
 reexported-libraries:
   - targets: [arm64-macos]
     libraries: ['/usr/lib/libchild.dylib']
@@ -154,8 +165,14 @@ exports:
         let d = Dylib::from_tbd(&p, &root).unwrap();
         assert_eq!(
             d.exports,
-            BTreeSet::from(["_right".into(), "_child".into()])
+            BTreeSet::from([
+                "_right".into(),
+                "_child".into(),
+                "_weak".into(),
+                "_thread".into()
+            ])
         );
+        assert_eq!(d.weak_exports, BTreeSet::from(["_weak".into()]));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

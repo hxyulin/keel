@@ -77,25 +77,7 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
         a.frames.push(f);
         return Ok(());
     }
-    let advance = at - f.last;
-    if advance > 0 {
-        if advance < 64 {
-            f.code.push(0x40 | advance as u8)
-        } else if advance <= 255 {
-            f.code.extend([2, advance as u8])
-        } else if advance <= 65535 {
-            f.code.push(3);
-            f.code.extend((advance as u16).to_le_bytes())
-        } else {
-            f.code.push(4);
-            f.code.extend(
-                u32::try_from(advance)
-                    .map_err(|_| "CFI advance exceeds 32 bits")?
-                    .to_le_bytes(),
-            )
-        }
-        f.last = at
-    }
+    advance(f, at)?;
     let p = x86::split(args, ',');
     match op {
         ".cfi_def_cfa_offset" => {
@@ -307,4 +289,70 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
         a.bytes(&b)?;
     }
     Ok(())
+}
+
+fn advance(f: &mut Frame, at: u64) -> Result<(), String> {
+    let advance = at - f.last;
+    if advance > 0 {
+        if advance < 64 {
+            f.code.push(0x40 | advance as u8)
+        } else if advance <= 255 {
+            f.code.extend([2, advance as u8])
+        } else if advance <= 65535 {
+            f.code.push(3);
+            f.code.extend((advance as u16).to_le_bytes())
+        } else {
+            f.code.push(4);
+            f.code.extend(
+                u32::try_from(advance)
+                    .map_err(|_| "CFI advance exceeds 32 bits")?
+                    .to_le_bytes(),
+            )
+        }
+        f.last = at
+    }
+    Ok(())
+}
+pub(super) fn shared_cfi(a: &mut Assembler, c: &keel_asm_ir::Cfi) -> Result<(), String> {
+    use keel_asm_ir::Cfi;
+    if matches!(c, Cfi::Start) {
+        return cfi(a, ".cfi_startproc", "");
+    }
+    if matches!(c, Cfi::End) {
+        return cfi(a, ".cfi_endproc", "");
+    }
+    let at = a.offset();
+    let f = a.cfi.as_mut().ok_or("CFI directive outside procedure")?;
+    if f.section != a.current {
+        return Err("CFI procedure crosses sections".into());
+    }
+    advance(f, at)?;
+    match c {
+        Cfi::DefCfaOffset(n) => {
+            f.code.push(0x0e);
+            leb(&mut f.code, (*n).into(), false)
+        }
+        Cfi::DefCfaRegister(r) => {
+            f.code.push(0x0d);
+            leb(&mut f.code, (*r).into(), false)
+        }
+        Cfi::DefCfa { register, offset } => {
+            f.code.push(0x0c);
+            leb(&mut f.code, (*register).into(), false)?;
+            leb(&mut f.code, (*offset).into(), false)
+        }
+        Cfi::Offset { register, offset } => {
+            if *offset > 0 || offset % 8 != 0 {
+                return Err("CFI offset must be a nonpositive multiple of eight".into());
+            }
+            if *register < 64 {
+                f.code.push(0x80 | *register);
+            } else {
+                f.code.push(5);
+                leb(&mut f.code, (*register).into(), false)?;
+            }
+            leb(&mut f.code, i128::from(*offset) / -8, false)
+        }
+        _ => Err("x86 exception personality/LSDA directives are unsupported".into()),
+    }
 }

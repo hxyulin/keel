@@ -1,4 +1,4 @@
-# Native macOS arm64 linker (initial scope)
+# Native macOS arm64 linker
 
 `keel link input.o ... -o program` is an opt-in native link path. Existing
 `keel cc`/`compile` output behavior and the suite's Clang link path remain intact.
@@ -27,7 +27,8 @@ the producer contract and the implementation decisions.
 * Relocations emitted: UNSIGNED (64-bit pointers; 32/64-bit differences paired
   with SUBTRACTOR), BRANCH26, PAGE21/PAGEOFF12, GOT_LOAD_PAGE21/PAGEOFF12,
   POINTER_TO_GOT, TLVP_PAGE21/PAGEOFF12, and signed 24-bit ADDEND prefix pairs.
-  The native linker implements the non-TLS forms with range/alignment checks.
+  The native linker implements these forms with range/alignment checks; TLVP
+  accesses use eager GOT slots containing descriptor addresses.
   Local UNSIGNED section references preserve their object-address addends.
   POINTER_TO_GOT fields are replaced, without treating embedded bytes as an
   addend: Apple's assembler can leave nonzero placeholders in these words.
@@ -35,9 +36,9 @@ the producer contract and the implementation decisions.
   and is covered by both a placeholder regression test and cleanup propagation
   into a Clang-compiled C++ catch handler.
 * `keel-codegen/src/data.rs` emits text constants, writable data and pointer
-  constants, BSS, and Darwin thread-local descriptors. TLS deliberately requires
-  the system linker. Commons are coalesced by maximum size/alignment; strong
-  definitions override tentative commons. Duplicate strong definitions are errors.
+  constants, BSS, and Darwin thread-local descriptors. TLS templates and Darwin
+  descriptors are supported as described below. Commons are coalesced by maximum
+  size/alignment; strong definitions override tentative commons. Duplicate strong definitions are errors.
 * `keel-asm/src/parser/debug.rs` selects ARM64 compact encodings when possible;
   other CFI uses DWARF-mode compact entries plus `__eh_frame` with explicit
   pointer-difference relocations. Runtime unwind is needed even for plain C
@@ -48,9 +49,10 @@ the producer contract and the implementation decisions.
 * Keel IR supports invoke/landingpad and emits `__gcc_except_tab`, personality
   and typeinfo references. Those references must resolve through selected dylib
   interfaces, e.g. `-lc++`; language-level C++ compilation is not implied.
-* `__DWARF` sections are deliberately omitted with warnings. There is no debug
-  map, STABS map, dSYM construction, or promise of source-level debugging yet.
-  The output retains its external symbol table for inspection.
+* `__DWARF` stays in retained object snapshots when explicitly requested with
+  `--debug-map DIR` or `--dsym PATH`. Native STABS debug-map records map object
+  addresses to executable addresses. Without either option, DWARF omission still
+  produces a warning. Runtime unwind sections are always handled independently.
 * Lua, QuickJS and SQLite suite manifests use libm and pthread interfaces (plus
   Lua's macOS POSIX/dlopen interfaces). macOS aliases these to libSystem. They
   need libc data imports as well as function calls, and real pointer rebasing;
@@ -95,13 +97,106 @@ the producer contract and the implementation decisions.
   thin/GNU long-name archives, LTO/bitcode and universal archives require the
   system linker. Extraction is whole-member, without atom splitting/dead strip.
 
+## TLS, weak symbols, and source debugging
+
+Darwin TLS supports `S_THREAD_LOCAL_REGULAR` data, `S_THREAD_LOCAL_ZEROFILL`
+BSS, and 24-byte `S_THREAD_LOCAL_VARIABLES` descriptors, including compiler
+and Clang objects and demand-extracted archive members. Initialized template
+sections precede TLS BSS in a contiguous VM range. Descriptor bootstrap pointers
+bind to libSystem's `__tlv_bootstrap`; the third descriptor word is relocated to
+a template-relative byte offset, with no pointer rebase. Descriptor sections
+are aligned to eight bytes even when a Clang input advertises byte alignment.
+`MH_HAS_TLV_DESCRIPTORS` asks dyld to initialize descriptor keys/thunks. TLVP
+page relocations address eager GOT slots; local descriptor pointers rebase and
+dylib descriptor imports bind normally. Export trie terminals carry the
+thread-local kind, and TAPI `thread-local-symbols` are included in interfaces.
+There is no instruction relaxation or synthesized TLS runtime.
+
+Tests exercise independent initial values and mutations in the main thread and
+two actual pthreads, repeated accesses, multiple objects, TLS BSS, archive
+extraction, imported TLS from a dylib, and Clang C++ guarded dynamic TLS
+initialization. Template alignment is preserved; runtime allocation follows the
+OS's dyld TLV implementation. No extra guarantee for over-aligned per-thread
+allocation is made. Legacy `S_THREAD_LOCAL_INIT_FUNCTION_POINTERS` is rejected:
+on the tested OS Apple ld changes this section to ordinary data, and neither
+Apple-linked nor native-linked probes called its callback. Use modern compiler
+guard/wrapper initialization instead.
+
+External section-based `N_WEAK_DEF` symbols coalesce to the first weak
+contribution. Any strong definition overrides weak contributions, independently
+of object order. References through external symbols resolve to that winner;
+losing sections remain allocated because this linker does not split/discard
+atoms. Private external weak definitions coalesce only statically. Legacy
+coalesced sections, weak local/absolute definitions, and aliases/resolvers remain
+precise errors. Ordinary strong duplicate definitions remain errors.
+
+Weak dylib export identity is retained from TAPI rather than flattened away.
+A strong interface is selected over a weak interface when both provide an
+undefined symbol. Weak exports carry the export-trie flag and `N_WEAK_DEF`;
+coalescible calls go through stubs/GOT, and pointer slots participate in sorted
+dyld weak-binding streams. Strong executable overrides have
+`NON_WEAK_DEFINITION` records and `MH_WEAK_DEFINES`; actual weak binding locations
+set `MH_BINDS_TO_WEAK`. Direct page references that cannot participate safely in
+dynamic coalescing are diagnosed. Available weak imports use their dylib ordinal
+and the weak-import bind flag. A symbol referenced **only** with `N_WEAK_REF`
+can be absent from all selected interfaces: explicit weak flat lookup then lets
+dyld write null when no loaded image supplies it. Any strong reference still
+requires a definition/interface. Apple's equivalent absent-name test needs
+`-Wl,-U,_absent`. Dynamic behavior follows dyld's image/namespace rules; a strong
+symbol in an arbitrary later dylib does not imply universal interposition.
+Function/data values and pointer identity are compared with Apple-linked output,
+including executable weak/strong/private definitions and competing dylibs.
+
+Source debugging is explicit:
+
+```sh
+keel link input.o libhelpers.a --debug-map /absolute/path/program.objects -o program
+# LLDB can use the retained objects directly; keep this directory in place.
+keel link input.o libhelpers.a --dsym program.dSYM -o program
+# --dsym invokes /usr/bin/dsymutil explicitly after signing.
+lldb program
+```
+
+The host-independent API uses `Options.debug_directory: Option<PathBuf>` (an
+absolute UTF-8 directory). `link` returns `Executable.debug_objects`, each with
+its required output path and exact object bytes. It performs no filesystem I/O.
+`write_signed` materializes these content-named snapshots, then signs/installs the
+executable. Callers writing image bytes themselves must also materialize those
+artifacts before using a debug map or invoking dsymutil. `Input.name` is only a
+diagnostic label: the implementation never opens it, including for archive
+members. No persistent original object is required. Use a distinct debug
+directory per executable. `--dsym` defaults the snapshot directory to the output
+path with extension `debug-objects`; `--debug-map` overrides it. Successful dSYM
+construction allows removing snapshots; a debug-map-only executable still needs
+them. Snapshot files may remain after a failed signing/dsymutil operation.
+
+Native `N_SO`, `N_OSO`, `N_FUN`, `N_GSYM`, and `N_STSYM` records describe selected
+function/data addresses and function extents. dsymutil handles DWARF relocation
+and dSYM construction; this is an explicit platform-tool dependency, never a
+call to Apple's linker. codesign remains the explicit signer. Real LLDB tests
+on unoptimized Clang and Keel `-g` C objects, including multiple compilation
+units, static functions, archived debug input, and input bytes whose original
+object has been deleted, prove source-line breakpoints, argument/local values,
+and backtraces through callers. They pass using the debug map alone and using a
+standalone dSYM after deleting snapshots. `dwarfdump --verify` passes. Optimized
+variable recovery, split DWARF, debug type archives, Swift/Objective-C debugging,
+and arbitrary producer DWARF extensions are outside this tested contract.
+Runtime unwind/LSDA and C++ exception support are preserved.
+
+The implementation follows the SDK headers and primary sources:
+[dyld TLV initialization and allocation](https://github.com/apple-oss-distributions/dyld/blob/main/libdyld/ThreadLocalVariables.cpp),
+[LLVM Darwin debug-map emission](https://github.com/llvm/llvm-project/blob/main/lld/MachO/SyntheticSections.cpp),
+and [Apple nlist weak-symbol definitions](https://github.com/apple-oss-distributions/xnu/blob/main/EXTERNAL_HEADERS/mach-o/nlist.h).
+
 ## Remaining boundaries
 
 No general ld64 compatibility claim: no dylib/bundle/static executable output,
-framework search, arbitrary dylib parsing, rpaths, custom entry points, weak or
-coalesced input definitions/imports, symbol aliases, interposition, Objective-C
-metadata linking, TLS, arm64e/PAC, chained fixups, dead stripping, ICF, relaxation,
-LOH optimization, branch islands, debug maps, or linker-script/order-file support.
+framework search, arbitrary dylib parsing, rpaths, custom entry points, legacy
+`S_COALESCED` sections (except existing `__eh_frame` handling), local/absolute weak
+definitions, symbol aliases/resolvers, general interposition, Objective-C metadata
+linking, legacy TLS initializer-pointer sections, arm64e/PAC, chained fixups,
+dead stripping, ICF, relaxation, LOH optimization, branch islands, or
+linker-script/order-file support.
 Unsupported options/forms are diagnosed. LOH hints can be ignored safely because
 this implementation does not relax their instruction sequences. Data-in-code
 payloads are rejected. Foreign implicit `__eh_frame` processing requires the
@@ -148,8 +243,9 @@ imported function/data pointers, malloc/libc calls, argc/argv, exported-symbol
 `dlsym`, BSD archive extraction, pointer addends, C backtraces, Keel-generated C++
 catch/cleanup/resume metadata, propagation across ordinary calls, and compact exception handling restoring integer and FP
 registers. A separate startup test confirms dyld runs an initializer before main.
-An ASLR fixture observed five distinct main addresses in five launches. A debug
-object ran successfully with the documented DWARF-omission warning. Explicit
+An ASLR fixture observed five distinct main addresses in five launches. The
+initial debug probe only exercised execution with a DWARF-omission warning;
+the compatibility validation below supersedes that debugging boundary. Explicit
 `--system` fallback was exercised with an extra `-Wl` option.
 
 `codesign --verify --strict`, `otool -l`, `nm -nm`,
@@ -183,3 +279,51 @@ The initial writer prioritizes correctness and diagnostics: uncompressed exports
 and unwind tables, whole-section retention, eager binding and generous header
 padding produce larger executables than Apple's linker. No link-speed or startup
 performance claim is made.
+
+## Compatibility validation — 2026-10-15
+
+The separate [TLS/weak/debug report](../suite/reports/native-linker-compatibility-20261015.json)
+records the new differential probes and regression suites. This work started
+from main `426d6fc` in an isolated MacHost worktree. macOS 27.0.1 and the macOS 27.0
+SDK are the only tested platform versions. All runtime comparisons use identical
+objects with native and Apple links and signed executable launches; test dylibs
+are built explicitly with Apple Clang because native dylib output is out of scope.
+No link-speed benchmark or older-OS compatibility claim is added.
+
+All Lua, QuickJS, and SQLite suites passed again in plain and optimized modes
+from freshly emitted native objects (44 per mode), with fixture trees copied to
+the isolated output directory. Existing pointer, addend, archive, backtrace,
+exception, compact-unwind and ASLR fixtures passed. `cargo test -p keel-link -p
+keel` passed 40 tests (16 linker, 24 driver); strict Clippy with `--no-deps`,
+formatting and diff checks passed. No x86 implementation or shared benchmark
+report was modified.
+
+```sh
+cargo build -p keel --release
+python3 suite/validate_native_linker_compat.py --keel target/release/keel --out target/linker-compat/compat
+```
+
+The existing regression/application commands above apply unchanged; the new
+validator creates its own SDK-interface overlay for test dylibs, retained debug
+objects, debugger transcripts, and JSON results inside `--out`.
+
+
+### Independent review fixes
+
+Review of `b313ac1` found two correctness issues that the initial probes did not
+cover. The first TLS template section now uses the greatest template-section
+alignment, preserving aligned offsets when initialized data needs less alignment
+than TLS BSS. New Clang/Keel probes check actual 4-, 8-, and 16-byte addresses in
+main and a fresh pthread, as well as independent values. Allocation guarantees
+beyond the OS TLV allocator's alignment remain outside this contract.
+
+Debug maps now include tentative `-fcommon` globals at their final resolved
+addresses, including commons overridden by strong definitions. LLDB checks
+recover `(int) global = 42` both from debug maps alone and from standalone dSYMs
+after deleting object snapshots; `dwarfdump --verify` passes.
+
+The expanded compatibility validator passes 33 cases and 150 signed native
+launches, plus two additional LLDB launches of common-global debug maps. The
+40 Rust tests and strict driver/linker Clippy checks pass. The report's
+`review_followup` section records the new results and debugger transcripts,
+while retaining the original application/regression evidence separately.

@@ -251,6 +251,19 @@ impl<'a> Debug<'a> {
                 }
                 return Ok(());
             }
+            C::DefCfaOffset(offset) => {
+                bytes.push(0x0e);
+                uleb(*offset, &mut bytes);
+                Rule::CfaOffset(*offset)
+            }
+            C::DefCfaRegister(register) => {
+                if *register > 95 {
+                    return Err("invalid CFI register".into());
+                }
+                bytes.push(0x0d);
+                uleb((*register).into(), &mut bytes);
+                Rule::Other
+            }
             C::DefCfa { register, offset } => {
                 if *register > 95 {
                     return Err("invalid CFI register".into());
