@@ -921,18 +921,21 @@ impl Assembler {
         }
         // A signature may also be an ordinary external relocation target.
         // Only group-only names may receive a synthetic .group definition.
-        let ordinary_references: BTreeSet<_> = self
-            .fixes
-            .iter()
-            .map(|f| &f.address.expression)
-            .chain(
-                self.symbols
-                    .values()
-                    .flat_map(|s| s.alias.iter().chain(s.size.iter())),
-            )
-            .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
-            .map(String::as_str)
-            .collect();
+        let ordinary_references: BTreeSet<_> = if groups.is_empty() {
+            BTreeSet::new()
+        } else {
+            self.fixes
+                .iter()
+                .map(|f| &f.address.expression)
+                .chain(
+                    self.symbols
+                        .values()
+                        .flat_map(|s| s.alias.iter().chain(s.size.iter())),
+                )
+                .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
+                .map(String::as_str)
+                .collect()
+        };
         let synthetic_signatures: BTreeSet<_> = groups
             .keys()
             .filter(|name| {
@@ -975,6 +978,7 @@ impl Assembler {
             }
             sections.push(id);
         }
+        let has_merge_sections = self.sections.iter().any(|s| s.flags & 0x10 != 0);
         let identity: BTreeSet<_> = self
             .fixes
             .iter()
@@ -993,11 +997,12 @@ impl Assembler {
                                 self.eval_symbol(name, 0)
                                     .is_ok_and(|(section, _)| section == Some(f.section))
                             });
-                let merge_target = f.address.expression.add.as_deref().is_some_and(|name| {
-                    self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
-                        section.is_some_and(|i| self.sections[i].flags & 0x10 != 0)
-                    })
-                });
+                let merge_target = has_merge_sections
+                    && f.address.expression.add.as_deref().is_some_and(|name| {
+                        self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
+                            section.is_some_and(|i| self.sections[i].flags & 0x10 != 0)
+                        })
+                    });
                 merge_target
                     || f.address.modifier != Modifier::None
                     || pc_relative
