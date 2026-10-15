@@ -281,6 +281,14 @@ fn normalized(
             )
         })
         .collect();
+    let referenced: std::collections::BTreeSet<_> = file
+        .sections()
+        .flat_map(|s| s.relocations())
+        .filter_map(|(_, r)| match r.target() {
+            object::RelocationTarget::Symbol(i) => Some(i.0),
+            _ => None,
+        })
+        .collect();
     let mut symbols: Vec<_> = file
         .symbols()
         .filter(|s| matches!(s.name(), Ok("pick" | ".Lsignature" | "first" | "second")))
@@ -288,25 +296,31 @@ fn normalized(
             let object::SymbolFlags::Elf { st_info, st_other } = s.flags() else {
                 panic!("not ELF")
             };
+            let name = s.name().unwrap();
+            let owner = s
+                .section_index()
+                .map(|i| file.section_by_index(i).unwrap().name().unwrap().to_owned());
+            let signature_only = file.comdats().any(|g| g.name() == Ok(name))
+                && !referenced.contains(&s.index().0)
+                && (s.is_undefined()
+                    || owner.as_deref() == Some(".group")
+                    || name.starts_with(".L") && s.scope() == object::SymbolScope::Compilation);
+            // Group-only signatures have no ordinary symbol references: GAS
+            // and Clang legitimately differ in binding and anchor selection.
+            // Referenced signature metadata must still compare exactly.
             (
-                s.name().unwrap().to_string(),
-                st_info,
+                name.to_owned(),
+                if signature_only {
+                    st_info & 15
+                } else {
+                    st_info
+                },
                 st_other,
-                s.section_index().map(|i| {
-                    let owner = file.section_by_index(i).unwrap().name().unwrap();
-                    if s.scope() == object::SymbolScope::Compilation {
-                        if let Some(group) = file.comdats().find(|group| group.name() == s.name()) {
-                            // GNU as anchors local signatures in .group; Clang
-                            // may retain a defined label in the member section.
-                            // Both identify the same group by the same name.
-                            assert!(
-                                owner == ".group" || group.sections().any(|member| member == i)
-                            );
-                            return "<local-group-signature>".into();
-                        }
-                    }
-                    owner.to_owned()
-                }),
+                if signature_only {
+                    Some("<signature-only>".into())
+                } else {
+                    owner
+                },
                 s.size(),
             )
         })
@@ -334,6 +348,10 @@ fn section_metadata_matches_clang_and_gnu() {
         ".globl first\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.byte 1",
         ".weak first\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.byte 1",
         ".type first,@object\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.byte 1",
+        ".section .rodata.one,\"aG\",@progbits,first,comdat\n.quad first",
+        ".globl first\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.quad first",
+        ".weak first\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.quad first",
+        ".hidden first\n.section .rodata.one,\"aG\",@progbits,first,comdat\n.quad first",
     ] {
         std::fs::write(&input, source).unwrap();
         let ours = assemble_object(source).unwrap();
@@ -527,6 +545,54 @@ pointer{index}: .quad .Lconstant
             Command::new(exe).status().unwrap().success(),
             "link combination {index}"
         );
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+}
+
+#[test]
+fn referenced_group_signatures_remain_undefined() {
+    for binding in ["", ".globl first", ".weak first", ".hidden first"] {
+        let source =
+            format!("{binding}\n.section .data.refs,\"awG\",@progbits,first,comdat\n.quad first\n");
+        let bytes = assemble_object(&source).unwrap();
+        let elf = object::File::parse(&*bytes).unwrap();
+        let signature = elf.symbols().find(|s| s.name() == Ok("first")).unwrap();
+        assert!(signature.is_undefined(), "{binding}");
+        assert!(signature.is_global() || signature.is_weak(), "{binding}");
+        assert_eq!(signature.is_weak(), binding == ".weak first");
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn undefined_signature_reference_resolves_to_external_definition() {
+    let temp = std::env::temp_dir().join(format!("keel-signature-external-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let driver = temp.join("main.c");
+    std::fs::write(&driver,"long first=42; extern long *reference; int main(void) {return reference!=&first || *reference!=42;}\n").unwrap();
+    for (index, binding) in ["", ".globl first", ".weak first", ".hidden first"]
+        .into_iter()
+        .enumerate()
+    {
+        let source = format!(
+            "{binding}\n.section .data.refs,\"awG\",@progbits,first,comdat\n.globl reference\nreference: .quad first\n.section .note.GNU-stack,\"\",@progbits\n"
+        );
+        let obj = temp.join(format!("input-{index}.o"));
+        std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();
+        let exe = temp.join(format!("check-{index}"));
+        let output = Command::new("clang")
+            .arg(&driver)
+            .arg(obj)
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{binding}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(Command::new(exe).status().unwrap().success(), "{binding}");
     }
     std::fs::remove_dir_all(temp).unwrap();
 }

@@ -919,12 +919,27 @@ impl Assembler {
                 groups.entry(signature.clone()).or_default().push(i);
             }
         }
+        // A signature may also be an ordinary external relocation target.
+        // Only group-only names may receive a synthetic .group definition.
+        let ordinary_references: BTreeSet<_> = self
+            .fixes
+            .iter()
+            .map(|f| &f.address.expression)
+            .chain(
+                self.symbols
+                    .values()
+                    .flat_map(|s| s.alias.iter().chain(s.size.iter())),
+            )
+            .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
+            .map(String::as_str)
+            .collect();
         let synthetic_signatures: BTreeSet<_> = groups
             .keys()
             .filter(|name| {
-                self.symbols
-                    .get(*name)
-                    .is_none_or(|s| s.section.is_none() && s.alias.is_none() && s.common.is_none())
+                !ordinary_references.contains(name.as_str())
+                    && self.symbols.get(*name).is_none_or(|s| {
+                        s.section.is_none() && s.alias.is_none() && s.common.is_none()
+                    })
             })
             .cloned()
             .collect();
@@ -978,7 +993,13 @@ impl Assembler {
                                 self.eval_symbol(name, 0)
                                     .is_ok_and(|(section, _)| section == Some(f.section))
                             });
-                f.address.modifier != Modifier::None
+                let merge_target = f.address.expression.add.as_deref().is_some_and(|name| {
+                    self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
+                        section.is_some_and(|i| self.sections[i].flags & 0x10 != 0)
+                    })
+                });
+                merge_target
+                    || f.address.modifier != Modifier::None
                     || pc_relative
                         && f.address.expression.add.as_deref().is_some_and(|name| {
                             self.eval_symbol(name, 0)
@@ -1139,6 +1160,7 @@ impl Assembler {
             }
             // Relocations against section-relative aliases use their underlying section symbol.
             let symbol = if (omitted.contains(&name) || self.symbols[&name].alias.is_some())
+                && !identity.contains(name.as_str())
                 && f.address.modifier == Modifier::None
                 && self.local_symbol(&name, 0)
                 && self.symbols[&name].kind != SymbolKind::Tls
