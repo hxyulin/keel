@@ -2,17 +2,20 @@
 
 Run `cargo suite test` first to populate identical preprocessed sources. Use
 immutable release compiler copies and leave this machine idle during timing.
-This checks benchmark stdout; suite correctness tests are a separate gate.
+This checks benchmark stdout; --check-tests also runs Lua and SQLite correctness gates.
 """
 
 import argparse
 import concurrent.futures
+from contextlib import nullcontext
 import hashlib
 import json
 import math
 import pathlib
 import platform
 import random
+import re
+import shutil
 import statistics
 import subprocess
 import tempfile
@@ -61,6 +64,11 @@ def geomean(rows):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compiler", type=pathlib.Path, required=True)
+    parser.add_argument("--suites", nargs="+", choices=["lua", "quickjs", "sqlite"], default=["lua", "quickjs", "sqlite"])
+    parser.add_argument("--prepared", type=pathlib.Path, default=ROOT / "target/suite", help="read-only prepared suite tree")
+    parser.add_argument("--work-dir", type=pathlib.Path, help="retain build artifacts in a new directory")
+    parser.add_argument("--check-tests", action="store_true", help="run Lua's portable tests and SQLite queries before timing")
+    parser.add_argument("--vector-counts", action="store_true", help="count vectorized functions in printed IR before timing")
     parser.add_argument("--baseline-compiler", type=pathlib.Path)
     parser.add_argument("--baseline-passes", required=True)
     parser.add_argument("--compiler-arg", action="append", default=[], help="extra argument for candidate compiler (repeatable)")
@@ -96,9 +104,10 @@ def main():
         configs[name] = (compiler, passes)
     variants = list(configs)[1:]
     rng = random.Random(42)
+    suites = [entry for entry in SUITES if entry[0] in args.suites]
     sources = {
-        suite: sorted((ROOT / "target/suite" / suite / "pre").glob("*.i"))
-        for suite, _, _ in SUITES
+        suite: sorted((args.prepared.resolve() / suite / "pre").glob("*.i"))
+        for suite, _, _ in suites
     }
     if any(not files for files in sources.values()):
         parser.error("missing preprocessed sources; run cargo suite test first")
@@ -127,7 +136,7 @@ def main():
             for name, (_, passes) in configs.items()
         },
         "sources_sha256": {
-            str(source.relative_to(ROOT)): hashlib.sha256(
+            str(source): hashlib.sha256(
                 source.read_bytes()
             ).hexdigest()
             for files in sources.values()
@@ -137,9 +146,17 @@ def main():
             name: {"runtime": [], "compile": [], "code": []} for name in variants
         },
     }
-    with tempfile.TemporaryDirectory(prefix="keel-pass-matrix-") as temporary:
+    if args.work_dir:
+        if args.work_dir.resolve() == args.prepared.resolve() or args.prepared.resolve() in args.work_dir.resolve().parents:
+            parser.error("work directory must be outside the prepared inputs")
+        args.work_dir.mkdir(parents=True, exist_ok=False)
+    context = nullcontext(str(args.work_dir.resolve())) if args.work_dir else tempfile.TemporaryDirectory(prefix="keel-pass-matrix-")
+    with context as temporary:
         work = pathlib.Path(temporary)
-        for suite, binary, libs in SUITES:
+        report["work_dir"] = str(work)
+        report["checks"] = []
+        report["vector_ir"] = []
+        for suite, binary, libs in suites:
             sizes = {}
             for name, (driver, passes) in configs.items():
                 out = work / name / suite
@@ -174,6 +191,33 @@ def main():
                     if platform.system() == "Darwin"
                     else int(size.splitlines()[1].split()[0])
                 )
+                if args.vector_counts:
+                    functions = []
+                    for source in sources[suite]:
+                        text = run([driver, "cc", *extra, *optimizer_arguments(passes), "--emit-ir", str(source)]).decode()
+                        function = None
+                        for line in text.splitlines():
+                            if line.startswith("func @"):
+                                function = line.split("(")[0][6:]
+                            if function and re.search(r"\b(?:i8x16|i16x8|i32x4|i64x2|f32x4|f64x2)\b", line):
+                                tag = f"{source.name}:{function}"
+                                if tag not in functions:
+                                    functions.append(tag)
+                    report["vector_ir"].append({"suite": suite, "config": name, "functions": functions, "count": len(functions)})
+                if args.check_tests and suite == "lua":
+                    fixture = out / "tests"
+                    shutil.copytree(args.prepared.resolve() / suite / "lua-5.4.7-tests", fixture)
+                    result = subprocess.run([str(out / binary), "-e", "_U=true", "all.lua"], cwd=fixture, capture_output=True, timeout=300)
+                    (out / "correctness.log").write_bytes(result.stdout + result.stderr)
+                    if result.returncode:
+                        raise RuntimeError(f"Lua correctness failed: {name}; see {out / 'correctness.log'}")
+                    report["checks"].append({"suite":suite,"config":name,"test":"Lua portable suite","passed":True})
+                elif args.check_tests and suite == "sqlite":
+                    answer = run([str(out / binary), ":memory:"], (ROOT / "suite/sqlite/queries.sql").read_bytes())
+                    (out / "correctness.log").write_bytes(answer)
+                    if name != "baseline" and answer != (work / "baseline" / suite / "correctness.log").read_bytes():
+                        raise RuntimeError(f"SQLite correctness mismatch: {name}")
+                    report["checks"].append({"suite":suite,"config":name,"test":"SQLite queries match baseline","passed":True})
                 print(f"built {suite}/{name}", flush=True)
             for name in variants:
                 changed = sum(
@@ -188,10 +232,11 @@ def main():
                         "after": sizes[name],
                         "assembly_files_changed": changed,
                         "files": len(sources[suite]),
+                        "executable_sha256": {config: hashlib.sha256((work / config / suite / binary).read_bytes()).hexdigest() for config in ["baseline", name]},
                     }
                 )
 
-        for suite, binary, _ in SUITES:
+        for suite, binary, _ in suites:
             benches = (
                 ["fib", "sort", "string", "float"]
                 if suite == "lua"
@@ -252,7 +297,7 @@ def main():
                         flush=True,
                     )
 
-        for suite, _, _ in SUITES:
+        for suite, _, _ in suites:
             samples = {name: {"before": [], "after": []} for name in variants}
             for iteration in range(1 + args.compile_pairs):
                 order = variants.copy()

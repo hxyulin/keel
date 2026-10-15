@@ -131,3 +131,15 @@ fn leaves_known_short_and_negative_loops_unchanged() {
         assert_eq!(packed(&optimize(&source, VectorTarget::Aarch64Neon)), 0);
     }
 }
+
+#[test]
+fn ignores_two_instruction_blocks_starting_with_a_store_or_void_call() {
+    for first in ["store v2,v0", "call @effect()"] {
+        let source = format!(
+            "decl @effect()\nfunc @not_a_counted_loop(ptr,i64) {{\nblock0(v0: ptr,v1: i64):\n jump block1(v1)\nblock1(v2: i64):\n {first}\n brif v2,block1(v2),block2\nblock2:\n return\n}}"
+        );
+        let before = keel_ir::parse(&source).unwrap().to_string();
+        let after = optimize(&source, VectorTarget::Portable);
+        assert_eq!(before, after.to_string());
+    }
+}

@@ -209,6 +209,15 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
     let D::Brif { cond, ref dests } = *f.inst_data(branch) else {
         return None;
     };
+    // A two-instruction block need not start with a comparison (it may
+    // start with a store or a void call, which has no result at all).
+    let D::Icmp {
+        cond: predicate,
+        args,
+    } = *f.inst_data(cmp)
+    else {
+        return None;
+    };
     if f.resolve(cond) != f.first_result(cmp) || !dests[0].args.is_empty() {
         return None;
     }
@@ -218,10 +227,11 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
     if body == header || cfg.preds(body) != [header] || !f.block_params(body).is_empty() {
         return None;
     }
-    let D::Icmp { cond, args } = *f.inst_data(cmp) else {
-        return None;
-    };
-    let (bound, signed) = match (cond, f.resolve(args[0]) == iv, f.resolve(args[1]) == iv) {
+    let (bound, signed) = match (
+        predicate,
+        f.resolve(args[0]) == iv,
+        f.resolve(args[1]) == iv,
+    ) {
         (IntCC::Ult, true, false) => (args[1], false),
         (IntCC::Ugt, false, true) => (args[0], false),
         (IntCC::Slt, true, false) => (args[1], true),
