@@ -1,11 +1,11 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
-//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch A64 assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -33,12 +33,12 @@ mod input;
 mod link;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
-  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
-  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel link [--system] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a>... -o executable
   keel passes
@@ -67,6 +67,7 @@ struct Options {
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
     tuning: keel_codegen::tuning::TuningCpu,
+    x86_features: keel_asm::x86::Features,
     ir_lines: bool,
     emit_ir: bool,
     emit_object: bool,
@@ -253,6 +254,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     }
                 }
             }
+            "--target-features" => {
+                opts.x86_features = keel_asm::x86::Features::parse(
+                    args.next()
+                        .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
+                )?;
+            }
             "--tune" => {
                 let name = args.next().ok_or("`--tune` needs generic or apple-m5")?;
                 opts.tuning = keel_codegen::tuning::TuningCpu::from_name(name)
@@ -327,6 +334,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--regalloc",
                     "--isel-tier",
                     "--tune",
+                    "--target-features",
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
@@ -359,6 +367,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--regalloc",
                     "--isel-tier",
                     "--tune",
+                    "--target-features",
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
@@ -460,8 +469,12 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
         options: opts.selection,
         cpu: opts.tuning,
     };
+    let feature_selector = keel_codegen::x86_features::FeatureSelector {
+        inner: &selector,
+        features: opts.x86_features,
+    };
     let pipeline = keel_codegen::CodegenPipeline {
-        selector: &selector,
+        selector: &feature_selector,
         allocator: &opts.allocation,
     };
     if opts.emit_object {
@@ -475,7 +488,9 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
             Target::Aarch64AppleDarwin => {
                 keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
             }
-            Target::X86_64LinuxGnu => keel_asm::x86::assemble_program_object(&program),
+            Target::X86_64LinuxGnu => {
+                keel_asm::x86::assemble_program_object_with_features(&program, opts.x86_features)
+            }
         }
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
@@ -744,5 +759,41 @@ mod tuning_tests {
                 .unwrap(),
             Target::X86_64LinuxGnu
         );
+    }
+}
+
+#[cfg(test)]
+mod x86_feature_option_tests {
+    use super::*;
+    #[test]
+    fn x86_features_parse_independently_of_tuning() {
+        let args = [
+            "--target-features",
+            "+avx,bmi2,-avx",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+        ]
+        .map(str::to_owned);
+        let options = parse_options(&args, &["--target-features", "--target"]).unwrap();
+        assert_eq!(
+            options.x86_features,
+            keel_asm::x86::Features {
+                bmi2: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(options.tuning, keel_codegen::tuning::TuningCpu::Generic);
+        for args in [
+            vec!["--target-features"],
+            vec!["--target-features", "unknown"],
+        ] {
+            assert!(
+                parse_options(
+                    &args.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &["--target-features"]
+                )
+                .is_err()
+            );
+        }
     }
 }

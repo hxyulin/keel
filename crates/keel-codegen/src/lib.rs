@@ -81,7 +81,12 @@ impl CodegenPipeline<'_> {
 
 /// Plan target instructions and the operands that remain live for allocation.
 /// `folds` describes operands encoded directly by the target emitter.
+pub mod x86_features;
+
 pub trait InstructionSelector {
+    fn x86_features(&self) -> keel_asm_ir::x86::Features {
+        keel_asm_ir::x86::Features::default()
+    }
     fn validate_target(&self, _target: Target) -> Result<(), &'static str> {
         Ok(())
     }

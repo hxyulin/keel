@@ -810,3 +810,6 @@ pub fn parse_program(source: &str) -> Result<crate::Program, String> {
 }
 
 mod format;
+
+mod features;
+pub use features::Features;

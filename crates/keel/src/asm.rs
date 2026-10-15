@@ -13,6 +13,7 @@ struct Options {
     output: Option<PathBuf>,
     out_dir: Option<PathBuf>,
     features: TargetFeatures,
+    x86_features: keel_asm::x86::Features,
     x86: bool,
 }
 
@@ -47,6 +48,12 @@ impl Options {
                         _ => return Err("assembler --target expects x86_64-unknown-linux-gnu or aarch64-apple-darwin".into()),
                     };
                 }
+                "--target-features" => {
+                    opts.x86_features = keel_asm::x86::Features::parse(
+                        args.next()
+                            .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
+                    )?;
+                }
                 "--cpu" => {
                     opts.features = match args.next().map(String::as_str) {
                         Some("baseline") => TargetFeatures::default(),
@@ -67,6 +74,9 @@ impl Options {
         }
         if opts.x86 && opts.features != TargetFeatures::default() {
             return Err("--cpu apple-m5 requires the AArch64 assembler target".into());
+        }
+        if !opts.x86 && !opts.x86_features.is_empty() {
+            return Err("x86 target features require the x86 assembler target".into());
         }
         if opts.inputs.is_empty() {
             return Err(crate::USAGE.into());
@@ -167,7 +177,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             .text()
             .map_err(|e| format!("{}: {e}", input.display()))?;
         let object = if opts.x86 {
-            keel_asm::x86::assemble_object(text)
+            keel_asm::x86::assemble_object_with_features(text, opts.x86_features)
         } else {
             keel_asm::assemble_object_with_features(text, opts.features)
         }
@@ -333,5 +343,36 @@ mod tests {
         assert!(temp.0.join("objects/first.o").exists());
         assert!(!temp.0.join("objects/bad.o").exists());
         assert!(!temp.0.join("objects/last.o").exists());
+    }
+}
+
+#[cfg(test)]
+mod feature_option_tests {
+    use super::*;
+    #[test]
+    fn feature_flags_are_x86_only_and_order_independent() {
+        let parse = |target: &str| {
+            Options::parse(
+                &[
+                    "--target-features",
+                    "bmi1,bmi2",
+                    "input.s",
+                    "-o",
+                    "out.o",
+                    "--target",
+                    target,
+                ]
+                .map(str::to_owned),
+            )
+        };
+        assert_eq!(
+            parse("x86_64-unknown-linux-gnu").unwrap().x86_features,
+            keel_asm::x86::Features {
+                bmi1: true,
+                bmi2: true,
+                ..Default::default()
+            }
+        );
+        assert!(parse("aarch64-apple-darwin").is_err());
     }
 }

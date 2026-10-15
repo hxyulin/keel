@@ -3,6 +3,7 @@
 mod encode;
 mod metadata;
 use crate::Error;
+pub use keel_asm_ir::x86::Features;
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
@@ -71,13 +72,26 @@ struct Assembler {
 
 /// Assemble standalone Intel syntax as a Linux relocatable ELF64 object.
 pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
+    assemble_object_with_features(source, x86::Features::default())
+}
+pub fn assemble_object_with_features(
+    source: &str,
+    features: x86::Features,
+) -> Result<Vec<u8>, Error> {
     let mut items = Vec::new();
     parse_source(source, 1, &mut items)?;
+    validate_features(&items, features)?;
     assemble_items(&items)
 }
 /// Consume x86 instructions and shared directives. Diagnostic positions refer
 /// to program items; positions inside explicit text refer to its source lines.
 pub fn assemble_program_object(program: &Program) -> Result<Vec<u8>, Error> {
+    assemble_program_object_with_features(program, x86::Features::default())
+}
+pub fn assemble_program_object_with_features(
+    program: &Program,
+    features: x86::Features,
+) -> Result<Vec<u8>, Error> {
     let mut items = Vec::with_capacity(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
         if let Item::Text(source) = item {
@@ -92,7 +106,29 @@ pub fn assemble_program_object(program: &Program) -> Result<Vec<u8>, Error> {
             items.push((std::borrow::Cow::Borrowed(item), index + 1));
         }
     }
+    validate_features(&items, features)?;
     assemble_items(&items)
+}
+fn validate_features<T: std::borrow::Borrow<Item>>(
+    items: &[(T, usize)],
+    features: x86::Features,
+) -> Result<(), Error> {
+    for (item, line) in items {
+        if let Item::X86Instruction(i) = item.borrow() {
+            let required = i.opcode.required_features();
+            if !features.contains(required) {
+                return Err(Error::new(
+                    *line,
+                    format!(
+                        "{} requires x86 target features: {}",
+                        i.opcode,
+                        required.names().collect::<Vec<_>>().join(",")
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 fn parse_source(source: &str, first: usize, items: &mut Vec<(Item, usize)>) -> Result<(), Error> {
     for (index, source) in source.lines().enumerate() {
@@ -117,10 +153,17 @@ pub struct Profile {
 }
 /// Assemble once and collect stage timings, excluding file I/O.
 pub fn profile_object(source: &str) -> Result<(Vec<u8>, Profile), Error> {
+    profile_object_with_features(source, Features::default())
+}
+pub fn profile_object_with_features(
+    source: &str,
+    features: Features,
+) -> Result<(Vec<u8>, Profile), Error> {
     let mut profile = Profile::default();
     let start = std::time::Instant::now();
     let mut items = Vec::new();
     parse_source(source, 1, &mut items)?;
+    validate_features(&items, features)?;
     profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     profile.items = items.len();
     let object = assemble_items_inner::<true, _>(&items, &mut profile)?;

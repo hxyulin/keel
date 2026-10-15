@@ -347,6 +347,7 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
 }
 
 struct FunctionCompiler<'a> {
+    features: keel_asm_ir::x86::Features,
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
@@ -577,6 +578,7 @@ impl<'a> FunctionCompiler<'a> {
             frame_size,
             saved,
             next_block: None,
+            features: pipeline.selector.x86_features(),
             out: Output::new(structured),
             uses_trap: false,
             debug: false,
@@ -3324,9 +3326,11 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn emit<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
+        debug_assert!(self.features.contains(opcode.required_features()));
         self.out.instruction(opcode, Vec::from(operands), false);
     }
     fn emit_locked<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
+        debug_assert!(self.features.contains(opcode.required_features()));
         self.out.instruction(opcode, Vec::from(operands), true);
     }
 }
