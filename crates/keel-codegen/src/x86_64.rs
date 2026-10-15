@@ -1015,9 +1015,21 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
                 self.def_done(result, d);
             }
+            InstData::VectorExtract { arg, lane } => {
+                let source = self.use_freg(arg, FS0);
+                let d = self.def_reg(result);
+                let source = if lane == 0 {
+                    source
+                } else {
+                    // Use reserved scratch; the input may still be live.
+                    self.emit(Opcode::Movhlps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(source))]);
+                    FS1
+                };
+                self.emit(Opcode::Movq, [asm_arg(&r64(d)), asm_arg(&xmm(source))]);
+                self.def_done(result, d);
+            }
             InstData::VectorSplat { .. }
             | InstData::VectorUnary { .. }
-            | InstData::VectorExtract { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorIcmp { .. }

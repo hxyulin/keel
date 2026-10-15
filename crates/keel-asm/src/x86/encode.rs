@@ -722,6 +722,13 @@ fn encode_sse(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
         return Err(err());
     };
     let (prefix, byte, mem_width, store) = match op {
+        Movhlps => {
+            if o.len() != 2 || !xmm(a) || !xmm(b) {
+                return Err(err());
+            }
+            e.rm(0, &[0x0f, 0x12], 32, reg(a)?.number, b, None)?;
+            return Ok(());
+        }
         Movss => (0xf3, 0x10, 32, true),
         Movsd => (0xf2, 0x10, 64, true),
         Movaps => (0, 0x28, 128, true),

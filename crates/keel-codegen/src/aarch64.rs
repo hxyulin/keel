@@ -1241,8 +1241,8 @@ impl<'a> FunctionCompiler<'a> {
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
-            InstData::VectorExtract { .. }
-            | InstData::VectorInsert { .. }
+            InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
+            InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorIcmp { .. }
             | InstData::VectorFcmp { .. }

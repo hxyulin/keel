@@ -115,6 +115,7 @@ impl fmt::Display for Opcode {
             Opcode::Movss => f.write_str("movss"),
             Opcode::Movsd => f.write_str("movsd"),
             Opcode::Movaps => f.write_str("movaps"),
+            Opcode::Movhlps => f.write_str("movhlps"),
             Opcode::Movups => f.write_str("movups"),
             Opcode::Paddb => f.write_str("paddb"),
             Opcode::Paddw => f.write_str("paddw"),

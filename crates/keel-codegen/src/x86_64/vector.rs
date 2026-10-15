@@ -57,6 +57,9 @@ pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
 }
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     crate::vector::lower(func, |func, data| match data {
+        InstData::VectorExtract { arg, .. } => {
+            func.value_type(*arg) == Type::Vector(VectorType::I64x2)
+        }
         InstData::VectorBinary { op, args } => {
             packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
         }

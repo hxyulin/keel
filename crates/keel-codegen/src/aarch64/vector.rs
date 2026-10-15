@@ -90,6 +90,9 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
 }
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     crate::vector::lower(func, |f, data| match data {
+        InstData::VectorExtract { arg, .. } => {
+            f.value_type(*arg) == Type::Vector(VectorType::I64x2)
+        }
         InstData::VectorBinary { op, args } => {
             binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
         }
@@ -101,6 +104,20 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_extract(&mut self, arg: Value, lane: u8, result: Option<Value>) {
+        let source = self.use_freg(arg, FS0);
+        let d = self.def_reg(result);
+        self.native(
+            Opcode::UMOV_asimdins_X_x,
+            [
+                (FieldId::imm5, 8 | (u32::from(lane) << 4)),
+                (FieldId::Rn, source.into()),
+                (FieldId::Rd, d.into()),
+            ],
+            |out| write!(out, "umov\tx{d}, v{source}.d[{lane}]"),
+        );
+        self.def_done(result, d);
+    }
     pub(super) fn vector_splat(&mut self, ty: Type, arg: Value, result: Option<Value>) {
         let shape = ty.vector().unwrap();
         let lane = shape.lane_type();

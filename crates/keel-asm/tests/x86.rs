@@ -27,6 +27,16 @@ fn rex_sib_displacements_and_immediates() {
 }
 
 #[test]
+fn movhlps_encodes_register_only_and_extended_registers() {
+    assert_eq!(
+        text("movhlps xmm1,xmm2; movhlps xmm14,xmm15"),
+        [0x0f, 0x12, 0xca, 0x45, 0x0f, 0x12, 0xf7]
+    );
+    assert!(assemble_object("movhlps xmm0,[rax]").is_err());
+    assert!(assemble_object("movhlps rax,xmm0").is_err());
+}
+
+#[test]
 fn short_branches_and_symbol_differences() {
     let bytes = text("start: jmp done\nje start\n.long done-start\ndone: ret");
     assert_eq!(bytes, [0xeb, 6, 0x74, 0xfc, 8, 0, 0, 0, 0xc3]);
