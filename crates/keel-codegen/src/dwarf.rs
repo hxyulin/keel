@@ -283,12 +283,16 @@ pub(crate) fn emit_debug_info<T: Sink>(
             // The variable's offset in its module's TLS block
             // (DW_OP_const8u), which DW_OP_GNU_push_tls_address turns into
             // this thread's copy, as GCC writes it.
-            writeln!(
-                out,
-                "\t.byte\t10, 0x0e\n\t.quad\t{}@dtpoff\n\t.byte\t0xe0",
-                format.symbol(&global.symbol)
-            )
-            .unwrap();
+            out.number(1, 10);
+            out.number(1, 0x0e);
+            out.directive(crate::metadata::Directive::X86Integer {
+                width: 8,
+                address: keel_asm_ir::x86::Address {
+                    expression: Expression::symbol(&global.symbol),
+                    modifier: keel_asm_ir::x86::Modifier::DtpOff,
+                },
+            });
+            out.number(1, 0xe0);
         } else if data.thread_local {
             // The address of the thread-local's descriptor
             // (DW_OP_const8u), which DW_OP_form_tls_address turns into

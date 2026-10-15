@@ -1,5 +1,6 @@
 //! Cross-target assembly coverage; execution lives in the native codegen matrix.
 use keel_codegen::{SelectionTier, Target, regalloc::AllocationTier};
+use object::{Object, ObjectSection};
 use std::path::Path;
 
 #[test]
@@ -41,12 +42,26 @@ fn every_x86_backend_fixture_assembles() {
                     path.display()
                 )
             });
+            let elf = object::File::parse(&*object).unwrap();
+            assert!(
+                elf.sections().all(|s| !s.name().unwrap().contains(',')),
+                "{}",
+                path.display()
+            );
+            if !module.files.is_empty() && !module.functions.is_empty() {
+                assert!(
+                    elf.section_by_name(".debug_info").is_some(),
+                    "{}",
+                    path.display()
+                );
+            }
             let program = keel_codegen::compile_program_with_pipeline(
                 &module,
                 Target::X86_64LinuxGnu,
                 &pipeline,
             )
             .unwrap();
+            assert_eq!(program.stats().text_bytes, 0, "{}", path.display());
             assert_eq!(
                 object,
                 keel_asm::x86::assemble_program_object(&program).unwrap(),
@@ -93,6 +108,14 @@ fn c_metadata_and_debug_fixtures_assemble() {
                 }
                 let program =
                     keel_codegen::compile_program(&module, Target::X86_64LinuxGnu).unwrap();
+                assert_eq!(program.stats().text_bytes, 0, "{}", path.display());
+                let text = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+                assert_eq!(
+                    keel_asm::x86::assemble_program_object(&program).unwrap(),
+                    keel_asm::x86::assemble_object(&text).unwrap(),
+                    "{} debug={debug_info} opt={opt}",
+                    path.display()
+                );
                 keel_asm::x86::assemble_program_object(&program).unwrap_or_else(|e| {
                     panic!("{} debug={debug_info} opt={opt}: {e}", path.display())
                 });

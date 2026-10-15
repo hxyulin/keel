@@ -78,12 +78,18 @@ pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
 /// Consume x86 instructions and shared directives. Diagnostic positions refer
 /// to program items; positions inside explicit text refer to its source lines.
 pub fn assemble_program_object(program: &Program) -> Result<Vec<u8>, Error> {
-    let mut items = Vec::new();
+    let mut items = Vec::with_capacity(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
         if let Item::Text(source) = item {
-            parse_source(source, index + 1, &mut items)?;
+            let mut parsed = Vec::new();
+            parse_source(source, index + 1, &mut parsed)?;
+            items.extend(
+                parsed
+                    .into_iter()
+                    .map(|(item, line)| (std::borrow::Cow::Owned(item), line)),
+            );
         } else {
-            items.push((item.clone(), index + 1));
+            items.push((std::borrow::Cow::Borrowed(item), index + 1));
         }
     }
     assemble_items(&items)
@@ -117,14 +123,14 @@ pub fn profile_object(source: &str) -> Result<(Vec<u8>, Profile), Error> {
     parse_source(source, 1, &mut items)?;
     profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
     profile.items = items.len();
-    let object = assemble_items_inner::<true>(&items, &mut profile)?;
+    let object = assemble_items_inner::<true, _>(&items, &mut profile)?;
     Ok((object, profile))
 }
-fn assemble_items(items: &[(Item, usize)]) -> Result<Vec<u8>, Error> {
-    assemble_items_inner::<false>(items, &mut Profile::default())
+fn assemble_items<T: std::borrow::Borrow<Item>>(items: &[(T, usize)]) -> Result<Vec<u8>, Error> {
+    assemble_items_inner::<false, _>(items, &mut Profile::default())
 }
-fn assemble_items_inner<const PROFILE: bool>(
-    items: &[(Item, usize)],
+fn assemble_items_inner<const PROFILE: bool, T: std::borrow::Borrow<Item>>(
+    items: &[(T, usize)],
     profile: &mut Profile,
 ) -> Result<Vec<u8>, Error> {
     // Start optimistically short, then only widen. Alignment (especially max-skip)
@@ -133,7 +139,7 @@ fn assemble_items_inner<const PROFILE: bool>(
     let mut short: Vec<bool> = items
         .iter()
         .map(|(item, _)| {
-            matches!(item,
+            matches!(item.borrow(),
         Item::X86Instruction(i) if matches!(i.opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_))
             && matches!(i.operands.as_slice(), [x86::Operand::Immediate(address)]
                 if address.modifier == Modifier::None && address.expression.add.is_some()
@@ -147,6 +153,7 @@ fn assemble_items_inner<const PROFILE: bool>(
         let mut a = Assembler::new()?;
         let mut branches = Vec::new();
         for (index, (item, line)) in items.iter().enumerate() {
+            let item = item.borrow();
             let fix = a.fixes.len();
             let result = if let Item::Text(t) = item {
                 t.lines()
@@ -428,6 +435,28 @@ impl Assembler {
     }
     fn shared_directive(&mut self, d: &Directive, line: usize) -> Result<(), String> {
         match d {
+            Directive::X86Integer { width, address } if matches!(width, 1 | 2 | 4 | 8) => {
+                self.integer(*width, address.clone(), line)
+            }
+            Directive::ElfSection {
+                name,
+                flags,
+                nobits,
+            } => self.section(name, Some(*flags), *nobits),
+            Directive::ElfType { name, function } => {
+                self.symbols.entry(name.clone()).or_default().kind = if *function {
+                    SymbolKind::Text
+                } else {
+                    SymbolKind::Data
+                };
+                Ok(())
+            }
+            Directive::Size { name, expression } => {
+                let e = self.capture_dot(expression.clone())?;
+                self.symbols.entry(name.clone()).or_default().size = Some(e);
+                Ok(())
+            }
+
             Directive::Section {
                 segment,
                 name,
@@ -479,20 +508,7 @@ impl Assembler {
                 });
                 Ok(())
             }
-            Directive::Cfi(cfi) => {
-                use keel_asm_ir::Cfi;
-                match cfi {
-                    Cfi::Start => metadata::cfi(self, ".cfi_startproc", ""),
-                    Cfi::End => metadata::cfi(self, ".cfi_endproc", ""),
-                    Cfi::DefCfa { register, offset } => {
-                        metadata::cfi(self, ".cfi_def_cfa", &format!("{register},{offset}"))
-                    }
-                    Cfi::Offset { register, offset } => {
-                        metadata::cfi(self, ".cfi_offset", &format!("{register},{offset}"))
-                    }
-                    _ => Err("x86 exception personality/LSDA directives are unsupported".into()),
-                }
-            }
+            Directive::Cfi(cfi) => metadata::shared_cfi(self, cfi),
             Directive::ZeroFill {
                 symbol,
                 size,

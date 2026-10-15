@@ -15,7 +15,11 @@ pub(crate) trait Sink: Write {
     }
     fn debug_section(&mut self, format: Format, name: &str) {
         if format == Format::Elf {
-            writeln!(self, "\t.section\t{}", format.debug_section(name)).unwrap();
+            self.directive(Directive::ElfSection {
+                name: format!(".debug_{name}"),
+                flags: 0,
+                nobits: false,
+            });
         } else {
             self.section("__DWARF", &format!("__debug_{name}"), SectionKind::Debug);
         }

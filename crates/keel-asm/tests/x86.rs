@@ -236,7 +236,15 @@ fn instruction_bytes_match_reference_assemblers() {
         "cvtsd2ss xmm9,xmm10",
     ];
     for (n, case) in cases.iter().enumerate() {
-        let source = format!(".intel_syntax noprefix\n.text\n{case}\n");
+        let instruction = Instruction::parse_intel(case).unwrap();
+        let rendered = instruction.to_string();
+        assert_eq!(
+            Instruction::parse_intel(&rendered).unwrap(),
+            instruction,
+            "{case}: {rendered}"
+        );
+        assert_eq!(text(&rendered), text(case), "{case}: {rendered}");
+        let source = format!(".intel_syntax noprefix\n.text\n{rendered}\n");
         let input = temp.join("input.s");
         let output = temp.join("clang.o");
         std::fs::write(&input, &source).unwrap();
