@@ -504,6 +504,13 @@ fn assemble_pass(
                 use keel_asm_ir::Directive as D;
                 d.validate().map_err(err)?;
                 match d {
+                    D::ElfSection { .. }
+                    | D::ElfSectionMetadata { .. }
+                    | D::ElfType { .. }
+                    | D::Size { .. }
+                    | D::X86Integer { .. } => {
+                        return Err(err("ELF directive in AArch64 Mach-O program".into()));
+                    }
                     D::Section {
                         segment,
                         name,

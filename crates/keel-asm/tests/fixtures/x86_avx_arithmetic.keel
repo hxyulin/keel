@@ -1,0 +1,22 @@
+; Scalar dependency chain for comparing baseline and --target-features avx.
+; Both inputs remain live across several operations, exposing destination copies.
+; Call repeatedly with finite positive inputs for a small arithmetic benchmark.
+func @avx_chain(f64, f64) -> f64 {
+block0(v0: f64, v1: f64):
+    v2 = fsub v0, v1
+    v3 = fdiv v0, v2
+    v4 = fmul v1, v3
+    v5 = fadd v4, v0
+    v6 = fsqrt v5
+    return v6
+}
+
+func @avx_chain32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fsub v0, v1
+    v3 = fdiv v0, v2
+    v4 = fmul v1, v3
+    v5 = fadd v4, v0
+    v6 = fsqrt v5
+    return v6
+}

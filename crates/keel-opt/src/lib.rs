@@ -21,6 +21,8 @@ mod gcm;
 mod gvn;
 mod instcombine;
 mod known_bits;
+mod loop_vectorize;
+pub use loop_vectorize::VectorTarget;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
@@ -32,6 +34,11 @@ pub trait Pass: Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn run(&self, func: &mut Function) -> bool;
+
+    /// Target-aware passes may override this; ordinary passes ignore it.
+    fn run_for_target(&self, func: &mut Function, _target: VectorTarget) -> bool {
+        self.run(func)
+    }
 
     /// Request the structural form documented in `docs/simplification.md`.
     /// The manager restores it on entry when an earlier pass changed the IR.
@@ -145,9 +152,11 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[9],
     &BUILTINS[10],
     &BUILTINS[11],
+    &loop_vectorize::LoopVectorize,
 ];
 
-/// Independent optimizer effort; Full adds value numbering and code motion.
+/// Independent optimizer effort; Full adds value numbering, code motion, and
+/// guarded loop vectorization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
@@ -184,6 +193,7 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "gvn",
     "dce",
     "gcm",
+    "loop-vectorize",
 ];
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {
@@ -221,16 +231,34 @@ impl fmt::Display for OptError {
 
 /// Runs the named passes, in order, on every function in `module`.
 pub fn run_passes(module: &mut Module, names: &[&str]) -> Result<(), OptError> {
+    run_passes_for_target(module, names, VectorTarget::Portable)
+}
+
+/// Runs named passes with target SIMD capabilities; ordinary passes ignore the target.
+pub fn run_passes_for_target(
+    module: &mut Module,
+    names: &[&str],
+    target: VectorTarget,
+) -> Result<(), OptError> {
     let passes = names
         .iter()
         .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline(module, &passes)
+    run_pipeline_for_target(module, &passes, target)
 }
 
 /// Runs custom or built-in passes, restoring declared canonical entry
 /// requirements and verifying the IR after each pass and restoration.
 pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), OptError> {
+    run_pipeline_for_target(module, passes, VectorTarget::Portable)
+}
+
+/// Runs a custom pipeline with target SIMD capabilities and per-pass verification.
+pub fn run_pipeline_for_target(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    target: VectorTarget,
+) -> Result<(), OptError> {
     profiling::scope!("optimization");
     for func in &mut module.functions {
         let mut canonical = false;
@@ -246,7 +274,7 @@ pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), Opt
                 })?;
                 canonical = true;
             }
-            let changed = pass.run(func);
+            let changed = pass.run_for_target(func, target);
             // Alias-producing rewrites can invalidate even untouched users.
             // Conservatively invalidate after any change unless promised otherwise.
             canonical = pass.produces_canonical_form() || (canonical && !changed);

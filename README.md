@@ -2,8 +2,9 @@
 
 An educational compiler written in Rust: a low-level SSA IR, optimizer,
 assembly generators for aarch64 macOS and x86-64 Linux, and a C frontend.
-Clang supplies preprocessing, assembly and linking; keel compiles one
-preprocessed C translation unit or textual IR module to assembly.
+Keel preprocesses and compiles one C translation unit or compiles textual IR
+to assembly without invoking Clang. The examples use Clang for assembly and
+linking, and the tests use it as an independent reference compiler.
 
 See [docs/design.md](docs/design.md) for the design decisions.
 
@@ -18,18 +19,55 @@ cargo run -p keel -- opt -p gvn,dce input.keel        # run passes, print the IR
 cargo run -p keel -- passes                           # list the passes
 ```
 
-C goes through clang's preprocessor first; keel compiles one preprocessed
-file to one assembly file:
+C source goes through Keel's native preprocessor. Keel derives predefined
+macros from its target ABI, answers feature queries itself, and embeds its
+compiler headers. It defines `__KEEL__` plus pinned GCC/Clang compatibility
+identity macros, including `__GNUC__` and `__clang__`:
 
 ```sh
-clang -E -std=c11 hello.c -o hello.i
-cargo run -p keel -- cc -O hello.i -o hello.s         # -g for debug info
-clang -o hello hello.s && ./hello                     # clang -g with -g, then lldb
-cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
+cargo run -p keel -- cc -O hello.c -o hello.s         # -g for debug info
+clang -o hello hello.s && ./hello
+cargo run -p keel -- cc --emit-ir hello.c            # print the keel IR
+cargo run -p keel -- cc -E -Iinclude -DDEBUG=1 hello.c -o hello.i
+cargo run -p keel -- cc hello.i -o hello.s           # .i bypasses preprocessing
+cargo run -p keel -- cc -E -dM hello.c               # inspect the final macro set
+cargo run -p keel -- cc --sysroot /path/to/sdk hello.c -o hello.s
 ```
 
+`-I`, `-D` and `-U` accept joined or separate arguments. `--sysroot dir`
+(or `--sysroot=dir`, `-isysroot dir`) selects the target SDK. `-isystem dir`
+adds an explicit system header directory. On macOS, the driver uses `SDKROOT`
+or discovers the SDK with `xcrun --sdk macosx --show-sdk-path` when no root is
+specified. An explicit root needs no discovery command. On native Linux it
+searches `/usr/include/x86_64-linux-gnu` and `/usr/include` by default.
+
+macOS deployment macros default to 11.0, the first arm64 macOS release.
+`-mmacosx-version-min=14.0` or `MACOSX_DEPLOYMENT_TARGET` overrides this; the
+SDK version and the minimum deployment version are separate settings.
+
+Preprocessing always uses Keel's target-derived macros, embedded compiler
+headers, and native feature queries. The same headers serve both supported
+targets, with target differences expressed through ABI macros and conditional
+definitions. `keel_c::preprocess` exposes this pipeline to library callers;
+`keel_c::compile` continues to accept preprocessed text.
+
 Both commands take `--target aarch64-apple-darwin` or
-`--target x86_64-unknown-linux-gnu`; the default is the host.
+`--target x86_64-unknown-linux-gnu`; the default is the host. Cross compilation
+needs a matching sysroot. An explicit root does not inherit host system header
+paths; `-I` and `-isystem` remain paths supplied by the caller. Passing
+`--target` cannot change an already preprocessed file. You can still use
+`clang -E -std=c11` externally and feed its `.i` output to Keel.
+
+Keel supplies `stddef.h`, `stdarg.h`, `stdint.h`, `limits.h`, `float.h`,
+`stdbool.h`, `stdalign.h`, `stdnoreturn.h`, `stdatomic.h`, and Darwin's
+`ptrcheck.h` annotation fallback. Hosted `stdint.h` and `limits.h` also consult
+the sysroot for libc-specific definitions. Headers such as `stdio.h`,
+`stdlib.h`, `string.h`, and `math.h` still come from the target libc/SDK.
+
+The preprocessor supports object/function macros, variadics, stringification,
+token pasting, conditionals, includes and `include_next`, `#pragma once`,
+`_Pragma`, and line markers. This is an initial Clang compatibility milestone;
+[the design notes](docs/design.md#c-frontend) list the remaining gaps.
 
 Target instruction selection is an optional codegen pass, independent of
 `-O`. `--isel all` enables generated tree patterns, allocation of folded
@@ -39,15 +77,12 @@ removes already folded operands from allocation; ordinary immediate and
 address folding remain active in every mode. For example:
 
 ```sh
-cargo run -p keel -- cc -O --isel all hello.i -o hello.s
+cargo run -p keel -- cc -O --isel all hello.c -o hello.s
 cargo suite run -c keel-O,keel-O-select
 ```
 
 Fewer instructions can still cost more registers or change scheduling, so
 selection remains opt-in while its profitability rules are developed.
-For C, preprocessing must use the same target and its headers, for example
-`clang -E --target=<triple>` with the appropriate sysroot. Passing
-`--target` to keel does not change an already preprocessed file.
 
 `asm`, `compile`, `cc`, and `opt` map input files by default.
 They use a read-only copy-on-write file mapping instead of an owned read
@@ -70,24 +105,26 @@ commands and flags used at the time.
 
 ## x86-64 Linux
 
-The native Linux path targets x86-64-v2 and the System V ABI, emitting Intel
-syntax for Clang's integrated assembler or GNU `as`, with ELF linking through
+The native Linux path targets x86-64-v2 and the System V ABI. It can emit ELF
+objects in process or Intel syntax for Clang/GNU `as`, with linking through
 Clang. On Linux, preprocess against the Linux system headers:
 
 ```sh
 cargo build --release -p keel
 clang -E -std=c11 hello.c -o hello.i
-target/release/keel cc --target x86_64-unknown-linux-gnu hello.i -o hello.s
-clang hello.s -o hello
+target/release/keel cc --target x86_64-unknown-linux-gnu --emit-object hello.i -o hello.o
+clang hello.o -o hello
 ./hello
 ```
 
 The [NUC bring-up report](suite/reports/x86-linux-bringup-20261015.html) records
 native execution on Ubuntu 24.04 / Intel i7-1360P, with Rust 1.99 and Clang 18.
 Compiler tests, ordinary/optimized C fixtures, both assemblers with debug info,
-and Lua's portable tests in all four compiler/selection modes pass. QuickJS
-and SQLite currently stop at an alignment-changing typedef in glibc's
-`pthread.h`; that frontend feature remains unsupported.
+and Lua's portable tests in all four compiler/selection modes pass. GNU aligned
+typedefs now preserve alignment independently of size and type compatibility,
+so glibc's `pthread.h` parses and QuickJS and SQLite also pass all four modes.
+The [full macOS/Linux benchmark report](suite/reports/full-platform-benchmarks-20261015.html)
+records the subsequent application measurements.
 
 The [allocator premerge validation](suite/reports/premerge-linux-debugger-2026-10-15/summary.json)
 passes 214 compiler test functions and 27 portable assembler tests on that
@@ -97,10 +134,11 @@ optimization; macOS LLDB checks also exercise both allocators, including
 source stepping, variable inspection and state mutation. Compressed logs and
 the temporary Lua matrix definitions accompany the report.
 
-`--emit-object` and the structured compiler/assembler API currently target
-AArch64 Mach-O. Native x86 instruction encoding and an ELF writer remain to
-be implemented. The x86 backend also diagnoses exceptions, inline assembly
-and selected i128 operations/conversions it cannot lower yet.
+`--emit-object` and the shared `Program` API support AArch64 Mach-O and x86-64
+ELF. Standalone Intel syntax uses `keel asm --target x86_64-unknown-linux-gnu`.
+See [native x86 assembly](docs/native-x86-assembler.md) for the boundary audit,
+coverage, validation and remaining gaps. The x86 backend still diagnoses
+exceptions, inline assembly and selected i128 operations/conversions it cannot lower.
 
 For native compiler checks, use
 `cargo test --workspace --exclude keel-asm --all-targets`. The portable ARM
@@ -108,6 +146,19 @@ assembler core can be tested with
 `cargo test -p keel-asm --lib --test structured`; the full ARM differential
 suite additionally needs a reference Clang that recognizes its requested
 features, including `-mcpu=apple-m5` (Ubuntu Clang 18 does not).
+
+### Native ELF linking
+
+`keel link --target x86_64-unknown-linux-gnu start.o helpers.o -o program`
+links x86-64 ELF objects and regular `.a` archives in process. It produces
+fixed-address executables entered at `_start`, with symbol resolution, common/
+weak symbols, BSS and address/call/GOT relocations. Supplying `.so` libraries
+adds Linux runtime-loader metadata, eager imports and default symbol versions.
+`-L dir -lfoo` searches libraries; `--rpath '$ORIGIN'` locates adjacent DSOs.
+Supply your own startup; automatic libc/CRT startup and static libc remain
+outside the supported scope. The target defaults to Linux on Linux and can be
+selected explicitly on macOS. See
+[ELF linker scope and validation](docs/elf-linker.md).
 
 ## Compiler tiers and profiling
 
@@ -164,6 +215,10 @@ compilation. The driver starts and retains the client for the invocation.
 Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
 crates and manage the Tracy client themselves. Benchmark uninstrumented
 release builds for final timings; use instrumented builds to locate costs.
+The [compilation-speed investigation](suite/reports/compilation-speed-analysis-20261015.html)
+compares complete object workflows with assembly-only output on macOS and Linux,
+and separates frontend, verification, optimization, codegen and object costs.
+
 
 ## Current scope
 
@@ -251,11 +306,12 @@ and outputs aliasing an input are rejected before any object is written. On
 macOS, names differing only by case are conservatively treated as collisions.
 The batch stops on its first error, keeping objects already written. A single
 input can still use `-o file.o`; `-o` and `--out-dir` are mutually exclusive.
-Use `--` before input names beginning with a dash. This assembler accepts AArch64
-syntax and emits Apple arm64 Mach-O; x86 AT&T/Intel syntax and ELF output require
-separate target support.
+Use `--` before input names beginning with a dash. The default assembler accepts
+AArch64 syntax and emits Apple arm64 Mach-O. Pass
+`--target x86_64-unknown-linux-gnu` for Intel syntax and ELF output; see
+[the native x86 subset](docs/native-x86-assembler.md).
 
-Hand-written assembly can use named `.macro` parameters (`\name` substitution
+Hand-written AArch64 assembly can use named `.macro` parameters (`\name` substitution
 and `\()` concatenation), nested `.rept` blocks, and literal `.if`/`.elseif`/
 `.else` conditionals. See [the standalone example](crates/keel-asm/examples/standalone.s).
 The supported subset and expansion limits are described in
@@ -288,8 +344,11 @@ metadata bypass source formatting and parsing, with normal encoding and feature
 validation. Conditional branches stay structured during far-branch relaxation.
 Only user inline assembly enters the program as source text; inline macros use
 an explicit validated expansion fallback. Assembly text output remains available.
-Direct object emission currently targets AArch64 Mach-O; see
-[the API design](docs/design.md#assembler).
+For x86-64 ELF, pass `Target::X86_64LinuxGnu` to codegen and consume the program
+with `keel_asm::x86::assemble_program_object(&program)`. Its architecture-specific
+instructions are typed; its current generator still formats and parses Intel
+source at the boundary. See [native x86 assembly](docs/native-x86-assembler.md)
+and [the AArch64 API design](docs/design.md#assembler).
 The completed migration covers all 85,988 generated Lua instructions, with zero
 source-text bytes. In the [33-file Lua comparison](suite/reports/compiler-object-api-complete-20261015.html),
 the API is 1.68× faster for codegen plus object generation and 1.48× for the
@@ -482,12 +541,21 @@ inputs, not complete applications; the measurements use a warm filesystem cache.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.
 - C tests live in `crates/keel-c/tests/programs/`: each `.c` program is
-  built by clang and by keel (as is and with `-O`), and both must print the
-  same and exit the same. Separate frontend tests cover GNU inference
-  rules where Clang differs and compile selected features for both targets.
+  built by Clang and by Keel with external Clang preprocessing and native
+  preprocessing (as is and with `-O`); all builds must print and exit the same.
+  Focused preprocessing cases compare tokens with Clang, and target ABI
+  macros are checked against Clang for both targets. Separate
+  frontend tests cover GNU inference rules where Clang differs and compile
+  selected features for both targets.
 - `cargo suite test` builds Lua, SQLite and QuickJS with keel and runs
   their test suites; `cargo suite run` builds them with clang and keel in
   every configuration and times them. Each program is a directory in
   `suite/`; see [suite/README.md](suite/README.md).
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.
+
+An opt-in native macOS arm64 linker is available as `keel link inputs.o -o program`.
+It resolves system interfaces from the macOS SDK and ad-hoc signs its output.
+`keel link --system` selects the Clang driver fallback. See
+[the supported scope and validation record](docs/macos-linker.md) before using
+this initial implementation; it is not a general ld64 replacement.

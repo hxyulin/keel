@@ -6,7 +6,8 @@
 //!
 //! - Integers and pointers go in rdi, rsi, rdx, rcx, r8, r9, floats in
 //!   xmm0–xmm7, each class counted on its own. An `i128` takes two
-//!   general registers, or 16 aligned bytes of stack.
+//!   general registers, or 16 aligned bytes of stack. A 128-bit vector uses
+//!   one XMM register or a 16-byte stack slot aligned to 16.
 //! - Once a class runs out, its arguments go on the stack in order, each in
 //!   its own 8-byte slot: unlike Apple arm64, the stack is never packed.
 //! - Variadic arguments are placed exactly like named ones, in registers
@@ -165,7 +166,7 @@ impl Cursor {
     fn scalar(&mut self, ty: Type) -> Slot {
         let classes: &[Class] = match ty {
             Type::I128 => &[Class::Integer, Class::Integer],
-            _ if ty.is_float() => &[Class::Sse],
+            _ if ty.is_float() || ty.is_vector() => &[Class::Sse],
             _ => &[Class::Integer],
         };
         match self.regs(classes) {
@@ -227,7 +228,7 @@ pub fn arg_locs(args: &[ArgKind]) -> Placement {
 /// Where a scalar result comes back: rax (and rdx for the high half of
 /// an `i128`), or xmm0.
 pub fn return_loc(ty: Type) -> Loc {
-    if ty.is_float() {
+    if ty.is_float() || ty.is_vector() {
         Loc::FReg(0)
     } else {
         Loc::Reg(RAX)

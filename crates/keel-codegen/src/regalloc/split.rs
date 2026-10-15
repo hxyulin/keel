@@ -49,6 +49,10 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         .func
         .layout_insts()
         .any(|(_, i)| input.returns_twice(i))
+        // Sparse cache copies currently move scalar halves only. Keep vector
+        // functions on the baseline scan until these experiments model widths.
+        || (0..input.func.num_values())
+            .any(|i| input.func.value_type(Value::new(i)).is_vector())
     {
         return allocate_tier_inner(
             input.func,

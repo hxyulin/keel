@@ -1,5 +1,5 @@
-//! A C frontend for keel: one preprocessed C file (the output of
-//! `clang -E`) to one keel module.
+//! A C frontend for keel: native preprocessing and compilation to keel IR.
+//! `preprocess` accepts raw C; `compile` accepts its output or `clang -E` text.
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
 //! types as it goes and builds a typed tree (`parse.rs`, `expr.rs`,
@@ -24,11 +24,24 @@ mod ast;
 mod debug;
 mod eval;
 mod expr;
+mod features;
+mod headers;
 mod init;
 mod irgen;
 mod lex;
 mod parse;
+mod predefined;
+mod preprocess;
+mod strings;
 mod types;
+
+pub use predefined::predefined_macros;
+pub use preprocess::{PreprocessOptions, preprocess};
+#[cfg(feature = "profile")]
+pub use preprocess::{PreprocessStats, preprocess_with_stats};
+
+#[cfg(feature = "profile")]
+pub mod profile;
 
 use std::fmt;
 
@@ -90,18 +103,21 @@ pub struct Options {
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
 pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, Diagnostic> {
+    let arena = bumpalo::Bump::new();
+    let mut text = crate::strings::Strings::new(&arena);
     let mut files = Vec::new();
-    let diagnostic = |files: &[String], e: Error| Diagnostic {
+    let diagnostic = |files: &[&str], e: Error| Diagnostic {
         file: files
             .get(e.loc.file as usize)
-            .cloned()
+            .map(|name| name.to_string())
             .unwrap_or_else(|| path.to_string()),
         line: e.loc.line,
         col: e.loc.col,
         message: e.message,
     };
-    let toks = lex::tokenize(src, path, &mut files).map_err(|e| diagnostic(&files, e))?;
-    let mut parser = parse::Parser::new(toks, opts.target);
+    let toks =
+        lex::tokenize(src, path, &mut files, &mut text).map_err(|e| diagnostic(&files, e))?;
+    let mut parser = parse::Parser::new(toks, opts.target, text);
     parser
         .translation_unit()
         .map_err(|e| diagnostic(&files, e))?;

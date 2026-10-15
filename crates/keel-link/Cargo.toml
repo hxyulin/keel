@@ -1,0 +1,15 @@
+[package]
+name = "keel-link"
+description = "Native arm64 Mach-O and x86-64 ELF executable linkers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+object = { version = "0.36", default-features = false, features = ["read", "std"] }
+sha2 = "0.11.1"
+serde = "1"
+serde_yaml = "0.9"
+
+[dev-dependencies]
+keel-asm = { path = "../keel-asm" }

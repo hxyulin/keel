@@ -38,13 +38,13 @@
 //!
 //! The default Fast and Full tiers use one location per value. [`AllocationEdits`]
 //! also supports per-instruction locations and transfers for splitting allocators.
-//! A spilled value lives in an 8-byte stack slot for its whole life; there
-//! is no interval splitting, so a value spilled anywhere is spilled
+//! A spilled scalar lives in an 8-byte stack slot, a vector in 16 bytes, for
+//! its whole life. There is no interval splitting, so a value spilled anywhere is spilled
 //! everywhere. Spill slots are shared by values whose intervals do not
 //! overlap, holes ignored.
 //!
-//! Integers and pointers go in general-purpose registers, floats in the
-//! SIMD/FP registers: two register classes that never interfere. One scan
+//! Integers and pointers go in general-purpose registers, floats and vectors
+//! in SIMD/FP registers: two register classes that never interfere. One scan
 //! handles both; each interval only competes for registers of its class.
 //!
 //! An `i128` is two 64-bit halves, each with its own interval over the same
@@ -69,8 +69,9 @@
 //!
 //! A call clobbers the caller-saved registers. An interval that is live
 //! across one (live just before it and just after it) may only take a
-//! callee-saved register, or be spilled. A value with a hole where the call
-//! is does not cross it. The call's arguments end at the
+//! callee-saved register, or be spilled. Vectors always spill across calls:
+//! neither supported ABI preserves a full 128-bit SIMD register.
+//! A value with a hole where the call is does not cross it. The call's arguments end at the
 //! call and its result starts after it, so neither counts as crossing it.
 //!
 //! A call that returns twice, like `setjmp`, returns the second time from
@@ -136,7 +137,7 @@ pub struct Allocation {
     /// `None` for values with no interval: those defined in unreachable
     /// code, and aliases.
     pub locs: [Vec<Option<Loc>>; 2],
-    /// Number of 8-byte spill slots the frame needs.
+    /// Number of 8-byte spill units the frame needs; each vector uses two.
     pub spill_slots: u32,
     /// The callee-saved registers handed out, sorted, which the prologue
     /// must save.
@@ -416,6 +417,7 @@ struct Interval {
     crosses_call: bool,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
+    vector: bool,
 }
 
 impl Interval {
@@ -497,6 +499,7 @@ struct FastInterval {
     end: u32,
     crosses_call: bool,
     float: bool,
+    vector: bool,
 }
 
 fn build_fast_intervals(
@@ -604,7 +607,8 @@ fn build_fast_intervals(
                 start,
                 end,
                 crosses_call: crosses_call[i],
-                float: ty.is_float(),
+                float: ty.is_float() || ty.is_vector(),
+                vector: ty.is_vector(),
             });
         }
     }
@@ -644,6 +648,11 @@ fn fast_scan_with_priority<'a>(
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
         let caller = if cur.crosses_call { &[][..] } else { caller };
+        let callee = if cur.crosses_call && cur.vector {
+            &[][..]
+        } else {
+            callee
+        };
         let mut occupied = RegisterMask::default();
         for &(iv, reg) in &active {
             if iv.float == cur.float {
@@ -689,12 +698,20 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     profiling::scope!("spill-slot-assignment");
     backend_scope!(SpillSlots);
     spilled.sort_unstable_by_key(|iv| (iv.start, iv.value, iv.half));
-    let mut slots = SpillSlots::default();
-    for iv in spilled.iter() {
-        let slot = slots.assign(iv.start, iv.end);
-        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+    let mut count = 0;
+    // Separate pools keep each reused home's width stable. Vector homes take
+    // two eight-byte units; the bitset still tracks one home per live vector.
+    for vector in [false, true] {
+        let base = count;
+        let units = if vector { 2 } else { 1 };
+        let mut slots = SpillSlots::default();
+        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+            let slot = base + units * slots.assign(iv.start, iv.end);
+            locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+        }
+        count += units * slots.count;
     }
-    slots.count
+    count
 }
 
 /// Live-in and live-out sets, indexed by block.
@@ -952,7 +969,8 @@ fn build_intervals(
             half: 0,
             ranges: list,
             crosses_call,
-            float: ty.is_float(),
+            float: ty.is_float() || ty.is_vector(),
+            vector: ty.is_vector(),
         });
         if let Some(ranges) = high_ranges {
             intervals.push(Interval {
@@ -961,6 +979,7 @@ fn build_intervals(
                 ranges,
                 crosses_call,
                 float: false,
+                vector: false,
             });
         }
     }
@@ -1040,6 +1059,11 @@ fn linear_scan_with_priority<'a>(
         } else {
             caller_saved
         };
+        let callee_saved = if cur.crosses_call && cur.vector {
+            &[][..]
+        } else {
+            callee_saved
+        };
         let allowed = |r: Loc| match r {
             Loc::Reg(n) if !cur.float => callers.contains(&n) || callee_saved.contains(&n),
             Loc::FReg(n) if cur.float => callers.contains(&n) || callee_saved.contains(&n),
@@ -1116,12 +1140,20 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
     profiling::scope!("spill-slot-assignment");
     backend_scope!(SpillSlots);
     spilled.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
-    let mut slots = SpillSlots::default();
-    for iv in spilled.iter() {
-        let slot = slots.assign(iv.start(), iv.end());
-        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+    let mut count = 0;
+    // Separate pools keep each reused home's width stable. Vector homes take
+    // two eight-byte units; the bitset still tracks one home per live vector.
+    for vector in [false, true] {
+        let base = count;
+        let units = if vector { 2 } else { 1 };
+        let mut slots = SpillSlots::default();
+        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+            let slot = base + units * slots.assign(iv.start(), iv.end());
+            locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+        }
+        count += units * slots.count;
     }
-    slots.count
+    count
 }
 
 /// Assign the lowest free stack slot after expiring intervals in start order.
@@ -1206,6 +1238,38 @@ mod tests {
             .expect("value has an interval")
     }
 
+    #[test]
+    fn vector_spills_keep_two_units_and_do_not_use_partial_callee_saves() {
+        let func = function(
+            "decl @clobber()\nfunc @f(ptr) {\nblock0(v0: ptr):\n              v1 = load.i32x4 v0\n v2 = load.i32x4 v0\n call @clobber()\n              v3 = viadd v1, v2\n store v3, v0\n return\n}",
+        );
+        let pools = Pools {
+            caller_saved: &[9],
+            callee_saved: &[19],
+            float_caller_saved: &[19],
+            float_callee_saved: &[8],
+        };
+        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+            let allocation = allocate_tier(
+                &func,
+                &pools,
+                |data: &InstData| matches!(data, InstData::Call { .. }),
+                |_: &InstData| false,
+                &crate::select::Selection::default(),
+                tier,
+            );
+            let homes: Vec<_> = [Value::new(1), Value::new(2)]
+                .into_iter()
+                .map(|v| match allocation.loc(v).unwrap() {
+                    Loc::Stack(slot) => slot,
+                    loc => panic!("cross-call vector assigned to {loc:?}"),
+                })
+                .collect();
+            assert!(homes[0].abs_diff(homes[1]) >= 2);
+            assert!(homes.iter().all(|s| s + 2 <= allocation.spill_slots));
+        }
+    }
+
     #[cfg(feature = "experimental-regalloc")]
     #[test]
     fn rematerialization_priority_evicts_cheap_values_before_longer_expensive_values() {
@@ -1222,6 +1286,7 @@ mod tests {
                 ranges: vec![(0, 5)],
                 crosses_call: false,
                 float: false,
+                vector: false,
             },
             Interval {
                 value: Value::new(1),
@@ -1229,6 +1294,7 @@ mod tests {
                 ranges: vec![(2, 9)],
                 crosses_call: false,
                 float: false,
+                vector: false,
             },
         ];
         let fast = intervals.each_ref().map(|iv| FastInterval {
@@ -1238,6 +1304,7 @@ mod tests {
             end: iv.end(),
             crosses_call: iv.crosses_call,
             float: iv.float,
+            vector: iv.vector,
         });
         // With no eligible recipes, the longer interval is spilled as usual.
         // Marking the shorter first value cheap must instead preserve the

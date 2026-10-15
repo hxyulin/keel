@@ -1,9 +1,11 @@
 //! Types of SSA values. Memory is untyped bytes; these describe values only.
 
+use crate::VectorType;
 use std::fmt;
 
 /// Signedness lives on operations (`sdiv`/`udiv`), never on types.
-/// Comparisons produce `I8` holding 0 or 1; there is no boolean type.
+/// Scalar comparisons produce `I8` holding 0 or 1; vector comparisons use
+/// integer lane masks. There is no boolean type.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Type {
     I8,
@@ -13,6 +15,8 @@ pub enum Type {
     I128,
     F32,
     F64,
+    /// A fixed 128-bit SIMD value, distinct from scalar integers/floats.
+    Vector(VectorType),
     /// Opaque address. Pointer width is a target property.
     Ptr,
 }
@@ -29,6 +33,17 @@ impl Type {
         matches!(self, Type::F32 | Type::F64)
     }
 
+    pub fn is_vector(self) -> bool {
+        matches!(self, Self::Vector(_))
+    }
+
+    pub fn vector(self) -> Option<VectorType> {
+        match self {
+            Self::Vector(v) => Some(v),
+            _ => None,
+        }
+    }
+
     /// Size in bytes, or `None` for `Ptr` whose size depends on the target.
     pub fn bytes(self) -> Option<u32> {
         match self {
@@ -36,7 +51,7 @@ impl Type {
             Type::I16 => Some(2),
             Type::I32 | Type::F32 => Some(4),
             Type::I64 | Type::F64 => Some(8),
-            Type::I128 => Some(16),
+            Type::I128 | Type::Vector(_) => Some(16),
             Type::Ptr => None,
         }
     }
@@ -44,6 +59,9 @@ impl Type {
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::Vector(v) = self {
+            return v.fmt(f);
+        }
         f.write_str(match self {
             Type::I8 => "i8",
             Type::I16 => "i16",
@@ -53,6 +71,7 @@ impl fmt::Display for Type {
             Type::F32 => "f32",
             Type::F64 => "f64",
             Type::Ptr => "ptr",
+            Type::Vector(_) => unreachable!(),
         })
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "keel-asm"
-description = "Keel AArch64 assembler and Mach-O object writer"
+description = "Keel AArch64 Mach-O and x86-64 ELF assemblers"
 version.workspace = true
 edition.workspace = true
 license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
@@ -8,6 +8,7 @@ license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 [dependencies]
 keel-asm-ir = { path = "../keel-asm-ir" }
 memchr = "2"
+object = { version = "0.36", default-features = false, features = ["write", "std"] }
 bumpalo = { version = "3", features = ["collections"] }
 
 [dev-dependencies]

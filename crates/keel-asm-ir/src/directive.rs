@@ -49,6 +49,8 @@ impl fmt::Display for Expression {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cfi {
+    DefCfaOffset(u64),
+    DefCfaRegister(u8),
     Start,
     End,
     DefCfa { register: u8, offset: u64 },
@@ -69,6 +71,8 @@ impl fmt::Display for CfiRegister {
 impl fmt::Display for Cfi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::DefCfaOffset(n) => write!(f, ".cfi_def_cfa_offset {n}"),
+            Self::DefCfaRegister(r) => write!(f, ".cfi_def_cfa_register {r}"),
             Self::Start => f.write_str(".cfi_startproc"),
             Self::End => f.write_str(".cfi_endproc"),
             Self::DefCfa { register, offset } => {
@@ -84,6 +88,35 @@ impl fmt::Display for Cfi {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Directive {
+    /// ELF integer with an x86 relocation modifier (for example DTPOFF64).
+    X86Integer {
+        width: u8,
+        address: crate::x86::Address,
+    },
+    /// ELF section name, SHF_* flags, and SHT_NOBITS selection.
+    ElfSection {
+        name: String,
+        flags: u64,
+        nobits: bool,
+    },
+    /// ELF merge/string entry size and optional COMDAT signature. The original
+    /// `ElfSection` remains available for sections without these attributes.
+    ElfSectionMetadata {
+        name: String,
+        flags: u64,
+        nobits: bool,
+        entry_size: u64,
+        group: Option<String>,
+    },
+    /// ELF STT_FUNC when true, otherwise STT_OBJECT.
+    ElfType {
+        name: String,
+        function: bool,
+    },
+    Size {
+        name: String,
+        expression: Expression,
+    },
     Section {
         segment: String,
         name: String,
@@ -140,6 +173,77 @@ fn quoted(f: &mut fmt::Formatter<'_>, s: &[u8]) -> fmt::Result {
 impl fmt::Display for Directive {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::X86Integer { width, address } => write!(
+                f,
+                "{} {address}",
+                match width {
+                    1 => ".byte",
+                    2 => ".short",
+                    4 => ".long",
+                    8 => ".quad",
+                    _ => return Err(fmt::Error),
+                }
+            ),
+            Self::ElfSection {
+                name,
+                flags,
+                nobits,
+            } => {
+                f.write_str(".section\t")?;
+                quoted(f, name.as_bytes())?;
+                f.write_str(",\"")?;
+                for (bit, c) in [(1, 'w'), (2, 'a'), (4, 'x'), (0x400, 'T')] {
+                    if flags & bit != 0 {
+                        write!(f, "{c}")?;
+                    }
+                }
+                write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })
+            }
+            Self::ElfSectionMetadata {
+                name,
+                flags,
+                nobits,
+                entry_size,
+                group,
+            } => {
+                f.write_str(".section\t")?;
+                quoted(f, name.as_bytes())?;
+                f.write_str(",\"")?;
+                for (bit, c) in [
+                    (1, 'w'),
+                    (2, 'a'),
+                    (4, 'x'),
+                    (0x10, 'M'),
+                    (0x20, 'S'),
+                    (0x200, 'G'),
+                    (0x400, 'T'),
+                ] {
+                    if flags & bit != 0 {
+                        write!(f, "{c}")?;
+                    }
+                }
+                write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })?;
+                if flags & 0x10 != 0 {
+                    write!(f, ",{entry_size}")?;
+                }
+                if let Some(signature) = group {
+                    f.write_str(",")?;
+                    quoted(f, signature.as_bytes())?;
+                    f.write_str(",comdat")?;
+                }
+                Ok(())
+            }
+            Self::ElfType { name, function } => {
+                f.write_str(".type\t")?;
+                quoted(f, name.as_bytes())?;
+                write!(f, ",@{}", if *function { "function" } else { "object" })
+            }
+            Self::Size { name, expression } => {
+                f.write_str(".size\t")?;
+                quoted(f, name.as_bytes())?;
+                write!(f, ", {expression}")
+            }
+
             Self::Section {
                 segment,
                 name,

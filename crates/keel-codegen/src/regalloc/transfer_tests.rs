@@ -237,6 +237,7 @@ fn range_intersections_match_pairwise_inclusive_overlap() {
         ranges,
         crosses_call: false,
         float: false,
+        vector: false,
     };
     for a in 0..32 {
         for b in 0..64 {

@@ -114,6 +114,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 mod native;
 mod output;
+mod vector;
 use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
 use native::{Address, Arg, Reg};
@@ -230,10 +231,11 @@ fn compile_output(
         }
     }
     let mut frames = Vec::new();
-    for func in &module.functions {
+    for original in &module.functions {
         #[cfg(feature = "backend-profile")]
-        let _function_profile = crate::backend_profile::function(&func.name);
-        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, structured)?;
+        let _function_profile = crate::backend_profile::function(&original.name);
+        let func = vector::lower(original);
+        let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -347,7 +349,8 @@ fn folded_offset(func: &Function, offsets: &[usize], addr: Value, ty: Type) -> O
     };
     let offset = offsets[slot.index()];
     let size = ty.bytes()? as usize;
-    (size <= 8 && offset.is_multiple_of(size) && offset / size < 4096).then_some(offset)
+    ((size <= 8 || ty.is_vector()) && offset.is_multiple_of(size) && offset / size < 4096)
+        .then_some(offset)
 }
 
 /// The operand of `data` that is a constant encoded in the instruction
@@ -480,6 +483,8 @@ struct FunctionCompiler<'a> {
     param_areas: Vec<Option<usize>>,
     /// Offset from `sp` of spill slot 0, above the areas for calls.
     spill_base: usize,
+    vector_spills: HashSet<u32>,
+    copy_temp: Option<u32>,
     /// The register the fixed frame is addressed from: `sp`, or x19 in a
     /// function that moves `sp`.
     base: &'static str,
@@ -768,7 +773,26 @@ impl<'a> FunctionCompiler<'a> {
             used.sort_unstable();
             used.dedup();
         }
-        let mut offset = spill_base + 8 * alloc.spill_slots as usize;
+        let mut vector_spills = HashSet::new();
+        let has_vectors = (0..func.num_values()).any(|i| {
+            func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
+        });
+        if has_vectors {
+            for i in 0..func.num_values() {
+                let v = Value::new(i);
+                if func.value_type(v).is_vector()
+                    && let Some(Loc::Stack(slot)) = alloc.loc(v)
+                {
+                    vector_spills.insert(slot);
+                }
+            }
+        }
+        let copy_temp = has_vectors.then_some(alloc.spill_slots);
+        if let Some(slot) = copy_temp {
+            vector_spills.insert(slot);
+        }
+        let mut offset =
+            spill_base + 8 * (alloc.spill_slots as usize + if has_vectors { 2 } else { 0 });
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
                 "{offset} bytes of spill slots is too many for this allocator"
@@ -810,6 +834,8 @@ impl<'a> FunctionCompiler<'a> {
             sret_save,
             param_areas,
             spill_base,
+            vector_spills,
+            copy_temp,
             base: if moves_sp { "x19" } else { "sp" },
             variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
@@ -1212,6 +1238,15 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
+            InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
+            InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
+            InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorIcmp { .. }
+            | InstData::VectorFcmp { .. }
+            | InstData::VectorSelect { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {
                     self.folded_values.contains(&r)
@@ -1474,6 +1509,19 @@ impl<'a> FunctionCompiler<'a> {
                 self.binary(op, args, d);
                 self.def_done(result, d);
             }
+            InstData::Select { args } if self.ty(args[1]).is_vector() => {
+                let d = self.def_freg(result);
+                self.test_value(args[0]);
+                let a = self.use_freg(args[1], FS1);
+                let b = self.use_freg(args[2], FS2);
+                let skip = format!("L{}_{inst}_vselect", func.name);
+                self.move_vector(FS0, b);
+                self.conditional("eq", skip.clone());
+                self.move_vector(FS0, a);
+                self.out.label(skip);
+                self.move_vector(d, FS0);
+                self.def_done(result, d);
+            }
             InstData::Select { args } if self.ty(args[1]).is_float() => {
                 let ty = self.ty(args[1]);
                 let d = self.def_freg(result);
@@ -1569,7 +1617,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.def_done(result, d);
                 }
             }
-            InstData::Load { ty, addr, .. } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
                 self.mach("ldr", [(freg(d, ty)).into(), (a).into()]);
@@ -1586,7 +1634,9 @@ impl<'a> FunctionCompiler<'a> {
                 self.mach(op, [(reg(d, ty)).into(), (a).into()]);
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. }
+                if self.ty(value).is_float() || self.ty(value).is_vector() =>
+            {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
@@ -2012,7 +2062,7 @@ impl<'a> FunctionCompiler<'a> {
                     Address::offset(Reg::SP, offset + 8).into(),
                 ],
             );
-        } else if ty.is_float() {
+        } else if ty.is_float() || ty.is_vector() {
             let r = self.use_freg(arg, FS1);
             self.mach(
                 "str",
@@ -2039,7 +2089,14 @@ impl<'a> FunctionCompiler<'a> {
     fn load_stack_param(&mut self, dst: Loc, ty: Type, offset: u32) {
         let (r, scratch) = match dst {
             Loc::Reg(r) | Loc::FReg(r) => (r, None),
-            Loc::Stack(s) => (if ty.is_float() { FS0 } else { S0 }, Some(s)),
+            Loc::Stack(s) => (
+                if ty.is_float() || ty.is_vector() {
+                    FS0
+                } else {
+                    S0
+                },
+                Some(s),
+            ),
             Loc::Remat(_) => unreachable!("a parameter cannot define a recipe"),
         };
         let op = match ty {
@@ -2047,7 +2104,7 @@ impl<'a> FunctionCompiler<'a> {
             Type::I16 => "ldrh",
             _ => "ldr",
         };
-        let rd = if ty.is_float() {
+        let rd = if ty.is_float() || ty.is_vector() {
             freg(r, ty)
         } else {
             reg(r, ty)
@@ -2057,6 +2114,10 @@ impl<'a> FunctionCompiler<'a> {
             [(rd).into(), Address::offset(Reg::x(29), offset).into()],
         );
         if let Some(s) = scratch {
+            if ty.is_vector() {
+                self.vector_spill(true, r, s);
+                return;
+            }
             let class = if ty.is_float() { 'd' } else { 'x' };
             self.mach(
                 "str",
@@ -3550,10 +3611,11 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// x16 breaks cycles, of either register class (`fmov` moves bits
-    /// between classes); `emit_move` uses x17 for slot-to-slot moves.
+    /// A 16-byte stack temporary breaks cycles in vector functions; otherwise
+    /// x16 suffices for either register class. Slot-to-slot moves use x17.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
-        for (dst, src) in sequentialize(moves, Loc::Reg(S0)) {
+        let temp = self.copy_temp.map_or(Loc::Reg(S0), Loc::Stack);
+        for (dst, src) in sequentialize(moves, temp) {
             self.emit_move(dst, src);
         }
     }
@@ -3585,6 +3647,7 @@ impl<'a> FunctionCompiler<'a> {
                 ],
                 |out| write!(out, "mov\tx{d}, x{s}"),
             ),
+            (Loc::FReg(d), Loc::FReg(s)) if self.copy_temp.is_some() => self.move_vector(d, s),
             (Loc::FReg(d), Loc::FReg(s)) => self.native(
                 Opcode::FMOV_D_floatdp1,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
@@ -3604,6 +3667,10 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::FReg(d), Loc::Stack(s)) => self.spill(false, true, d, s),
             (Loc::Stack(d), Loc::Reg(s)) => self.spill(true, false, s, d),
             (Loc::Stack(d), Loc::FReg(s)) => self.spill(true, true, s, d),
+            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains(&d) => {
+                self.spill(false, true, FS2, s);
+                self.spill(true, true, FS2, d);
+            }
             (Loc::Stack(d), Loc::Stack(s)) => {
                 self.spill(false, false, S1, s);
                 self.spill(true, false, S1, d);
@@ -3841,7 +3908,13 @@ impl<'a> FunctionCompiler<'a> {
         let Some(value) = result else { return };
         match self.defined(value) {
             Some(Loc::Stack(s)) => {
-                self.spill(true, self.func.value_type(value).is_float(), reg, s);
+                self.spill(
+                    true,
+                    self.func.value_type(value).is_float()
+                        || self.func.value_type(value).is_vector(),
+                    reg,
+                    s,
+                );
             }
             Some(Loc::Remat(_)) => unreachable!("a lowered instruction cannot define a recipe"),
             _ => {}
@@ -3932,6 +4005,10 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             crate::backend_profile::Counter::SpillHelperLoads
         });
+        if float && self.vector_spills.contains(&slot) {
+            self.vector_spill(store, register, slot);
+            return;
+        }
         let opcode = match (store, float) {
             (false, false) => Opcode::LDR_64_ldst_pos,
             (false, true) => Opcode::LDR_D_ldst_pos,
@@ -4330,7 +4407,7 @@ fn piece_ops(size: u64) -> (&'static str, &'static str) {
 
 /// Where a single return value of type `ty` goes: x0 or v0.
 fn return_loc(ty: Type) -> Loc {
-    if ty.is_float() {
+    if ty.is_float() || ty.is_vector() {
         Loc::FReg(0)
     } else {
         Loc::Reg(0)
@@ -4345,9 +4422,10 @@ fn reg(n: u8, ty: Type) -> Reg {
     }
 }
 
-/// `s<n>` for f32, `d<n>` for f64.
+/// `s<n>` for f32, `d<n>` for f64, `q<n>` for vectors.
 fn freg(n: u8, ty: Type) -> Reg {
     match ty {
+        Type::Vector(_) => Reg::q(n),
         Type::F32 => Reg::s(n),
         _ => Reg::d(n),
     }

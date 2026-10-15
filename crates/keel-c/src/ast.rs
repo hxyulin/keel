@@ -12,15 +12,15 @@ use std::rc::Rc;
 pub type LocalId = usize;
 
 #[derive(Clone, Debug)]
-pub struct Expr {
-    pub kind: ExprKind,
+pub struct Expr<'a> {
+    pub kind: ExprKind<'a>,
     /// Qualifier/type shape retained through lvalues and pointer values.
     pub sugar: Sugar,
     pub ty: Ty,
     pub loc: Loc,
 }
 
-impl Expr {
+impl<'a> Expr<'a> {
     pub fn with_sugar(mut self, sugar: Sugar) -> Self {
         self.sugar = sugar;
         self
@@ -28,7 +28,7 @@ impl Expr {
 }
 
 #[derive(Clone, Debug)]
-pub enum ExprKind {
+pub enum ExprKind<'a> {
     /// An integer constant, as the bits of its type (sign-extended).
     Int(i64),
     Float(f64),
@@ -41,59 +41,59 @@ pub enum ExprKind {
     /// A function or an object with static storage, by index in the
     /// global table.
     Global(usize),
-    Unary(UnOp, Box<Expr>),
+    Unary(UnOp, Box<Expr<'a>>),
     /// Operands of one type (the result's, or for comparisons the type they
     /// are compared as); shifts convert the amount to the left's type.
-    Binary(BinOp, Box<Expr>, Box<Expr>),
+    Binary(BinOp, Box<Expr<'a>>, Box<Expr<'a>>),
     /// `ptr + index * size`, `index` a `long`.
-    PtrAdd(Box<Expr>, Box<Expr>, u64),
+    PtrAdd(Box<Expr<'a>>, Box<Expr<'a>>, u64),
     /// `(a - b) / size`, a `long`.
-    PtrDiff(Box<Expr>, Box<Expr>, u64),
-    LogAnd(Box<Expr>, Box<Expr>),
-    LogOr(Box<Expr>, Box<Expr>),
+    PtrDiff(Box<Expr<'a>>, Box<Expr<'a>>, u64),
+    LogAnd(Box<Expr<'a>>, Box<Expr<'a>>),
+    LogOr(Box<Expr<'a>>, Box<Expr<'a>>),
     /// The right side is already converted to the left's type.
-    Assign(Box<Expr>, Box<Expr>),
+    Assign(Box<Expr<'a>>, Box<Expr<'a>>),
     /// `lhs op= rhs`: the left is converted to `ty`, combined with the right
     /// (already of `ty`), and converted back.
     OpAssign {
         op: BinOp,
         ty: Ty,
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: Box<Expr<'a>>,
+        rhs: Box<Expr<'a>>,
     },
     /// `p += n` / `p -= n` on a pointer: `n` is a `long`, already negated
     /// for `-=`; `size` is the element size.
     PtrOpAssign {
-        lhs: Box<Expr>,
-        rhs: Box<Expr>,
+        lhs: Box<Expr<'a>>,
+        rhs: Box<Expr<'a>>,
         size: u64,
     },
     /// `++` and `--`, prefix or postfix.
     IncDec {
-        lhs: Box<Expr>,
+        lhs: Box<Expr<'a>>,
         inc: bool,
         prefix: bool,
     },
-    Cond(Box<Expr>, Box<Expr>, Box<Expr>),
+    Cond(Box<Expr<'a>>, Box<Expr<'a>>, Box<Expr<'a>>),
     /// GNU's statement expression `({ ...; e; })`: the statements, in
     /// a block scope, then the value of the last one if it is an
     /// expression.
     StmtExpr {
         scope: usize,
-        stmts: Vec<Stmt>,
-        value: Option<Box<Expr>>,
+        stmts: Vec<Stmt<'a>>,
+        value: Option<Box<Expr<'a>>>,
     },
-    Comma(Box<Expr>, Box<Expr>),
+    Comma(Box<Expr<'a>>, Box<Expr<'a>>),
     /// Calls a function pointer. Arguments are converted to the parameter
     /// types, and extra ones promoted.
-    Call(Box<Expr>, Vec<Expr>),
+    Call(Box<Expr<'a>>, Vec<Expr<'a>>),
     /// Converts the operand to this expression's type.
-    Cast(Box<Expr>),
-    Deref(Box<Expr>),
-    Addr(Box<Expr>),
+    Cast(Box<Expr<'a>>),
+    Deref(Box<Expr<'a>>),
+    Addr(Box<Expr<'a>>),
     /// A member of a struct-typed operand, `offset` bytes in.
     Member {
-        base: Box<Expr>,
+        base: Box<Expr<'a>>,
         offset: u64,
         bits: Option<BitField>,
         align: u64,
@@ -101,11 +101,11 @@ pub enum ExprKind {
     /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
     /// the address of the `va_list` object. `va_copy` is an assignment, of
     /// the pointer on Apple arm64 and of the struct on SysV.
-    VaStart(Box<Expr>),
-    VaArg(Box<Expr>),
-    Builtin(Builtin, Vec<Expr>),
+    VaStart(Box<Expr<'a>>),
+    VaArg(Box<Expr<'a>>),
+    Builtin(Builtin, Vec<Expr<'a>>),
     /// A compound literal in a function: a local initialized here.
-    CompoundLit(LocalId, Box<Init>),
+    CompoundLit(LocalId, Box<Init<'a>>),
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -195,50 +195,50 @@ pub enum Builtin {
 
 /// An initializer, flattened: the object is zero except for these items.
 #[derive(Clone, Debug, Default)]
-pub struct Init {
-    pub items: Vec<InitItem>,
+pub struct Init<'a> {
+    pub items: Vec<InitItem<'a>>,
 }
 
 #[derive(Clone, Debug)]
-pub enum InitItem {
+pub enum InitItem<'a> {
     /// A scalar (converted to the member's type) or a struct-typed
     /// expression to copy, at a byte offset.
     Expr {
         offset: u64,
-        expr: Expr,
+        expr: Expr<'a>,
         bits: Option<BitField>,
     },
     /// The bytes of a string literal initializing a character array.
-    Bytes { offset: u64, bytes: Vec<u8> },
+    Bytes { offset: u64, bytes: &'a [u8] },
 }
 
 #[derive(Clone, Debug)]
-pub enum Stmt {
-    Expr(Expr),
+pub enum Stmt<'a> {
+    Expr(Expr<'a>),
     /// A local's initialization, at its declaration.
-    Init(LocalId, Init, Loc),
+    Init(LocalId, Init<'a>, Loc),
     /// A local declared without an initializer. Each time its declaration
     /// is reached it is a new object with an indeterminate value, so its
     /// old value (from the last trip round a loop) is not needed.
     Declare(LocalId),
-    Block(Vec<Stmt>),
+    Block(Vec<Stmt<'a>>),
     /// Statements in a block scope (a compound statement or a `for`), by
     /// its index in the function's scopes.
-    Scoped(usize, Vec<Stmt>),
-    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
-    While(Expr, Box<Stmt>),
-    DoWhile(Box<Stmt>, Expr),
+    Scoped(usize, Vec<Stmt<'a>>),
+    If(Expr<'a>, Box<Stmt<'a>>, Option<Box<Stmt<'a>>>),
+    While(Expr<'a>, Box<Stmt<'a>>),
+    DoWhile(Box<Stmt<'a>>, Expr<'a>),
     For {
-        init: Option<Box<Stmt>>,
-        cond: Option<Expr>,
-        step: Option<Expr>,
-        body: Box<Stmt>,
+        init: Option<Box<Stmt<'a>>>,
+        cond: Option<Expr<'a>>,
+        step: Option<Expr<'a>>,
+        body: Box<Stmt<'a>>,
     },
     /// The cases are the values of the `Case` labels in the body, by their
     /// index, and which one is `default`.
     Switch {
-        cond: Expr,
-        body: Box<Stmt>,
+        cond: Expr<'a>,
+        body: Box<Stmt<'a>>,
         cases: Vec<(i64, usize)>,
         default: Option<usize>,
         labels: usize,
@@ -247,18 +247,18 @@ pub enum Stmt {
     Case(usize),
     Break,
     Continue,
-    Return(Option<Expr>, Loc),
-    Goto(String),
+    Return(Option<Expr<'a>>, Loc),
+    Goto(&'a str),
     /// GNU's `goto *p`, to a label whose address was taken.
-    GotoIndirect(Expr),
-    Label(String),
+    GotoIndirect(Expr<'a>),
+    Label(&'a str),
 }
 
 #[derive(Clone, Debug)]
-pub struct Local {
+pub struct Local<'a> {
     /// The source name; made-up ones, which are not identifiers, have a
     /// `.` (`compound literal.3`).
-    pub name: String,
+    pub name: &'a str,
     pub ty: Ty,
     pub sugar: Sugar,
     pub align: u64,
@@ -271,27 +271,27 @@ pub struct Local {
 }
 
 #[derive(Clone, Debug)]
-pub struct FuncDef {
+pub struct FuncDef<'a> {
     /// Index in the global table.
     pub global: usize,
     pub ty: Rc<FuncTy>,
     pub params: Vec<LocalId>,
-    pub locals: Vec<Local>,
+    pub locals: Vec<Local<'a>>,
     /// The parent of each block scope; `None` for the outermost.
     pub scopes: Vec<Option<usize>>,
     /// The labels whose address is taken (`&&label`), numbered from 1.
-    pub label_addrs: Vec<String>,
-    pub body: Vec<Stmt>,
+    pub label_addrs: Vec<&'a str>,
+    pub body: Vec<Stmt<'a>>,
     pub loc: Loc,
 }
 
 /// A file-scope name: a function or an object with static storage
 /// (including `static` locals and file-scope compound literals).
 #[derive(Clone, Debug)]
-pub struct Global {
-    pub name: String,
+pub struct Global<'a> {
+    pub name: &'a str,
     /// The linker name (`__asm("_" "realpath" "$DARWIN_EXTSN")` renames).
-    pub symbol: String,
+    pub symbol: &'a str,
     pub ty: Ty,
     /// From the last declaration.
     pub sugar: Sugar,
@@ -301,7 +301,7 @@ pub struct Global {
     /// Defined in this file: a function body, an initializer, or a
     /// tentative definition (`int x;`).
     pub defined: bool,
-    pub init: Option<Init>,
+    pub init: Option<Init<'a>>,
     pub is_const: bool,
     pub thread_local: bool,
     pub returns_twice: bool,

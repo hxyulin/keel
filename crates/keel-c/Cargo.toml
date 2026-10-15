@@ -1,11 +1,25 @@
 [package]
 name = "keel-c"
-description = "A C frontend for keel: preprocessed C to keel IR"
+description = "A C frontend for keel: native preprocessing and C to keel IR"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Stage timing helpers; absent from normal compiler builds.
+profile = []
+
+[[example]]
+name = "profile"
+required-features = ["profile"]
+
 [dependencies]
+memchr = "2"
+smallvec = "1"
+bumpalo = { version = "3", features = ["collections"] }
+typed-arena = "2"
+memmap2 = "0.9"
+simdutf8 = "0.1"
 keel-ir = { path = "../keel-ir" }
 keel-frontend = { path = "../keel-frontend" }
 

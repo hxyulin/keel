@@ -31,10 +31,15 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     backend_scope!(Allocation);
     // A second return can observe a value after its first lifetime ended.
     // Keep the established function-wide pinning rule for these rare functions.
+    let has_vectors =
+        (0..input.func.num_values()).any(|i| input.func.value_type(Value::new(i)).is_vector());
     if input
         .func
         .layout_insts()
         .any(|(_, i)| input.returns_twice(i))
+        // Sparse cache copies currently move scalar halves only. Keep vector
+        // functions on the baseline scan until these experiments model widths.
+        || has_vectors
     {
         return allocate_tier_inner(
             input.func,
@@ -42,7 +47,11 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
             input.is_call,
             input.returns_twice,
             input.selection,
-            AllocationTier::Fast,
+            if has_vectors {
+                AllocationTier::Full
+            } else {
+                AllocationTier::Fast
+            },
         );
     }
     let func = input.func;

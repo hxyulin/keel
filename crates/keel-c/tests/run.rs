@@ -1,5 +1,5 @@
 //! End-to-end tests: every `tests/programs/*.c` is preprocessed with
-//! `clang -E`, compiled by keel (as is and with the default optimization
+//! both Clang and Keel, compiled by keel (as is and with the default optimization
 //! pipeline), linked with clang and run. Its output and exit status must be
 //! the same as the program built by clang alone, so the programs print
 //! what they compute rather than spelling out expected values.
@@ -87,6 +87,14 @@ fn programs() {
     paths.sort();
     assert!(!paths.is_empty());
     let mut failures = Vec::new();
+    let sysroot = if cfg!(target_os = "macos") {
+        let out = run(Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]));
+        Some(std::path::PathBuf::from(
+            String::from_utf8(out.stdout).unwrap().trim(),
+        ))
+    } else {
+        None
+    };
     for path in &paths {
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         let reference = out_dir.join(format!("{stem}-clang"));
@@ -101,22 +109,42 @@ fn programs() {
             .args(["-E", "-std=c11", "-o"])
             .arg(&i_path)
             .arg(path));
-        for optimize in [false, true] {
-            let name = format!("{stem}{}", if optimize { " (-O)" } else { "" });
-            let exe = out_dir.join(format!("{stem}{}", if optimize { "-opt" } else { "" }));
-            if let Err(e) = build_with_keel(&i_path, &exe, optimize) {
-                failures.push(format!("{name}: {e}"));
-                continue;
-            }
-            let got = Command::new(&exe).output().unwrap();
-            if got.status.code() != want.status.code() || got.stdout != want.stdout {
-                failures.push(format!(
-                    "{name}: exit {:?}, expected {:?}\n--- keel:\n{}--- clang:\n{}",
-                    got.status.code(),
-                    want.status.code(),
-                    String::from_utf8_lossy(&got.stdout),
-                    String::from_utf8_lossy(&want.stdout),
+        let raw = std::fs::read_to_string(path).unwrap();
+        let standalone_path = out_dir.join(format!("{stem}-standalone.i"));
+        let standalone = keel_c::preprocess(
+            &raw,
+            path.to_str().unwrap(),
+            &keel_c::PreprocessOptions {
+                sysroot: sysroot.clone(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        std::fs::write(&standalone_path, standalone).unwrap();
+        for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &standalone_path)] {
+            for optimize in [false, true] {
+                let name = format!(
+                    "{stem} ({preprocessor} pp){}",
+                    if optimize { " (-O)" } else { "" }
+                );
+                let exe = out_dir.join(format!(
+                    "{stem}-{preprocessor}{}",
+                    if optimize { "-opt" } else { "" }
                 ));
+                if let Err(e) = build_with_keel(preprocessed, &exe, optimize) {
+                    failures.push(format!("{name}: {e}"));
+                    continue;
+                }
+                let got = Command::new(&exe).output().unwrap();
+                if got.status.code() != want.status.code() || got.stdout != want.stdout {
+                    failures.push(format!(
+                        "{name}: exit {:?}, expected {:?}\n--- keel:\n{}--- clang:\n{}",
+                        got.status.code(),
+                        want.status.code(),
+                        String::from_utf8_lossy(&got.stdout),
+                        String::from_utf8_lossy(&want.stdout),
+                    ));
+                }
             }
         }
     }
@@ -935,8 +963,12 @@ fn rejected() {
             "error: alignment must be an integer constant",
         ),
         (
-            "typedef int I __attribute__((aligned(16)));",
-            "error: alignment-changing typedef attributes are not supported",
+            "_Alignas(16) typedef int I;",
+            "error: `_Alignas` cannot apply to a typedef",
+        ),
+        (
+            "typedef int Wide __attribute__((aligned(16))); Wide xs[2];",
+            "error: array element size is not a multiple of its alignment",
         ),
         (
             "int f(void) __attribute__((aligned(32)));",

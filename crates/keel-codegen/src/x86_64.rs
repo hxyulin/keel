@@ -1,4 +1,4 @@
-//! IR → x86-64 Linux (System V, ELF) assembly text in Intel syntax, with
+//! IR → typed x86-64 Linux (System V, ELF) assembly or Intel source, with
 //! values in registers chosen by the linear-scan allocator in
 //! [`crate::regalloc`].
 //!
@@ -69,13 +69,16 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
-use crate::data::asm_string;
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
+use crate::metadata::{Cfi, Directive, Expression, Sink};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
 use crate::sysv::{self, ArgKind, ArgLoc, RAX, RCX, RDI, RDX, Slot};
 use crate::{CodegenError, Format, data, loc_reg, pieces};
+use keel_asm_ir::x86::{
+    Address, Memory, Modifier, Opcode, Operand as AsmOperand, Register, RegisterClass,
+};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DebugScope, EntityRef,
     FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp,
@@ -83,6 +86,9 @@ use keel_ir::{
 };
 use std::collections::HashSet;
 use std::fmt::Write;
+mod output;
+mod vector;
+use output::*;
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -145,6 +151,28 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
+    let Output::Text(text) = compile_output(module, pools, pipeline, false)? else {
+        unreachable!()
+    };
+    Ok(text)
+}
+pub fn compile_program_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    let Output::Structured(program) = compile_output(module, pools, pipeline, true)? else {
+        unreachable!()
+    };
+    Ok(program)
+}
+fn compile_output(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    structured: bool,
+) -> Result<Output, CodegenError> {
+    validate_vector_abi(module)?;
     pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -154,16 +182,23 @@ pub fn compile_with_pipeline(
             && subset(pools.float_callee_saved, REGISTERS.float_callee_saved),
         "register pools must be subsets of REGISTERS"
     );
-    let mut out = String::from("\t.intel_syntax noprefix\n");
+    let mut out = Output::new(structured);
+    if !structured {
+        out.write_str("\t.intel_syntax noprefix\n").unwrap();
+    }
     let debug = !module.files.is_empty() && !module.functions.is_empty();
     if debug {
         for (i, path) in module.files.iter().enumerate() {
-            writeln!(out, "\t.file\t{} {}", i + 1, data::asm_string(path)).unwrap();
+            out.directive(Directive::File {
+                index: (i + 1) as u32,
+                path: path.as_bytes().to_vec(),
+            });
         }
     }
     let mut frames = Vec::new();
-    for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline)?;
+    for original in &module.functions {
+        let func = vector::lower(original);
+        let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -171,15 +206,56 @@ pub fn compile_with_pipeline(
     }
     for data in &module.data {
         if let Some(init) = &data.init {
-            data::emit_data(&mut out, Format::Elf, data, init);
+            data::emit_elf(&mut out, data, init);
         }
     }
     if debug {
         dwarf::emit_debug_info(&mut out, Format::Elf, DWARF_RBP, module, &frames);
     }
     // No executable stack.
-    out.push_str("\t.section\t.note.GNU-stack,\"\",@progbits\n");
+    out.directive(Directive::ElfSection {
+        name: ".note.GNU-stack".into(),
+        flags: 0,
+        nobits: false,
+    });
     Ok(out)
+}
+
+// Vector scalars use one XMM register. Aggregate SSEUP classification is a
+// separate ABI feature; reject it rather than treating vector fields as integers.
+fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
+    fn contains(l: &Layout) -> bool {
+        match l {
+            Layout::Scalar(t) => t.is_vector(),
+            Layout::Struct(fields) => fields.iter().any(contains),
+            Layout::Array(elem, _) => contains(elem),
+        }
+    }
+    let check = |name: &str, sig: &keel_ir::Signature| {
+        if sig
+            .params
+            .iter()
+            .chain(&sig.returns)
+            .any(|p| p.layout().is_some_and(contains))
+        {
+            Err(CodegenError {func:name.into(),message:"SIMD vector fields in byval/sret aggregates require SSEUP ABI classification and are not supported yet".into()})
+        } else {
+            Ok(())
+        }
+    };
+    for d in &module.decls {
+        check(&d.name, &d.sig)?;
+    }
+    for f in &module.functions {
+        check(&f.name, &f.sig)?;
+        for (_, d) in f.callees() {
+            check(&f.name, &d.sig)?;
+        }
+        for (_, s) in f.signatures() {
+            check(&f.name, s)?;
+        }
+    }
+    Ok(())
 }
 
 /// What this backend does not handle yet, if `inst` needs it.
@@ -277,7 +353,7 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
             }
         }
         InstData::Icmp { args, .. } => imm(args[1], ty_of(args[0])).map(|k| (args[1], k)),
-        InstData::Store { value, .. } if !ty_of(value).is_float() => {
+        InstData::Store { value, .. } if !ty_of(value).is_float() && !ty_of(value).is_vector() => {
             imm(value, ty_of(value)).map(|k| (value, k))
         }
         _ => None,
@@ -311,6 +387,7 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
 }
 
 struct FunctionCompiler<'a> {
+    features: keel_asm_ir::x86::Features,
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
@@ -329,6 +406,8 @@ struct FunctionCompiler<'a> {
     /// Offset from `rsp` of spill slot 0. Slots past the allocator's are
     /// staging for struct arguments in registers; see [`Self::move_args`].
     spill_base: usize,
+    vector_spills: HashSet<u32>,
+    copy_temp: Option<u32>,
     /// Offset from `rsp` of an 8-byte slot keeping a call's `sret` address
     /// across the call, for results that come back in registers.
     sret_save: Option<usize>,
@@ -351,7 +430,7 @@ struct FunctionCompiler<'a> {
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
-    out: String,
+    out: Output,
     uses_trap: bool,
     /// Whether to emit `.loc` directives.
     debug: bool,
@@ -380,6 +459,7 @@ impl<'a> FunctionCompiler<'a> {
         module: &'a Module,
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
+        structured: bool,
     ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -510,7 +590,7 @@ impl<'a> FunctionCompiler<'a> {
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
             func,
-            pools: pools,
+            pools,
             selection: &selection,
             is_call: &is_call,
             returns_twice: &returns_twice,
@@ -518,8 +598,27 @@ impl<'a> FunctionCompiler<'a> {
         let mut alloc = pipeline.allocator.allocate(&input);
         alloc.finish(&input);
         alloc.validate(&input).map_err(err)?;
+        let mut vector_spills = HashSet::new();
+        let has_vectors = (0..func.num_values()).any(|i| {
+            func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
+        });
+        if has_vectors {
+            for i in 0..func.num_values() {
+                let value = Value::new(i);
+                if func.value_type(value).is_vector()
+                    && let Some(Loc::Stack(slot)) = alloc.loc(value)
+                {
+                    vector_spills.insert(slot);
+                }
+            }
+        }
+        let copy_temp = has_vectors.then_some(alloc.spill_slots + staging as u32);
+        if let Some(slot) = copy_temp {
+            vector_spills.insert(slot);
+        }
         let spill_base = offset.next_multiple_of(8);
-        let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
+        let mut offset = spill_base
+            + 8 * (alloc.spill_slots as usize + staging + if has_vectors { 2 } else { 0 });
         let mut stack_slot_offsets = Vec::new();
         for (_, slot) in func.stack_slots() {
             offset = offset.next_multiple_of(slot.align as usize);
@@ -545,6 +644,8 @@ impl<'a> FunctionCompiler<'a> {
             stack_slot_offsets,
             outgoing,
             spill_base,
+            vector_spills,
+            copy_temp,
             sret_save,
             sret_ptr,
             param_areas,
@@ -553,7 +654,8 @@ impl<'a> FunctionCompiler<'a> {
             frame_size,
             saved,
             next_block: None,
-            out: String::new(),
+            features: pipeline.selector.x86_features(),
+            out: Output::new(structured),
             uses_trap: false,
             debug: false,
             srcloc: None,
@@ -565,20 +667,26 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
-    fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
+    fn compile(mut self, out: &mut Output) -> Vec<(String, Option<DebugScope>)> {
         profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
-        let symbol = asm_string(name);
-        out.push_str("\t.text\n");
+        let symbol = name.clone();
+        out.directive(Directive::ElfSection {
+            name: ".text".into(),
+            flags: 6,
+            nobits: false,
+        });
         if !func.local {
-            writeln!(out, "\t.globl\t{symbol}").unwrap();
+            out.directive(Directive::Global(symbol.clone()));
         }
-        writeln!(
-            out,
-            "\t.p2align\t4\n\t.type\t{symbol},@function\n{symbol}:\n.L{name}_begin:"
-        )
-        .unwrap();
+        out.align(4);
+        out.directive(Directive::ElfType {
+            name: symbol.clone(),
+            function: true,
+        });
+        out.label(symbol.clone());
+        out.label(format!(".L{name}_begin"));
         // The prologue takes the function's location, or else that of its
         // first located instruction, with column 0; the first located
         // instruction after it ends the prologue.
@@ -595,19 +703,28 @@ impl<'a> FunctionCompiler<'a> {
             }));
             self.prologue_end = true;
         }
-        self.emit(".cfi_startproc");
-        self.emit("push\trbp");
-        self.emit(".cfi_def_cfa_offset 16");
-        self.emit(".cfi_offset rbp, -16");
-        self.emit("mov\trbp, rsp");
-        self.emit(".cfi_def_cfa_register rbp");
+        self.out.directive(Directive::Cfi(Cfi::Start));
+        self.emit(Opcode::Push, [asm_arg(&(r64(5)))]);
+        self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
+        self.out.directive(Directive::Cfi(Cfi::Offset {
+            register: 6,
+            offset: -16,
+        }));
+        self.emit(Opcode::Mov, [asm_arg(&(r64(5))), asm_arg(&(r64(4)))]);
+        self.out.directive(Directive::Cfi(Cfi::DefCfaRegister(6)));
         // Each push is 8 bytes further from the CFA, which is rbp + 16.
         for (k, r) in self.saved.clone().into_iter().enumerate() {
-            self.emit(format!("push\t{}", r64(r)));
-            self.emit(format!(".cfi_offset {}, -{}", r64(r), 24 + 8 * k));
+            self.emit(Opcode::Push, [asm_arg(&(r64(r)))]);
+            self.out.directive(Directive::Cfi(Cfi::Offset {
+                register: dwarf_register(r),
+                offset: -((24 + 8 * k) as i64),
+            }));
         }
         if self.frame_size > 0 {
-            self.emit(format!("sub\trsp, {}", self.frame_size));
+            self.emit(
+                Opcode::Sub,
+                [asm_arg(&(r64(4))), asm_arg(&(self.frame_size))],
+            );
         }
         self.entry();
 
@@ -615,9 +732,9 @@ impl<'a> FunctionCompiler<'a> {
         let order = self.alloc.order.clone();
         for (i, &block) in order.iter().enumerate() {
             self.next_block = order.get(i + 1).copied();
-            writeln!(self.out, "{}:", self.label(block)).unwrap();
+            self.out.label(self.label(block));
             for &inst in func.block_insts(block) {
-                writeln!(self.out, "\t# {}", func.display_inst(inst)).unwrap();
+                self.out.comment(func.display_inst(inst));
                 if self.debug {
                     self.set_srcloc(func.inst_loc(inst));
                 }
@@ -625,13 +742,16 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         if self.uses_trap {
-            writeln!(self.out, ".L{name}_trap:").unwrap();
-            self.emit("ud2");
+            self.out.label(format!(".L{name}_trap"));
+            self.emit(Opcode::Ud2, []);
         }
-        writeln!(self.out, ".L{name}_end:").unwrap();
-        self.emit(".cfi_endproc");
-        writeln!(self.out, "\t.size\t{symbol}, .-{symbol}").unwrap();
-        out.push_str(&self.out);
+        self.out.label(format!(".L{name}_end"));
+        self.out.directive(Directive::Cfi(Cfi::End));
+        self.out.directive(Directive::Size {
+            name: symbol.clone(),
+            expression: Expression::difference(".", symbol),
+        });
+        out.append(self.out);
         self.scope_marks
     }
 
@@ -642,7 +762,7 @@ impl<'a> FunctionCompiler<'a> {
         let Some(loc) = loc else { return };
         if loc.scope != self.scope {
             let label = format!(".L{}_ds{}", self.func.name, self.scope_marks.len());
-            writeln!(self.out, "{label}:").unwrap();
+            self.out.label(label.clone());
             self.scope_marks.push((label, loc.scope));
             self.scope = loc.scope;
         }
@@ -656,12 +776,12 @@ impl<'a> FunctionCompiler<'a> {
         let SourceLoc {
             file, line, col, ..
         } = loc;
-        let flag = if self.prologue_end {
-            " prologue_end"
-        } else {
-            ""
-        };
-        self.emit(format!(".loc\t{} {line} {col}{flag}", file.index() + 1));
+        self.out.directive(Directive::Loc {
+            file: (file.index() + 1) as u32,
+            line,
+            column: col,
+            prologue_end: self.prologue_end,
+        });
         self.srcloc = Some(loc);
         self.prologue_end = false;
     }
@@ -689,28 +809,40 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(area) = self.reg_save {
             for (k, &r) in sysv::INT_ARGS.iter().enumerate() {
                 let at = self.frame(area + 8 * k);
-                self.emit(format!("mov\tqword ptr {at}, {}", r64(r)));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(r)))],
+                );
             }
             let skip = format!(".L{}_saved", func.name);
-            self.emit("test\tal, al");
-            self.emit(format!("je\t{skip}"));
+            self.emit(Opcode::Test, [asm_arg(&(r8(0))), asm_arg(&(r8(0)))]);
+            self.emit(Opcode::Jcc(4), [asm_arg(&(skip))]);
             for k in 0..8 {
                 let at = self.frame(area + 48 + 16 * k);
-                self.emit(format!("movaps\txmmword ptr {at}, xmm{k}"));
+                self.emit(
+                    Opcode::Movaps,
+                    [
+                        asm_arg(&(sized((at).clone(), 128))),
+                        asm_arg(&(xmm((k) as u8))),
+                    ],
+                );
             }
-            writeln!(self.out, "{skip}:").unwrap();
+            self.out.label(skip.clone());
         }
         if let Some(slot) = self.sret_ptr {
             let at = self.frame(slot);
-            self.emit(format!("mov\tqword ptr {at}, rdi"));
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(7)))],
+            );
         }
         let params = func.block_params(entry).to_vec();
         let locs = self.named.locs.clone();
         // What happens after the copy: a stack parameter loads, a struct's
         // parameter gets the address of its bytes.
         enum Later {
-            Load(Loc, Type, String),
-            Address(Loc, String),
+            Load(Loc, Type, Memory),
+            Address(Loc, Memory),
         }
         let (mut moves, mut later) = (Vec::new(), Vec::new());
         for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
@@ -732,7 +864,7 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 }
                 ArgLoc::Value(Slot::Stack(offset)) => {
-                    let at = |o: u32| format!("[rbp + {}]", 16 + offset + o);
+                    let at = |o: u32| memory(r64(5), i128::from(16 + offset + o));
                     match self
                         .alloc
                         .param_loc(entry, crate::regalloc::ValuePart::high(param))
@@ -748,10 +880,13 @@ impl<'a> FunctionCompiler<'a> {
                 ArgLoc::InRegs(regs) => {
                     let area = self.param_areas[i].expect("planned");
                     for (k, r) in regs.into_iter().enumerate() {
-                        let at = format!("qword ptr {}", self.frame(area + 8 * k));
+                        let at = sized(self.frame(area + 8 * k), 64);
                         match r {
-                            Loc::Reg(r) => self.emit(format!("mov\t{at}, {}", r64(r))),
-                            _ => self.emit(format!("movsd\t{at}, {}", xmm(loc_reg(r)))),
+                            Loc::Reg(r) => {
+                                self.emit(Opcode::Mov, [asm_arg(&(at)), asm_arg(&(r64(r)))])
+                            }
+                            _ => self
+                                .emit(Opcode::Movsd, [asm_arg(&(at)), asm_arg(&(xmm(loc_reg(r))))]),
                         }
                     }
                     later.push(Later::Address(dst, self.frame(area)));
@@ -761,7 +896,7 @@ impl<'a> FunctionCompiler<'a> {
                     later.push(Later::Address(dst, self.frame(area)));
                 }
                 ArgLoc::OnStack(offset) => {
-                    later.push(Later::Address(dst, format!("[rbp + {}]", 16 + offset)))
+                    later.push(Later::Address(dst, memory(r64(5), i128::from(16 + offset))))
                 }
             }
         }
@@ -779,13 +914,13 @@ impl<'a> FunctionCompiler<'a> {
         let a = self.use_reg(matched.args[0], S0);
         let b = self.use_reg(matched.args[1], S1);
         let d = self.def_reg(result);
-        self.emit(format!(
-            "lea\t{}, [{} + {} * {}]",
-            wide(d, ty),
-            r64(a),
-            r64(b),
-            1u8 << matched.shift
-        ));
+        self.emit(
+            Opcode::Lea,
+            [
+                asm_arg(&(wide(d, ty))),
+                asm_arg(&(indexed(r64(a), r64(b), 1u8 << matched.shift))),
+            ],
+        );
         self.def_done(result, d);
     }
 
@@ -847,6 +982,47 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorBinary { op, args } => {
+                let d = self.def_freg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                // Preserve the second source if writing d would overwrite it.
+                let dst = if d == b && a != d { FS2 } else { d };
+                if dst != a {
+                    self.emit(Opcode::Movaps, [asm_arg(&xmm(dst)), asm_arg(&xmm(a))]);
+                }
+                self.emit(
+                    vector::packed(op, self.ty(args[0]).vector().unwrap())
+                        .expect("legalized packed op"),
+                    [asm_arg(&xmm(dst)), asm_arg(&xmm(b))],
+                );
+                if dst != d {
+                    self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(dst))]);
+                }
+                self.def_done(result, d);
+            }
+            InstData::VectorUnary {
+                op: UnaryOp::Fsqrt,
+                arg,
+            } => {
+                let d = self.def_freg(result);
+                let a = self.use_freg(arg, FS1);
+                let op = if self.ty(arg).vector().unwrap().lane_type() == Type::F32 {
+                    Opcode::Sqrtps
+                } else {
+                    Opcode::Sqrtpd
+                };
+                self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
+                self.def_done(result, d);
+            }
+            InstData::VectorSplat { .. }
+            | InstData::VectorUnary { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorIcmp { .. }
+            | InstData::VectorFcmp { .. }
+            | InstData::VectorSelect { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {
                     self.folded_values.contains(&r)
@@ -862,10 +1038,10 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Fconst { bits, .. } => {
                 let d = self.def_freg(result);
                 if bits == 0 {
-                    self.emit(format!("xorps\t{0}, {0}", xmm(d)));
+                    self.emit(Opcode::Xorps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(d)))]);
                 } else {
-                    self.emit(format!("movabs\trax, {bits:#x}"));
-                    self.emit(format!("movq\t{}, rax", xmm(d)));
+                    self.emit(Opcode::Movabs, [asm_arg(&(r64(0))), asm_arg(&(bits))]);
+                    self.emit(Opcode::Movq, [asm_arg(&(xmm(d))), asm_arg(&(r64(0)))]);
                 }
                 self.def_done(result, d);
             }
@@ -873,12 +1049,12 @@ impl<'a> FunctionCompiler<'a> {
                 let decl = func.callee(callee);
                 let sret = self.move_args(&args, &decl.sig, None, false);
                 let target = self.call_target(&decl.name);
-                self.emit(format!("call\t{target}"));
+                self.emit(Opcode::Call, [asm_arg(&(target))]);
                 self.call_result(result, sret);
             }
             InstData::CallIndirect { sig, callee, args } => {
                 let sret = self.move_args(&args, func.signature(sig), Some(callee), false);
-                self.emit(format!("call\t{}", r64(R10)));
+                self.emit(Opcode::Call, [asm_arg(&(r64(R10)))]);
                 self.call_result(result, sret);
             }
             // Arguments into registers, then this function's epilogue, then
@@ -888,14 +1064,14 @@ impl<'a> FunctionCompiler<'a> {
                 self.move_args(&args, &decl.sig, None, true);
                 self.epilogue();
                 let target = self.call_target(&decl.name);
-                self.emit(format!("jmp\t{target}"));
+                self.emit(Opcode::Jmp, [asm_arg(&(target))]);
             }
             // The epilogue only restores callee-saved registers and rbp,
             // so the target stays in r10.
             InstData::ReturnCallIndirect { sig, callee, args } => {
                 self.move_args(&args, func.signature(sig), Some(callee), true);
                 self.epilogue();
-                self.emit(format!("jmp\t{}", r64(R10)));
+                self.emit(Opcode::Jmp, [asm_arg(&(r64(R10)))]);
             }
             InstData::SymbolAddr { symbol } => {
                 let d = self.def_reg(result);
@@ -912,30 +1088,54 @@ impl<'a> FunctionCompiler<'a> {
                 let defined = self.module.defines(name);
                 // Intel operand syntax reserves names such as `offset`, `ptr`
                 // and register names. Quoting keeps C symbols unambiguous.
-                let name = asm_string(name);
+                let name = name.to_owned();
                 if thread_local && defined {
-                    self.emit(format!("mov\t{}, qword ptr fs:0", r64(d)));
-                    self.emit(format!("lea\t{0}, [{0} + {name}@tpoff]", r64(d)));
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(&(r64(d))), asm_arg(&(sized(fs_zero(), 64)))],
+                    );
+                    self.emit(
+                        Opcode::Lea,
+                        [
+                            asm_arg(&(r64(d))),
+                            asm_arg(&(symbol_memory(r64(d), &name, Modifier::TpOff))),
+                        ],
+                    );
                 } else if thread_local {
-                    self.emit(format!(
-                        "mov\t{}, qword ptr [rip + {name}@gottpoff]",
-                        r64(d)
-                    ));
-                    self.emit(format!("add\t{}, qword ptr fs:0", r64(d)));
+                    self.emit(
+                        Opcode::Mov,
+                        [
+                            asm_arg(&(r64(d))),
+                            asm_arg(&(sized(symbol_memory(rip(), &name, Modifier::GotTpOff), 64))),
+                        ],
+                    );
+                    self.emit(
+                        Opcode::Add,
+                        [asm_arg(&(r64(d))), asm_arg(&(sized(fs_zero(), 64)))],
+                    );
                 } else if defined {
-                    self.emit(format!("lea\t{}, [rip + {name}]", r64(d)));
+                    self.emit(
+                        Opcode::Lea,
+                        [
+                            asm_arg(&(r64(d))),
+                            asm_arg(&(symbol_memory(rip(), &name, Modifier::None))),
+                        ],
+                    );
                 } else {
-                    self.emit(format!(
-                        "mov\t{}, qword ptr [rip + {name}@GOTPCREL]",
-                        r64(d)
-                    ));
+                    self.emit(
+                        Opcode::Mov,
+                        [
+                            asm_arg(&(r64(d))),
+                            asm_arg(&(sized(symbol_memory(rip(), &name, Modifier::GotPcRel), 64))),
+                        ],
+                    );
                 }
                 self.def_done(result, d);
             }
             InstData::StackAddr { slot } => {
                 let d = self.def_reg(result);
                 let at = self.frame(self.stack_slot_offsets[slot.index()]);
-                self.emit(format!("lea\t{}, {at}", r64(d)));
+                self.emit(Opcode::Lea, [asm_arg(&(r64(d))), asm_arg(&(at))]);
                 self.def_done(result, d);
             }
             InstData::Unary { op, arg } if op.is_float() => {
@@ -955,7 +1155,10 @@ impl<'a> FunctionCompiler<'a> {
                     .collect();
                 self.parallel_copy(&moves);
                 let name = if ty == Type::F32 { "fmaf" } else { "fma" };
-                self.emit(format!("call\t{name}@PLT"));
+                self.emit(
+                    Opcode::Call,
+                    [asm_arg(&(symbol_address(&name, Modifier::Plt)))],
+                );
                 self.call_result(result, None);
             }
             InstData::Overflow { op, args } => self.overflow(inst, op, args),
@@ -969,17 +1172,19 @@ impl<'a> FunctionCompiler<'a> {
                 self.binary(inst, op, args, d);
                 self.def_done(result, d);
             }
-            InstData::Select { args } if self.ty(args[1]).is_float() => {
+            InstData::Select { args }
+                if self.ty(args[1]).is_float() || self.ty(args[1]).is_vector() =>
+            {
                 let d = self.def_freg(result);
                 let skip = format!(".L{}_{inst}_select", func.name);
                 self.test_value(args[0]);
                 let a = self.use_freg(args[1], FS1);
                 let b = self.use_freg(args[2], FS2);
-                self.emit(format!("movaps\t{}, {}", xmm(FS0), xmm(b)));
-                self.emit(format!("je\t{skip}"));
-                self.emit(format!("movaps\t{}, {}", xmm(FS0), xmm(a)));
-                writeln!(self.out, "{skip}:").unwrap();
-                self.emit(format!("movaps\t{}, {}", xmm(d), xmm(FS0)));
+                self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS0))), asm_arg(&(xmm(b)))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&(skip))]);
+                self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS0))), asm_arg(&(xmm(a)))]);
+                self.out.label(skip.clone());
+                self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(FS0)))]);
                 self.def_done(result, d);
             }
             // The false value in rax, replaced by the true one if the
@@ -989,9 +1194,9 @@ impl<'a> FunctionCompiler<'a> {
                 self.test_value(args[0]);
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
-                self.emit(format!("mov\trax, {}", r64(b)));
-                self.emit(format!("cmovne\trax, {}", r64(a)));
-                self.emit(format!("mov\t{}, rax", r64(d)));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(b)))]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(0)))]);
                 self.def_done(result, d);
             }
             InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
@@ -1003,19 +1208,29 @@ impl<'a> FunctionCompiler<'a> {
                 let from = self.ty(arg);
                 match op {
                     ConvertOp::Sext => match from {
-                        Type::I32 => self.emit(format!("movsxd\t{}, {}", r64(d), r32(a))),
-                        _ => self.emit(format!("movsx\t{}, {}", wide(d, ty), reg(a, from))),
+                        Type::I32 => {
+                            self.emit(Opcode::Movsxd, [asm_arg(&(r64(d))), asm_arg(&(r32(a)))])
+                        }
+                        _ => self.emit(
+                            Opcode::Movsx,
+                            [asm_arg(&(wide(d, ty))), asm_arg(&(reg(a, from)))],
+                        ),
                     },
                     // Writing a 32-bit register clears the upper 32 bits.
                     ConvertOp::Uext => match from {
-                        Type::I32 => self.emit(format!("mov\t{}, {}", r32(d), r32(a))),
-                        _ => self.emit(format!("movzx\t{}, {}", r32(d), reg(a, from))),
+                        Type::I32 => {
+                            self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(a)))])
+                        }
+                        _ => self.emit(
+                            Opcode::Movzx,
+                            [asm_arg(&(r32(d))), asm_arg(&(reg(a, from)))],
+                        ),
                     },
                     // The low bits are already right; upper bits are
                     // unspecified. A pointer is a 64-bit address already.
                     ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
                         if a != d {
-                            self.emit(format!("mov\t{}, {}", r64(d), r64(a)));
+                            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
                         }
                     }
                     _ => unreachable!("float conversions are lowered by float_convert"),
@@ -1025,13 +1240,13 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Icmp { .. } | InstData::Fcmp { .. } => {
                 let d = self.def_reg(result);
                 let cc = self.compare(inst);
-                self.emit(format!("set{cc}\t{}", r8(d)));
+                self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(d)))]);
                 self.def_done(result, d);
             }
-            InstData::Load { ty, addr, .. } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
-                self.emit(format!("{}\t{}, {a}", movs(ty), xmm(d)));
+                self.emit(movs(ty), [asm_arg(&(xmm(d))), asm_arg(&(a))]);
                 self.def_done(result, d);
             }
             // A narrow load zero-extends to 32 bits, which avoids writing
@@ -1040,25 +1255,29 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let a = self.mem(addr, S0, ty);
                 match ty {
-                    Type::I8 | Type::I16 => self.emit(format!("movzx\t{}, {a}", r32(d))),
-                    _ => self.emit(format!("mov\t{}, {a}", reg(d, ty))),
+                    Type::I8 | Type::I16 => {
+                        self.emit(Opcode::Movzx, [asm_arg(&(r32(d))), asm_arg(&(a))])
+                    }
+                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(d, ty))), asm_arg(&(a))]),
                 }
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. }
+                if self.ty(value).is_float() || self.ty(value).is_vector() =>
+            {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
-                self.emit(format!("{}\t{a}, {}", movs(ty), xmm(v)));
+                self.emit(movs(ty), [asm_arg(&(a)), asm_arg(&(xmm(v)))]);
             }
             InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
-                    Some((_, k)) => k.to_string(),
-                    None => reg(self.use_reg(value, S0), ty).to_string(),
+                    Some((_, k)) => asm_arg(&k),
+                    None => asm_arg(&reg(self.use_reg(value, S0), ty)),
                 };
                 let a = self.mem(addr, S1, ty);
-                self.emit(format!("mov\t{a}, {v}"));
+                self.emit(Opcode::Mov, [asm_arg(&(a)), asm_arg(&(v))]);
             }
             // x86 is strongly ordered: every load is an acquire and every
             // store a release. Only a sequentially consistent store needs
@@ -1067,10 +1286,12 @@ impl<'a> FunctionCompiler<'a> {
             InstData::AtomicLoad { ty, addr, .. } => {
                 let d = self.def_reg(result);
                 let a = self.use_reg(addr, S0);
-                let src = format!("{} [{}]", ptr(ty), r64(a));
+                let src = sized(memory(r64(a), 0), ptr(ty));
                 match ty {
-                    Type::I8 | Type::I16 => self.emit(format!("movzx\t{}, {src}", r32(d))),
-                    _ => self.emit(format!("mov\t{}, {src}", reg(d, ty))),
+                    Type::I8 | Type::I16 => {
+                        self.emit(Opcode::Movzx, [asm_arg(&(r32(d))), asm_arg(&(src))])
+                    }
+                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(d, ty))), asm_arg(&(src))]),
                 }
                 self.def_done(result, d);
             }
@@ -1083,16 +1304,22 @@ impl<'a> FunctionCompiler<'a> {
                 let v = self.use_reg(value, S0);
                 let a = self.use_reg(addr, S1);
                 let op = if ordering == Ordering::SeqCst {
-                    "xchg"
+                    Opcode::Xchg
                 } else {
-                    "mov"
+                    Opcode::Mov
                 };
-                if op == "xchg" && v != S0 {
+                if op == Opcode::Xchg && v != S0 {
                     // xchg writes its register operand.
-                    self.emit(format!("mov\trax, {}", r64(v)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(v)))]);
                 }
-                let v = if op == "xchg" { S0 } else { v };
-                self.emit(format!("{op}\t{} [{}], {}", ptr(ty), r64(a), reg(v, ty)));
+                let v = if op == Opcode::Xchg { S0 } else { v };
+                self.emit(
+                    op,
+                    [
+                        asm_arg(&(sized(memory(r64(a), 0), ptr(ty)))),
+                        asm_arg(&(reg(v, ty))),
+                    ],
+                );
             }
             InstData::AtomicRmw { op, args, .. } => self.atomic_rmw(inst, op, args, result),
             // `cmpxchg` compares memory with rax and writes the old value
@@ -1101,21 +1328,22 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S1);
                 let expected = self.use_reg(args[1], S0);
-                self.emit(format!("mov\trax, {}", r64(expected)));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(expected)))]);
                 let new = self.use_reg(args[2], S2);
-                self.emit(format!(
-                    "lock cmpxchg\t{} [{}], {}",
-                    ptr(ty),
-                    r64(a),
-                    reg(new, ty)
-                ));
+                self.emit_locked(
+                    Opcode::Cmpxchg,
+                    [
+                        asm_arg(&(sized(memory(r64(a), 0), ptr(ty)))),
+                        asm_arg(&(reg(new, ty))),
+                    ],
+                );
                 if let Some(loc) = result.and_then(|r| self.defined(r)) {
                     self.emit_move(loc, Loc::Reg(S0));
                 }
             }
             InstData::Fence { ordering } => {
                 if ordering == Ordering::SeqCst {
-                    self.emit("mfence");
+                    self.emit(Opcode::Mfence, []);
                 }
             }
             InstData::Jump { dest } => {
@@ -1143,15 +1371,18 @@ impl<'a> FunctionCompiler<'a> {
                 // else-arguments needs its own landing pad. The copies are
                 // `mov`s, which leave the flags alone.
                 if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
-                    self.emit(format!("j{not}\t{}", self.label(else_dest.block)));
+                    self.emit(
+                        Opcode::Jcc(condition(not)),
+                        [asm_arg(&(self.label(else_dest.block)))],
+                    );
                     self.block_args(&then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!(".L{}_{inst}_else", func.name);
-                    self.emit(format!("j{not}\t{pad}"));
+                    self.emit(Opcode::Jcc(condition(not)), [asm_arg(&(pad))]);
                     self.block_args(&then_dest, 0);
-                    self.emit(format!("jmp\t{}", self.label(then_dest.block)));
-                    writeln!(self.out, "{pad}:").unwrap();
+                    self.emit(Opcode::Jmp, [asm_arg(&(self.label(then_dest.block)))]);
+                    self.out.label(pad.clone());
                     self.block_args(&else_dest, 1);
                     self.branch_unless_next(else_dest.block);
                 }
@@ -1170,36 +1401,48 @@ impl<'a> FunctionCompiler<'a> {
                         returns_twice: false,
                     };
                     self.move_args(&args, &sig, None, false);
-                    self.emit(format!("call\t{id}@PLT"));
+                    self.emit(
+                        Opcode::Call,
+                        [asm_arg(&(symbol_address(&id.to_string(), Modifier::Plt)))],
+                    );
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // continue past it.
-                Intrinsic::Debugtrap => self.emit("int3"),
+                Intrinsic::Debugtrap => self.emit(Opcode::Int3, []),
                 // Round up to keep rsp 16-byte aligned; the memory starts
                 // above the outgoing arguments, which stay at rsp.
                 Intrinsic::StackAlloc => {
                     let size = self.use_reg(args[0], S0);
-                    self.emit(format!("lea\trax, [{} + 15]", r64(size)));
-                    self.emit("and\trax, -16");
-                    self.emit("sub\trsp, rax");
+                    self.emit(
+                        Opcode::Lea,
+                        [asm_arg(&(r64(0))), asm_arg(&(memory(r64(size), 15i128)))],
+                    );
+                    self.emit(Opcode::And, [asm_arg(&(r64(0))), asm_arg(&(-16i128))]);
+                    self.emit(Opcode::Sub, [asm_arg(&(r64(4))), asm_arg(&(r64(0)))]);
                     let d = self.def_reg(result);
-                    self.emit(format!("lea\t{}, [rsp + {}]", r64(d), self.outgoing));
+                    self.emit(
+                        Opcode::Lea,
+                        [
+                            asm_arg(&(r64(d))),
+                            asm_arg(&(memory(r64(4), (self.outgoing) as i128))),
+                        ],
+                    );
                     self.def_done(result, d);
                 }
                 Intrinsic::StackSave => {
                     let d = self.def_reg(result);
-                    self.emit(format!("mov\t{}, rsp", r64(d)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(4)))]);
                     self.def_done(result, d);
                 }
                 Intrinsic::StackRestore => {
                     let mark = self.use_reg(args[0], S0);
-                    self.emit(format!("mov\trsp, {}", r64(mark)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(4))), asm_arg(&(r64(mark)))]);
                 }
                 // Where the prologue points rbp: the saved rbp, with the
                 // return address above it.
                 Intrinsic::FrameAddress => {
                     let d = self.def_reg(result);
-                    self.emit(format!("mov\t{}, rbp", r64(d)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(5)))]);
                     self.def_done(result, d);
                 }
                 // SysV's va_list: the offsets of the next general and vector
@@ -1210,35 +1453,62 @@ impl<'a> FunctionCompiler<'a> {
                     let p = self.use_reg(args[0], S1);
                     let p = r64(p);
                     let (ints, floats) = (self.named.ints, self.named.floats);
-                    self.emit(format!("mov\tdword ptr [{p}], {}", 8 * u32::from(ints)));
-                    self.emit(format!(
-                        "mov\tdword ptr [{p} + 4], {}",
-                        48 + 16 * u32::from(floats)
-                    ));
-                    self.emit(format!("lea\trax, [rbp + {}]", 16 + self.named.stack));
-                    self.emit(format!("mov\tqword ptr [{p} + 8], rax"));
+                    self.emit(
+                        Opcode::Mov,
+                        [
+                            asm_arg(&(sized(memory(p, 0), 32))),
+                            asm_arg(&(8 * u32::from(ints))),
+                        ],
+                    );
+                    self.emit(
+                        Opcode::Mov,
+                        [
+                            asm_arg(&(sized(memory(p, 4i128), 32))),
+                            asm_arg(&(48 + 16 * u32::from(floats))),
+                        ],
+                    );
+                    self.emit(
+                        Opcode::Lea,
+                        [
+                            asm_arg(&(r64(0))),
+                            asm_arg(&(memory(r64(5), (16 + self.named.stack) as i128))),
+                        ],
+                    );
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(&(sized(memory(p, 8i128), 64))), asm_arg(&(r64(0)))],
+                    );
                     let save = self.frame(self.reg_save.expect("a variadic function"));
-                    self.emit(format!("lea\trax, {save}"));
-                    self.emit(format!("mov\tqword ptr [{p} + 16], rax"));
+                    self.emit(Opcode::Lea, [asm_arg(&(r64(0))), asm_arg(&(save))]);
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(&(sized(memory(p, 16i128), 64))), asm_arg(&(r64(0)))],
+                    );
                 }
             },
-            InstData::Trap => self.emit("ud2"),
+            InstData::Trap => self.emit(Opcode::Ud2, []),
             InstData::Return { args } => {
                 // A struct result in registers is loaded from where the
                 // function wrote it; one in memory returns its address.
                 if let Some(ArgLoc::SretRegs(regs)) = self.named.locs.first().cloned() {
                     let area = self.param_areas[0].expect("planned");
                     for (k, r) in regs.into_iter().enumerate() {
-                        let at = format!("qword ptr {}", self.frame(area + 8 * k));
+                        let at = sized(self.frame(area + 8 * k), 64);
                         match r {
-                            Loc::Reg(r) => self.emit(format!("mov\t{}, {at}", r64(r))),
-                            _ => self.emit(format!("movsd\t{}, {at}", xmm(loc_reg(r)))),
+                            Loc::Reg(r) => {
+                                self.emit(Opcode::Mov, [asm_arg(&(r64(r))), asm_arg(&(at))])
+                            }
+                            _ => self
+                                .emit(Opcode::Movsd, [asm_arg(&(xmm(loc_reg(r)))), asm_arg(&(at))]),
                         }
                     }
                 }
                 if let Some(slot) = self.sret_ptr {
                     let at = self.frame(slot);
-                    self.emit(format!("mov\trax, qword ptr {at}"));
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(&(r64(0))), asm_arg(&(sized((at).clone(), 64)))],
+                    );
                 }
                 if let Some(&value) = args.first() {
                     let ty = self.ty(value);
@@ -1250,7 +1520,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.extend_in_place(RAX, ret.ty, ret.ext);
                 }
                 self.epilogue();
-                self.emit("ret");
+                self.emit(Opcode::Ret, []);
             }
             InstData::VaArg { ty, list } => self.va_arg(inst, ty, list, result),
             InstData::Invoke { .. }
@@ -1275,26 +1545,59 @@ impl<'a> FunctionCompiler<'a> {
             format!(".L{}_{inst}_stack", self.func.name),
             format!(".L{}_{inst}_load", self.func.name),
         );
-        self.emit(format!("mov\tecx, dword ptr [{p} + {field}]"));
-        self.emit(format!("cmp\tecx, {end}"));
-        self.emit(format!("jae\t{stack}"));
-        self.emit(format!("mov\trax, qword ptr [{p} + 16]"));
-        self.emit("add\trax, rcx");
-        self.emit(format!("add\tecx, {step}"));
-        self.emit(format!("mov\tdword ptr [{p} + {field}], ecx"));
-        self.emit(format!("jmp\t{load}"));
-        writeln!(self.out, "{stack}:").unwrap();
-        self.emit(format!("mov\trax, qword ptr [{p} + 8]"));
-        self.emit("lea\trcx, [rax + 8]");
-        self.emit(format!("mov\tqword ptr [{p} + 8], rcx"));
-        writeln!(self.out, "{load}:").unwrap();
+        self.emit(
+            Opcode::Mov,
+            [
+                asm_arg(&(r32(1))),
+                asm_arg(&(sized(memory(p, (field) as i128), 32))),
+            ],
+        );
+        self.emit(Opcode::Cmp, [asm_arg(&(r32(1))), asm_arg(&(end))]);
+        self.emit(Opcode::Jcc(3), [asm_arg(&(stack))]);
+        self.emit(
+            Opcode::Mov,
+            [asm_arg(&(r64(0))), asm_arg(&(sized(memory(p, 16i128), 64)))],
+        );
+        self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+        self.emit(Opcode::Add, [asm_arg(&(r32(1))), asm_arg(&(step))]);
+        self.emit(
+            Opcode::Mov,
+            [
+                asm_arg(&(sized(memory(p, (field) as i128), 32))),
+                asm_arg(&(r32(1))),
+            ],
+        );
+        self.emit(Opcode::Jmp, [asm_arg(&(load))]);
+        self.out.label(stack.clone());
+        self.emit(
+            Opcode::Mov,
+            [asm_arg(&(r64(0))), asm_arg(&(sized(memory(p, 8i128), 64)))],
+        );
+        self.emit(
+            Opcode::Lea,
+            [asm_arg(&(r64(1))), asm_arg(&(memory(r64(0), 8i128)))],
+        );
+        self.emit(
+            Opcode::Mov,
+            [asm_arg(&(sized(memory(p, 8i128), 64))), asm_arg(&(r64(1)))],
+        );
+        self.out.label(load.clone());
         if ty.is_float() {
             let d = self.def_freg(result);
-            self.emit(format!("movsd\t{}, qword ptr [rax]", xmm(d)));
+            self.emit(
+                Opcode::Movsd,
+                [asm_arg(&(xmm(d))), asm_arg(&(sized(memory(r64(0), 0), 64)))],
+            );
             self.def_done(result, d);
         } else {
             let d = self.def_reg(result);
-            self.emit(format!("mov\t{}, {} [rax]", reg(d, ty), ptr(ty)));
+            self.emit(
+                Opcode::Mov,
+                [
+                    asm_arg(&(reg(d, ty))),
+                    asm_arg(&(sized(memory(r64(0), 0), ptr(ty)))),
+                ],
+            );
             self.def_done(result, d);
         }
     }
@@ -1331,11 +1634,11 @@ impl<'a> FunctionCompiler<'a> {
                 let code = match cond {
                     // Equal if both halves are: their XORs are zero.
                     IntCC::Eq | IntCC::Ne => {
-                        self.emit(format!("mov\trax, {a0}"));
-                        self.emit(format!("xor\trax, {b0}"));
-                        self.emit(format!("mov\trdx, {a1}"));
-                        self.emit(format!("xor\trdx, {b1}"));
-                        self.emit("or\trax, rdx");
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                        self.emit(Opcode::Xor, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                        self.emit(Opcode::Xor, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
+                        self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
                         cond_code(cond)
                     }
                     // a - b, with the borrow of the low halves feeding the
@@ -1349,10 +1652,10 @@ impl<'a> FunctionCompiler<'a> {
                         } else {
                             ((a0, a1), (b0, b1))
                         };
-                        self.emit(format!("mov\trax, {x0}"));
-                        self.emit(format!("cmp\trax, {y0}"));
-                        self.emit(format!("mov\trdx, {x1}"));
-                        self.emit(format!("sbb\trdx, {y1}"));
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(x0))]);
+                        self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(y0))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(x1))]);
+                        self.emit(Opcode::Sbb, [asm_arg(&(r64(2))), asm_arg(&(y1))]);
                         match cond {
                             IntCC::Slt | IntCC::Sgt => "l",
                             IntCC::Sle | IntCC::Sge => "ge",
@@ -1362,23 +1665,23 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 };
                 let d = self.def_reg(result);
-                self.emit(format!("set{code}\t{}", r8(d)));
+                self.emit(Opcode::Setcc(condition(code)), [asm_arg(&(r8(d)))]);
                 self.def_done(result, d);
             }
             InstData::Select { args } if wide(self, args[1]) => {
                 if wide(self, args[0]) {
                     let [c0, c1] = self.halves(args[0]);
-                    self.emit(format!("mov\trax, {c0}"));
-                    self.emit(format!("or\trax, {c1}"));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(c0))]);
+                    self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(c1))]);
                 } else {
                     self.test_value(args[0]);
                 }
                 let [t0, t1] = self.halves(args[1]);
                 let [f0, f1] = self.halves(args[2]);
-                self.emit(format!("mov\trax, {f0}"));
-                self.emit(format!("cmovne\trax, {t0}"));
-                self.emit(format!("mov\trdx, {f1}"));
-                self.emit(format!("cmovne\trdx, {t1}"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(f0))]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(0))), asm_arg(&(t0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(f1))]);
+                self.emit(Opcode::Cmovcc(5), [asm_arg(&(r64(2))), asm_arg(&(t1))]);
                 self.pair_out(result);
             }
             InstData::Convert {
@@ -1390,17 +1693,29 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(arg, S0);
                 let signed = op == ConvertOp::Sext;
                 match (from, signed) {
-                    (Type::I64, _) => self.emit(format!("mov\trax, {}", r64(a))),
-                    (Type::I32, true) => self.emit(format!("movsxd\trax, {}", r32(a))),
-                    (Type::I32, false) => self.emit(format!("mov\teax, {}", r32(a))),
-                    (_, true) => self.emit(format!("movsx\trax, {}", reg(a, from))),
-                    (_, false) => self.emit(format!("movzx\teax, {}", reg(a, from))),
+                    (Type::I64, _) => {
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))])
+                    }
+                    (Type::I32, true) => {
+                        self.emit(Opcode::Movsxd, [asm_arg(&(r64(0))), asm_arg(&(r32(a)))])
+                    }
+                    (Type::I32, false) => {
+                        self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(a)))])
+                    }
+                    (_, true) => self.emit(
+                        Opcode::Movsx,
+                        [asm_arg(&(r64(0))), asm_arg(&(reg(a, from)))],
+                    ),
+                    (_, false) => self.emit(
+                        Opcode::Movzx,
+                        [asm_arg(&(r32(0))), asm_arg(&(reg(a, from)))],
+                    ),
                 }
                 if signed {
-                    self.emit("mov\trdx, rax");
-                    self.emit("sar\trdx, 63");
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(r64(0)))]);
+                    self.emit(Opcode::Sar, [asm_arg(&(r64(2))), asm_arg(&(63i128))]);
                 } else {
-                    self.emit("xor\tedx, edx");
+                    self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
                 }
                 self.pair_out(result);
             }
@@ -1410,17 +1725,29 @@ impl<'a> FunctionCompiler<'a> {
                 ..
             } => {
                 let a = r64(self.use_reg(addr, S1));
-                self.emit(format!("mov\trax, qword ptr [{a}]"));
-                self.emit(format!("mov\trdx, qword ptr [{a} + 8]"));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(0))), asm_arg(&(sized(memory(a, 0), 64)))],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(2))), asm_arg(&(sized(memory(a, 8i128), 64)))],
+                );
                 self.pair_out(result);
             }
             InstData::Store { value, addr, .. } if wide(self, value) => {
                 let [v0, v1] = self.halves(value);
                 let a = r64(self.use_reg(addr, S1));
-                self.emit(format!("mov\trax, {v0}"));
-                self.emit(format!("mov\tqword ptr [{a}], rax"));
-                self.emit(format!("mov\trax, {v1}"));
-                self.emit(format!("mov\tqword ptr [{a} + 8], rax"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(v0))]);
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized(memory(a, 0), 64))), asm_arg(&(r64(0)))],
+                );
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(v1))]);
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized(memory(a, 8i128), 64))), asm_arg(&(r64(0)))],
+                );
             }
             // The carry or borrow of the low halves feeds the high; the
             // flags then describe the whole 128 bits. Multiplication is
@@ -1429,17 +1756,17 @@ impl<'a> FunctionCompiler<'a> {
                 let [a0, a1] = self.halves(args[0]);
                 let [b0, b1] = self.halves(args[1]);
                 let (lo, hi, code) = match op {
-                    OverflowOp::Uadd => ("add", "adc", "c"),
-                    OverflowOp::Sadd => ("add", "adc", "o"),
-                    OverflowOp::Usub => ("sub", "sbb", "c"),
-                    OverflowOp::Ssub => ("sub", "sbb", "o"),
+                    OverflowOp::Uadd => (Opcode::Add, Opcode::Adc, "c"),
+                    OverflowOp::Sadd => (Opcode::Add, Opcode::Adc, "o"),
+                    OverflowOp::Usub => (Opcode::Sub, Opcode::Sbb, "c"),
+                    OverflowOp::Ssub => (Opcode::Sub, Opcode::Sbb, "o"),
                     OverflowOp::Umul | OverflowOp::Smul => unreachable!("rejected"),
                 };
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("{lo}\trax, {b0}"));
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit(format!("{hi}\trdx, {b1}"));
-                self.emit(format!("set{code}\tcl"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(lo, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(hi, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
+                self.emit(Opcode::Setcc(condition(code)), [asm_arg(&(r8(1)))]);
                 self.pair_out(result);
                 let flag = self.func.inst_results(inst)[1];
                 if let Some(loc) = self.defined(flag) {
@@ -1453,15 +1780,15 @@ impl<'a> FunctionCompiler<'a> {
 
     /// The halves of `i128` operand `value`, low first, as operands: a
     /// register or a spill slot.
-    fn halves(&self, value: Value) -> [String; 2] {
+    fn halves(&self, value: Value) -> [AsmOperand; 2] {
         [self.loc(value), self.hi(value)].map(|loc| self.operand(loc))
     }
 
     /// Integer location `loc` as a 64-bit operand.
-    fn operand(&self, loc: Loc) -> String {
+    fn operand(&self, loc: Loc) -> AsmOperand {
         match loc {
-            Loc::Reg(r) => r64(r).to_string(),
-            Loc::Stack(s) => self.slot(s),
+            Loc::Reg(r) => asm_arg(&r64(r)),
+            Loc::Stack(s) => asm_arg(&self.slot(s)),
             Loc::FReg(_) => unreachable!("not an integer"),
             Loc::Remat(_) => unreachable!("i128 halves are not rematerialized"),
         }
@@ -1501,108 +1828,128 @@ impl<'a> FunctionCompiler<'a> {
             let count = match self.loc(args[1]) {
                 Loc::Remat(value) => {
                     self.rematerialize(S1, value);
-                    r64(S1).to_string()
+                    asm_arg(&r64(S1))
                 }
                 loc => self.operand(loc),
             };
-            [count, String::new()]
+            [count, asm_arg(&0i128)]
         };
         let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
-        let pair = |this: &mut Self, lo: &str, hi: &str| {
-            this.emit(format!("mov\trax, {a0}"));
-            this.emit(format!("{lo}\trax, {b0}"));
-            this.emit(format!("mov\trdx, {a1}"));
-            this.emit(format!("{hi}\trdx, {b1}"));
+        let pair = |this: &mut Self, lo: Opcode, hi: Opcode| {
+            this.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+            this.emit(lo, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
+            this.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+            this.emit(hi, [asm_arg(&(r64(2))), asm_arg(&(b1))]);
         };
         match op {
-            BinaryOp::Iadd => pair(self, "add", "adc"),
-            BinaryOp::Isub => pair(self, "sub", "sbb"),
-            BinaryOp::And => pair(self, "and", "and"),
-            BinaryOp::Or => pair(self, "or", "or"),
-            BinaryOp::Xor => pair(self, "xor", "xor"),
+            BinaryOp::Iadd => pair(self, Opcode::Add, Opcode::Adc),
+            BinaryOp::Isub => pair(self, Opcode::Sub, Opcode::Sbb),
+            BinaryOp::And => pair(self, Opcode::And, Opcode::And),
+            BinaryOp::Or => pair(self, Opcode::Or, Opcode::Or),
+            BinaryOp::Xor => pair(self, Opcode::Xor, Opcode::Xor),
             // (a1:a0)(b1:b0) mod 2^128 = a0 b0 + 2^64 (a0 b1 + a1 b0); `mul`
             // gives the full 128-bit a0 b0 in rdx:rax.
             BinaryOp::Imul => {
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("mul\t{b0}"));
-                self.emit(format!("mov\trcx, {a0}"));
-                self.emit(format!("imul\trcx, {b1}"));
-                self.emit("add\trdx, rcx");
-                self.emit(format!("mov\trcx, {a1}"));
-                self.emit(format!("imul\trcx, {b0}"));
-                self.emit("add\trdx, rcx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Mul, [asm_arg(&(b0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(a0))]);
+                self.emit(Opcode::Imul, [asm_arg(&(r64(1))), asm_arg(&(b1))]);
+                self.emit(Opcode::Add, [asm_arg(&(r64(2))), asm_arg(&(r64(1)))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(a1))]);
+                self.emit(Opcode::Imul, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
+                self.emit(Opcode::Add, [asm_arg(&(r64(2))), asm_arg(&(r64(1)))]);
             }
             // `shld`/`shrd` shift one half while filling from the other,
             // by the count modulo 64; at 64 or more (bit 6 of the count),
             // the result is the other half shifted, and zeros or the sign.
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                 let done = label("shifted");
-                self.emit(format!("mov\trcx, {b0}"));
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("mov\trdx, {a1}"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
                 match op {
                     BinaryOp::Shl => {
-                        self.emit("shld\trdx, rax, cl");
-                        self.emit("shl\trax, cl");
-                        self.emit("test\tcl, 64");
-                        self.emit(format!("je\t{done}"));
-                        self.emit("mov\trdx, rax");
-                        self.emit("xor\teax, eax");
+                        self.emit(
+                            Opcode::Shld,
+                            [asm_arg(&(r64(2))), asm_arg(&(r64(0))), asm_arg(&(r8(1)))],
+                        );
+                        self.emit(Opcode::Shl, [asm_arg(&(r64(0))), asm_arg(&(r8(1)))]);
+                        self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
+                        self.emit(Opcode::Jcc(4), [asm_arg(&(done))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(r64(0)))]);
+                        self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(r32(0)))]);
                     }
                     _ => {
-                        let shr = if op == BinaryOp::Sshr { "sar" } else { "shr" };
-                        self.emit("shrd\trax, rdx, cl");
-                        self.emit(format!("{shr}\trdx, cl"));
-                        self.emit("test\tcl, 64");
-                        self.emit(format!("je\t{done}"));
-                        self.emit("mov\trax, rdx");
-                        if op == BinaryOp::Sshr {
-                            self.emit("sar\trdx, 63");
+                        let shr = if op == BinaryOp::Sshr {
+                            Opcode::Sar
                         } else {
-                            self.emit("xor\tedx, edx");
+                            Opcode::Shr
+                        };
+                        self.emit(
+                            Opcode::Shrd,
+                            [asm_arg(&(r64(0))), asm_arg(&(r64(2))), asm_arg(&(r8(1)))],
+                        );
+                        self.emit(shr, [asm_arg(&(r64(2))), asm_arg(&(r8(1)))]);
+                        self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
+                        self.emit(Opcode::Jcc(4), [asm_arg(&(done))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                        if op == BinaryOp::Sshr {
+                            self.emit(Opcode::Sar, [asm_arg(&(r64(2))), asm_arg(&(63i128))]);
+                        } else {
+                            self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
                         }
                     }
                 }
-                writeln!(self.out, "{done}:").unwrap();
+                self.out.label(done.clone());
             }
             // Rotating by 64 swaps the halves; then each half rotates by the
             // rest, filling from the other's original bits.
             BinaryOp::Rotl | BinaryOp::Rotr => {
                 let swapped = label("swapped");
-                self.emit(format!("mov\trcx, {b0}"));
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit("test\tcl, 64");
-                self.emit(format!("je\t{swapped}"));
-                self.emit("xchg\trax, rdx");
-                writeln!(self.out, "{swapped}:").unwrap();
-                let fill = if op == BinaryOp::Rotl { "shld" } else { "shrd" };
-                self.emit("mov\tr11, rax");
-                self.emit(format!("{fill}\trax, rdx, cl"));
-                self.emit(format!("{fill}\trdx, r11, cl"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(b0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Test, [asm_arg(&(r8(1))), asm_arg(&(64i128))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&(swapped))]);
+                self.emit(Opcode::Xchg, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.out.label(swapped.clone());
+                let fill = if op == BinaryOp::Rotl {
+                    Opcode::Shld
+                } else {
+                    Opcode::Shrd
+                };
+                self.emit(Opcode::Mov, [asm_arg(&r64(11)), asm_arg(&r64(0))]);
+                self.emit(
+                    fill,
+                    [asm_arg(&(r64(0))), asm_arg(&(r64(2))), asm_arg(&(r8(1)))],
+                );
+                self.emit(fill, [asm_arg(&r64(2)), asm_arg(&r64(11)), asm_arg(&r8(1))]);
             }
             // libgcc takes the pairs in rdi:rsi and rdx:rcx and returns
             // rdx:rax. Traps first, as for narrower types.
             BinaryOp::Udiv | BinaryOp::Sdiv | BinaryOp::Urem | BinaryOp::Srem => {
                 let trap = self.trap_label();
-                self.emit(format!("mov\trax, {b0}"));
-                self.emit(format!("or\trax, {b1}"));
-                self.emit(format!("je\t{trap}"));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
+                self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(b1))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
                 if op == BinaryOp::Sdiv {
                     // MIN / -1: the divisor's halves are both all ones and
                     // the dividend is 2^127.
                     let ok = label("divok");
-                    self.emit(format!("mov\trax, {b0}"));
-                    self.emit(format!("and\trax, {b1}"));
-                    self.emit("cmp\trax, -1");
-                    self.emit(format!("jne\t{ok}"));
-                    self.emit(format!("mov\trax, {a0}"));
-                    self.emit("test\trax, rax");
-                    self.emit(format!("jne\t{ok}"));
-                    self.emit("movabs\trax, 0x8000000000000000");
-                    self.emit(format!("cmp\trax, {a1}"));
-                    self.emit(format!("je\t{trap}"));
-                    writeln!(self.out, "{ok}:").unwrap();
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(b0))]);
+                    self.emit(Opcode::And, [asm_arg(&(r64(0))), asm_arg(&(b1))]);
+                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(-1i128))]);
+                    self.emit(Opcode::Jcc(5), [asm_arg(&(ok))]);
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                    self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
+                    self.emit(Opcode::Jcc(5), [asm_arg(&(ok))]);
+                    self.emit(
+                        Opcode::Movabs,
+                        [asm_arg(&(r64(0))), asm_arg(&(0x8000000000000000i128))],
+                    );
+                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(a1))]);
+                    self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
+                    self.out.label(ok.clone());
                 }
                 let moves = [
                     (Loc::Reg(RDI), self.loc(args[0])),
@@ -1617,7 +1964,10 @@ impl<'a> FunctionCompiler<'a> {
                     BinaryOp::Urem => "__umodti3",
                     _ => "__modti3",
                 };
-                self.emit(format!("call\t{function}@PLT"));
+                self.emit(
+                    Opcode::Call,
+                    [asm_arg(&(symbol_address(&function, Modifier::Plt)))],
+                );
             }
             _ => unreachable!("{op} on i128 is rejected or not an integer operation"),
         }
@@ -1631,65 +1981,65 @@ impl<'a> FunctionCompiler<'a> {
             // -x = ~x + 1: `neg` the low half sets the carry unless it was
             // zero, which the high half then absorbs.
             UnaryOp::Ineg => {
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit("neg\trax");
-                self.emit("adc\trdx, 0");
-                self.emit("neg\trdx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Neg, [asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Adc, [asm_arg(&(r64(2))), asm_arg(&(0i128))]);
+                self.emit(Opcode::Neg, [asm_arg(&(r64(2)))]);
             }
             UnaryOp::Bnot => {
-                self.emit(format!("mov\trax, {a0}"));
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit("not\trax");
-                self.emit("not\trdx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Not, [asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Not, [asm_arg(&(r64(2)))]);
             }
             // The high half's count, or 64 plus the low half's (see
             // `unary` for the `bsr` arithmetic).
             UnaryOp::Clz => {
                 let (low, done) = (label("low"), label("counted"));
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit("test\trdx, rdx");
-                self.emit(format!("je\t{low}"));
-                self.emit("bsr\trax, rdx");
-                self.emit("xor\teax, 63");
-                self.emit(format!("jmp\t{done}"));
-                writeln!(self.out, "{low}:").unwrap();
-                self.emit(format!("mov\trdx, {a0}"));
-                self.emit("bsr\trax, rdx");
-                self.emit("mov\tecx, 127");
-                self.emit("cmove\teax, ecx");
-                self.emit("xor\teax, 63");
-                self.emit("add\teax, 64");
-                writeln!(self.out, "{done}:").unwrap();
-                self.emit("xor\tedx, edx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Test, [asm_arg(&(r64(2))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&(low))]);
+                self.emit(Opcode::Bsr, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(63i128))]);
+                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.out.label(low.clone());
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
+                self.emit(Opcode::Bsr, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(127i128))]);
+                self.emit(Opcode::Cmovcc(4), [asm_arg(&(r32(0))), asm_arg(&(r32(1)))]);
+                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(63i128))]);
+                self.emit(Opcode::Add, [asm_arg(&(r32(0))), asm_arg(&(64i128))]);
+                self.out.label(done.clone());
+                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
             }
             UnaryOp::Ctz => {
                 let (high, done) = (label("high"), label("counted"));
-                self.emit(format!("mov\trdx, {a0}"));
-                self.emit("test\trdx, rdx");
-                self.emit(format!("je\t{high}"));
-                self.emit("bsf\trax, rdx");
-                self.emit(format!("jmp\t{done}"));
-                writeln!(self.out, "{high}:").unwrap();
-                self.emit(format!("mov\trdx, {a1}"));
-                self.emit("bsf\trax, rdx");
-                self.emit("mov\tecx, 64");
-                self.emit("cmove\teax, ecx");
-                self.emit("add\teax, 64");
-                writeln!(self.out, "{done}:").unwrap();
-                self.emit("xor\tedx, edx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
+                self.emit(Opcode::Test, [asm_arg(&(r64(2))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Jcc(4), [asm_arg(&(high))]);
+                self.emit(Opcode::Bsf, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.out.label(high.clone());
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Bsf, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(64i128))]);
+                self.emit(Opcode::Cmovcc(4), [asm_arg(&(r32(0))), asm_arg(&(r32(1)))]);
+                self.emit(Opcode::Add, [asm_arg(&(r32(0))), asm_arg(&(64i128))]);
+                self.out.label(done.clone());
+                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
             }
             UnaryOp::Popcnt => {
-                self.emit(format!("popcnt\trax, {a0}"));
-                self.emit(format!("popcnt\trdx, {a1}"));
-                self.emit("add\trax, rdx");
-                self.emit("xor\tedx, edx");
+                self.emit(Opcode::Popcnt, [asm_arg(&(r64(0))), asm_arg(&(a0))]);
+                self.emit(Opcode::Popcnt, [asm_arg(&(r64(2))), asm_arg(&(a1))]);
+                self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
+                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
             }
             UnaryOp::Bswap => {
-                self.emit(format!("mov\trax, {a1}"));
-                self.emit(format!("mov\trdx, {a0}"));
-                self.emit("bswap\trax");
-                self.emit("bswap\trdx");
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(a1))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r64(2))), asm_arg(&(a0))]);
+                self.emit(Opcode::Bswap, [asm_arg(&(r64(0)))]);
+                self.emit(Opcode::Bswap, [asm_arg(&(r64(2)))]);
             }
             _ => unreachable!("{op} is not an integer operation"),
         }
@@ -1697,13 +2047,15 @@ impl<'a> FunctionCompiler<'a> {
 
     /// The operand of a `call` or `jmp` to function `name`: through the
     /// PLT if it is in another module.
-    fn call_target(&self, name: &str) -> String {
-        let symbol = asm_string(name);
-        if self.module.defines(name) {
-            symbol
-        } else {
-            format!("{symbol}@PLT")
-        }
+    fn call_target(&self, name: &str) -> Address {
+        symbol_address(
+            name,
+            if self.module.defines(name) {
+                Modifier::None
+            } else {
+                Modifier::Plt
+            },
+        )
     }
 
     /// Moves call arguments into their registers and the stack, for
@@ -1738,7 +2090,11 @@ impl<'a> FunctionCompiler<'a> {
         let mut extend = Vec::new();
         let mut staged = self.alloc.spill_slots;
         let mut sret = None;
-        let stack_base = if tail { "rbp + 16" } else { "rsp" };
+        let stack_base = if tail {
+            memory(r64(5), 16)
+        } else {
+            memory(r64(4), 0)
+        };
         for (i, ((&arg, loc), kind)) in args.iter().zip(placement.locs).zip(&kinds).enumerate() {
             let layout = match kind {
                 ArgKind::ByVal(layout) | ArgKind::Sret(layout) => Some(*layout),
@@ -1755,10 +2111,16 @@ impl<'a> FunctionCompiler<'a> {
                     }
                 }
                 ArgLoc::Value(Slot::Stack(offset)) => {
-                    let at = |o: u32| format!("[{stack_base} + {}]", offset + o);
+                    let at = |o: u32| offset_memory(&stack_base, i128::from(offset + o));
                     if self.ty(arg) == Type::I128 {
                         self.store_stack_arg(self.loc(arg), &at(0));
                         self.store_stack_arg(self.hi(arg), &at(8));
+                    } else if self.ty(arg).is_vector() {
+                        let r = self.use_freg(arg, FS0);
+                        self.emit(
+                            Opcode::Movups,
+                            [asm_arg(&sized(at(0), 128)), asm_arg(&xmm(r))],
+                        );
                     } else {
                         self.store_stack_arg(self.loc(arg), &at(0));
                     }
@@ -1766,7 +2128,7 @@ impl<'a> FunctionCompiler<'a> {
                 ArgLoc::OnStack(offset) => {
                     let p = self.use_reg(arg, S1);
                     let size = layout.expect("a struct").size();
-                    self.copy_bytes(&format!("rsp + {offset}"), p, size);
+                    self.copy_bytes(&memory(r64(4), i128::from(offset)), p, size);
                 }
                 ArgLoc::InRegs(regs) => {
                     let p = self.use_reg(arg, S1);
@@ -1774,7 +2136,10 @@ impl<'a> FunctionCompiler<'a> {
                     for (k, r) in regs.into_iter().enumerate() {
                         let offset = 8 * k as u64;
                         self.load_chunk(S0, p, offset, (size - offset).min(8));
-                        self.emit(format!("mov\t{}, rax", self.slot(staged)));
+                        self.emit(
+                            Opcode::Mov,
+                            [asm_arg(&(self.slot(staged))), asm_arg(&(r64(0)))],
+                        );
                         moves.push((r, Loc::Stack(staged)));
                         staged += 1;
                     }
@@ -1783,7 +2148,10 @@ impl<'a> FunctionCompiler<'a> {
                 ArgLoc::SretRegs(regs) => {
                     let p = self.use_reg(arg, S1);
                     let save = self.frame(self.sret_save.expect("planned"));
-                    self.emit(format!("mov\tqword ptr {save}, {}", r64(p)));
+                    self.emit(
+                        Opcode::Mov,
+                        [asm_arg(&(sized((save).clone(), 64))), asm_arg(&(r64(p)))],
+                    );
                     sret = Some((regs, layout.expect("a struct")));
                 }
             }
@@ -1797,7 +2165,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         // A variadic callee saves this many vector registers.
         if sig.variadic {
-            self.emit(format!("mov\teax, {}", placement.floats));
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r32(0))), asm_arg(&(placement.floats))],
+            );
         }
         sret
     }
@@ -1816,17 +2187,26 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some((regs, layout)) = sret {
             let save = self.frame(self.sret_save.expect("planned"));
-            self.emit(format!("mov\tr11, qword ptr {save}"));
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(&r64(11)), asm_arg(&sized(save.clone(), 64))],
+            );
             for (k, r) in regs.into_iter().enumerate() {
                 let offset = 8 * k as u64;
                 let n = (layout.size() - offset).min(8);
                 match r {
                     Loc::Reg(r) => self.store_chunk(r, S3, offset, n),
                     _ => {
-                        let mov = if n == 4 { "movss" } else { "movsd" };
-                        let size = if n == 4 { "dword" } else { "qword" };
+                        let mov = if n == 4 { Opcode::Movss } else { Opcode::Movsd };
+                        let size = if n == 4 { 32 } else { 64 };
                         let x = xmm(loc_reg(r));
-                        self.emit(format!("{mov}\t{size} ptr [r11 + {offset}], {x}"));
+                        self.emit(
+                            mov,
+                            [
+                                asm_arg(&sized(memory(r64(11), offset as i128), size)),
+                                asm_arg(&x),
+                            ],
+                        );
                     }
                 }
             }
@@ -1837,19 +2217,31 @@ impl<'a> FunctionCompiler<'a> {
     /// zero-extended, without reading past them: a struct may end at the
     /// end of a page. Odd sizes are pieced together through rdx.
     fn load_chunk(&mut self, d: u8, p: u8, offset: u64, n: u64) {
-        let at = |o: u64| format!("[{} + {}]", r64(p), offset + o);
+        let at = |o: u64| memory(r64(p), i128::from(offset + o));
         match n {
-            8 => self.emit(format!("mov\t{}, qword ptr {}", r64(d), at(0))),
-            4 => self.emit(format!("mov\t{}, dword ptr {}", r32(d), at(0))),
-            2 => self.emit(format!("movzx\t{}, word ptr {}", r32(d), at(0))),
-            1 => self.emit(format!("movzx\t{}, byte ptr {}", r32(d), at(0))),
+            8 => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r64(d))), asm_arg(&(sized((at(0)).clone(), 64)))],
+            ),
+            4 => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 32)))],
+            ),
+            2 => self.emit(
+                Opcode::Movzx,
+                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 16)))],
+            ),
+            1 => self.emit(
+                Opcode::Movzx,
+                [asm_arg(&(r32(d))), asm_arg(&(sized((at(0)).clone(), 8)))],
+            ),
             _ => {
                 let low = if n > 4 { 4 } else { 2 };
                 self.load_chunk(d, p, offset, low);
                 for (piece, at_byte) in pieces(n - low).into_iter().map(|(o, k)| (k, low + o)) {
                     self.load_chunk(S2, p, offset + at_byte, piece);
-                    self.emit(format!("shl\trdx, {}", 8 * at_byte));
-                    self.emit(format!("or\t{}, rdx", r64(d)));
+                    self.emit(Opcode::Shl, [asm_arg(&(r64(2))), asm_arg(&(8 * at_byte))]);
+                    self.emit(Opcode::Or, [asm_arg(&(r64(d))), asm_arg(&(r64(2)))]);
                 }
             }
         }
@@ -1862,50 +2254,67 @@ impl<'a> FunctionCompiler<'a> {
         let mut done = 0;
         for (o, k) in pieces(n) {
             if o > done {
-                self.emit(format!("shr\t{}, {}", r64(r), 8 * (o - done)));
+                self.emit(
+                    Opcode::Shr,
+                    [asm_arg(&(r64(r))), asm_arg(&(8 * (o - done)))],
+                );
                 done = o;
             }
             let (size, src) = match k {
-                8 => ("qword", r64(r)),
-                4 => ("dword", r32(r)),
-                2 => ("word", r16(r)),
-                _ => ("byte", r8(r)),
+                8 => (64, r64(r)),
+                4 => (32, r32(r)),
+                2 => (16, r16(r)),
+                _ => (8, r8(r)),
             };
-            self.emit(format!(
-                "mov\t{size} ptr [{} + {}], {src}",
-                r64(p),
-                offset + o
-            ));
+            self.emit(
+                Opcode::Mov,
+                [
+                    asm_arg(&(sized(memory(r64(p), (offset + o) as i128), size))),
+                    asm_arg(&(src)),
+                ],
+            );
         }
     }
 
     /// Copies `size` bytes from `[src]` to `[to]`, 8 at a time through rax
     /// and then the remainder exactly.
-    fn copy_bytes(&mut self, to: &str, src: u8, size: u64) {
+    fn copy_bytes(&mut self, to: &Memory, src: u8, size: u64) {
         let mut offset = 0;
         while offset < size {
             let n = (size - offset).min(8);
             for (o, k) in pieces(n) {
                 let (ptr_kw, rax) = match k {
-                    8 => ("qword", "rax"),
-                    4 => ("dword", "eax"),
-                    2 => ("word", "ax"),
-                    _ => ("byte", "al"),
+                    8 => (64, r64(0)),
+                    4 => (32, r32(0)),
+                    2 => (16, r16(0)),
+                    _ => (8, r8(0)),
                 };
                 let at = offset + o;
-                self.emit(format!("mov\t{rax}, {ptr_kw} ptr [{} + {at}]", r64(src)));
-                self.emit(format!("mov\t{ptr_kw} ptr [{to} + {at}], {rax}"));
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(&(rax)),
+                        asm_arg(&(sized(memory(r64(src), (at) as i128), ptr_kw))),
+                    ],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [
+                        asm_arg(&(sized(offset_memory(to, (at) as i128), ptr_kw))),
+                        asm_arg(&(rax)),
+                    ],
+                );
             }
             offset += n;
         }
     }
 
     /// Sets `dst` to the address of memory operand `at` (`[rbp - 16]`).
-    fn address(&mut self, dst: Loc, at: &str) {
+    fn address(&mut self, dst: Loc, at: &Memory) {
         match dst {
-            Loc::Reg(r) => self.emit(format!("lea\t{}, {at}", r64(r))),
+            Loc::Reg(r) => self.emit(Opcode::Lea, [asm_arg(&(r64(r))), asm_arg(&(at))]),
             _ => {
-                self.emit(format!("lea\trax, {at}"));
+                self.emit(Opcode::Lea, [asm_arg(&(r64(0))), asm_arg(&(at))]);
                 self.emit_move(dst, Loc::Reg(S0));
             }
         }
@@ -1915,38 +2324,62 @@ impl<'a> FunctionCompiler<'a> {
     fn extend_in_place(&mut self, r: u8, ty: Type, ext: ArgExt) {
         let op = match ext {
             ArgExt::None => return,
-            ArgExt::Sext => "movsx",
-            ArgExt::Uext => "movzx",
+            ArgExt::Sext => Opcode::Movsx,
+            ArgExt::Uext => Opcode::Movzx,
         };
         if matches!(ty, Type::I8 | Type::I16) {
-            self.emit(format!("{op}\t{}, {}", r32(r), reg(r, ty)));
+            self.emit(op, [asm_arg(&(r32(r))), asm_arg(&(reg(r, ty)))]);
         }
     }
 
     /// Stores an argument from `src` at memory `at`, a stack argument's
     /// slot. Each has 8 bytes, so all 64 bits of an integer can go.
-    fn store_stack_arg(&mut self, src: Loc, at: &str) {
+    fn store_stack_arg(&mut self, src: Loc, at: &Memory) {
         match src {
-            Loc::Reg(r) => self.emit(format!("mov\tqword ptr {at}, {}", r64(r))),
-            Loc::FReg(r) => self.emit(format!("movsd\tqword ptr {at}, {}", xmm(r))),
+            Loc::Reg(r) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(r)))],
+            ),
+            Loc::FReg(r) => self.emit(
+                Opcode::Movsd,
+                [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(xmm(r)))],
+            ),
             Loc::Stack(s) => {
-                self.emit(format!("mov\trax, {}", self.slot(s)));
-                self.emit(format!("mov\tqword ptr {at}, rax"));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(0)))],
+                );
             }
             Loc::Remat(value) => {
                 self.rematerialize(S0, value);
-                self.emit(format!("mov\tqword ptr {at}, rax"));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&sized(at.clone(), 64)), asm_arg(&r64(S0))],
+                );
             }
         }
     }
 
     /// Loads a value of type `ty` from memory `src` into `dst`.
-    fn load_into(&mut self, dst: Loc, ty: Type, src: &str) {
+    fn load_into(&mut self, dst: Loc, ty: Type, src: &Memory) {
         match dst {
-            Loc::Reg(r) => self.emit(format!("mov\t{}, qword ptr {src}", r64(r))),
-            Loc::FReg(r) => self.emit(format!("{}\t{}, {} {src}", movs(ty), xmm(r), ptr(ty))),
+            Loc::Reg(r) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r64(r))), asm_arg(&(sized((src).clone(), 64)))],
+            ),
+            Loc::FReg(r) => self.emit(
+                movs(ty),
+                [
+                    asm_arg(&(xmm(r))),
+                    asm_arg(&(sized((src).clone(), ptr(ty)))),
+                ],
+            ),
             Loc::Stack(_) => {
-                let tmp = if ty.is_float() {
+                let tmp = if ty.is_float() || ty.is_vector() {
                     Loc::FReg(FS0)
                 } else {
                     Loc::Reg(S0)
@@ -1961,14 +2394,20 @@ impl<'a> FunctionCompiler<'a> {
     /// Restores the callee-saved registers, rsp and rbp.
     fn epilogue(&mut self) {
         if self.saved.is_empty() {
-            self.emit("mov\trsp, rbp");
+            self.emit(Opcode::Mov, [asm_arg(&(r64(4))), asm_arg(&(r64(5)))]);
         } else {
-            self.emit(format!("lea\trsp, [rbp - {}]", 8 * self.saved.len()));
+            self.emit(
+                Opcode::Lea,
+                [
+                    asm_arg(&r64(4)),
+                    asm_arg(&memory(r64(5), -((8 * self.saved.len()) as i128))),
+                ],
+            );
             for r in self.saved.clone().into_iter().rev() {
-                self.emit(format!("pop\t{}", r64(r)));
+                self.emit(Opcode::Pop, [asm_arg(&(r64(r)))]);
             }
         }
-        self.emit("pop\trbp");
+        self.emit(Opcode::Pop, [asm_arg(&(r64(5)))]);
     }
 
     /// Computes `args[0] op args[1]` into `d`.
@@ -1977,12 +2416,12 @@ impl<'a> FunctionCompiler<'a> {
         let a = self.use_reg(args[0], S0);
         let imm = folded_imm(self.func, self.func.inst_data(inst)).map(|(_, k)| k);
         let simple = match op {
-            BinaryOp::Iadd | BinaryOp::Ptradd => Some("add"),
-            BinaryOp::Isub => Some("sub"),
-            BinaryOp::And => Some("and"),
-            BinaryOp::Or => Some("or"),
-            BinaryOp::Xor => Some("xor"),
-            BinaryOp::Imul if imm.is_none() => Some("imul"),
+            BinaryOp::Iadd | BinaryOp::Ptradd => Some(Opcode::Add),
+            BinaryOp::Isub => Some(Opcode::Sub),
+            BinaryOp::And => Some(Opcode::And),
+            BinaryOp::Or => Some(Opcode::Or),
+            BinaryOp::Xor => Some(Opcode::Xor),
+            BinaryOp::Imul if imm.is_none() => Some(Opcode::Imul),
             _ => None,
         };
         if let Some(mnemonic) = simple {
@@ -1997,31 +2436,89 @@ impl<'a> FunctionCompiler<'a> {
             // The three-operand form writes a fresh destination.
             BinaryOp::Imul => {
                 let k = imm.expect("register form handled above");
-                self.emit(format!("imul\t{}, {}, {k}", wide(d, ty), wide(a, ty)));
+                self.emit(
+                    Opcode::Imul,
+                    [
+                        asm_arg(&(wide(d, ty))),
+                        asm_arg(&(wide(a, ty))),
+                        asm_arg(&(k)),
+                    ],
+                );
             }
             BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr | BinaryOp::Rotl | BinaryOp::Rotr => {
+                if self.features.bmi2 {
+                    if imm.is_none()
+                        && matches!(op, BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr)
+                    {
+                        let mut b = self.use_reg(args[1], S1);
+                        // Only narrow types need an explicit modulo mask. Copy
+                        // the count before masking, preserving any live input.
+                        if let Some(bits) = narrow_bits(ty) {
+                            if b != S1 {
+                                self.emit(Opcode::Mov, [asm_arg(&r32(S1)), asm_arg(&r32(b))]);
+                            }
+                            self.emit(Opcode::And, [asm_arg(&r32(S1)), asm_arg(&(bits - 1))]);
+                            b = S1;
+                        }
+                        let a = match op {
+                            BinaryOp::Ushr => self.extend(S0, a, ty, false),
+                            BinaryOp::Sshr => self.extend(S0, a, ty, true),
+                            _ => a,
+                        };
+                        let mnemonic = match op {
+                            BinaryOp::Shl => Opcode::Shlx,
+                            BinaryOp::Ushr => Opcode::Shrx,
+                            _ => Opcode::Sarx,
+                        };
+                        self.emit(
+                            mnemonic,
+                            [
+                                asm_arg(&wide(d, ty)),
+                                asm_arg(&wide(a, ty)),
+                                asm_arg(&wide(b, ty)),
+                            ],
+                        );
+                        return;
+                    }
+                    if let Some(k) = imm
+                        && narrow_bits(ty).is_none()
+                        && matches!(op, BinaryOp::Rotl | BinaryOp::Rotr)
+                    {
+                        let bits = if wide_ty(ty) == Type::I64 { 64 } else { 32 };
+                        let count = if op == BinaryOp::Rotl { -k } else { k } & (bits - 1);
+                        self.emit(
+                            Opcode::Rorx,
+                            [
+                                asm_arg(&wide(d, ty)),
+                                asm_arg(&wide(a, ty)),
+                                asm_arg(&count),
+                            ],
+                        );
+                        return;
+                    }
+                }
                 let mnemonic = match op {
-                    BinaryOp::Shl => "shl",
-                    BinaryOp::Ushr => "shr",
-                    BinaryOp::Sshr => "sar",
-                    BinaryOp::Rotl => "rol",
-                    _ => "ror",
+                    BinaryOp::Shl => Opcode::Shl,
+                    BinaryOp::Ushr => Opcode::Shr,
+                    BinaryOp::Sshr => Opcode::Sar,
+                    BinaryOp::Rotl => Opcode::Rol,
+                    _ => Opcode::Ror,
                 };
                 // The count goes in cl. Shifts take it modulo 32 or 64; a
                 // narrower type needs its own mask. Rotates of narrow
                 // registers already rotate modulo their width.
                 let count = match imm {
-                    Some(k) => k.to_string(),
+                    Some(k) => asm_arg(&k),
                     None => {
                         let b = self.use_reg(args[1], S1);
                         if b != RCX {
-                            self.emit(format!("mov\tecx, {}", r32(b)));
+                            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(r32(b)))]);
                         }
                         let rotate = matches!(op, BinaryOp::Rotl | BinaryOp::Rotr);
                         if let (Some(bits), false) = (narrow_bits(ty), rotate) {
-                            self.emit(format!("and\tecx, {}", bits - 1));
+                            self.emit(Opcode::And, [asm_arg(&(r32(1))), asm_arg(&(bits - 1))]);
                         }
-                        "cl".into()
+                        asm_arg(&r8(1))
                     }
                 };
                 // Right shifts read the upper bits, so a narrow value is
@@ -2033,9 +2530,9 @@ impl<'a> FunctionCompiler<'a> {
                     _ => (a, ty),
                 };
                 if a != d {
-                    self.emit(format!("mov\t{}, {}", r64(d), r64(a)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
                 }
-                self.emit(format!("{mnemonic}\t{}, {count}", reg(d, width)));
+                self.emit(mnemonic, [asm_arg(&(reg(d, width))), asm_arg(&(count))]);
             }
             // The double-width product of the extended operands: rdx:rax
             // from a one-operand `mul`/`imul` for 32 and 64 bits; for
@@ -2046,22 +2543,22 @@ impl<'a> FunctionCompiler<'a> {
                 match narrow_bits(ty) {
                     None => {
                         if a != S0 {
-                            self.emit(format!("mov\trax, {}", r64(a)));
+                            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
                         }
-                        let mnemonic = if signed { "imul" } else { "mul" };
-                        self.emit(format!("{mnemonic}\t{}", reg(b, ty)));
-                        self.emit(format!("mov\t{}, rdx", r64(d)));
+                        let mnemonic = if signed { Opcode::Imul } else { Opcode::Mul };
+                        self.emit(mnemonic, [asm_arg(&(reg(b, ty)))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(2)))]);
                     }
                     Some(bits) => {
                         let x = self.extend(S0, a, ty, signed);
                         let y = self.extend(S1, b, ty, signed);
                         if x != S0 {
-                            self.emit(format!("mov\teax, {}", r32(x)));
+                            self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
                         }
-                        self.emit(format!("imul\teax, {}", r32(y)));
-                        let shr = if signed { "sar" } else { "shr" };
-                        self.emit(format!("{shr}\teax, {bits}"));
-                        self.emit(format!("mov\t{}, eax", r32(d)));
+                        self.emit(Opcode::Imul, [asm_arg(&(r32(0))), asm_arg(&(r32(y)))]);
+                        let shr = if signed { Opcode::Sar } else { Opcode::Shr };
+                        self.emit(shr, [asm_arg(&(r32(0))), asm_arg(&(bits))]);
+                        self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
                     }
                 }
             }
@@ -2083,52 +2580,65 @@ impl<'a> FunctionCompiler<'a> {
         let b = self.extend(S1, b, ty, signed);
         let x = self.extend(S0, a, ty, signed);
         if x != S0 {
-            self.emit(format!("mov\t{}, {}", reg(S0, width), reg(x, width)));
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(&(reg(S0, width))), asm_arg(&(reg(x, width)))],
+            );
         }
         let rb = reg(b, width);
         let trap = self.trap_label();
         // Hardware division faults on a zero divisor; the IR traps.
-        self.emit(format!("test\t{rb}, {rb}"));
-        self.emit(format!("je\t{trap}"));
+        self.emit(Opcode::Test, [asm_arg(&(rb)), asm_arg(&(rb))]);
+        self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
         let name = &self.func.name;
         let done = format!(".L{name}_{inst}_div");
         if signed {
             // MIN / -1 overflows, which faults too. The IR traps on the
             // quotient and gives 0 for the remainder.
-            self.emit(format!("cmp\t{rb}, -1"));
+            self.emit(Opcode::Cmp, [asm_arg(&(rb)), asm_arg(&(-1i128))]);
             let go = format!(".L{name}_{inst}_divide");
-            self.emit(format!("jne\t{go}"));
+            self.emit(Opcode::Jcc(5), [asm_arg(&(go))]);
             if op == BinaryOp::Sdiv {
                 let min = min_value(ty);
                 if width == Type::I64 {
-                    self.emit(format!("movabs\trdx, {min:#x}"));
-                    self.emit("cmp\trax, rdx");
+                    self.emit(Opcode::Movabs, [asm_arg(&(r64(2))), asm_arg(&(min))]);
+                    self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(r64(2)))]);
                 } else {
-                    self.emit(format!("cmp\teax, {}", min as u32 as i32));
+                    self.emit(
+                        Opcode::Cmp,
+                        [asm_arg(&(r32(0))), asm_arg(&(min as u32 as i32))],
+                    );
                 }
-                self.emit(format!("je\t{trap}"));
+                self.emit(Opcode::Jcc(4), [asm_arg(&(trap))]);
             } else {
-                self.emit("xor\tedx, edx");
-                self.emit(format!("jmp\t{done}"));
+                self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
             }
-            writeln!(self.out, "{go}:").unwrap();
-            self.emit(if width == Type::I64 { "cqo" } else { "cdq" });
-            self.emit(format!("idiv\t{rb}"));
+            self.out.label(go.clone());
+            self.emit(
+                if width == Type::I64 {
+                    Opcode::Cqo
+                } else {
+                    Opcode::Cdq
+                },
+                [],
+            );
+            self.emit(Opcode::Idiv, [asm_arg(&(rb))]);
         } else {
-            self.emit("xor\tedx, edx");
-            self.emit(format!("div\t{rb}"));
+            self.emit(Opcode::Xor, [asm_arg(&(r32(2))), asm_arg(&(r32(2)))]);
+            self.emit(Opcode::Div, [asm_arg(&(rb))]);
         }
-        writeln!(self.out, "{done}:").unwrap();
+        self.out.label(done.clone());
         let src = match op {
             BinaryOp::Udiv | BinaryOp::Sdiv => S0,
             _ => S2,
         };
-        self.emit(format!("mov\t{}, {}", r64(d), r64(src)));
+        self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(src)))]);
     }
 
     /// `d = a op b` with a two-address instruction `op d, b`, for an
     /// integer operation of type `ty`, on 32 or 64 bits.
-    fn two_address(&mut self, mnemonic: &str, ty: Type, d: u8, a: u8, b: Operand) {
+    fn two_address(&mut self, mnemonic: Opcode, ty: Type, d: u8, a: u8, b: Operand) {
         let width = wide_ty(ty);
         // `mov d, a` would overwrite b.
         let dst = match b {
@@ -2136,15 +2646,15 @@ impl<'a> FunctionCompiler<'a> {
             _ => d,
         };
         if dst != a {
-            self.emit(format!("mov\t{}, {}", r64(dst), r64(a)));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(dst))), asm_arg(&(r64(a)))]);
         }
         let b = match b {
-            Operand::Reg(r) => reg(r, width).to_string(),
-            Operand::Imm(k) => k.to_string(),
+            Operand::Reg(r) => asm_arg(&reg(r, width)),
+            Operand::Imm(k) => asm_arg(&k),
         };
-        self.emit(format!("{mnemonic}\t{}, {b}", reg(dst, width)));
+        self.emit(mnemonic, [asm_arg(&(reg(dst, width))), asm_arg(&(b))]);
         if dst != d {
-            self.emit(format!("mov\t{}, {}", r64(d), r64(dst)));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(dst)))]);
         }
     }
 
@@ -2155,10 +2665,14 @@ impl<'a> FunctionCompiler<'a> {
         match op {
             UnaryOp::Ineg | UnaryOp::Bnot => {
                 if a != d {
-                    self.emit(format!("mov\t{}, {}", r64(d), r64(a)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
                 }
-                let mnemonic = if op == UnaryOp::Ineg { "neg" } else { "not" };
-                self.emit(format!("{mnemonic}\t{}", reg(d, width)));
+                let mnemonic = if op == UnaryOp::Ineg {
+                    Opcode::Neg
+                } else {
+                    Opcode::Not
+                };
+                self.emit(mnemonic, [asm_arg(&(reg(d, width)))]);
             }
             // `bsr` gives the index of the highest set bit, i, and leaves
             // ZF set for zero. The count is (bits - 1) - i, which is
@@ -2168,44 +2682,70 @@ impl<'a> FunctionCompiler<'a> {
                 let x = self.extend(S0, a, ty, false);
                 let bits = if width == Type::I64 { 64 } else { 32 };
                 let (rx, rax) = (reg(x, width), reg(S0, width));
-                self.emit(format!("bsr\t{rax}, {rx}"));
-                self.emit(format!("mov\tecx, {}", 2 * bits - 1));
-                self.emit(format!("cmove\t{rax}, {}", reg(S1, width)));
-                self.emit(format!("xor\teax, {}", bits - 1));
+                self.emit(Opcode::Bsr, [asm_arg(&(rax)), asm_arg(&(rx))]);
+                self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(2 * bits - 1))]);
+                self.emit(
+                    Opcode::Cmovcc(4),
+                    [asm_arg(&(rax)), asm_arg(&(reg(S1, width)))],
+                );
+                self.emit(Opcode::Xor, [asm_arg(&(r32(0))), asm_arg(&(bits - 1))]);
                 if let Some(narrow) = narrow_bits(ty) {
-                    self.emit(format!("sub\teax, {}", 32 - narrow));
+                    self.emit(Opcode::Sub, [asm_arg(&(r32(0))), asm_arg(&(32 - narrow))]);
                 }
-                self.emit(format!("mov\t{}, eax", r32(d)));
+                self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
             }
             // `bsf` gives the index of the lowest set bit. A narrow value
             // gets a bit set just above it, which is the answer for zero.
+            UnaryOp::Ctz if self.features.bmi1 => {
+                if let Some(bits) = narrow_bits(ty) {
+                    // Sentinel forces zero to return the IR type's width;
+                    // bits above it cannot influence the first set bit.
+                    self.emit(Opcode::Mov, [asm_arg(&r32(S0)), asm_arg(&r32(a))]);
+                    self.emit(Opcode::Or, [asm_arg(&r32(S0)), asm_arg(&(1u32 << bits))]);
+                    self.emit(Opcode::Tzcnt, [asm_arg(&r32(d)), asm_arg(&r32(S0))]);
+                } else {
+                    self.emit(
+                        Opcode::Tzcnt,
+                        [asm_arg(&reg(d, width)), asm_arg(&reg(a, width))],
+                    );
+                }
+            }
             UnaryOp::Ctz => match narrow_bits(ty) {
                 Some(bits) => {
-                    self.emit(format!("mov\teax, {}", r32(a)));
-                    self.emit(format!("or\teax, {}", 1u32 << bits));
-                    self.emit("bsf\teax, eax");
-                    self.emit(format!("mov\t{}, eax", r32(d)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(a)))]);
+                    self.emit(Opcode::Or, [asm_arg(&(r32(0))), asm_arg(&(1u32 << bits))]);
+                    self.emit(Opcode::Bsf, [asm_arg(&(r32(0))), asm_arg(&(r32(0)))]);
+                    self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(0)))]);
                 }
                 None => {
                     let bits = if width == Type::I64 { 64 } else { 32 };
-                    self.emit(format!("bsf\t{}, {}", reg(S0, width), reg(a, width)));
-                    self.emit(format!("mov\tecx, {bits}"));
-                    self.emit(format!("cmove\t{}, {}", reg(S0, width), reg(S1, width)));
-                    self.emit(format!("mov\t{}, {}", r64(d), r64(S0)));
+                    self.emit(
+                        Opcode::Bsf,
+                        [asm_arg(&(reg(S0, width))), asm_arg(&(reg(a, width)))],
+                    );
+                    self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(bits))]);
+                    self.emit(
+                        Opcode::Cmovcc(4),
+                        [asm_arg(&(reg(S0, width))), asm_arg(&(reg(S1, width)))],
+                    );
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(S0)))]);
                 }
             },
             UnaryOp::Popcnt => {
                 let x = self.extend(S0, a, ty, false);
-                self.emit(format!("popcnt\t{}, {}", reg(d, width), reg(x, width)));
+                self.emit(
+                    Opcode::Popcnt,
+                    [asm_arg(&(reg(d, width))), asm_arg(&(reg(x, width)))],
+                );
             }
             UnaryOp::Bswap => {
                 if a != d {
-                    self.emit(format!("mov\t{}, {}", r64(d), r64(a)));
+                    self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(a)))]);
                 }
                 match ty {
                     Type::I8 => {}
-                    Type::I16 => self.emit(format!("rol\t{}, 8", r16(d))),
-                    _ => self.emit(format!("bswap\t{}", reg(d, ty))),
+                    Type::I16 => self.emit(Opcode::Rol, [asm_arg(&(r16(d))), asm_arg(&(8i128))]),
+                    _ => self.emit(Opcode::Bswap, [asm_arg(&(reg(d, ty)))]),
                 }
             }
             _ => unreachable!("{op} is not an integer operation"),
@@ -2218,19 +2758,38 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(arg);
         let a = self.use_freg(arg, FS0);
         let (gpr, sign) = if ty == Type::F32 {
-            ("eax", 31)
+            (r32(0), 31)
         } else {
-            ("rax", 63)
+            (r64(0), 63)
         };
-        let mov = if ty == Type::F32 { "movd" } else { "movq" };
+        let mov = if ty == Type::F32 {
+            Opcode::Movd
+        } else {
+            Opcode::Movq
+        };
         match op {
             UnaryOp::Fneg | UnaryOp::Fabs => {
-                let bit_op = if op == UnaryOp::Fneg { "btc" } else { "btr" };
-                self.emit(format!("{mov}\t{gpr}, {}", xmm(a)));
-                self.emit(format!("{bit_op}\t{gpr}, {sign}"));
-                self.emit(format!("{mov}\t{}, {gpr}", xmm(d)));
+                let bit_op = if op == UnaryOp::Fneg {
+                    Opcode::Btc
+                } else {
+                    Opcode::Btr
+                };
+                self.emit(mov, [asm_arg(&(gpr)), asm_arg(&(xmm(a)))]);
+                self.emit(bit_op, [asm_arg(&(gpr)), asm_arg(&(sign))]);
+                self.emit(mov, [asm_arg(&(xmm(d))), asm_arg(&(gpr))]);
             }
-            UnaryOp::Fsqrt => self.emit(format!("sqrt{}\t{}, {}", suffix(ty), xmm(d), xmm(a))),
+            UnaryOp::Fsqrt if self.features.avx => self.emit(
+                if ty == Type::F32 {
+                    Opcode::Vsqrtss
+                } else {
+                    Opcode::Vsqrtsd
+                },
+                [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(a))],
+            ),
+            UnaryOp::Fsqrt => self.emit(
+                scalar(Opcode::Sqrtsd, ty),
+                [asm_arg(&(xmm(d))), asm_arg(&(xmm(a)))],
+            ),
             _ => {
                 // Bit 3 suppresses the inexact exception; bits 1:0 are the
                 // rounding mode.
@@ -2241,12 +2800,10 @@ impl<'a> FunctionCompiler<'a> {
                     UnaryOp::Ftrunc => 11,
                     _ => unreachable!("{op} is not a float operation"),
                 };
-                self.emit(format!(
-                    "round{}\t{}, {}, {mode}",
-                    suffix(ty),
-                    xmm(d),
-                    xmm(a)
-                ));
+                self.emit(
+                    scalar(Opcode::Roundsd, ty),
+                    [asm_arg(&(xmm(d))), asm_arg(&(xmm(a))), asm_arg(&(mode))],
+                );
             }
         }
     }
@@ -2255,22 +2812,43 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(args[0]);
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
-        let s = suffix(ty);
+
+        if self.features.avx {
+            let opcode = match (op, ty == Type::F32) {
+                (BinaryOp::Fadd, true) => Some(Opcode::Vaddss),
+                (BinaryOp::Fadd, false) => Some(Opcode::Vaddsd),
+                (BinaryOp::Fsub, true) => Some(Opcode::Vsubss),
+                (BinaryOp::Fsub, false) => Some(Opcode::Vsubsd),
+                (BinaryOp::Fmul, true) => Some(Opcode::Vmulss),
+                (BinaryOp::Fmul, false) => Some(Opcode::Vmulsd),
+                (BinaryOp::Fdiv, true) => Some(Opcode::Vdivss),
+                (BinaryOp::Fdiv, false) => Some(Opcode::Vdivsd),
+                _ => None,
+            };
+            if let Some(opcode) = opcode {
+                self.emit(
+                    opcode,
+                    [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(b))],
+                );
+                return;
+            }
+        }
+
         // Two-address, computed in xmm13 unless d is free to overwrite.
         let dst = if b == d && a != d { FS0 } else { d };
         let (xd, xb) = (xmm(dst), xmm(b));
         if dst != a {
-            self.emit(format!("movaps\t{xd}, {}", xmm(a)));
+            self.emit(Opcode::Movaps, [asm_arg(&(xd)), asm_arg(&(xmm(a)))]);
         }
         match op {
             BinaryOp::Fadd | BinaryOp::Fsub | BinaryOp::Fmul | BinaryOp::Fdiv => {
                 let mnemonic = match op {
-                    BinaryOp::Fadd => "add",
-                    BinaryOp::Fsub => "sub",
-                    BinaryOp::Fmul => "mul",
-                    _ => "div",
+                    BinaryOp::Fadd => Opcode::Add,
+                    BinaryOp::Fsub => Opcode::Sub,
+                    BinaryOp::Fmul => Opcode::Mul,
+                    _ => Opcode::Div,
                 };
-                self.emit(format!("{mnemonic}{s}\t{xd}, {xb}"));
+                self.emit(scalar(mnemonic, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
             }
             // `minsd`/`maxsd` give the second operand for a NaN or two
             // zeros. IEEE minimum wants NaN, and -0 below +0: for equal
@@ -2284,41 +2862,44 @@ impl<'a> FunctionCompiler<'a> {
                     format!(".L{name}_{inst}_ne"),
                     format!(".L{name}_{inst}_done"),
                 );
-                let p = if ty == Type::F32 { "ps" } else { "pd" };
-                self.emit(format!("ucomi{s}\t{xd}, {xb}"));
-                self.emit(format!("jp\t{nan}"));
-                self.emit(format!("jne\t{ne}"));
-                let bits = if min { "or" } else { "and" };
-                self.emit(format!("{bits}{p}\t{xd}, {xb}"));
-                self.emit(format!("jmp\t{done}"));
-                writeln!(self.out, "{ne}:").unwrap();
-                let pick = if min { "min" } else { "max" };
-                self.emit(format!("{pick}{s}\t{xd}, {xb}"));
-                self.emit(format!("jmp\t{done}"));
+
+                self.emit(
+                    scalar(Opcode::Ucomisd, ty),
+                    [asm_arg(&(xd)), asm_arg(&(xb))],
+                );
+                self.emit(Opcode::Jcc(10), [asm_arg(&(nan))]);
+                self.emit(Opcode::Jcc(5), [asm_arg(&(ne))]);
+                let bits = if min { Opcode::Or } else { Opcode::And };
+                self.emit(packed(bits, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
+                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                self.out.label(ne.clone());
+                let pick = scalar(if min { Opcode::Minsd } else { Opcode::Maxsd }, ty);
+                self.emit(pick, [asm_arg(&(xd)), asm_arg(&(xb))]);
+                self.emit(Opcode::Jmp, [asm_arg(&(done))]);
                 // Adding gives a quiet NaN.
-                writeln!(self.out, "{nan}:").unwrap();
-                self.emit(format!("add{s}\t{xd}, {xb}"));
-                writeln!(self.out, "{done}:").unwrap();
+                self.out.label(nan.clone());
+                self.emit(scalar(Opcode::Addsd, ty), [asm_arg(&(xd)), asm_arg(&(xb))]);
+                self.out.label(done.clone());
             }
             // The sign bit of b with the rest of a, spliced in rax.
             BinaryOp::Fcopysign => {
                 let (mov, ra, rc, sign) = if ty == Type::F32 {
-                    ("movd", "eax", "ecx", 31)
+                    (Opcode::Movd, r32(0), r32(1), 31)
                 } else {
-                    ("movq", "rax", "rcx", 63)
+                    (Opcode::Movq, r64(0), r64(1), 63)
                 };
-                self.emit(format!("{mov}\t{ra}, {xd}"));
-                self.emit(format!("{mov}\t{rc}, {xb}"));
-                self.emit(format!("btr\t{ra}, {sign}"));
-                self.emit(format!("shr\t{rc}, {sign}"));
-                self.emit(format!("shl\t{rc}, {sign}"));
-                self.emit(format!("or\t{ra}, {rc}"));
-                self.emit(format!("{mov}\t{xd}, {ra}"));
+                self.emit(mov, [asm_arg(&(ra)), asm_arg(&(xd))]);
+                self.emit(mov, [asm_arg(&(rc)), asm_arg(&(xb))]);
+                self.emit(Opcode::Btr, [asm_arg(&(ra)), asm_arg(&(sign))]);
+                self.emit(Opcode::Shr, [asm_arg(&(rc)), asm_arg(&(sign))]);
+                self.emit(Opcode::Shl, [asm_arg(&(rc)), asm_arg(&(sign))]);
+                self.emit(Opcode::Or, [asm_arg(&(ra)), asm_arg(&(rc))]);
+                self.emit(mov, [asm_arg(&(xd)), asm_arg(&(ra))]);
             }
             _ => unreachable!("{op} is not a float operation"),
         }
         if dst != d {
-            self.emit(format!("movaps\t{}, {xd}", xmm(d)));
+            self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xd))]);
         }
     }
 
@@ -2338,11 +2919,11 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_freg(result);
                 let a = self.use_freg(arg, FS0);
                 let mnemonic = if op == ConvertOp::Fpext {
-                    "cvtss2sd"
+                    Opcode::Cvtss2sd
                 } else {
-                    "cvtsd2ss"
+                    Opcode::Cvtsd2ss
                 };
-                self.emit(format!("{mnemonic}\t{}, {}", xmm(d), xmm(a)));
+                self.emit(mnemonic, [asm_arg(&(xmm(d))), asm_arg(&(xmm(a)))]);
                 self.def_done(result, d);
             }
             // `cvtsi2sd` reads a signed 32- or 64-bit integer. Narrow and
@@ -2352,16 +2933,22 @@ impl<'a> FunctionCompiler<'a> {
                 let signed = op == ConvertOp::Sitofp;
                 let d = self.def_freg(result);
                 let a = self.use_reg(arg, S0);
-                let s = suffix(to);
+
                 let xd = xmm(d);
                 // `cvtsi2sd` only writes the low lane; clearing the
                 // register first breaks the dependency on its old value.
-                self.emit(format!("xorps\t{xd}, {xd}"));
+                self.emit(Opcode::Xorps, [asm_arg(&(xd)), asm_arg(&(xd))]);
                 match (from, signed) {
-                    (Type::I64, true) => self.emit(format!("cvtsi2{s}\t{xd}, {}", r64(a))),
+                    (Type::I64, true) => self.emit(
+                        scalar(Opcode::Cvtsi2sd, to),
+                        [asm_arg(&(xd)), asm_arg(&(r64(a)))],
+                    ),
                     (_, true) => {
                         let x = self.extend(S0, a, from, true);
-                        self.emit(format!("cvtsi2{s}\t{xd}, {}", r32(x)));
+                        self.emit(
+                            scalar(Opcode::Cvtsi2sd, to),
+                            [asm_arg(&(xd)), asm_arg(&(r32(x)))],
+                        );
                     }
                     (Type::I64, false) => {
                         // Below 2^63 the signed conversion is right. Above,
@@ -2369,26 +2956,35 @@ impl<'a> FunctionCompiler<'a> {
                         // right), convert and double.
                         let (big, done) = (label("big"), label("done"));
                         if a != S0 {
-                            self.emit(format!("mov\trax, {}", r64(a)));
+                            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
                         }
-                        self.emit("test\trax, rax");
-                        self.emit(format!("js\t{big}"));
-                        self.emit(format!("cvtsi2{s}\t{xd}, rax"));
-                        self.emit(format!("jmp\t{done}"));
-                        writeln!(self.out, "{big}:").unwrap();
-                        self.emit("mov\trcx, rax");
-                        self.emit("shr\trcx, 1");
-                        self.emit("and\teax, 1");
-                        self.emit("or\trcx, rax");
-                        self.emit(format!("cvtsi2{s}\t{xd}, rcx"));
-                        self.emit(format!("add{s}\t{xd}, {xd}"));
-                        writeln!(self.out, "{done}:").unwrap();
+                        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
+                        self.emit(Opcode::Jcc(8), [asm_arg(&(big))]);
+                        self.emit(
+                            scalar(Opcode::Cvtsi2sd, to),
+                            [asm_arg(&(xd)), asm_arg(&(r64(0)))],
+                        );
+                        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+                        self.out.label(big.clone());
+                        self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
+                        self.emit(Opcode::Shr, [asm_arg(&(r64(1))), asm_arg(&(1i128))]);
+                        self.emit(Opcode::And, [asm_arg(&(r32(0))), asm_arg(&(1i128))]);
+                        self.emit(Opcode::Or, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
+                        self.emit(
+                            scalar(Opcode::Cvtsi2sd, to),
+                            [asm_arg(&(xd)), asm_arg(&(r64(1)))],
+                        );
+                        self.emit(scalar(Opcode::Addsd, to), [asm_arg(&(xd)), asm_arg(&(xd))]);
+                        self.out.label(done.clone());
                     }
                     (_, false) => {
                         let x = self.extend(S0, a, from, false);
                         // A 32-bit move zero-extends to 64.
-                        self.emit(format!("mov\teax, {}", r32(x)));
-                        self.emit(format!("cvtsi2{s}\t{xd}, rax"));
+                        self.emit(Opcode::Mov, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
+                        self.emit(
+                            scalar(Opcode::Cvtsi2sd, to),
+                            [asm_arg(&(xd)), asm_arg(&(r64(0)))],
+                        );
                     }
                 }
                 self.def_done(result, d);
@@ -2397,25 +2993,25 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let a = self.use_freg(arg, FS0);
                 self.float_to_int(op == ConvertOp::Fptosi, from, to, a, &label);
-                self.emit(format!("mov\t{}, rax", r64(d)));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(0)))]);
                 self.def_done(result, d);
             }
             // The same bits in the other register class.
             ConvertOp::Bitcast => {
                 let mov = if from == Type::F32 || to == Type::F32 {
-                    "movd"
+                    Opcode::Movd
                 } else {
-                    "movq"
+                    Opcode::Movq
                 };
                 if to.is_float() {
                     let d = self.def_freg(result);
                     let a = self.use_reg(arg, S0);
-                    self.emit(format!("{mov}\t{}, {}", xmm(d), reg(a, from)));
+                    self.emit(mov, [asm_arg(&(xmm(d))), asm_arg(&(reg(a, from)))]);
                     self.def_done(result, d);
                 } else {
                     let d = self.def_reg(result);
                     let a = self.use_freg(arg, FS0);
-                    self.emit(format!("{mov}\t{}, {}", reg(d, to), xmm(a)));
+                    self.emit(mov, [asm_arg(&(reg(d, to))), asm_arg(&(xmm(a)))]);
                     self.def_done(result, d);
                 }
             }
@@ -2435,7 +3031,7 @@ impl<'a> FunctionCompiler<'a> {
         a: u8,
         label: &dyn Fn(&str) -> String,
     ) {
-        let (s, xa) = (suffix(from), xmm(a));
+        let xa = xmm(a);
         let to64 = to == Type::I64;
         // The bits of 2^n as a float of type `from`, in xmm14.
         let power = |this: &mut Self, n: i32| {
@@ -2444,35 +3040,57 @@ impl<'a> FunctionCompiler<'a> {
             } else {
                 2f64.powi(n).to_bits()
             };
-            this.emit(format!("movabs\tr11, {bits:#x}"));
-            this.emit(format!("movq\t{}, r11", xmm(FS1)));
+            this.emit(Opcode::Movabs, [asm_arg(&r64(11)), asm_arg(&bits)]);
+            this.emit(Opcode::Movq, [asm_arg(&xmm(FS1)), asm_arg(&r64(11))]);
         };
         if signed {
-            let (rax, rcx) = if to64 { ("rax", "rcx") } else { ("eax", "ecx") };
+            let (rax, rcx) = if to64 {
+                (r64(0), r64(1))
+            } else {
+                (r32(0), r32(1))
+            };
             let bits = if to64 { 63 } else { 31 };
-            self.emit(format!("cvtt{s}2si\t{rax}, {xa}"));
+            self.emit(
+                scalar(Opcode::Cvttsd2si, from),
+                [asm_arg(&(rax)), asm_arg(&(xa))],
+            );
             power(self, bits);
-            self.emit(format!("ucomi{s}\t{xa}, {}", xmm(FS1)));
+            self.emit(
+                scalar(Opcode::Ucomisd, from),
+                [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+            );
             // At or above 2^bits (and not NaN): the maximum.
-            self.emit(format!("movabs\trcx, {:#x}", (1u64 << bits) - 1));
-            self.emit(format!("cmovae\t{rax}, {rcx}"));
-            self.emit("mov\tecx, 0");
-            self.emit(format!("cmovp\t{rax}, {rcx}"));
+            self.emit(
+                Opcode::Movabs,
+                [asm_arg(&(r64(1))), asm_arg(&((1u64 << bits) - 1))],
+            );
+            self.emit(Opcode::Cmovcc(3), [asm_arg(&(rax)), asm_arg(&(rcx))]);
+            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
+            self.emit(Opcode::Cmovcc(10), [asm_arg(&(rax)), asm_arg(&(rcx))]);
             return;
         }
         if !to64 {
             // Every u32 is an in-range i64. Negative (or NaN, or huge,
             // which convert to the minimum) gives 0; then clamp above.
-            self.emit(format!("cvtt{s}2si\trax, {xa}"));
-            self.emit("mov\tecx, 0");
-            self.emit("test\trax, rax");
-            self.emit("cmovs\trax, rcx");
-            self.emit("mov\tecx, 0xffffffff");
-            self.emit("cmp\trax, rcx");
-            self.emit("cmova\trax, rcx");
+            self.emit(
+                scalar(Opcode::Cvttsd2si, from),
+                [asm_arg(&(r64(0))), asm_arg(&(xa))],
+            );
+            self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
+            self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
+            self.emit(Opcode::Cmovcc(8), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+            self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r32(1))), asm_arg(&(0xffffffffi128))],
+            );
+            self.emit(Opcode::Cmp, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+            self.emit(Opcode::Cmovcc(7), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
             power(self, 32);
-            self.emit(format!("ucomi{s}\t{xa}, {}", xmm(FS1)));
-            self.emit("cmovae\trax, rcx");
+            self.emit(
+                scalar(Opcode::Ucomisd, from),
+                [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+            );
+            self.emit(Opcode::Cmovcc(3), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
             return;
         }
         // Below 2^63 (or NaN) the signed conversion, clamped at 0. At or
@@ -2480,24 +3098,36 @@ impl<'a> FunctionCompiler<'a> {
         // overflows too, which is the maximum.
         let (big, max, done) = (label("big"), label("max"), label("done"));
         power(self, 63);
-        self.emit(format!("ucomi{s}\t{xa}, {}", xmm(FS1)));
-        self.emit(format!("jae\t{big}"));
-        self.emit(format!("cvtt{s}2si\trax, {xa}"));
-        self.emit("mov\tecx, 0");
-        self.emit("test\trax, rax");
-        self.emit("cmovs\trax, rcx");
-        self.emit(format!("jmp\t{done}"));
-        writeln!(self.out, "{big}:").unwrap();
-        self.emit(format!("movaps\t{}, {xa}", xmm(FS2)));
-        self.emit(format!("sub{s}\t{}, {}", xmm(FS2), xmm(FS1)));
-        self.emit(format!("cvtt{s}2si\trax, {}", xmm(FS2)));
-        self.emit("test\trax, rax");
-        self.emit(format!("js\t{max}"));
-        self.emit("btc\trax, 63");
-        self.emit(format!("jmp\t{done}"));
-        writeln!(self.out, "{max}:").unwrap();
-        self.emit("mov\trax, -1");
-        writeln!(self.out, "{done}:").unwrap();
+        self.emit(
+            scalar(Opcode::Ucomisd, from),
+            [asm_arg(&(xa)), asm_arg(&(xmm(FS1)))],
+        );
+        self.emit(Opcode::Jcc(3), [asm_arg(&(big))]);
+        self.emit(
+            scalar(Opcode::Cvttsd2si, from),
+            [asm_arg(&(r64(0))), asm_arg(&(xa))],
+        );
+        self.emit(Opcode::Mov, [asm_arg(&(r32(1))), asm_arg(&(0i128))]);
+        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
+        self.emit(Opcode::Cmovcc(8), [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+        self.out.label(big.clone());
+        self.emit(Opcode::Movaps, [asm_arg(&(xmm(FS2))), asm_arg(&(xa))]);
+        self.emit(
+            scalar(Opcode::Subsd, from),
+            [asm_arg(&(xmm(FS2))), asm_arg(&(xmm(FS1)))],
+        );
+        self.emit(
+            scalar(Opcode::Cvttsd2si, from),
+            [asm_arg(&(r64(0))), asm_arg(&(xmm(FS2)))],
+        );
+        self.emit(Opcode::Test, [asm_arg(&(r64(0))), asm_arg(&(r64(0)))]);
+        self.emit(Opcode::Jcc(8), [asm_arg(&(max))]);
+        self.emit(Opcode::Btc, [asm_arg(&(r64(0))), asm_arg(&(63i128))]);
+        self.emit(Opcode::Jmp, [asm_arg(&(done))]);
+        self.out.label(max.clone());
+        self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(-1i128))]);
+        self.out.label(done.clone());
     }
 
     /// The value and overflow flag of `op`. The value is computed in rax
@@ -2511,17 +3141,19 @@ impl<'a> FunctionCompiler<'a> {
         let b = self.extend(S1, b, ty, signed);
         let width = wide_ty(ty);
         if a != S0 {
-            self.emit(format!("mov\trax, {}", r64(a)));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(a)))]);
         }
         let rb = reg(b, width);
         match op {
-            OverflowOp::Umul => self.emit(format!("mul\t{rb}")),
-            OverflowOp::Smul => self.emit(format!("imul\t{}, {rb}", reg(S0, width))),
+            OverflowOp::Umul => self.emit(Opcode::Mul, [asm_arg(&(rb))]),
+            OverflowOp::Smul => {
+                self.emit(Opcode::Imul, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
+            }
             OverflowOp::Uadd | OverflowOp::Sadd => {
-                self.emit(format!("add\t{}, {rb}", reg(S0, width)))
+                self.emit(Opcode::Add, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
             }
             OverflowOp::Usub | OverflowOp::Ssub => {
-                self.emit(format!("sub\t{}, {rb}", reg(S0, width)))
+                self.emit(Opcode::Sub, [asm_arg(&(reg(S0, width))), asm_arg(&(rb))])
             }
         }
         match narrow_bits(ty) {
@@ -2529,15 +3161,15 @@ impl<'a> FunctionCompiler<'a> {
             // narrow type if it differs from its own extension.
             Some(_) => {
                 let x = self.extend(S1, S0, ty, signed);
-                self.emit(format!("cmp\teax, {}", r32(x)));
-                self.emit("setne\tcl");
+                self.emit(Opcode::Cmp, [asm_arg(&(r32(0))), asm_arg(&(r32(x)))]);
+                self.emit(Opcode::Setcc(5), [asm_arg(&(r8(1)))]);
             }
             None => {
                 let cc = match op {
                     OverflowOp::Uadd | OverflowOp::Usub | OverflowOp::Umul => "c",
                     _ => "o",
                 };
-                self.emit(format!("set{cc}\tcl"));
+                self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(1)))]);
             }
         }
         let results = self.func.inst_results(inst);
@@ -2559,35 +3191,37 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(args[1]);
         let a = self.use_reg(args[0], S2);
         let v = self.use_reg(args[1], S3);
-        let at = format!("{} [{}]", ptr(ty), r64(a));
+        let at = sized(memory(r64(a), 0), ptr(ty));
         match op {
             RmwOp::Add | RmwOp::Sub | RmwOp::Xchg => {
-                self.emit(format!("mov\trax, {}", r64(v)));
+                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(r64(v)))]);
                 if op == RmwOp::Sub {
-                    self.emit(format!("neg\t{}", reg(S0, ty)));
+                    self.emit(Opcode::Neg, [asm_arg(&(reg(S0, ty)))]);
                 }
-                let mnemonic = if op == RmwOp::Xchg {
-                    "xchg"
+                let operands = [asm_arg(&at), asm_arg(&reg(S0, ty))];
+                if op == RmwOp::Xchg {
+                    self.emit(Opcode::Xchg, operands);
                 } else {
-                    "lock xadd"
-                };
-                self.emit(format!("{mnemonic}\t{at}, {}", reg(S0, ty)));
+                    self.emit_locked(Opcode::Xadd, operands);
+                }
             }
             _ => {
                 let retry = format!(".L{}_{inst}_retry", self.func.name);
                 match ty {
-                    Type::I8 | Type::I16 => self.emit(format!("movzx\teax, {at}")),
-                    _ => self.emit(format!("mov\t{}, {at}", reg(S0, ty))),
+                    Type::I8 | Type::I16 => {
+                        self.emit(Opcode::Movzx, [asm_arg(&(r32(0))), asm_arg(&(at))])
+                    }
+                    _ => self.emit(Opcode::Mov, [asm_arg(&(reg(S0, ty))), asm_arg(&(at))]),
                 }
-                writeln!(self.out, "{retry}:").unwrap();
-                self.emit("mov\trcx, rax");
+                self.out.label(retry.clone());
+                self.emit(Opcode::Mov, [asm_arg(&(r64(1))), asm_arg(&(r64(0)))]);
                 let (rc, rv) = (reg(S1, ty), reg(v, ty));
                 let w = wide_ty(ty);
                 let (wc, wv) = (reg(S1, w), reg(v, w));
                 match op {
-                    RmwOp::And => self.emit(format!("and\t{wc}, {wv}")),
-                    RmwOp::Or => self.emit(format!("or\t{wc}, {wv}")),
-                    RmwOp::Xor => self.emit(format!("xor\t{wc}, {wv}")),
+                    RmwOp::And => self.emit(Opcode::And, [asm_arg(&(wc)), asm_arg(&(wv))]),
+                    RmwOp::Or => self.emit(Opcode::Or, [asm_arg(&(wc)), asm_arg(&(wv))]),
+                    RmwOp::Xor => self.emit(Opcode::Xor, [asm_arg(&(wc)), asm_arg(&(wv))]),
                     // Replace the old value by v where v wins, comparing at
                     // the type's width (`cmov` has no 8-bit form, but the
                     // low bits are what matter).
@@ -2598,12 +3232,15 @@ impl<'a> FunctionCompiler<'a> {
                             RmwOp::Smin => "g",
                             _ => "l",
                         };
-                        self.emit(format!("cmp\t{rc}, {rv}"));
-                        self.emit(format!("cmov{cc}\t{wc}, {wv}"));
+                        self.emit(Opcode::Cmp, [asm_arg(&(rc)), asm_arg(&(rv))]);
+                        self.emit(
+                            Opcode::Cmovcc(condition(cc)),
+                            [asm_arg(&(wc)), asm_arg(&(wv))],
+                        );
                     }
                 }
-                self.emit(format!("lock cmpxchg\t{at}, {rc}"));
-                self.emit(format!("jne\t{retry}"));
+                self.emit_locked(Opcode::Cmpxchg, [asm_arg(&(at)), asm_arg(&(rc))]);
+                self.emit(Opcode::Jcc(5), [asm_arg(&(retry))]);
             }
         }
         if let Some(loc) = result.and_then(|r| self.defined(r)) {
@@ -2636,12 +3273,12 @@ impl<'a> FunctionCompiler<'a> {
         };
         let span = max - min;
         // A value that fits a sign-extended 32-bit immediate.
-        let imm = |this: &mut Self, value: u64| -> String {
+        let imm = |this: &mut Self, value: u64| -> AsmOperand {
             if width == Type::I64 && i32::try_from(value as i64).is_err() {
-                this.emit(format!("movabs\trcx, {value:#x}"));
-                "rcx".into()
+                this.emit(Opcode::Movabs, [asm_arg(&(r64(1))), asm_arg(&(value))]);
+                asm_arg(&r64(1))
             } else {
-                (value as i64).to_string()
+                asm_arg(&(value as i64))
             }
         };
         if values.len() >= 4 && span < 3 * values.len() as u64 && span < 4096 {
@@ -2649,48 +3286,65 @@ impl<'a> FunctionCompiler<'a> {
             // A 32-bit index is zero-extended by writing it.
             let rax = reg(S0, width);
             if min == 0 {
-                self.emit(format!("mov\t{rax}, {}", reg(x, width)));
+                self.emit(Opcode::Mov, [asm_arg(&(rax)), asm_arg(&(reg(x, width)))]);
             } else {
                 let sub = imm(self, min);
                 if x != S0 {
-                    self.emit(format!("mov\t{rax}, {}", reg(x, width)));
+                    self.emit(Opcode::Mov, [asm_arg(&(rax)), asm_arg(&(reg(x, width)))]);
                 }
-                self.emit(format!("sub\t{rax}, {sub}"));
+                self.emit(Opcode::Sub, [asm_arg(&(rax)), asm_arg(&(sub))]);
             }
-            self.emit(format!("cmp\t{rax}, {span}"));
-            self.emit(format!("ja\t{}", targets[0]));
+            self.emit(Opcode::Cmp, [asm_arg(&(rax)), asm_arg(&(span))]);
+            self.emit(Opcode::Jcc(7), [asm_arg(&(targets[0]))]);
             let table = format!(".L{}_{inst}_table", self.func.name);
             // Offsets from the table to each target, so the table needs no
             // relocations: position independent.
-            self.emit(format!("lea\trcx, [rip + {table}]"));
-            self.emit("movsxd\trax, dword ptr [rcx + 4*rax]");
-            self.emit("add\trax, rcx");
-            self.emit("jmp\trax");
-            writeln!(self.out, "\t.p2align\t2\n{table}:").unwrap();
+            self.emit(
+                Opcode::Lea,
+                [
+                    asm_arg(&(r64(1))),
+                    asm_arg(&(symbol_memory(rip(), &table, Modifier::None))),
+                ],
+            );
+            self.emit(
+                Opcode::Movsxd,
+                [
+                    asm_arg(&(r64(0))),
+                    asm_arg(&(sized(indexed(r64(1), r64(0), (4i128) as u8), 32))),
+                ],
+            );
+            self.emit(Opcode::Add, [asm_arg(&(r64(0))), asm_arg(&(r64(1)))]);
+            self.emit(Opcode::Jmp, [asm_arg(&(r64(0)))]);
+            self.out.align(2);
+            self.out.label(table.clone());
             for k in 0..=span {
                 let i = values
                     .iter()
                     .position(|&v| v == min + k)
                     .map_or(0, |i| i + 1);
-                self.emit(format!(".long\t{} - {table}", targets[i]));
+                self.out
+                    .integer(4, Expression::difference(targets[i].clone(), table.clone()));
             }
         } else {
             for (i, &value) in values.iter().enumerate() {
                 let operand = imm(self, value);
-                self.emit(format!("cmp\t{}, {operand}", reg(x, width)));
-                self.emit(format!("je\t{}", targets[i + 1]));
+                self.emit(
+                    Opcode::Cmp,
+                    [asm_arg(&(reg(x, width))), asm_arg(&(operand))],
+                );
+                self.emit(Opcode::Jcc(4), [asm_arg(&(targets[i + 1]))]);
             }
             if dests[0].args.is_empty() && self.edge_moves(0).is_empty() {
                 self.branch_unless_next(dests[0].block);
             } else {
-                self.emit(format!("jmp\t{}", targets[0]));
+                self.emit(Opcode::Jmp, [asm_arg(&(targets[0]))]);
             }
         }
         for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
             if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
-                writeln!(self.out, "{target}:").unwrap();
+                self.out.label(target.clone());
                 self.block_args(dest, i);
-                self.emit(format!("jmp\t{}", self.label(dest.block)));
+                self.emit(Opcode::Jmp, [asm_arg(&(self.label(dest.block)))]);
             }
         }
     }
@@ -2708,10 +3362,10 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(args[0]);
                 let a = self.use_reg(args[0], S0);
                 let b = match folded_imm(self.func, self.func.inst_data(inst)) {
-                    Some((_, k)) => k.to_string(),
-                    None => reg(self.use_reg(args[1], S1), ty).to_string(),
+                    Some((_, k)) => asm_arg(&k),
+                    None => asm_arg(&reg(self.use_reg(args[1], S1), ty)),
                 };
-                self.emit(format!("cmp\t{}, {b}", reg(a, ty)));
+                self.emit(Opcode::Cmp, [asm_arg(&(reg(a, ty))), asm_arg(&(b))]);
                 cond_code(cond)
             }
             InstData::Fcmp { cond, args } => {
@@ -2719,7 +3373,7 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);
                 let (xa, xb) = (xmm(a), xmm(b));
-                let ucomi = format!("ucomi{}", suffix(ty));
+                let ucomi = scalar(Opcode::Ucomisd, ty);
                 let (first, second, cc) = match cond {
                     FloatCC::Gt => (xa, xb, "a"),
                     FloatCC::Ge => (xa, xb, "ae"),
@@ -2728,21 +3382,21 @@ impl<'a> FunctionCompiler<'a> {
                     FloatCC::Ord => (xa, xb, "np"),
                     FloatCC::Uno => (xa, xb, "p"),
                     FloatCC::Eq | FloatCC::Ne => {
-                        self.emit(format!("{ucomi}\t{xa}, {xb}"));
+                        self.emit(ucomi, [asm_arg(&(xa)), asm_arg(&(xb))]);
                         if cond == FloatCC::Eq {
-                            self.emit("sete\tal");
-                            self.emit("setnp\tcl");
-                            self.emit("and\tal, cl");
+                            self.emit(Opcode::Setcc(4), [asm_arg(&(r8(0)))]);
+                            self.emit(Opcode::Setcc(11), [asm_arg(&(r8(1)))]);
+                            self.emit(Opcode::And, [asm_arg(&(r8(0))), asm_arg(&(r8(1)))]);
                         } else {
-                            self.emit("setne\tal");
-                            self.emit("setp\tcl");
-                            self.emit("or\tal, cl");
+                            self.emit(Opcode::Setcc(5), [asm_arg(&(r8(0)))]);
+                            self.emit(Opcode::Setcc(10), [asm_arg(&(r8(1)))]);
+                            self.emit(Opcode::Or, [asm_arg(&(r8(0))), asm_arg(&(r8(1)))]);
                         }
-                        self.emit("test\tal, al");
+                        self.emit(Opcode::Test, [asm_arg(&(r8(0))), asm_arg(&(r8(0)))]);
                         return "ne";
                     }
                 };
-                self.emit(format!("{ucomi}\t{first}, {second}"));
+                self.emit(ucomi, [asm_arg(&(first)), asm_arg(&(second))]);
                 cc
             }
             _ => unreachable!("not a compare"),
@@ -2755,13 +3409,13 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(value);
         if ty == Type::I128 {
             let [lo, hi] = self.halves(value);
-            self.emit(format!("mov\trax, {lo}"));
-            self.emit(format!("or\trax, {hi}"));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(lo))]);
+            self.emit(Opcode::Or, [asm_arg(&(r64(0))), asm_arg(&(hi))]);
             return;
         }
         let c = self.use_reg(value, S0);
         let r = reg(c, ty);
-        self.emit(format!("test\t{r}, {r}"));
+        self.emit(Opcode::Test, [asm_arg(&(r)), asm_arg(&(r))]);
     }
 
     /// Copies block-call arguments into the target's parameters, all at
@@ -2789,16 +3443,17 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// r11 breaks cycles, of either register class (`movq` moves bits
-    /// between classes); `emit_move` uses rax for slot-to-slot moves.
+    /// Scalar functions break cycles through r11. With live vectors, a
+    /// 16-byte stack temporary preserves complete XMM values instead.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
-        for (dst, src) in sequentialize(moves, Loc::Reg(S3)) {
+        let temp = self.copy_temp.map_or(Loc::Reg(S3), Loc::Stack);
+        for (dst, src) in sequentialize(moves, temp) {
             self.emit_move(dst, src);
         }
     }
 
-    /// One 64-bit move between any two locations. Narrow values have
-    /// unspecified upper bits, so copying all 64 is always fine.
+    /// Copy between allocated locations. Scalar slots carry 64 bits; vector
+    /// slots and vector register copies preserve all 128 bits.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
         match (dst, src) {
             (Loc::Remat(_), _) => unreachable!("rematerialized locations are source-only"),
@@ -2806,37 +3461,81 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::Reg(d), Loc::Remat(value)) => self.rematerialize(d, value),
             (Loc::FReg(d), Loc::Remat(value)) => {
                 self.rematerialize(S0, value);
-                self.emit(format!("movq\t{}, {}", xmm(d), r64(S0)));
+                self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&r64(S0))]);
             }
             (Loc::Stack(d), Loc::Remat(value)) => {
                 // Match stack-to-stack copies: rax is reserved, while
                 // rcx can already contain an outgoing argument. Keep the
                 // parallel-copy cycle temporary (r11) intact.
                 self.rematerialize(S0, value);
-                self.emit(format!("mov\t{}, {}", self.slot(d), r64(S0)));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&sized(self.slot(d), 64)), asm_arg(&r64(S0))],
+                );
             }
-            (Loc::Reg(d), Loc::Reg(s)) => self.emit(format!("mov\t{}, {}", r64(d), r64(s))),
-            (Loc::FReg(d), Loc::FReg(s)) => self.emit(format!("movaps\t{}, {}", xmm(d), xmm(s))),
-            (Loc::Reg(d), Loc::FReg(s)) => self.emit(format!("movq\t{}, {}", r64(d), xmm(s))),
-            (Loc::FReg(d), Loc::Reg(s)) => self.emit(format!("movq\t{}, {}", xmm(d), r64(s))),
-            (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("mov\t{}, {}", r64(d), self.slot(s))),
-            (Loc::FReg(d), Loc::Stack(s)) => {
-                self.emit(format!("movsd\t{}, {}", xmm(d), self.slot(s)))
+            (Loc::Reg(d), Loc::Reg(s)) => {
+                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(s)))])
             }
-            (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("mov\t{}, {}", self.slot(d), r64(s))),
-            (Loc::Stack(d), Loc::FReg(s)) => {
-                self.emit(format!("movsd\t{}, {}", self.slot(d), xmm(s)))
+            (Loc::FReg(d), Loc::FReg(s)) => {
+                self.emit(Opcode::Movaps, [asm_arg(&(xmm(d))), asm_arg(&(xmm(s)))])
+            }
+            (Loc::Reg(d), Loc::FReg(s)) => {
+                self.emit(Opcode::Movq, [asm_arg(&(r64(d))), asm_arg(&(xmm(s)))])
+            }
+            (Loc::FReg(d), Loc::Reg(s)) => {
+                self.emit(Opcode::Movq, [asm_arg(&(xmm(d))), asm_arg(&(r64(s)))])
+            }
+            (Loc::Reg(d), Loc::Stack(s)) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r64(d))), asm_arg(&(sized(self.slot(s), 64)))],
+            ),
+            (Loc::FReg(d), Loc::Stack(s)) => self.emit(
+                if self.vector_spills.contains(&s) {
+                    Opcode::Movups
+                } else {
+                    Opcode::Movsd
+                },
+                [asm_arg(&(xmm(d))), asm_arg(&(self.slot(s)))],
+            ),
+            (Loc::Stack(d), Loc::Reg(s)) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(s)))],
+            ),
+            (Loc::Stack(d), Loc::FReg(s)) => self.emit(
+                if self.vector_spills.contains(&d) {
+                    Opcode::Movups
+                } else {
+                    Opcode::Movsd
+                },
+                [asm_arg(&(self.slot(d))), asm_arg(&(xmm(s)))],
+            ),
+            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains(&d) => {
+                self.emit(
+                    if self.vector_spills.contains(&s) {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
+                    [asm_arg(&xmm(FS2)), asm_arg(&self.slot(s))],
+                );
+                self.emit(Opcode::Movups, [asm_arg(&self.slot(d)), asm_arg(&xmm(FS2))]);
             }
             (Loc::Stack(d), Loc::Stack(s)) => {
-                self.emit(format!("mov\trax, {}", self.slot(s)));
-                self.emit(format!("mov\t{}, rax", self.slot(d)));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(0)))],
+                );
             }
         }
     }
 
     fn branch_unless_next(&mut self, target: Block) {
         if self.next_block != Some(target) {
-            self.emit(format!("jmp\t{}", self.label(target)));
+            self.emit(Opcode::Jmp, [asm_arg(&(self.label(target)))]);
         }
     }
 
@@ -2848,8 +3547,8 @@ impl<'a> FunctionCompiler<'a> {
         if narrow_bits(ty).is_none() {
             return src;
         }
-        let op = if signed { "movsx" } else { "movzx" };
-        self.emit(format!("{op}\t{}, {}", r32(scratch), reg(src, ty)));
+        let op = if signed { Opcode::Movsx } else { Opcode::Movzx };
+        self.emit(op, [asm_arg(&(r32(scratch))), asm_arg(&(reg(src, ty)))]);
         scratch
     }
 
@@ -2859,13 +3558,13 @@ impl<'a> FunctionCompiler<'a> {
     fn materialize(&mut self, d: u8, imm: i64, ty: Type) {
         let bits = imm as u64 & mask(ty);
         if bits == 0 {
-            self.emit(format!("xor\t{0}, {0}", r32(d)));
+            self.emit(Opcode::Xor, [asm_arg(&(r32(d))), asm_arg(&(r32(d)))]);
         } else if bits <= u64::from(u32::MAX) {
-            self.emit(format!("mov\t{}, {bits:#x}", r32(d)));
+            self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(bits))]);
         } else if i32::try_from(bits as i64).is_ok() {
-            self.emit(format!("mov\t{}, {}", r64(d), bits as i64));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(bits as i64))]);
         } else {
-            self.emit(format!("movabs\t{}, {bits:#x}", r64(d)));
+            self.emit(Opcode::Movabs, [asm_arg(&(r64(d))), asm_arg(&(bits))]);
         }
     }
 
@@ -2878,18 +3577,18 @@ impl<'a> FunctionCompiler<'a> {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
                 if bits <= u64::from(u32::MAX) {
-                    self.emit(format!("mov\t{}, {bits:#x}", r32(d)));
+                    self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&bits)]);
                 } else if i32::try_from(bits as i64).is_ok() {
-                    self.emit(format!("mov\t{}, {}", r64(d), bits as i64));
+                    self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&(bits as i64))]);
                 } else {
-                    self.emit(format!("movabs\t{}, {bits:#x}", r64(d)));
+                    self.emit(Opcode::Movabs, [asm_arg(&r64(d)), asm_arg(&bits)]);
                 }
             }
             RematRecipe::StackAddr(slot) => {
                 #[cfg(feature = "backend-profile")]
                 crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
                 let at = self.frame(self.stack_slot_offsets[slot.index()]);
-                self.emit(format!("lea\t{}, {at}", r64(d)));
+                self.emit(Opcode::Lea, [asm_arg(&r64(d)), asm_arg(&at)]);
             }
         }
     }
@@ -2913,11 +3612,11 @@ impl<'a> FunctionCompiler<'a> {
     /// The memory operand for an access of type `ty` at `addr`: the stack
     /// slot itself if `addr` is one's address, else the address in a
     /// register.
-    fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> String {
+    fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> Memory {
         if let Some(slot) = stack_slot(self.func, addr) {
-            return format!("{} {}", ptr(ty), self.frame(self.stack_slot_offsets[slot]));
+            return sized(self.frame(self.stack_slot_offsets[slot]), ptr(ty));
         }
-        format!("{} [{}]", ptr(ty), r64(self.use_reg(addr, scratch)))
+        sized(memory(r64(self.use_reg(addr, scratch)), 0), ptr(ty))
     }
 
     /// The register holding operand `value`: its own, or `scratch` after
@@ -2926,7 +3625,10 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("mov\t{}, {}", r64(scratch), self.slot(s)));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(scratch))), asm_arg(&(self.slot(s)))],
+                );
                 scratch
             }
             Loc::Remat(value) => {
@@ -2942,7 +3644,14 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("movsd\t{}, {}", xmm(scratch), self.slot(s)));
+                self.emit(
+                    if self.ty(value).is_vector() {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
+                    [asm_arg(&(xmm(scratch))), asm_arg(&(self.slot(s)))],
+                );
                 scratch
             }
             Loc::Reg(_) | Loc::Remat(_) => unreachable!("{value} is not a float"),
@@ -2973,10 +3682,20 @@ impl<'a> FunctionCompiler<'a> {
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
         if let Some(Loc::Stack(s)) = self.defined(value) {
-            if self.func.value_type(value).is_float() {
-                self.emit(format!("movsd\t{}, {}", self.slot(s), xmm(reg)));
+            if self.func.value_type(value).is_float() || self.func.value_type(value).is_vector() {
+                self.emit(
+                    if self.func.value_type(value).is_vector() {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
+                    [asm_arg(&(self.slot(s))), asm_arg(&(xmm(reg)))],
+                );
             } else {
-                self.emit(format!("mov\t{}, {}", self.slot(s), r64(reg)));
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(self.slot(s))), asm_arg(&(r64(reg)))],
+                );
             }
         }
     }
@@ -2987,16 +3706,20 @@ impl<'a> FunctionCompiler<'a> {
 
     /// The fixed frame at `offset` from `rsp` after the prologue, from rbp,
     /// which stays put if `rsp` moves.
-    fn frame(&self, offset: usize) -> String {
+    fn frame(&self, offset: usize) -> Memory {
         let top = self.frame_size + 8 * self.saved.len();
-        format!("[rbp - {}]", top - offset)
+        memory(r64(5), -((top - offset) as i128))
     }
 
-    /// Spill slot `index`, as a 64-bit memory operand.
-    fn slot(&self, index: u32) -> String {
-        format!(
-            "qword ptr {}",
-            self.frame(self.spill_base + 8 * index as usize)
+    /// Spill slot `index`, with its fixed scalar or vector memory width.
+    fn slot(&self, index: u32) -> Memory {
+        sized(
+            self.frame(self.spill_base + 8 * index as usize),
+            if self.vector_spills.contains(&index) {
+                128
+            } else {
+                64
+            },
         )
     }
 
@@ -3004,8 +3727,13 @@ impl<'a> FunctionCompiler<'a> {
         format!(".L{}_{block}", self.func.name)
     }
 
-    fn emit(&mut self, line: impl AsRef<str>) {
-        writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    fn emit<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
+        debug_assert!(self.features.contains(opcode.required_features()));
+        self.out.instruction(opcode, Vec::from(operands), false);
+    }
+    fn emit_locked<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
+        debug_assert!(self.features.contains(opcode.required_features()));
+        self.out.instruction(opcode, Vec::from(operands), true);
     }
 }
 
@@ -3036,47 +3764,28 @@ fn arg_kinds<'s>(func: &Function, params: &'s [AbiParam], args: &[Value]) -> Vec
         .collect()
 }
 
-const R64: [&str; 16] = [
-    "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13",
-    "r14", "r15",
-];
-const R32: [&str; 16] = [
-    "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi", "r8d", "r9d", "r10d", "r11d", "r12d",
-    "r13d", "r14d", "r15d",
-];
-const R16: [&str; 16] = [
-    "ax", "cx", "dx", "bx", "sp", "bp", "si", "di", "r8w", "r9w", "r10w", "r11w", "r12w", "r13w",
-    "r14w", "r15w",
-];
-const R8: [&str; 16] = [
-    "al", "cl", "dl", "bl", "spl", "bpl", "sil", "dil", "r8b", "r9b", "r10b", "r11b", "r12b",
-    "r13b", "r14b", "r15b",
-];
-
-fn r64(n: u8) -> &'static str {
-    R64[n as usize]
-}
-
-fn r32(n: u8) -> &'static str {
-    R32[n as usize]
-}
-
-fn r16(n: u8) -> &'static str {
-    R16[n as usize]
-}
-
-fn r8(n: u8) -> &'static str {
-    R8[n as usize]
-}
-
-/// Register `n` at the width of `ty`.
-fn reg(n: u8, ty: Type) -> &'static str {
-    match ty {
-        Type::I8 => r8(n),
-        Type::I16 => r16(n),
-        Type::I32 | Type::F32 => r32(n),
-        _ => r64(n),
+fn gpr(n: u8, width: u16) -> Register {
+    Register {
+        class: RegisterClass::Gpr,
+        number: n,
+        width,
+        high_byte: false,
     }
+}
+fn r64(n: u8) -> Register {
+    gpr(n, 64)
+}
+fn r32(n: u8) -> Register {
+    gpr(n, 32)
+}
+fn r16(n: u8) -> Register {
+    gpr(n, 16)
+}
+fn r8(n: u8) -> Register {
+    gpr(n, 8)
+}
+fn reg(n: u8, ty: Type) -> Register {
+    gpr(n, ptr(ty))
 }
 
 /// The width integer arithmetic on `ty` runs at: 64 bits for 64-bit
@@ -3089,32 +3798,40 @@ fn wide_ty(ty: Type) -> Type {
 }
 
 /// Register `n` at the width arithmetic on `ty` runs at.
-fn wide(n: u8, ty: Type) -> &'static str {
+fn wide(n: u8, ty: Type) -> Register {
     reg(n, wide_ty(ty))
 }
 
-fn xmm(n: u8) -> String {
-    format!("xmm{n}")
-}
-
-/// The size keyword of a memory operand of type `ty`.
-fn ptr(ty: Type) -> &'static str {
-    match ty {
-        Type::I8 => "byte ptr",
-        Type::I16 => "word ptr",
-        Type::I32 | Type::F32 => "dword ptr",
-        _ => "qword ptr",
+fn xmm(n: u8) -> Register {
+    Register {
+        class: RegisterClass::Xmm,
+        number: n,
+        width: 128,
+        high_byte: false,
     }
 }
 
-/// The scalar SSE suffix: `ss` for f32, `sd` for f64.
-fn suffix(ty: Type) -> &'static str {
-    if ty == Type::F32 { "ss" } else { "sd" }
+/// The size keyword of a memory operand of type `ty`.
+fn ptr(ty: Type) -> u16 {
+    match ty {
+        Type::Vector(_) => 128,
+        Type::I8 => 8,
+        Type::I16 => 16,
+        Type::I32 | Type::F32 => 32,
+        _ => 64,
+    }
 }
 
-/// The scalar float move.
-fn movs(ty: Type) -> &'static str {
-    if ty == Type::F32 { "movss" } else { "movsd" }
+/// The scalar float or unaligned vector move.
+fn movs(ty: Type) -> Opcode {
+    if ty.is_vector() {
+        return Opcode::Movups;
+    }
+    if ty == Type::F32 {
+        Opcode::Movss
+    } else {
+        Opcode::Movsd
+    }
 }
 
 fn narrow_bits(ty: Type) -> Option<u32> {
@@ -3167,5 +3884,66 @@ fn invert_cond(cond: &str) -> &'static str {
         "p" => "np",
         "np" => "p",
         _ => panic!("unknown condition `{cond}`"),
+    }
+}
+
+fn dwarf_register(r: u8) -> u8 {
+    [0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15][usize::from(r)]
+}
+
+fn condition(cc: &str) -> u8 {
+    match cc {
+        "o" => 0,
+        "no" => 1,
+        "b" | "c" => 2,
+        "ae" | "nc" => 3,
+        "e" => 4,
+        "ne" => 5,
+        "be" => 6,
+        "a" => 7,
+        "s" => 8,
+        "ns" => 9,
+        "p" => 10,
+        "np" => 11,
+        "l" => 12,
+        "ge" => 13,
+        "le" => 14,
+        "g" => 15,
+        _ => unreachable!("compiler condition {cc}"),
+    }
+}
+
+fn scalar(op: Opcode, ty: Type) -> Opcode {
+    if ty != Type::F32 {
+        return match op {
+            Opcode::Add => Opcode::Addsd,
+            Opcode::Sub => Opcode::Subsd,
+            Opcode::Mul => Opcode::Mulsd,
+            Opcode::Div => Opcode::Divsd,
+            other => other,
+        };
+    }
+    match op {
+        Opcode::Add | Opcode::Addsd => Opcode::Addss,
+        Opcode::Sub | Opcode::Subsd => Opcode::Subss,
+        Opcode::Mul => Opcode::Mulss,
+        Opcode::Div => Opcode::Divss,
+        Opcode::Sqrtsd => Opcode::Sqrtss,
+        Opcode::Roundsd => Opcode::Roundss,
+        Opcode::Ucomisd => Opcode::Ucomiss,
+        Opcode::Minsd => Opcode::Minss,
+        Opcode::Maxsd => Opcode::Maxss,
+        Opcode::Cvtsi2sd => Opcode::Cvtsi2ss,
+        Opcode::Cvttsd2si => Opcode::Cvttss2si,
+        _ => unreachable!("compiler scalar opcode"),
+    }
+}
+fn packed(op: Opcode, ty: Type) -> Opcode {
+    match (op, ty == Type::F32) {
+        (Opcode::Or, true) => Opcode::Orps,
+        (Opcode::Or, false) => Opcode::Orpd,
+        (Opcode::And, true) => Opcode::Andps,
+        (Opcode::And, false) => Opcode::Andpd,
+        _ => unreachable!("compiler packed opcode"),
     }
 }

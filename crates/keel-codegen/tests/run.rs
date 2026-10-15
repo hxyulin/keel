@@ -167,11 +167,28 @@ fn run_program(
             keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
         }
     }
+    let selector = keel_codegen::OptionsSelector(selection);
+    let features = std::env::var("KEEL_TEST_X86_FEATURES")
+        .ok()
+        .map(|s| keel_asm_ir::x86::Features::parse(&s))
+        .transpose()?
+        .unwrap_or_default();
+    #[cfg(target_arch = "x86_64")]
+    if (features.avx && !std::is_x86_feature_detected!("avx"))
+        || (features.bmi1 && !std::is_x86_feature_detected!("bmi1"))
+        || (features.bmi2 && !std::is_x86_feature_detected!("bmi2"))
+    {
+        return Err("requested test x86 ISA is unavailable on this host".into());
+    }
+    let selector = keel_codegen::x86_features::FeatureSelector {
+        inner: &selector,
+        features,
+    };
     let asm = compile_with_pipeline(
         &module,
         pools,
         &keel_codegen::CodegenPipeline {
-            selector: &keel_codegen::OptionsSelector(selection),
+            selector: &selector,
             allocator: allocation,
         },
     )
@@ -182,7 +199,19 @@ fn run_program(
     std::fs::create_dir_all(&dir).unwrap();
     let asm_path = dir.join(format!("{stem}.s"));
     let exe_path = dir.join(&stem);
-    std::fs::write(&asm_path, asm).unwrap();
+    std::fs::write(&asm_path, &asm).unwrap();
+    let link_input = if std::env::var("KEEL_TEST_ASSEMBLER").as_deref() == Ok("native") {
+        if keel_codegen::Target::host() != Some(keel_codegen::Target::X86_64LinuxGnu) {
+            return Err("KEEL_TEST_ASSEMBLER=native currently requires x86-64 Linux".into());
+        }
+        let object = keel_asm::x86::assemble_object_with_features(&asm, features)
+            .map_err(|e| e.to_string())?;
+        let object_path = dir.join(format!("{stem}.o"));
+        std::fs::write(&object_path, object).map_err(|e| e.to_string())?;
+        object_path
+    } else {
+        asm_path.clone()
+    };
 
     let cpp_driver = path.with_extension("cpp");
     let mut clang = if cpp_driver.exists() {
@@ -192,7 +221,7 @@ fn run_program(
     } else {
         Command::new("clang")
     };
-    clang.arg("-o").arg(&exe_path).arg(&asm_path).arg("-lm");
+    clang.arg("-o").arg(&exe_path).arg(&link_input).arg("-lm");
     let driver = path.with_extension("c");
     if driver.exists() {
         clang.arg(&driver);
@@ -743,6 +772,80 @@ fn pressure_rematerialization_programs() {
         experimental_allocator_programs(&allocator, &format!("pressure-remat-{tier:?}"));
     }
 }
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn rematerialization_objects_match_text_assembly() {
+    let module = keel_ir::parse(include_str!("programs/rematerialization.keel")).unwrap();
+    for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for prefer_spilling in [false, true] {
+            let allocator = keel_codegen::regalloc::RematerializingAllocator {
+                base: &tier,
+                prefer_spilling,
+                constants: true,
+                stack_addresses: true,
+            };
+            let pipeline = keel_codegen::CodegenPipeline {
+                selector: &keel_codegen::SelectionTier::Baseline,
+                allocator: &allocator,
+            };
+            for arm in [false, true] {
+                let (program, text) = if arm {
+                    (
+                        keel_codegen::aarch64::compile_program_with_pipeline(
+                            &module, &TINY_ARM, &pipeline,
+                        )
+                        .unwrap(),
+                        keel_codegen::aarch64::compile_with_pipeline(&module, &TINY_ARM, &pipeline)
+                            .unwrap(),
+                    )
+                } else {
+                    (
+                        keel_codegen::x86_64::compile_program_with_pipeline(
+                            &module, &TINY_X86, &pipeline,
+                        )
+                        .unwrap(),
+                        keel_codegen::x86_64::compile_with_pipeline(&module, &TINY_X86, &pipeline)
+                            .unwrap(),
+                    )
+                };
+                assert_eq!(program.stats().text_bytes, 0);
+                let (typed, parsed) = if arm {
+                    (
+                        keel_asm::assemble_program_object(
+                            &program,
+                            keel_asm::TargetFeatures::default(),
+                        )
+                        .unwrap(),
+                        keel_asm::assemble_object(&text).unwrap(),
+                    )
+                } else {
+                    (
+                        keel_asm::x86::assemble_program_object(&program).unwrap(),
+                        keel_asm::x86::assemble_object(&text).unwrap(),
+                    )
+                };
+                assert_eq!(
+                    typed, parsed,
+                    "{tier:?} pressure={prefer_spilling} arm={arm}"
+                );
+            }
+        }
+    }
+}
+#[cfg(feature = "experimental-regalloc")]
+const TINY_ARM: Pools = Pools {
+    caller_saved: &[9, 10],
+    callee_saved: &[19, 20],
+    float_caller_saved: &[19, 20],
+    float_callee_saved: &[8, 9],
+};
+#[cfg(feature = "experimental-regalloc")]
+const TINY_X86: Pools = Pools {
+    caller_saved: &[6, 7],
+    callee_saved: &[3, 12],
+    float_caller_saved: &[8, 9],
+    float_callee_saved: &[],
+};
 #[test]
 #[cfg(feature = "experimental-regalloc")]
 fn rematerialization_all_spilled() {

@@ -33,8 +33,8 @@ use std::collections::HashMap;
 type R<T> = Result<T, Error>;
 
 pub struct Gen<'p> {
-    p: &'p Parser,
-    files: &'p [String],
+    p: &'p Parser<'p>,
+    files: &'p [&'p str],
     module: Module,
     debug: bool,
     /// Module source files, by the lexer's file index.
@@ -48,10 +48,16 @@ pub struct Gen<'p> {
     /// Data made up for local initializers: bytes to symbol.
     anon: HashMap<Vec<u8>, String>,
     dtypes: DebugTypes,
+    /// Borrow immutable declaration spellings. Build once, on the first
+    /// alignment query; aliases retain the first declaration's alignment.
+    global_alignments: Option<HashMap<&'p str, u32>>,
+    /// Non-declaration objects emitted while functions are built. The
+    /// first module object wins, matching Module::data_object.
+    generated_alignments: HashMap<String, u32>,
 }
 
 impl<'p> Gen<'p> {
-    pub fn new(p: &'p Parser, files: &'p [String], debug: bool) -> Self {
+    pub fn new(p: &'p Parser<'p>, files: &'p [&'p str], debug: bool) -> Self {
         Self {
             p,
             files,
@@ -64,6 +70,8 @@ impl<'p> Gen<'p> {
             unprototyped: HashMap::new(),
             anon: HashMap::new(),
             dtypes: DebugTypes::default(),
+            global_alignments: None,
+            generated_alignments: HashMap::new(),
         }
     }
 
@@ -88,7 +96,7 @@ impl<'p> Gen<'p> {
                         None => self.signature(fty, g, &[])?,
                     };
                     self.module.decls.push(FuncDecl {
-                        name: global.symbol.clone(),
+                        name: global.symbol.to_owned(),
                         sig,
                     });
                 }
@@ -101,14 +109,14 @@ impl<'p> Gen<'p> {
                             .debug_type(&global.ty, &global.sugar)
                             .expect("a void object");
                         self.module.debug_globals.push(DebugGlobal {
-                            name: global.name.clone(),
+                            name: global.name.to_owned(),
                             ty,
-                            symbol: global.symbol.clone(),
+                            symbol: global.symbol.to_owned(),
                         });
                     }
                 }
                 _ => self.module.data.push(DataObject {
-                    name: global.symbol.clone(),
+                    name: global.symbol.to_owned(),
                     thread_local: global.thread_local,
                     local: false,
                     init: None,
@@ -128,19 +136,46 @@ impl<'p> Gen<'p> {
         }
     }
 
+    fn symbol_alignment(&mut self, name: &str) -> u32 {
+        let globals = self.global_alignments.get_or_insert_with(|| {
+            let mut alignments = HashMap::with_capacity(self.p.globals.len());
+            for global in &self.p.globals {
+                alignments
+                    .entry(global.symbol)
+                    .or_insert(global.align as u32);
+            }
+            alignments
+        });
+        globals
+            .get(name)
+            .copied()
+            .or_else(|| self.generated_alignments.get(name).copied())
+            .unwrap_or(1)
+    }
+
+    /// All non-declaration module data goes through here so an alignment
+    /// query sees literals and initializer bytes emitted later in a function.
+    fn push_generated_data(&mut self, data: DataObject) {
+        let align = data.init.as_ref().map_or(1, |init| init.align);
+        self.generated_alignments
+            .entry(data.name.clone())
+            .or_insert(align);
+        self.module.data.push(data);
+    }
+
     fn string_symbol(&mut self, i: usize) -> String {
         let name = format!(".str.{i}");
         if !self.strings_used[i] {
             self.strings_used[i] = true;
             let s = &self.p.strings[i];
-            self.module.data.push(DataObject {
+            self.push_generated_data(DataObject {
                 name: name.clone(),
                 thread_local: false,
                 local: true,
                 init: Some(DataInit {
                     constant: true,
                     align: if s.wide { 4 } else { 1 },
-                    items: vec![DataItem::Bytes(s.bytes.clone())],
+                    items: vec![DataItem::Bytes(s.bytes.to_vec())],
                 }),
             });
         }
@@ -153,7 +188,7 @@ impl<'p> Gen<'p> {
             return name.clone();
         }
         let name = format!(".init.{}", self.anon.len());
-        self.module.data.push(DataObject {
+        self.push_generated_data(DataObject {
             name: name.clone(),
             thread_local: false,
             local: true,
@@ -174,7 +209,7 @@ impl<'p> Gen<'p> {
         let file = match self.srcfiles.get(&loc.file) {
             Some(f) => *f,
             None => {
-                let f = self.module.add_file(self.files[loc.file as usize].clone());
+                let f = self.module.add_file(self.files[loc.file as usize]);
                 self.srcfiles.insert(loc.file, f);
                 f
             }
@@ -273,33 +308,19 @@ impl<'p> Gen<'p> {
     /// Preserve proven address alignment on every emitted access, including
     /// byte copies and initializer chunks. No pointee-type inference: packed
     /// members and pointers cast from byte buffers may be unaligned.
-    fn preserve_access_alignment(&self, func: &mut Function, mut known: HashMap<Value, u32>) {
-        let slots: HashMap<_, _> = func.stack_slots().map(|(s, d)| (s, d.align)).collect();
-        let symbols: HashMap<_, _> = func
+    fn preserve_access_alignment(&mut self, func: &mut Function, mut known: HashMap<Value, u32>) {
+        // StackSlot and DataRef are append-only dense arena indices.
+        let slots: Vec<_> = func.stack_slots().map(|(_, d)| d.align).collect();
+        let symbols: Vec<_> = func
             .data_symbols()
-            .map(|(r, name)| {
-                let align = self
-                    .p
-                    .globals
-                    .iter()
-                    .find(|g| g.symbol == name)
-                    .map(|g| g.align as u32)
-                    .or_else(|| {
-                        self.module
-                            .data_object(name)
-                            .and_then(|d| d.init.as_ref())
-                            .map(|d| d.align)
-                    })
-                    .unwrap_or(1);
-                (r, align)
-            })
+            .map(|(_, name)| self.symbol_alignment(name))
             .collect();
         fn alignment(
             func: &Function,
             value: Value,
             known: &mut HashMap<Value, u32>,
-            slots: &HashMap<StackSlot, u32>,
-            symbols: &HashMap<keel_ir::DataRef, u32>,
+            slots: &[u32],
+            symbols: &[u32],
             depth: usize,
         ) -> u32 {
             let value = func.resolve(value);
@@ -315,10 +336,10 @@ impl<'p> Gen<'p> {
                 return 1;
             };
             let result = match func.inst_data(inst) {
-                InstData::StackAddr { slot } => slots[slot],
+                InstData::StackAddr { slot } => slots[slot.index()],
                 InstData::SymbolAddr {
                     symbol: Symbol::Data(data),
-                } => symbols[data],
+                } => symbols[data.index()],
                 InstData::Iconst { imm, .. } => 1u32 << (*imm as u64).trailing_zeros().min(31),
                 InstData::Binary {
                     op: op @ (BinaryOp::Ptradd | BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::Imul),
@@ -355,10 +376,10 @@ impl<'p> Gen<'p> {
         }
     }
 
-    fn function(&mut self, def: &'p FuncDef) -> R<Function> {
+    fn function(&mut self, def: &'p FuncDef<'p>) -> R<Function> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
-        let mut func = Function::new(global.symbol.clone(), sig.clone());
+        let mut func = Function::new(global.symbol.to_owned(), sig.clone());
         func.local = global.internal;
         let mut b = FunctionBuilder::new(&mut func);
         let entry = b.create_block();
@@ -367,7 +388,7 @@ impl<'p> Gen<'p> {
         let params: Vec<Value> = sig
             .params
             .iter()
-            .map(|p| b.func.append_block_param(entry, p.ty))
+            .map(|p| b.append_block_param(entry, p.ty))
             .collect();
         let mut fg = FnGen {
             g: self,
@@ -392,12 +413,12 @@ impl<'p> Gen<'p> {
             } else {
                 let types = fg.g.types();
                 let size = types.size(&local.ty).max(1);
-                let align = local.align.max(types.align(&local.ty));
+                let align = local.align;
                 let reserve = size
                     .checked_add(if align > 16 { align - 1 } else { 0 })
                     .and_then(|n| u32::try_from(n).ok())
                     .ok_or_else(|| Error::new(def.loc, "local object exceeds the IR stack-slot size limit (including alignment padding)"))?;
-                let slot = fg.b.func.create_stack_slot(reserve, align.min(16) as u32);
+                let slot = fg.b.create_stack_slot(reserve, align.min(16) as u32);
                 if align <= 16 {
                     Storage::Slot(slot)
                 } else {
@@ -410,7 +431,7 @@ impl<'p> Gen<'p> {
                     let addr = fg.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, rounded);
                     fg.alignments.insert(addr, align as u32);
                     let debug_slot = fg.g.debug.then(|| {
-                        let pointer = fg.b.func.create_stack_slot(8, 8);
+                        let pointer = fg.b.create_stack_slot(8, 8);
                         let at = fg.b.ins().stack_addr(pointer);
                         fg.b.ins().store(addr, at);
                         pointer
@@ -421,12 +442,12 @@ impl<'p> Gen<'p> {
             fg.locals.push(storage);
         }
         if fg.g.debug {
-            fg.b.func.debug_loc = fg.g.srcloc(def.loc);
+            fg.b.function_mut().debug_loc = fg.g.srcloc(def.loc);
             let ret = match &fg.g.p.globals[def.global].sugar {
                 Sugar::Func(ret) => ret.as_ref().clone(),
                 _ => Sugar::Plain,
             };
-            fg.b.func.debug_return = fg.g.debug_type(&def.ty.ret, &ret);
+            fg.b.function_mut().debug_return = fg.g.debug_type(&def.ty.ret, &ret);
             // Only scopes with variables need to be told apart.
             let named = |local: &&Local| !local.name.contains('.');
             let mut has_vars = vec![false; def.scopes.len()];
@@ -436,8 +457,8 @@ impl<'p> Gen<'p> {
             for (scope, parent) in def.scopes.iter().enumerate() {
                 let parent = parent.and_then(|p| fg.scopes[p]);
                 let own = has_vars[scope].then(|| {
-                    fg.b.func.debug_scopes.push(parent);
-                    DebugScope::new(fg.b.func.debug_scopes.len() - 1)
+                    fg.b.function_mut().debug_scopes.push(parent);
+                    DebugScope::new(fg.b.function().debug_scopes.len() - 1)
                 });
                 fg.scopes.push(own.or(parent));
             }
@@ -456,8 +477,8 @@ impl<'p> Gen<'p> {
                     let ty =
                         fg.g.debug_type(&local.ty, &local.sugar)
                             .expect("a void local");
-                    fg.b.func.debug_vars.push(DebugVar {
-                        name: local.name.clone(),
+                    fg.b.function_mut().debug_vars.push(DebugVar {
+                        name: local.name.to_owned(),
                         ty,
                         slot,
                         indirect,
@@ -524,7 +545,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[g];
         let types = self.types();
         let size = types.size(&global.ty) as usize;
-        let align = global.align.max(types.align(&global.ty)).max(1) as u32;
+        let align = global.align.max(1) as u32;
         let mut bytes = vec![0u8; size];
         let mut relocs: Vec<(usize, String, i64)> = Vec::new();
         let items = global.init.as_ref().map_or(&[][..], |i| &i.items[..]);
@@ -574,7 +595,7 @@ impl<'p> Gen<'p> {
                             let symbol = match base {
                                 Base::Global(target) => {
                                     self.use_global(target);
-                                    self.p.globals[target].symbol.clone()
+                                    self.p.globals[target].symbol.to_owned()
                                 }
                                 Base::Str(s) => self.string_symbol(s),
                             };
@@ -609,7 +630,7 @@ impl<'p> Gen<'p> {
             items.push(DataItem::Zero(1));
         }
         Ok(DataObject {
-            name: global.symbol.clone(),
+            name: global.symbol.to_owned(),
             thread_local: global.thread_local,
             local: global.internal,
             init: Some(DataInit {
@@ -693,14 +714,14 @@ enum Place {
 struct FnGen<'g, 'p, 'f> {
     g: &'g mut Gen<'p>,
     b: FunctionBuilder<'f>,
-    def: &'p FuncDef,
+    def: &'p FuncDef<'p>,
     locals: Vec<Storage>,
     /// Facts attached to distinct SSA definitions, never to a mutable C variable.
     alignments: HashMap<Value, u32>,
     sret: Option<Value>,
     breaks: Vec<Block>,
     continues: Vec<Block>,
-    labels: HashMap<String, Block>,
+    labels: HashMap<&'p str, Block>,
     /// All computed gotos share one switch, with the label number as its
     /// first parameter. Leave it unsealed until every dispatch edge exists.
     dispatch: Option<Block>,
@@ -717,7 +738,7 @@ struct FnGen<'g, 'p, 'f> {
     scope: Option<DebugScope>,
 }
 
-impl FnGen<'_, '_, '_> {
+impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     fn new_block(&mut self) -> Block {
         self.b.create_block()
     }
@@ -761,12 +782,12 @@ impl FnGen<'_, '_, '_> {
         self.g.types().size(ty)
     }
 
-    fn label_block(&mut self, name: &str) -> Block {
+    fn label_block(&mut self, name: &'p str) -> Block {
         if let Some(&b) = self.labels.get(name) {
             return b;
         }
         let b = self.new_block();
-        self.labels.insert(name.to_string(), b);
+        self.labels.insert(name, b);
         b
     }
 
@@ -797,7 +818,7 @@ impl FnGen<'_, '_, '_> {
 
     // ---- statements ----
 
-    fn stmt(&mut self, s: &Stmt) -> R<()> {
+    fn stmt(&mut self, s: &Stmt<'p>) -> R<()> {
         match s {
             Stmt::Expr(e) => {
                 self.ensure_block();
@@ -1012,7 +1033,7 @@ impl FnGen<'_, '_, '_> {
                     Some(block) => block,
                     None => {
                         let block = self.new_block();
-                        self.b.func.append_block_param(block, Type::I64);
+                        self.b.append_block_param(block, Type::I64);
                         self.dispatch = Some(block);
                         block
                     }
@@ -1035,7 +1056,7 @@ impl FnGen<'_, '_, '_> {
         };
         self.switch_to(dispatch);
         self.b.set_srcloc(None);
-        let n = self.b.func.block_params(dispatch)[0];
+        let n = self.b.function().block_params(dispatch)[0];
         let call = |block| keel_ir::BlockCall {
             block,
             args: Vec::new(),
@@ -1056,7 +1077,7 @@ impl FnGen<'_, '_, '_> {
         self.terminated = true;
     }
 
-    fn loop_body(&mut self, body: &Stmt, block: Block, exit: Block, cont: Block) -> R<()> {
+    fn loop_body(&mut self, body: &Stmt<'p>, block: Block, exit: Block, cont: Block) -> R<()> {
         self.switch_to(block);
         self.breaks.push(exit);
         self.continues.push(cont);
@@ -1068,7 +1089,7 @@ impl FnGen<'_, '_, '_> {
 
     /// Branches to `t` if `cond` is true (non-zero), else to `f`, without
     /// materializing `&&`, `||` and `!` as values.
-    fn branch(&mut self, cond: &Expr, t: Block, f: Block) -> R<()> {
+    fn branch(&mut self, cond: &Expr<'p>, t: Block, f: Block) -> R<()> {
         match &cond.kind {
             ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
                 let mid = self.new_block();
@@ -1093,7 +1114,7 @@ impl FnGen<'_, '_, '_> {
 
     /// A value that is non-zero exactly when `e` is true. Comparisons give
     /// their `i8` directly; integers are their own truth value.
-    fn truth(&mut self, e: &Expr) -> R<Value> {
+    fn truth(&mut self, e: &Expr<'p>) -> R<Value> {
         if let ExprKind::Binary(op, a, b) = &e.kind
             && op.is_comparison()
         {
@@ -1119,7 +1140,7 @@ impl FnGen<'_, '_, '_> {
     // ---- expressions ----
 
     /// The value of a non-void expression; for aggregates, their address.
-    fn val(&mut self, e: &Expr) -> R<Value> {
+    fn val(&mut self, e: &Expr<'p>) -> R<Value> {
         match self.emit(e)? {
             Some(v) => Ok(v),
             None => Err(Error::new(e.loc, "a void expression has no value")),
@@ -1130,7 +1151,7 @@ impl FnGen<'_, '_, '_> {
         matches!(ty, Ty::Struct(_) | Ty::Array(..) | Ty::Func(_))
     }
 
-    fn emit(&mut self, e: &Expr) -> R<Option<Value>> {
+    fn emit(&mut self, e: &Expr<'p>) -> R<Option<Value>> {
         let v = match &e.kind {
             ExprKind::LabelAddr(n) => {
                 let n = self.b.ins().iconst(Type::I64, *n as i64);
@@ -1388,7 +1409,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// `n * size` as an `i64`, for pointer arithmetic.
-    fn scaled(&mut self, n: &Expr, size: u64) -> R<Value> {
+    fn scaled(&mut self, n: &Expr<'p>, size: u64) -> R<Value> {
         if let ExprKind::Int(k) = n.kind {
             return Ok(self.b.ins().iconst(Type::I64, k.wrapping_mul(size as i64)));
         }
@@ -1400,7 +1421,7 @@ impl FnGen<'_, '_, '_> {
         Ok(self.b.ins().imul(v, s))
     }
 
-    fn compare(&mut self, op: BinOp, a: &Expr, b: &Expr) -> R<Value> {
+    fn compare(&mut self, op: BinOp, a: &Expr<'p>, b: &Expr<'p>) -> R<Value> {
         let (x, y) = (self.val(a)?, self.val(b)?);
         let ty = &a.ty;
         if ty.is_float() {
@@ -1578,7 +1599,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// Where an lvalue lives. `None` for a void-typed dereference.
-    fn place(&mut self, e: &Expr) -> R<Option<Place>> {
+    fn place(&mut self, e: &Expr<'p>) -> R<Option<Place>> {
         if e.ty == Ty::Void {
             return Ok(None);
         }
@@ -1632,7 +1653,7 @@ impl FnGen<'_, '_, '_> {
                 // Materialize a volatile aggregate read now, before an
                 // assignment, return or by-value ABI copy loses the lvalue.
                 // This private byte snapshot is never exposed as an aligned C object.
-                let slot = self.b.func.create_stack_slot(size, align.min(16));
+                let slot = self.b.create_stack_slot(size, align.min(16));
                 let copy = self.b.ins().stack_addr(slot);
                 self.copy_bytes_with_flags(
                     copy,
@@ -1706,7 +1727,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// The address of an lvalue (or of an aggregate rvalue's bytes).
-    fn addr(&mut self, e: &Expr) -> R<Value> {
+    fn addr(&mut self, e: &Expr<'p>) -> R<Value> {
         Ok(match &e.kind {
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Slot(slot) => self.b.ins().stack_addr(slot),
@@ -1720,15 +1741,15 @@ impl FnGen<'_, '_, '_> {
                 let global = &self.g.p.globals[*g];
                 let symbol = if let Ty::Func(fty) = &global.ty {
                     let sig = self.callee_signature(*g, fty, &[])?;
-                    Symbol::Func(self.b.func.import_function(&global.symbol, sig))
+                    Symbol::Func(self.b.import_function(&global.symbol, sig))
                 } else {
-                    Symbol::Data(self.b.func.import_data(&global.symbol))
+                    Symbol::Data(self.b.import_data(&global.symbol))
                 };
                 self.b.ins().symbol_addr(symbol)
             }
             ExprKind::Str(i) => {
                 let name = self.g.string_symbol(*i);
-                let data = self.b.func.import_data(&name);
+                let data = self.b.import_data(&name);
                 self.b.ins().symbol_addr(Symbol::Data(data))
             }
             ExprKind::Deref(p) => self.val(p)?,
@@ -1767,7 +1788,7 @@ impl FnGen<'_, '_, '_> {
 
     /// Proof used only to defer ordinary aggregate argument copying. Any
     /// unknown effect, volatile access, call or initialization is a barrier.
-    fn may_change_memory(&self, e: &Expr) -> bool {
+    fn may_change_memory(&self, e: &Expr<'p>) -> bool {
         if self.object_flags(&e.ty, &e.sugar).volatile {
             return true;
         }
@@ -1796,16 +1817,13 @@ impl FnGen<'_, '_, '_> {
         }
     }
 
-    fn call(&mut self, f: &Expr, args: &[Expr], e: &Expr) -> R<Option<Value>> {
+    fn call(&mut self, f: &Expr<'p>, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap().clone();
         self.set_loc(e.loc);
         let mut vals = Vec::new();
         let ret_slot = if fty.ret.is_struct() {
             let (size, align) = (self.size(&fty.ret), self.g.types().align(&fty.ret));
-            let slot = self
-                .b
-                .func
-                .create_stack_slot(size.max(1) as u32, align as u32);
+            let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
             vals.push(self.b.ins().stack_addr(slot));
             Some(slot)
         } else {
@@ -1842,7 +1860,7 @@ impl FnGen<'_, '_, '_> {
                 let Place::Aggregate { size, align, .. } = layout else {
                     unreachable!()
                 };
-                let slot = self.b.func.create_stack_slot(size.max(1), align);
+                let slot = self.b.create_stack_slot(size.max(1), align);
                 let copy = self.b.ins().stack_addr(slot);
                 self.copy(copy, value, &arg.ty);
                 value = copy;
@@ -1862,15 +1880,15 @@ impl FnGen<'_, '_, '_> {
             Some(g) => {
                 self.g.use_global(g);
                 let sig = self.callee_signature(g, &fty, &extra)?;
-                let name = self.g.p.globals[g].symbol.clone();
-                let fref = self.b.func.import_function(&name, sig);
+                let name = self.g.p.globals[g].symbol;
+                let fref = self.b.import_function(&name, sig);
                 self.b.ins().call(fref, &vals)
             }
             None => {
                 let callee = self.val(f)?;
                 let extra = if fty.prototyped { &[][..] } else { &extra[..] };
                 let sig = self.g.signature(&fty, usize::MAX, extra)?;
-                let sig = self.b.func.import_signature(sig);
+                let sig = self.b.import_signature(sig);
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
         };
@@ -1893,10 +1911,10 @@ impl FnGen<'_, '_, '_> {
         if let Some(slot) = ret_slot {
             return Ok(Some(self.b.ins().stack_addr(slot)));
         }
-        Ok(self.b.func.inst_results(inst).first().copied())
+        Ok(self.b.function().inst_results(inst).first().copied())
     }
 
-    fn builtin(&mut self, op: Builtin, args: &[Expr], e: &Expr) -> R<Option<Value>> {
+    fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let mut vals = Vec::new();
         for a in args {
             vals.push(self.val(a)?);
@@ -1952,7 +1970,7 @@ impl FnGen<'_, '_, '_> {
                     Builtin::Ctz => ins.ctz(vals[0]),
                     _ => ins.popcnt(vals[0]),
                 };
-                if self.b.func.value_type(r) == Type::I64 {
+                if self.b.function().value_type(r) == Type::I64 {
                     self.b.ins().trunc(Type::I32, r)
                 } else {
                     r
@@ -1960,11 +1978,11 @@ impl FnGen<'_, '_, '_> {
             }
             Builtin::Alloca => {
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
-                self.b.func.inst_results(inst)[0]
+                self.b.function().inst_results(inst)[0]
             }
             Builtin::FrameAddress => {
                 let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
-                self.b.func.inst_results(inst)[0]
+                self.b.function().inst_results(inst)[0]
             }
             Builtin::AtomicLoad
             | Builtin::AtomicStore
@@ -2128,7 +2146,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// Runs a local's initializer.
-    fn init_local(&mut self, id: LocalId, init: &Init) -> R<()> {
+    fn init_local(&mut self, id: LocalId, init: &Init<'p>) -> R<()> {
         let ty = self.def.locals[id].ty.clone();
         let flags = self.object_flags(&ty, &self.def.locals[id].sugar);
         if let Storage::Var(var) = self.locals[id] {
@@ -2172,7 +2190,7 @@ impl FnGen<'_, '_, '_> {
                 InitItem::Bytes { offset, bytes } => {
                     let size = (self.size(&ty) - offset).min(bytes.len() as u64);
                     let name = self.g.anon_data(&bytes[..size as usize]);
-                    let data = self.b.func.import_data(&name);
+                    let data = self.b.import_data(&name);
                     let src = self.b.ins().symbol_addr(Symbol::Data(data));
                     let dst = self.offset(base, *offset);
                     self.copy_bytes_with_flags(dst, src, size, flags, MemoryFlags::default());
@@ -2180,5 +2198,156 @@ impl FnGen<'_, '_, '_> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+    use crate::strings::Strings;
+
+    fn parser(arena: &bumpalo::Bump) -> Parser<'_> {
+        let mut text = Strings::new(arena);
+        let mut files = Vec::new();
+        let toks = crate::lex::tokenize(
+            "int first; int second; int collision;",
+            "align.c",
+            &mut files,
+            &mut text,
+        )
+        .unwrap();
+        let mut p = Parser::new(toks, crate::Options::default().target, text);
+        p.translation_unit().unwrap();
+        p.globals[0].symbol = "shared";
+        p.globals[0].align = 8;
+        p.globals[1].symbol = "shared";
+        p.globals[1].align = 64;
+        p.globals[2].symbol = ".str.0";
+        p.globals[2].align = 16;
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"a\0",
+            wide: false,
+        });
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"b\0\0\0\0\0\0\0",
+            wide: true,
+        });
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"c\0",
+            wide: false,
+        });
+        p
+    }
+
+    fn old_alignment(g: &Gen<'_>, name: &str) -> u32 {
+        g.p.globals
+            .iter()
+            .find(|global| global.symbol == name)
+            .map(|global| global.align as u32)
+            .or_else(|| {
+                g.module
+                    .data_object(name)
+                    .and_then(|data| data.init.as_ref())
+                    .map(|init| init.align)
+            })
+            .unwrap_or(1)
+    }
+
+    fn data(name: &str, align: Option<u32>) -> DataObject {
+        DataObject {
+            name: name.into(),
+            local: true,
+            thread_local: false,
+            init: align.map(|align| DataInit {
+                align,
+                constant: true,
+                items: vec![],
+            }),
+        }
+    }
+
+    #[test]
+    fn symbol_index_preserves_first_matches_and_late_generated_data() {
+        let arena = bumpalo::Bump::new();
+        let p = parser(&arena);
+        let mut g = Gen::new(&p, &[], false);
+        assert!(g.global_alignments.is_none());
+        assert_eq!(g.symbol_alignment("unknown"), 1);
+        assert_eq!(g.symbol_alignment("shared"), 8);
+        // These objects are emitted after the declaration index is built.
+        for i in 0..3 {
+            g.string_symbol(i);
+        }
+        let init = g.anon_data(b"bytes");
+        assert_eq!(g.anon_data(b"bytes"), init);
+        g.push_generated_data(data("duplicate", Some(32)));
+        g.push_generated_data(data("duplicate", Some(64)));
+        g.push_generated_data(data("no_initializer", None));
+        g.push_generated_data(data("no_initializer", Some(64)));
+        for name in [
+            "shared",
+            ".str.0",
+            ".str.1",
+            ".str.2",
+            &init,
+            "duplicate",
+            "no_initializer",
+            "unknown",
+        ] {
+            assert_eq!(g.symbol_alignment(name), old_alignment(&g, name), "{name}");
+        }
+        assert_eq!(g.symbol_alignment(".str.0"), 16);
+        assert_eq!(g.symbol_alignment(".str.1"), 4);
+        assert_eq!(g.symbol_alignment("duplicate"), 32);
+        assert_eq!(g.symbol_alignment("no_initializer"), 1);
+    }
+
+    #[test]
+    fn dense_tables_keep_alignment_and_conservative_offsets() {
+        let arena = bumpalo::Bump::new();
+        let p = parser(&arena);
+        let mut g = Gen::new(&p, &[], false);
+        let init = g.anon_data(b"bytes");
+        let mut f = Function::new("f", Signature::new(&[], &[Type::I8]));
+        let entry = f.create_block();
+        f.create_stack_slot(32, 8);
+        let slot = f.create_stack_slot(64, 16);
+        for i in 0..12 {
+            f.import_data(&format!("unused{i}"));
+        }
+        let shared = f.import_data("shared");
+        let generated = f.import_data(&init);
+        let unknown = f.import_data("unknown");
+        let stack = f.ins(keel_ir::InsertPoint::End(entry)).stack_addr(slot);
+        let shared = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(shared));
+        let generated = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(generated));
+        let unknown = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(unknown));
+        let offset = f.ins(keel_ir::InsertPoint::End(entry)).iconst(Type::I64, 2);
+        let unaligned = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .ptradd(shared, offset);
+        let mut result = None;
+        for addr in [stack, shared, generated, unknown, unaligned] {
+            let value = f.ins(keel_ir::InsertPoint::End(entry)).load(Type::I8, addr);
+            result.get_or_insert(value);
+        }
+        f.ins(keel_ir::InsertPoint::End(entry))
+            .return_(&[result.unwrap()]);
+        g.preserve_access_alignment(&mut f, HashMap::new());
+        keel_ir::verify(&f).unwrap();
+        let alignments: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, inst)| match f.inst_data(inst) {
+                InstData::Load { flags, .. } => Some(flags.align),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(alignments, [16, 8, 8, 1, 2]);
     }
 }

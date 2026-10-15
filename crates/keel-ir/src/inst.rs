@@ -7,7 +7,7 @@
 
 use crate::{
     Block, DataRef, FuncRef, InlineAsm, Intrinsic, MemoryEffects, MemoryFlags, SigRef, StackSlot,
-    Type, Value,
+    Type, Value, VectorBinaryOp,
 };
 use std::fmt;
 
@@ -31,6 +31,49 @@ pub enum InstData {
     Binary {
         op: BinaryOp,
         args: [Value; 2],
+    },
+    /// Broadcast one scalar into every lane of `ty`.
+    VectorSplat {
+        ty: Type,
+        arg: Value,
+    },
+    VectorUnary {
+        op: UnaryOp,
+        arg: Value,
+    },
+    VectorBinary {
+        op: VectorBinaryOp,
+        args: [Value; 2],
+    },
+    /// Extract a scalar lane. Index is a checked compile-time immediate.
+    VectorExtract {
+        arg: Value,
+        lane: u8,
+    },
+    /// Replace one lane; args are (vector, scalar).
+    VectorInsert {
+        args: [Value; 2],
+        lane: u8,
+    },
+    /// Concatenate two equal-shaped vectors, then choose one source lane per
+    /// output lane. Every index must be in 0..2*lane_count; no undef lanes.
+    VectorShuffle {
+        args: [Value; 2],
+        lanes: Vec<u8>,
+    },
+    /// Comparison masks contain all ones for true, zero for false per lane.
+    VectorIcmp {
+        cond: IntCC,
+        args: [Value; 2],
+    },
+    VectorFcmp {
+        cond: FloatCC,
+        args: [Value; 2],
+    },
+    /// Select an entire lane from args[1] if its integer mask lane is nonzero,
+    /// otherwise args[2]. Mask has the same lane count and width as the arms.
+    VectorSelect {
+        args: [Value; 3],
     },
     /// Integer arithmetic that also reports overflow: the wrapped result,
     /// and an `i8` that is 1 if the exact result does not fit the type
@@ -361,8 +404,8 @@ pub enum ConvertOp {
     /// Integer to float, rounding to nearest.
     Sitofp,
     Uitofp,
-    /// Reinterprets the bits between an integer and a float of the same
-    /// size.
+    /// Reinterprets equal-size bits between vectors (or vector/i128),
+    /// or between a scalar integer and float.
     Bitcast,
 }
 
@@ -435,6 +478,21 @@ impl UnaryOp {
 }
 
 impl InstData {
+    pub fn is_vector_instruction(&self) -> bool {
+        matches!(
+            self,
+            Self::VectorSplat { .. }
+                | Self::VectorUnary { .. }
+                | Self::VectorBinary { .. }
+                | Self::VectorExtract { .. }
+                | Self::VectorInsert { .. }
+                | Self::VectorShuffle { .. }
+                | Self::VectorIcmp { .. }
+                | Self::VectorFcmp { .. }
+                | Self::VectorSelect { .. }
+        )
+    }
+
     /// Pinned instructions keep their position; the rest are pure and float,
     /// placed only by the scheduler.
     pub fn is_pinned(&self) -> bool {
@@ -442,6 +500,15 @@ impl InstData {
             InstData::Binary { op, .. } => op.can_trap(),
             InstData::Intrinsic { id, .. } => !id.info().pure,
             InstData::Iconst { .. }
+            | InstData::VectorSplat { .. }
+            | InstData::VectorUnary { .. }
+            | InstData::VectorBinary { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorIcmp { .. }
+            | InstData::VectorFcmp { .. }
+            | InstData::VectorSelect { .. }
             | InstData::Fconst { .. }
             | InstData::Unary { .. }
             | InstData::Overflow { .. }
@@ -508,6 +575,15 @@ impl InstData {
                 | Intrinsic::Debugtrap => Barrier,
             },
             Self::Iconst { .. }
+            | Self::VectorSplat { .. }
+            | Self::VectorUnary { .. }
+            | Self::VectorBinary { .. }
+            | Self::VectorExtract { .. }
+            | Self::VectorInsert { .. }
+            | Self::VectorShuffle { .. }
+            | Self::VectorIcmp { .. }
+            | Self::VectorFcmp { .. }
+            | Self::VectorSelect { .. }
             | Self::Fconst { .. }
             | Self::Unary { .. }
             | Self::Overflow { .. }
@@ -552,6 +628,15 @@ impl InstData {
                 !matches!(id, Intrinsic::FrameAddress | Intrinsic::StackSave)
             }
             Self::Iconst { .. }
+            | Self::VectorSplat { .. }
+            | Self::VectorUnary { .. }
+            | Self::VectorBinary { .. }
+            | Self::VectorExtract { .. }
+            | Self::VectorInsert { .. }
+            | Self::VectorShuffle { .. }
+            | Self::VectorIcmp { .. }
+            | Self::VectorFcmp { .. }
+            | Self::VectorSelect { .. }
             | Self::Fconst { .. }
             | Self::Unary { .. }
             | Self::Overflow { .. }
@@ -621,7 +706,12 @@ impl InstData {
                 args.iter().copied().for_each(&mut f);
                 dests.iter().flat_map(|d| &d.args).copied().for_each(f);
             }
-            InstData::Binary { args, .. }
+            InstData::VectorBinary { args, .. }
+            | InstData::VectorInsert { args, .. }
+            | InstData::VectorShuffle { args, .. }
+            | InstData::VectorIcmp { args, .. }
+            | InstData::VectorFcmp { args, .. }
+            | InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
             | InstData::AtomicRmw { args, .. }
             | InstData::Icmp { args, .. }
@@ -637,8 +727,13 @@ impl InstData {
                 f(*callee);
                 args.iter().copied().for_each(f);
             }
-            InstData::Select { args } | InstData::Fma { args } => args.iter().copied().for_each(f),
-            InstData::Unary { arg, .. } => f(*arg),
+            InstData::VectorSelect { args }
+            | InstData::Select { args }
+            | InstData::Fma { args } => args.iter().copied().for_each(f),
+            InstData::VectorSplat { arg, .. }
+            | InstData::VectorUnary { arg, .. }
+            | InstData::VectorExtract { arg, .. }
+            | InstData::Unary { arg, .. } => f(*arg),
             InstData::Convert { arg, .. } => f(*arg),
             InstData::Load { addr, .. } => f(*addr),
             InstData::VaArg { list, .. } => f(*list),
@@ -677,7 +772,12 @@ impl InstData {
                 args.iter_mut().for_each(&mut f);
                 dests.iter_mut().flat_map(|d| &mut d.args).for_each(f);
             }
-            InstData::Binary { args, .. }
+            InstData::VectorBinary { args, .. }
+            | InstData::VectorInsert { args, .. }
+            | InstData::VectorShuffle { args, .. }
+            | InstData::VectorIcmp { args, .. }
+            | InstData::VectorFcmp { args, .. }
+            | InstData::Binary { args, .. }
             | InstData::Overflow { args, .. }
             | InstData::AtomicRmw { args, .. }
             | InstData::Icmp { args, .. }
@@ -693,8 +793,13 @@ impl InstData {
                 f(callee);
                 args.iter_mut().for_each(f);
             }
-            InstData::Select { args } | InstData::Fma { args } => args.iter_mut().for_each(f),
-            InstData::Unary { arg, .. } => f(arg),
+            InstData::VectorSelect { args }
+            | InstData::Select { args }
+            | InstData::Fma { args } => args.iter_mut().for_each(f),
+            InstData::VectorSplat { arg, .. }
+            | InstData::VectorUnary { arg, .. }
+            | InstData::VectorExtract { arg, .. }
+            | InstData::Unary { arg, .. } => f(arg),
             InstData::Convert { arg, .. } => f(arg),
             InstData::Load { addr, .. } => f(addr),
             InstData::VaArg { list, .. } => f(list),

@@ -17,6 +17,7 @@ pub mod module;
 pub mod parser;
 pub mod target;
 pub mod types;
+pub mod vector;
 pub mod verifier;
 
 pub use asm::{AsmClobber, AsmOperand, InlineAsm, PhysReg};
@@ -42,6 +43,7 @@ pub use module::Module;
 pub use parser::{ParseError, parse, parse_with_ir_lines};
 pub use target::Target;
 pub use types::Type;
+pub use vector::{VectorBinaryOp, VectorType};
 pub use verifier::{VerifierError, verify, verify_module};
 
 entity!(

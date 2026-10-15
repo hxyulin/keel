@@ -24,7 +24,7 @@ impl<'a> Input<'a> {
                 Item::Text(s) | Item::Label(s) | Item::Branch { target: s, .. } => {
                     s.contains(needle)
                 }
-                Item::Instruction(_) => false,
+                Item::Instruction(_) | Item::X86Instruction(_) => false,
                 Item::Directive(d) => d.contains(needle),
                 Item::Symbolic(s) => s.target().contains(needle),
             }),
@@ -74,6 +74,9 @@ impl<'a> Iterator for Lines<'a> {
             let line = self.next_line;
             self.next_line += 1;
             match item {
+                Item::X86Instruction(_) => {
+                    return Some(Err(Error::new(line, "x86 instruction in AArch64 program")));
+                }
                 Item::Directive(d) => return Some(Ok((line, Entry::Directive(d)))),
                 Item::Symbolic(s) => return Some(Ok((line, Entry::Symbolic(s)))),
                 Item::Instruction(i) => return Some(Ok((line, Entry::Instruction(i)))),
@@ -105,6 +108,9 @@ pub(super) fn materialize(
     let mut text = String::new();
     for item in &program.items {
         match item {
+            Item::X86Instruction(_) => {
+                return Err(Error::new(0, "x86 instruction in AArch64 program"));
+            }
             Item::Text(s) => {
                 text.push_str(s);
                 if !s.ends_with('\n') {

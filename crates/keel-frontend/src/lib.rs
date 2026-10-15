@@ -32,6 +32,7 @@
 use keel_ir::{
     Block, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value,
 };
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 keel_ir::entity!(
@@ -40,42 +41,136 @@ keel_ir::entity!(
     "var"
 );
 
+/// Sparse definitions within one block. Most blocks use only a handful of
+/// variables; keep four inline and spill only the definitions actually used.
+/// Wide blocks use a map so reverse-order definitions cannot cause quadratic
+/// insertion work. Neither representation allocates a variable-by-block matrix.
+enum Definitions {
+    Small(SmallVec<[(Variable, Value); 4]>),
+    Large(HashMap<Variable, Value>),
+}
+
+impl Default for Definitions {
+    fn default() -> Self {
+        Self::Small(SmallVec::new())
+    }
+}
+
+impl Definitions {
+    fn get(&self, var: Variable) -> Option<Value> {
+        match self {
+            Self::Small(entries) => entries
+                .binary_search_by_key(&var, |&(var, _)| var)
+                .ok()
+                .map(|i| entries[i].1),
+            Self::Large(entries) => entries.get(&var).copied(),
+        }
+    }
+
+    fn insert(&mut self, var: Variable, value: Value) {
+        match self {
+            Self::Small(entries) => match entries.binary_search_by_key(&var, |&(var, _)| var) {
+                Ok(i) => entries[i].1 = value,
+                Err(i) if entries.len() < 32 => entries.insert(i, (var, value)),
+                Err(_) => {
+                    let mut map = HashMap::with_capacity(64);
+                    map.extend(std::mem::take(entries));
+                    map.insert(var, value);
+                    *self = Self::Large(map);
+                }
+            },
+            Self::Large(entries) => {
+                entries.insert(var, value);
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct BlockState {
+    /// None for blocks not yet registered with the SSA builder (including
+    /// gaps created through raw Function access).
+    sealed: Option<bool>,
+    defs: Definitions,
+    incomplete: Vec<(Variable, Value)>,
+    preds: Vec<(Inst, usize)>,
+}
+
 pub struct FunctionBuilder<'f> {
-    pub func: &'f mut Function,
+    func: &'f mut Function,
+    cfg_changed: bool,
     current: Option<Block>,
     /// The location instructions built from now on get.
     srcloc: Option<SourceLoc>,
     var_types: Vec<Type>,
-    /// The latest definition of each variable in each block.
-    defs: HashMap<(Variable, Block), Value>,
-    sealed: HashMap<Block, bool>,
-    /// Parameters added to unsealed blocks, filled in by `seal_block`.
-    incomplete: HashMap<Block, Vec<(Variable, Value)>>,
-    /// Branch edges into each sealed block: (branch, destination index).
-    preds: HashMap<Block, Vec<(Inst, usize)>>,
+    /// SSA state indexed directly by block, with sparse variable definitions.
+    blocks: Vec<BlockState>,
     /// Every parameter the builder added, for the final trivial-parameter
     /// cleanup.
     added_params: Vec<(Block, Value)>,
+    /// Incoming edges built so far, indexed by destination block. Sealing
+    /// moves a sorted bucket into `preds`, preserving source-layout order.
+    incoming: Vec<Vec<(Inst, usize)>>,
+    /// The branch terminator already indexed for each source block.
+    indexed_terms: Vec<Option<Inst>>,
+    /// `ins()` lends out a builder; its insertion is observed on the next
+    /// source change or seal, once that mutable borrow has ended.
+    pending: Option<Block>,
 }
 
 impl<'f> FunctionBuilder<'f> {
     pub fn new(func: &'f mut Function) -> Self {
         Self {
             func,
+            cfg_changed: true,
             current: None,
             srcloc: None,
             var_types: Vec::new(),
-            defs: HashMap::new(),
-            sealed: HashMap::new(),
-            incomplete: HashMap::new(),
-            preds: HashMap::new(),
+            blocks: Vec::new(),
             added_params: Vec::new(),
+            incoming: Vec::new(),
+            indexed_terms: Vec::new(),
+            pending: None,
         }
+    }
+
+    /// Shared access to the function under construction.
+    pub fn function(&self) -> &Function {
+        self.func
+    }
+
+    /// Raw mutable access. Any CFG edits are observed before the next
+    /// block is sealed. Already sealed blocks must keep their predecessors.
+    /// Prefer the builder's helpers for ordinary construction, so unrelated
+    /// changes do not require rebuilding the incoming-edge index.
+    pub fn function_mut(&mut self) -> &mut Function {
+        self.cfg_changed = true;
+        self.func
+    }
+
+    pub fn append_block_param(&mut self, block: Block, ty: Type) -> Value {
+        self.func.append_block_param(block, ty)
+    }
+
+    pub fn create_stack_slot(&mut self, size: u32, align: u32) -> keel_ir::StackSlot {
+        self.func.create_stack_slot(size, align)
+    }
+
+    pub fn import_function(&mut self, name: &str, sig: keel_ir::Signature) -> keel_ir::FuncRef {
+        self.func.import_function(name, sig)
+    }
+
+    pub fn import_data(&mut self, name: &str) -> keel_ir::DataRef {
+        self.func.import_data(name)
+    }
+
+    pub fn import_signature(&mut self, sig: keel_ir::Signature) -> keel_ir::SigRef {
+        self.func.import_signature(sig)
     }
 
     pub fn create_block(&mut self) -> Block {
         let block = self.func.create_block();
-        self.sealed.insert(block, false);
+        self.block_state(block).sealed = Some(false);
         block
     }
 
@@ -96,6 +191,10 @@ impl<'f> FunctionBuilder<'f> {
     /// A builder for one instruction at the end of the current block.
     pub fn ins(&mut self) -> InstBuilder<'_> {
         let block = self.current_block();
+        if self.pending != Some(block) {
+            self.sync_preds();
+            self.pending = Some(block);
+        }
         self.func.ins(InsertPoint::End(block)).loc(self.srcloc)
     }
 
@@ -109,7 +208,7 @@ impl<'f> FunctionBuilder<'f> {
         let (want, got) = (self.var_types[var.index()], self.func.value_type(value));
         assert_eq!(want, got, "{var} has type {want}, assigned a {got}");
         let block = self.current_block();
-        self.defs.insert((var, block), value);
+        self.block_state(block).defs.insert(var, value);
     }
 
     /// The value of `var` at the end of the current block so far.
@@ -121,12 +220,19 @@ impl<'f> FunctionBuilder<'f> {
     /// Declares that every branch into `block` has been built, and fills
     /// in the parameters added while it was unsealed.
     pub fn seal_block(&mut self, block: Block) {
-        if self.sealed.insert(block, true) == Some(true) {
+        if self.block_state(block).sealed.replace(true) == Some(true) {
             return;
         }
-        let preds = self.find_preds(block);
-        self.preds.insert(block, preds);
-        for (var, param) in self.incomplete.remove(&block).unwrap_or_default() {
+        self.sync_preds();
+        if self.incoming.len() <= block.index() {
+            self.incoming.resize_with(block.index() + 1, Vec::new);
+        }
+        let mut preds = std::mem::take(&mut self.incoming[block.index()]);
+        // Blocks are created in layout order. Construction may visit them
+        // in a different order; keep SSA arguments/values deterministic.
+        preds.sort_unstable_by_key(|&(inst, dest)| (self.func.inst_block(inst), dest));
+        self.blocks[block.index()].preds = preds;
+        for (var, param) in std::mem::take(&mut self.blocks[block.index()].incomplete) {
             self.add_param_args(var, block, param);
         }
     }
@@ -142,7 +248,7 @@ impl<'f> FunctionBuilder<'f> {
     /// others were removed. Every block must be sealed.
     pub fn finalize(mut self) {
         assert!(
-            self.sealed.values().all(|&s| s),
+            self.blocks.iter().all(|s| s.sealed != Some(false)),
             "finalize needs every block sealed"
         );
         loop {
@@ -162,17 +268,28 @@ impl<'f> FunctionBuilder<'f> {
         }
     }
 
+    fn block_state(&mut self, block: Block) -> &mut BlockState {
+        if self.blocks.len() <= block.index() {
+            self.blocks
+                .resize_with(block.index() + 1, BlockState::default);
+        }
+        &mut self.blocks[block.index()]
+    }
+
     fn read(&mut self, var: Variable, block: Block) -> Value {
-        if let Some(&value) = self.defs.get(&(var, block)) {
+        if let Some(value) = self.blocks.get(block.index()).and_then(|s| s.defs.get(var)) {
             return self.func.resolve(value);
         }
         let ty = self.var_types[var.index()];
-        let value = if !self.sealed[&block] {
+        let value = if !self.blocks[block.index()]
+            .sealed
+            .expect("unregistered SSA block")
+        {
             let param = self.add_param(block, ty);
-            self.incomplete.entry(block).or_default().push((var, param));
+            self.blocks[block.index()].incomplete.push((var, param));
             param
         } else {
-            match self.preds[&block].as_slice() {
+            match self.blocks[block.index()].preds.as_slice() {
                 [] => self.zero(block, ty),
                 &[(branch, _)] => {
                     let pred = self.func.inst_block(branch);
@@ -182,12 +299,12 @@ impl<'f> FunctionBuilder<'f> {
                     // Define the parameter first, so a loop that reaches
                     // this block again finds it instead of recursing.
                     let param = self.add_param(block, ty);
-                    self.defs.insert((var, block), param);
+                    self.blocks[block.index()].defs.insert(var, param);
                     self.add_param_args(var, block, param)
                 }
             }
         };
-        self.defs.insert((var, block), value);
+        self.block_state(block).defs.insert(var, value);
         value
     }
 
@@ -220,7 +337,11 @@ impl<'f> FunctionBuilder<'f> {
     /// Passes each predecessor's value of `var` to `param`, then removes
     /// `param` if it is trivial. Returns what `param` stands for.
     fn add_param_args(&mut self, var: Variable, block: Block, param: Value) -> Value {
-        for (branch, i) in self.preds[&block].clone() {
+        // Reading can add/remove SSA parameters, but sealed predecessor
+        // edges stay fixed. Copy one edge at a time instead of allocating a
+        // clone of the predecessor vector for every new parameter.
+        for edge in 0..self.blocks[block.index()].preds.len() {
+            let (branch, i) = self.blocks[block.index()].preds[edge];
             let pred = self.func.inst_block(branch);
             let value = self.read(var, pred);
             let index = self.param_index(block, param);
@@ -244,7 +365,7 @@ impl<'f> FunctionBuilder<'f> {
     fn try_remove_trivial(&mut self, block: Block, param: Value) -> Value {
         let index = self.param_index(block, param);
         let mut same = None;
-        for &(branch, i) in &self.preds[&block] {
+        for &(branch, i) in &self.blocks[block.index()].preds {
             let arg = self
                 .func
                 .resolve(self.func.inst_data(branch).branch_dests()[i].args[index]);
@@ -260,7 +381,7 @@ impl<'f> FunctionBuilder<'f> {
         let ty = self.func.value_type(param);
         let same = same.unwrap_or_else(|| self.zero(block, ty));
         self.func.remove_block_param(block, index);
-        for &(branch, i) in &self.preds[&block] {
+        for &(branch, i) in &self.blocks[block.index()].preds {
             self.func.inst_data_mut(branch).branch_dests_mut()[i]
                 .args
                 .remove(index);
@@ -269,19 +390,221 @@ impl<'f> FunctionBuilder<'f> {
         same
     }
 
-    /// Branch edges into `block`, read from the terminators built so far.
-    fn find_preds(&self, block: Block) -> Vec<(Inst, usize)> {
-        let mut preds = Vec::new();
-        for b in self.func.blocks() {
-            let Some(&term) = self.func.block_insts(b).last() else {
-                continue;
-            };
-            for (i, dest) in self.func.inst_data(term).branch_dests().iter().enumerate() {
-                if dest.block == block {
-                    preds.push((term, i));
-                }
+    /// Observe the instruction builder most recently lent out. Raw mutable
+    /// access can change any source, so rebuild once after such access.
+    fn sync_preds(&mut self) {
+        if self.cfg_changed {
+            self.rebuild_preds();
+        } else if let Some(block) = self.pending.take() {
+            let term = self.branch_terminator(block);
+            if self.indexed_terms.len() <= block.index() {
+                self.indexed_terms.resize(block.index() + 1, None);
+            }
+            match (self.indexed_terms[block.index()], term) {
+                (old, new) if old == new => {}
+                (None, Some(term)) => self.index_term(block, term),
+                // Appending after an indexed branch can temporarily hide
+                // that branch. Preserve the old last-instruction semantics.
+                _ => self.rebuild_preds(),
             }
         }
-        preds
+    }
+
+    fn branch_terminator(&self, block: Block) -> Option<Inst> {
+        let &term = self.func.block_insts(block).last()?;
+        (!self.func.inst_data(term).branch_dests().is_empty()).then_some(term)
+    }
+
+    fn index_term(&mut self, block: Block, term: Inst) {
+        if self.indexed_terms.len() <= block.index() {
+            self.indexed_terms.resize(block.index() + 1, None);
+        }
+        self.indexed_terms[block.index()] = Some(term);
+        for (i, dest) in self.func.inst_data(term).branch_dests().iter().enumerate() {
+            if self.incoming.len() <= dest.block.index() {
+                self.incoming.resize_with(dest.block.index() + 1, Vec::new);
+            }
+            self.incoming[dest.block.index()].push((term, i));
+        }
+    }
+
+    fn rebuild_preds(&mut self) {
+        for edges in &mut self.incoming {
+            edges.clear();
+        }
+        self.indexed_terms.fill(None);
+        let blocks: Vec<_> = self.func.blocks().collect();
+        for block in blocks {
+            if let Some(term) = self.branch_terminator(block) {
+                self.index_term(block, term);
+            }
+        }
+        self.cfg_changed = false;
+        self.pending = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_ir::{BlockCall, InstData, Signature};
+
+    #[test]
+    fn sparse_definitions_survive_updates_spilling_and_promotion() {
+        let mut defs = Definitions::default();
+        let mut reference = HashMap::new();
+        for (i, key) in [900_000, 7, 40_000, 42].into_iter().enumerate() {
+            defs.insert(Variable::new(key), Value::new(i));
+            reference.insert(Variable::new(key), Value::new(i));
+        }
+        assert!(matches!(&defs, Definitions::Small(entries) if !entries.spilled()));
+        // Updates and sparse IDs must not consume more slots or force a spill.
+        defs.insert(Variable::new(900_000), Value::new(12));
+        reference.insert(Variable::new(900_000), Value::new(12));
+        assert!(
+            matches!(&defs, Definitions::Small(entries) if entries.len() == 4 && !entries.spilled())
+        );
+        assert_eq!(defs.get(Variable::new(899_999)), None);
+        // Reverse insertion exercises sorted movement and the wide-block
+        // fallback; repeated overwrites must preserve the latest definition.
+        for i in (0..96).rev().chain(0..96) {
+            let var = Variable::new(i * 1_001);
+            let value = Value::new(i + reference.len());
+            defs.insert(var, value);
+            reference.insert(var, value);
+            for (&key, &want) in &reference {
+                assert_eq!(defs.get(key), Some(want));
+            }
+        }
+        assert!(matches!(&defs, Definitions::Large(entries) if entries.len() == reference.len()));
+    }
+
+    #[test]
+    fn raw_block_gaps_do_not_register_unused_ssa_state() {
+        let mut func = Function::new("gaps", Signature::new(&[], &[Type::I64]));
+        let raw_entry = func.create_block();
+        let zero = func.ins(InsertPoint::End(raw_entry)).iconst(Type::I64, 0);
+        func.ins(InsertPoint::End(raw_entry)).return_(&[zero]);
+        let mut b = FunctionBuilder::new(&mut func);
+        let block = b.create_block();
+        let var = b.declare_var(Type::I64);
+        b.switch_to_block(block);
+        b.seal_block(block);
+        let result = b.use_var(var);
+        b.ins().return_(&[result]);
+        assert_eq!(b.blocks[raw_entry.index()].sealed, None);
+        b.finalize();
+        keel_ir::verify(&func).unwrap();
+    }
+
+    // Compare the incremental index to the original full scan after every
+    // operation, including edits that bypass FunctionBuilder::ins().
+    fn check_index(b: &mut FunctionBuilder<'_>) {
+        b.sync_preds();
+        for dest in b.func.blocks() {
+            let mut expected = Vec::new();
+            for src in b.func.blocks() {
+                if let Some(&term) = b.func.block_insts(src).last() {
+                    for (i, call) in b.func.inst_data(term).branch_dests().iter().enumerate() {
+                        if call.block == dest {
+                            expected.push((term, i));
+                        }
+                    }
+                }
+            }
+            let mut got = b.incoming.get(dest.index()).cloned().unwrap_or_default();
+            got.sort_unstable_by_key(|&(inst, i)| (b.func.inst_block(inst), i));
+            assert_eq!(got, expected, "incoming edges of {dest}");
+        }
+    }
+
+    #[test]
+    fn indexed_edges_follow_raw_cfg_edits() {
+        let mut func = Function::new("edges", Signature::new(&[], &[]));
+        let mut b = FunctionBuilder::new(&mut func);
+        let blocks: Vec<_> = (0..8).map(|_| b.create_block()).collect();
+        // Visit sources out of layout order and include duplicate edges.
+        for i in [5, 1, 7, 0, 3, 2, 6, 4] {
+            b.switch_to_block(blocks[i]);
+            let cond = b.ins().iconst(Type::I8, 1);
+            b.ins()
+                .brif(cond, blocks[(i + 1) % 8], &[], blocks[(i + 1) % 8], &[]);
+            check_index(&mut b);
+        }
+        let term = *b.func.block_insts(blocks[5]).last().unwrap();
+        b.function_mut().inst_data_mut(term).branch_dests_mut()[1].block = blocks[2];
+        check_index(&mut b);
+        b.function_mut().remove_inst(term);
+        check_index(&mut b);
+        let moved = *b.func.block_insts(blocks[6]).last().unwrap();
+        b.function_mut()
+            .move_inst(moved, InsertPoint::End(blocks[3]));
+        check_index(&mut b);
+        b.function_mut().remove_block(blocks[7]);
+        check_index(&mut b);
+        let extra = b.function_mut().create_block();
+        let arg = b.func.inst_results(b.func.block_insts(blocks[0])[0])[0];
+        b.function_mut().ins(InsertPoint::End(extra)).switch(
+            arg,
+            BlockCall {
+                block: blocks[2],
+                args: vec![],
+            },
+            vec![
+                (
+                    1,
+                    BlockCall {
+                        block: blocks[2],
+                        args: vec![],
+                    },
+                ),
+                (
+                    2,
+                    BlockCall {
+                        block: blocks[4],
+                        args: vec![],
+                    },
+                ),
+            ],
+        );
+        check_index(&mut b);
+        // Replacing the entire function is also a mutable dereference.
+        *b.function_mut() = Function::new("replacement", Signature::new(&[], &[]));
+        let block = b.function_mut().create_block();
+        b.function_mut().append_inst(
+            block,
+            InstData::Jump {
+                dest: BlockCall {
+                    block,
+                    args: vec![],
+                },
+            },
+        );
+        check_index(&mut b);
+    }
+
+    #[test]
+    fn revisiting_sources_and_hiding_terminators() {
+        let mut func = Function::new("edges", Signature::new(&[], &[]));
+        let mut b = FunctionBuilder::new(&mut func);
+        let a = b.create_block();
+        let c = b.create_block();
+        b.switch_to_block(a);
+        b.ins().jump(c, &[]);
+        check_index(&mut b);
+        // A non-branch at the end hides the previous branch, just as in
+        // the original scan, even in this temporarily invalid block.
+        b.ins().iconst(Type::I64, 0);
+        check_index(&mut b);
+        b.ins().jump(c, &[]);
+        check_index(&mut b);
+        b.switch_to_block(c);
+        let unused_builder = b.ins();
+        drop(unused_builder);
+        check_index(&mut b);
+        b.switch_to_block(a);
+        let unused_builder = b.ins();
+        drop(unused_builder);
+        check_index(&mut b);
     }
 }

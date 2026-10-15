@@ -7,12 +7,14 @@
 //! Apple's Mach headers do); each token records the limit. Other `#` lines
 //! are skipped.
 
+use crate::strings::Strings;
 use crate::{Error, Loc};
+use std::collections::HashMap;
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum Tok {
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Tok<'a> {
     /// Identifiers and keywords alike; the parser tells them apart.
-    Ident(String),
+    Ident(&'a str),
     /// An integer constant: its value, and whether it was decimal, which
     /// changes the types it may get.
     Int {
@@ -32,40 +34,134 @@ pub enum Tok {
     /// A string literal's bytes, without the terminating zero. Wide
     /// literals (`L"..."`) hold their code points as `u32`s.
     Str {
-        bytes: Vec<u8>,
+        bytes: &'a [u8],
         wide: bool,
     },
     Punct(&'static str),
     /// A preprocessing number that is not a valid constant, like the
     /// `10.12.1` in `availability(macos, introduced=10.12.1)`: only an
     /// error if an expression uses it.
-    BadNumber(String),
+    BadNumber(&'a str),
     Eof,
 }
 
-#[derive(Clone, Debug)]
-pub struct Token {
-    pub tok: Tok,
+#[derive(Clone, Copy, Debug)]
+pub struct Token<'a> {
+    pub tok: Tok<'a>,
     pub loc: Loc,
     /// The `#pragma pack` alignment limit in force, if any.
     pub pack: Option<u64>,
 }
 
+#[cfg(test)]
 const PUNCTS: [&str; 48] = [
     "...", "<<=", ">>=", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "*=",
     "/=", "%=", "+=", "-=", "&=", "^=", "|=", "##", "[", "]", "(", ")", "{", "}", ".", "&", "*",
     "+", "-", "~", "!", "/", "%", "<", ">", "^", "|", "?", ":", ";", "=", ",", "#",
 ];
 
+// Longest-match dispatch reads at most three bounded bytes. A punctuation
+// token never walks unrelated spellings or calls a general string comparator.
+#[inline]
+fn punctuation(bytes: &[u8]) -> Option<&'static str> {
+    let a = *bytes.first()?;
+    let b = bytes.get(1).copied().unwrap_or(0);
+    let c = bytes.get(2).copied().unwrap_or(0);
+    Some(match a {
+        b'.' if b == b'.' && c == b'.' => "...",
+        b'<' if b == b'<' => {
+            if c == b'=' {
+                "<<="
+            } else {
+                "<<"
+            }
+        }
+        b'>' if b == b'>' => {
+            if c == b'=' {
+                ">>="
+            } else {
+                ">>"
+            }
+        }
+        b'-' if b == b'>' => "->",
+        b'+' if b == b'+' => "++",
+        b'-' if b == b'-' => "--",
+        b'<' if b == b'=' => "<=",
+        b'>' if b == b'=' => ">=",
+        b'=' if b == b'=' => "==",
+        b'!' if b == b'=' => "!=",
+        b'&' if b == b'&' => "&&",
+        b'|' if b == b'|' => "||",
+        b'*' if b == b'=' => "*=",
+        b'/' if b == b'=' => "/=",
+        b'%' if b == b'=' => "%=",
+        b'+' if b == b'=' => "+=",
+        b'-' if b == b'=' => "-=",
+        b'&' if b == b'=' => "&=",
+        b'^' if b == b'=' => "^=",
+        b'|' if b == b'=' => "|=",
+        b'#' if b == b'#' => "##",
+        b'[' => "[",
+        b']' => "]",
+        b'(' => "(",
+        b')' => ")",
+        b'{' => "{",
+        b'}' => "}",
+        b'.' => ".",
+        b'&' => "&",
+        b'*' => "*",
+        b'+' => "+",
+        b'-' => "-",
+        b'~' => "~",
+        b'!' => "!",
+        b'/' => "/",
+        b'%' => "%",
+        b'<' => "<",
+        b'>' => ">",
+        b'^' => "^",
+        b'|' => "|",
+        b'?' => "?",
+        b':' => ":",
+        b';' => ";",
+        b'=' => "=",
+        b',' => ",",
+        b'#' => "#",
+        _ => return None,
+    })
+}
+
+const IDENT: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        table[i] = (i as u8).is_ascii_alphanumeric() || i == b'_' as usize || i == b'$' as usize;
+        i += 1;
+    }
+    table
+};
+
 /// Splits `src` into tokens. `files` collects the file names line markers
 /// mention; a token's `Loc::file` indexes it.
-pub fn tokenize(src: &str, path: &str, files: &mut Vec<String>) -> Result<Vec<Token>, Error> {
+pub fn tokenize<'a>(
+    src: &str,
+    path: &str,
+    files: &mut Vec<&'a str>,
+    text: &mut Strings<'a>,
+) -> Result<Vec<Token<'a>>, Error> {
+    let file = file_index(files, path, text);
+    let file_ids = files
+        .iter()
+        .enumerate()
+        .map(|(i, &name)| (name, i as u32))
+        .collect();
     let mut lx = Lexer {
         src: src.as_bytes(),
         pos: 0,
         line: 1,
         line_start: 0,
-        file: file_index(files, path),
+        file,
+        file_ids,
+        text,
         files,
         pack: Vec::new(),
     };
@@ -74,7 +170,7 @@ pub fn tokenize(src: &str, path: &str, files: &mut Vec<String>) -> Result<Vec<To
         let tok = lx.next()?;
         // GNU's `__extension__` only silences pedantic warnings, and may
         // come before a declaration or any expression.
-        if matches!(&tok.tok, Tok::Ident(s) if s == "__extension__") {
+        if matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
             continue;
         }
         let end = tok.tok == Tok::Eof;
@@ -85,28 +181,30 @@ pub fn tokenize(src: &str, path: &str, files: &mut Vec<String>) -> Result<Vec<To
     }
 }
 
-fn file_index(files: &mut Vec<String>, name: &str) -> u32 {
-    match files.iter().position(|f| f == name) {
+fn file_index<'a>(files: &mut Vec<&'a str>, name: &str, text: &mut Strings<'a>) -> u32 {
+    match files.iter().position(|f| *f == name) {
         Some(i) => i as u32,
         None => {
-            files.push(name.to_string());
+            files.push(text.intern(name));
             files.len() as u32 - 1
         }
     }
 }
 
-struct Lexer<'a> {
-    src: &'a [u8],
+struct Lexer<'s, 'b, 'a> {
+    src: &'s [u8],
     pos: usize,
     line: u32,
     line_start: usize,
     file: u32,
-    files: &'a mut Vec<String>,
+    files: &'b mut Vec<&'a str>,
+    text: &'b mut Strings<'a>,
+    file_ids: HashMap<&'a str, u32>,
     /// `#pragma pack` limits: the last is in force, `None` for none.
     pack: Vec<Option<u64>>,
 }
 
-impl Lexer<'_> {
+impl<'a> Lexer<'_, '_, 'a> {
     fn peek(&self, n: usize) -> u8 {
         self.src.get(self.pos + n).copied().unwrap_or(0)
     }
@@ -135,7 +233,12 @@ impl Lexer<'_> {
         loop {
             match self.peek(0) {
                 b'\n' => self.newline(),
-                b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b' => self.pos += 1,
+                b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b' => {
+                    self.pos += 1;
+                    while matches!(self.peek(0), b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b') {
+                        self.pos += 1;
+                    }
+                }
                 b'\\' if self.peek(1) == b'\n' => {
                     self.pos += 1;
                     self.newline();
@@ -176,21 +279,30 @@ impl Lexer<'_> {
         while !matches!(self.peek(0), b'\n' | 0) {
             self.pos += 1;
         }
-        let text = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
         let text = text.trim_start();
         if let Some(rest) = text.strip_prefix("pragma") {
             self.pragma(rest);
         }
         let text = text.strip_prefix("line").unwrap_or(text).trim_start();
-        let digits: String = text.chars().take_while(char::is_ascii_digit).collect();
-        let Ok(line) = digits.parse::<u32>() else {
+        let end = text.bytes().take_while(u8::is_ascii_digit).count();
+        let Ok(line) = text[..end].parse::<u32>() else {
             return;
         };
-        let rest = text[digits.len()..].trim_start();
+        let rest = text[end..].trim_start();
         if let Some(name) = rest.strip_prefix('"')
             && let Some(end) = name.find('"')
         {
-            self.file = file_index(self.files, &name[..end]);
+            let name = &name[..end];
+            self.file = if let Some(&id) = self.file_ids.get(name) {
+                id
+            } else {
+                let name = self.text.intern(name);
+                let id = self.files.len() as u32;
+                self.files.push(name);
+                self.file_ids.insert(name, id);
+                id
+            };
         }
         if self.peek(0) == b'\n' {
             self.newline();
@@ -222,7 +334,7 @@ impl Lexer<'_> {
         }
     }
 
-    fn next(&mut self) -> Result<Token, Error> {
+    fn next(&mut self) -> Result<Token<'a>, Error> {
         self.skip_space()?;
         let loc = self.loc();
         let c = self.peek(0);
@@ -237,17 +349,20 @@ impl Lexer<'_> {
             self.quoted(false)?
         } else if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
             let start = self.pos;
-            while self.peek(0).is_ascii_alphanumeric() || matches!(self.peek(0), b'_' | b'$') {
+            while IDENT[self.peek(0) as usize] {
                 self.pos += 1;
             }
-            Tok::Ident(String::from_utf8_lossy(&self.src[start..self.pos]).into_owned())
+            Tok::Ident(
+                self.text
+                    .intern(std::str::from_utf8(&self.src[start..self.pos]).unwrap()),
+            )
         } else if c.is_ascii_digit() || (c == b'.' && self.peek(1).is_ascii_digit()) {
             self.number()?
         } else if c == b'"' || c == b'\'' {
             self.quoted(false)?
         } else {
             let rest = &self.src[self.pos..];
-            let Some(p) = PUNCTS.iter().find(|p| rest.starts_with(p.as_bytes())) else {
+            let Some(p) = punctuation(rest) else {
                 return Err(self.error(format!("unexpected character `{}`", c as char)));
             };
             self.pos += p.len();
@@ -258,7 +373,7 @@ impl Lexer<'_> {
     }
 
     /// A preprocessing number, then its value.
-    fn number(&mut self) -> Result<Tok, Error> {
+    fn number(&mut self) -> Result<Tok<'a>, Error> {
         let start = self.pos;
         loop {
             let c = self.peek(0);
@@ -271,16 +386,19 @@ impl Lexer<'_> {
             }
         }
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        Ok(parse_number(text).unwrap_or_else(|| Tok::BadNumber(text.to_string())))
+        Ok(parse_number(text).unwrap_or_else(|| Tok::BadNumber(self.text.intern(text))))
     }
 
     /// A character constant or string literal, the opening quote next.
-    fn quoted(&mut self, wide: bool) -> Result<Tok, Error> {
+    fn quoted(&mut self, wide: bool) -> Result<Tok<'a>, Error> {
         let quote = self.peek(0);
         self.pos += 1;
-        let mut units: Vec<u32> = Vec::new();
+        let string = quote == b'"';
+        let mut bytes = Vec::new();
+        let (mut count, mut first, mut packed) = (0usize, 0u32, 0u32);
         loop {
-            match self.peek(0) {
+            let c = self.peek(0);
+            let unit = match c {
                 0 | b'\n' => return Err(self.error("unterminated literal")),
                 c if c == quote => {
                     self.pos += 1;
@@ -288,39 +406,63 @@ impl Lexer<'_> {
                 }
                 b'\\' => {
                     self.pos += 1;
-                    let unit = self.escape()?;
-                    units.push(unit);
+                    self.escape()?
                 }
                 _ if wide => {
-                    // Decode one UTF-8 character into a code point.
-                    let rest = std::str::from_utf8(&self.src[self.pos..]).unwrap_or("\u{fffd}");
-                    let ch = rest.chars().next().unwrap_or('\u{fffd}');
-                    self.pos += ch.len_utf8().max(1);
-                    units.push(ch as u32);
+                    // Decode only this scalar, never revalidate the remainder
+                    // of a potentially megabyte-sized translation unit.
+                    let width = match c {
+                        0..=0x7f => 1,
+                        0xc0..=0xdf => 2,
+                        0xe0..=0xef => 3,
+                        _ => 4,
+                    };
+                    let end = (self.pos + width).min(self.src.len());
+                    let text = std::str::from_utf8(&self.src[self.pos..end]).unwrap_or("\u{fffd}");
+                    let ch = text.chars().next().unwrap_or('\u{fffd}');
+                    self.pos += ch.len_utf8();
+                    ch as u32
+                }
+                _ if string => {
+                    let rest = &self.src[self.pos..];
+                    let end = memchr::memchr3(quote, b'\\', b'\n', rest).unwrap_or(rest.len());
+                    let span = &rest[..end];
+                    if let Some(at) = memchr::memchr(0, span) {
+                        self.pos += at;
+                        return Err(self.error("unterminated literal"));
+                    }
+                    bytes.extend_from_slice(span);
+                    self.pos += end;
+                    continue;
                 }
                 c => {
                     self.pos += 1;
-                    units.push(u32::from(c));
+                    u32::from(c)
                 }
+            };
+            if string {
+                if wide {
+                    bytes.extend_from_slice(&unit.to_le_bytes());
+                } else {
+                    bytes.push(unit as u8);
+                }
+            } else {
+                first = if count == 0 { unit } else { first };
+                count += 1;
+                packed = (packed << 8) | (unit & 0xff);
             }
         }
-        if quote == b'"' {
-            let bytes = if wide {
-                units.iter().flat_map(|u| u.to_le_bytes()).collect()
-            } else {
-                units.iter().map(|&u| u as u8).collect()
-            };
-            return Ok(Tok::Str { bytes, wide });
+        if string {
+            return Ok(Tok::Str {
+                bytes: self.text.bytes(&bytes),
+                wide,
+            });
         }
-        match units.as_slice() {
-            [] => Err(self.error("empty character constant")),
-            // A plain `char` is signed: '\xff' is -1.
-            [u] if !wide => Ok(Tok::Char(i64::from(*u as u8 as i8))),
-            [u] => Ok(Tok::Char(i64::from(*u))),
-            // Multi-character constants, as GCC and clang give them.
-            _ => Ok(Tok::Char(i64::from(
-                units.iter().fold(0u32, |acc, &u| (acc << 8) | (u & 0xff)) as i32,
-            ))),
+        match count {
+            0 => Err(self.error("empty character constant")),
+            1 if !wide => Ok(Tok::Char(i64::from(first as u8 as i8))),
+            1 => Ok(Tok::Char(i64::from(first))),
+            _ => Ok(Tok::Char(i64::from(packed as i32))),
         }
     }
 
@@ -382,19 +524,21 @@ impl Lexer<'_> {
 }
 
 /// The value of an integer or floating constant.
-fn parse_number(text: &str) -> Option<Tok> {
-    let lower = text.to_ascii_lowercase();
-    let hex = lower.starts_with("0x");
-    let is_float = if hex {
-        lower.contains('.') || lower.contains('p')
-    } else {
-        lower.contains('.') || lower.contains('e')
-    };
+fn parse_number<'a>(text: &str) -> Option<Tok<'a>> {
+    let hex = text.starts_with("0x") || text.starts_with("0X");
+    let is_float = text.bytes().any(|b| {
+        b == b'.'
+            || if hex {
+                matches!(b, b'p' | b'P')
+            } else {
+                matches!(b, b'e' | b'E')
+            }
+    });
     if is_float {
-        let (body, single) = if let Some(b) = lower.strip_suffix('f') {
-            (b, true)
-        } else {
-            (lower.strip_suffix('l').unwrap_or(&lower), false)
+        let (body, single) = match text.as_bytes().last()? {
+            b'f' | b'F' => (&text[..text.len() - 1], true),
+            b'l' | b'L' => (&text[..text.len() - 1], false),
+            _ => (text, false),
         };
         let value = if hex {
             parse_hex_float(&body[2..])?
@@ -410,21 +554,30 @@ fn parse_number(text: &str) -> Option<Tok> {
         };
         return Some(Tok::Float { value, single });
     }
-    let digits_end = lower.find(['u', 'l']).unwrap_or(lower.len());
-    let (digits, suffix) = lower.split_at(digits_end);
-    let (unsigned, longs) = match suffix {
-        "" => (false, 0),
-        "u" => (true, 0),
-        "l" => (false, 1),
-        "ul" | "lu" => (true, 1),
-        "ll" => (false, 2),
-        "ull" | "llu" => (true, 2),
+    let end = text.find(['u', 'U', 'l', 'L']).unwrap_or(text.len());
+    let (digits, suffix) = text.split_at(end);
+    // Only the at-most-three suffix bytes need folding; numeric tokens never
+    // allocate a lowercase copy of the full spelling.
+    if suffix.len() > 3 {
+        return None;
+    }
+    let mut folded = [0; 3];
+    for (to, from) in folded.iter_mut().zip(suffix.bytes()) {
+        *to = from.to_ascii_lowercase();
+    }
+    let (unsigned, longs) = match &folded[..suffix.len()] {
+        b"" => (false, 0),
+        b"u" => (true, 0),
+        b"l" => (false, 1),
+        b"ul" | b"lu" => (true, 1),
+        b"ll" => (false, 2),
+        b"ull" | b"llu" => (true, 2),
         _ => return None,
     };
-    let (radix, body) = if let Some(h) = digits.strip_prefix("0x") {
-        (16, h)
-    } else if let Some(b) = digits.strip_prefix("0b") {
-        (2, b)
+    let (radix, body) = if hex {
+        (16, &digits[2..])
+    } else if digits.starts_with("0b") || digits.starts_with("0B") {
+        (2, &digits[2..])
     } else if digits.len() > 1 && digits.starts_with('0') {
         (8, &digits[1..])
     } else {
@@ -442,7 +595,7 @@ fn parse_number(text: &str) -> Option<Tok> {
 /// `1.8p3` (the part after `0x`): hex digits with an optional point, and
 /// a binary exponent. Exact while the digits fit in 64 bits.
 fn parse_hex_float(text: &str) -> Option<f64> {
-    let (mantissa, exp) = match text.split_once('p') {
+    let (mantissa, exp) = match text.split_once(['p', 'P']) {
         Some((m, e)) => (m, e.parse::<i32>().ok()?),
         None => (text, 0),
     };
@@ -482,4 +635,169 @@ fn parse_hex_float(text: &str) -> Option<f64> {
         shift -= 1000;
     }
     Some(value * 2f64.powi(shift))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn numeric_spellings_match_the_previous_decoder() {
+        for value in [0, 1, 7, 255, 65536, u32::MAX as u64, u64::MAX] {
+            for body in [
+                format!("{value}"),
+                format!("0{value:o}"),
+                format!("0x{value:x}"),
+                format!("0X{value:X}"),
+                format!("0b{value:b}"),
+                format!("0B{value:b}"),
+            ] {
+                for suffix in [
+                    "", "U", "l", "LL", "ul", "Lu", "uLL", "LLu", "lL", "UU", "f", "invalid",
+                ] {
+                    let text = format!("{body}{suffix}");
+                    assert_eq!(parse_number(&text), parse_number_reference(&text), "{text}");
+                }
+            }
+        }
+        for text in [
+            "1.0",
+            ".5f",
+            "1E20F",
+            "1e999L",
+            "0x1.fp3",
+            "0X1.FP-10L",
+            "0x1.1",
+            "12_34",
+            "0x",
+            "1.2.3",
+            "0XFF",
+            "0x1p0F",
+        ] {
+            assert_eq!(parse_number(text), parse_number_reference(text), "{text}");
+        }
+    }
+
+    fn parse_number_reference<'a>(text: &str) -> Option<Tok<'a>> {
+        let lower = text.to_ascii_lowercase();
+        let hex = lower.starts_with("0x");
+        let is_float = if hex {
+            lower.contains('.') || lower.contains('p')
+        } else {
+            lower.contains('.') || lower.contains('e')
+        };
+        if is_float {
+            let (body, single) = if let Some(b) = lower.strip_suffix('f') {
+                (b, true)
+            } else {
+                (lower.strip_suffix('l').unwrap_or(&lower), false)
+            };
+            let value = if hex {
+                parse_hex_float(&body[2..])?
+            } else if single {
+                f64::from(body.parse::<f32>().ok()?)
+            } else {
+                body.parse::<f64>().ok()?
+            };
+            let value = if single && hex {
+                f64::from(value as f32)
+            } else {
+                value
+            };
+            return Some(Tok::Float { value, single });
+        }
+        let digits_end = lower.find(['u', 'l']).unwrap_or(lower.len());
+        let (digits, suffix) = lower.split_at(digits_end);
+        let (unsigned, longs) = match suffix {
+            "" => (false, 0),
+            "u" => (true, 0),
+            "l" => (false, 1),
+            "ul" | "lu" => (true, 1),
+            "ll" => (false, 2),
+            "ull" | "llu" => (true, 2),
+            _ => return None,
+        };
+        let (radix, body) = if let Some(h) = digits.strip_prefix("0x") {
+            (16, h)
+        } else if let Some(b) = digits.strip_prefix("0b") {
+            (2, b)
+        } else if digits.len() > 1 && digits.starts_with('0') {
+            (8, &digits[1..])
+        } else {
+            (10, digits)
+        };
+        let value = u64::from_str_radix(body, radix).ok()?;
+        Some(Tok::Int {
+            value,
+            decimal: radix == 10,
+            unsigned,
+            longs,
+        })
+    }
+
+    #[test]
+    fn literals_keep_width_escape_bytes_and_multibyte_scalars() {
+        let arena = bumpalo::Bump::new();
+        let mut pool = Strings::new(&arena);
+        let mut files = Vec::new();
+        let tokens = tokenize(
+            r#""ab\0cd" "hé" L"λ中𐐀" '\xff' 'ab' L'λ'"#,
+            "literals.c",
+            &mut files,
+            &mut pool,
+        )
+        .unwrap();
+        assert_eq!(
+            tokens[0].tok,
+            Tok::Str {
+                bytes: b"ab\0cd",
+                wide: false
+            }
+        );
+        assert_eq!(
+            tokens[1].tok,
+            Tok::Str {
+                bytes: "hé".as_bytes(),
+                wide: false
+            }
+        );
+        let wide: Vec<u8> = "λ中𐐀"
+            .chars()
+            .flat_map(|c| (c as u32).to_le_bytes())
+            .collect();
+        assert_eq!(
+            tokens[2].tok,
+            Tok::Str {
+                bytes: &wide,
+                wide: true
+            }
+        );
+        assert_eq!(tokens[3].tok, Tok::Char(-1));
+        assert_eq!(tokens[4].tok, Tok::Char(0x6162));
+        assert_eq!(tokens[5].tok, Tok::Char('λ' as i64));
+    }
+
+    #[test]
+    fn punctuation_longest_match_on_all_spellings_and_boundaries() {
+        for a in PUNCTS {
+            for b in PUNCTS {
+                let text = format!("{a}{b}");
+                for end in 0..=text.len() {
+                    let input = &text.as_bytes()[..end];
+                    let expected = PUNCTS
+                        .iter()
+                        .find(|p| input.starts_with(p.as_bytes()))
+                        .copied();
+                    assert_eq!(punctuation(input), expected, "{text:?} at {end}");
+                }
+            }
+        }
+        for byte in 0..=255u8 {
+            let input = [byte];
+            let expected = PUNCTS
+                .iter()
+                .find(|p| input.starts_with(p.as_bytes()))
+                .copied();
+            assert_eq!(punctuation(&input), expected);
+        }
+    }
 }

@@ -10,6 +10,6 @@ verifier errors:
   @f inst8 `v11 = fptrunc.f32 v1`: fptrunc converts f64 to f32, got f32 to f32
   @f inst9 `v12 = fptosi.i8 v0`: fptosi converts a float to i32 or i64, got f64 to i8
   @f inst10 `v13 = sitofp.i32 v2`: sitofp converts an integer up to i64 to a float, got i32 to i32
-  @f inst11 `v14 = bitcast.f64 v2`: bitcast converts between an integer and a float of the same size, got i32 to f64
+  @f inst11 `v14 = bitcast.f64 v2`: bitcast converts between same-size vectors/scalars, or a scalar integer and float, got i32 to f64
   @f inst13 `v16 = sext.i64 v0`: sext must convert an integer to a wider integer, got f64 to i64
   @f inst14 `brif v0, block1, block1`: brif condition must be an integer, got f64

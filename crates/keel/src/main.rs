@@ -1,11 +1,11 @@
 //! The keel driver:
 //!
 //! ```text
-//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
-//! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
-//! keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
+//! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
+//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 A64 assembly to Mach-O
+//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch A64 assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -15,8 +15,8 @@
 //! Assembly has debug info if the input names source files (`file`
 //! lines); `-g` gives an input without them its own lines instead, for
 //! stepping through the IR in a debugger.
-//! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
-//! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
+//! `cc` preprocesses raw C (or accepts `.i` files), then compiles to assembly or,
+//! with `--emit-ir`, to keel IR; `-E` stops after preprocessing; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
 //! `compile`/`cc --emit-object -o output.o` compose structured codegen and
 //! object emission in-process for AArch64 Mach-O.
@@ -30,15 +30,17 @@ use keel_ir::Module;
 use std::process::ExitCode;
 mod asm;
 mod input;
+mod link;
 
 const USAGE: &str = "usage:
-  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
-  keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O)
-  keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
-  keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
+  keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
+  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
+  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
+  keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel passes
 
   Input files must remain unchanged during parsing.";
@@ -67,9 +69,17 @@ struct Options {
     #[cfg(feature = "experimental-regalloc")]
     remat: u8,
     tuning: keel_codegen::tuning::TuningCpu,
+    x86_features: keel_asm::x86::Features,
     ir_lines: bool,
     emit_ir: bool,
     emit_object: bool,
+    preprocess_only: bool,
+    dump_macros: bool,
+    sysroot: Option<std::path::PathBuf>,
+    system_include_dirs: Vec<std::path::PathBuf>,
+    darwin_deployment: Option<String>,
+    include_dirs: Vec<std::path::PathBuf>,
+    defines: Vec<(String, Option<String>)>,
     passes: Option<Vec<String>>,
     target: Option<Target>,
 }
@@ -80,9 +90,21 @@ impl Options {
         match &self.passes {
             Some(names) => {
                 let names: Vec<_> = names.iter().map(String::as_str).collect();
-                keel_opt::run_passes(module, &names)
+                keel_opt::run_passes_for_target(module, &names, self.vector_target())
             }
-            None => keel_opt::optimize_with_tier(module, self.optimization),
+            None => keel_opt::run_passes_for_target(
+                module,
+                self.optimization.pipeline(),
+                self.vector_target(),
+            ),
+        }
+    }
+
+    fn vector_target(&self) -> keel_opt::VectorTarget {
+        match self.target.or_else(Target::host) {
+            Some(Target::Aarch64AppleDarwin) => keel_opt::VectorTarget::Aarch64Neon,
+            Some(Target::X86_64LinuxGnu) => keel_opt::VectorTarget::X86Sse2,
+            None => keel_opt::VectorTarget::Portable,
         }
     }
 
@@ -95,17 +117,106 @@ impl Options {
             .map_err(str::to_string)?;
         Ok(target)
     }
+
+    fn preprocessing_sysroot(&self, target: Target) -> Result<Option<std::path::PathBuf>, String> {
+        if let Some(root) = &self.sysroot {
+            if !root.is_dir() {
+                return Err(format!("sysroot is not a directory: {}", root.display()));
+            }
+            return Ok(Some(root.clone()));
+        }
+        if target != Target::Aarch64AppleDarwin {
+            return Ok(None);
+        }
+        if let Some(root) = std::env::var_os("SDKROOT").filter(|s| !s.is_empty()) {
+            let root = std::path::PathBuf::from(root);
+            if !root.is_dir() {
+                return Err(format!("SDKROOT is not a directory: {}", root.display()));
+            }
+            return Ok(Some(root));
+        }
+        if cfg!(target_os = "macos")
+            && let Ok(out) = std::process::Command::new("xcrun")
+                .args(["--sdk", "macosx", "--show-sdk-path"])
+                .output()
+            && out.status.success()
+        {
+            let root = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+            if root.is_dir() {
+                return Ok(Some(root));
+            }
+        }
+        // Sources using only compiler headers can still compile without an SDK.
+        Ok(None)
+    }
 }
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        let flag = arg.as_str();
+        let raw = arg.as_str();
+        let flag = if raw.starts_with("--sysroot=") {
+            "--sysroot"
+        } else if raw.starts_with("-mmacosx-version-min=") {
+            "-mmacosx-version-min"
+        } else if raw.starts_with("-I") {
+            "-I"
+        } else if raw.starts_with("-D") {
+            "-D"
+        } else if raw.starts_with("-U") {
+            "-U"
+        } else {
+            raw
+        };
         if flag.starts_with('-') && !allowed.contains(&flag) {
             return Err(format!("unknown flag `{flag}`\n{USAGE}"));
         }
         match flag {
+            "-I" | "-D" | "-U" => {
+                let value = if raw.len() > 2 {
+                    raw[2..].to_string()
+                } else {
+                    args.next()
+                        .ok_or_else(|| format!("`{flag}` needs a value"))?
+                        .clone()
+                };
+                match flag {
+                    "-I" => opts.include_dirs.push(value.into()),
+                    "-D" => {
+                        let (name, body) = value.split_once('=').unwrap_or((&value, "1"));
+                        opts.defines.push((name.into(), Some(body.into())));
+                    }
+                    _ => opts.defines.push((value, None)),
+                }
+            }
+            "--sysroot" | "-isysroot" => {
+                let value = raw
+                    .strip_prefix("--sysroot=")
+                    .map(str::to_string)
+                    .or_else(|| args.next().cloned())
+                    .ok_or("`--sysroot` needs a directory")?;
+                if value.is_empty() {
+                    return Err("`--sysroot` needs a nonempty directory".into());
+                }
+                opts.sysroot = Some(value.into());
+            }
+            "-isystem" => opts
+                .system_include_dirs
+                .push(args.next().ok_or("`-isystem` needs a directory")?.into()),
+            "-mmacosx-version-min" => {
+                opts.darwin_deployment = Some(
+                    raw.split_once('=')
+                        .map(|(_, v)| v.to_string())
+                        .or_else(|| args.next().cloned())
+                        .ok_or("`-mmacosx-version-min` needs a version")?,
+                )
+            }
+            "-dM" => {
+                opts.dump_macros = true;
+                opts.preprocess_only = true;
+            }
+            "-E" => opts.preprocess_only = true,
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
@@ -177,6 +288,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     }
                 }
             }
+            "--target-features" => {
+                opts.x86_features = keel_asm::x86::Features::parse(
+                    args.next()
+                        .ok_or("--target-features needs avx,bmi1,bmi2 or none")?,
+                )?;
+            }
             "--tune" => {
                 let name = args.next().ok_or("`--tune` needs generic or apple-m5")?;
                 opts.tuning = keel_codegen::tuning::TuningCpu::from_name(name)
@@ -245,6 +362,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             write_output(&opts, &output)
         }
         "asm" => asm::run(rest),
+        "link" => link::run(rest),
         "compile" => {
             let opts = parse_options(
                 rest,
@@ -261,6 +379,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--remat",
                     "--isel-tier",
                     "--tune",
+                    "--target-features",
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
@@ -277,6 +396,15 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-p",
                     "-g",
                     "--emit-ir",
+                    "-E",
+                    "-dM",
+                    "-I",
+                    "-D",
+                    "-U",
+                    "--sysroot",
+                    "-isysroot",
+                    "-isystem",
+                    "-mmacosx-version-min",
                     "--target",
                     "--emit-object",
                     "--isel",
@@ -285,19 +413,52 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--remat",
                     "--isel-tier",
                     "--tune",
+                    "--target-features",
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
             let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
+            if opts.preprocess_only && (opts.emit_ir || opts.emit_object) {
+                return Err("preprocessing (`-E`/`-dM`) and `--emit-ir`/`--emit-object` cannot be used together".into());
+            }
+            let preprocessed = if opts.preprocess_only || !input.ends_with(".i") {
+                Some(
+                    keel_c::preprocess(
+                        text,
+                        &input,
+                        &keel_c::PreprocessOptions {
+                            include_dirs: opts.include_dirs.clone(),
+                            system_include_dirs: opts.system_include_dirs.clone(),
+                            sysroot: opts.preprocessing_sysroot(target)?,
+                            darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
+                                (target == Target::Aarch64AppleDarwin)
+                                    .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
+                                    .flatten()
+                            }),
+                            defines: opts.defines.clone(),
+                            target,
+                            dump_macros: opts.dump_macros,
+                        },
+                    )
+                    .map_err(|e| e.to_string())?,
+                )
+            } else {
+                None
+            };
+            if opts.preprocess_only {
+                drop(src);
+                return write_output(&opts, &preprocessed.unwrap());
+            }
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
                 target,
             };
             let mut module = {
                 profiling::scope!("c-frontend");
-                keel_c::compile(text, &input, c_opts).map_err(|e| e.to_string())?
+                keel_c::compile(preprocessed.as_deref().unwrap_or(text), &input, c_opts)
+                    .map_err(|e| e.to_string())?
             };
             drop(src);
             if let Err(errors) = keel_ir::verify_module(&module) {
@@ -318,17 +479,28 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
-            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O"])?;
+            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O", "--target"])?;
             let (input, mut module) = load(&opts)?;
+            let target = if opts.target.is_some() {
+                opts.vector_target()
+            } else {
+                keel_opt::VectorTarget::Portable
+            };
             let result = match &opts.passes {
                 Some(names) => {
                     let names: Vec<&str> = names.iter().map(String::as_str).collect();
-                    keel_opt::run_passes(&mut module, &names)
+                    keel_opt::run_passes_for_target(&mut module, &names, target)
                 }
                 None if rest.iter().any(|arg| arg == "--opt-tier" || arg == "-O") => {
-                    keel_opt::optimize_with_tier(&mut module, opts.optimization)
+                    keel_opt::run_passes_for_target(
+                        &mut module,
+                        opts.optimization.pipeline(),
+                        target,
+                    )
                 }
-                None => keel_opt::optimize(&mut module),
+                None => {
+                    keel_opt::run_passes_for_target(&mut module, keel_opt::DEFAULT_PIPELINE, target)
+                }
             };
             result.map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &module.to_string())
@@ -354,6 +526,10 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
         options: opts.selection,
         cpu: opts.tuning,
     };
+    let feature_selector = keel_codegen::x86_features::FeatureSelector {
+        inner: &selector,
+        features: opts.x86_features,
+    };
     #[cfg(feature = "experimental-regalloc")]
     let remat = keel_codegen::regalloc::RematerializingAllocator {
         base: &opts.allocation,
@@ -366,7 +542,7 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
     let allocator: &dyn keel_codegen::regalloc::RegisterAllocator =
         if opts.remat != 0 { &remat } else { allocator };
     let pipeline = keel_codegen::CodegenPipeline {
-        selector: &selector,
+        selector: &feature_selector,
         allocator,
     };
     if opts.emit_object {
@@ -376,9 +552,15 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
             .ok_or("`--emit-object` requires `-o <output.o>`")?;
         let program = keel_codegen::compile_program_with_pipeline(module, target, &pipeline)
             .map_err(|e| e.to_string())?;
-        let object =
-            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-                .map_err(|e| e.to_string())?;
+        let object = match target {
+            Target::Aarch64AppleDarwin => {
+                keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+            }
+            Target::X86_64LinuxGnu => {
+                keel_asm::x86::assemble_program_object_with_features(&program, opts.x86_features)
+            }
+        }
+        .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
         let source = keel_codegen::compile_with_pipeline(module, target, &pipeline)
@@ -443,7 +625,7 @@ mod tests {
     }
 
     #[test]
-    fn direct_object_emission_matches_source_path_and_rejects_other_targets() {
+    fn direct_object_emission_matches_source_path_for_both_targets() {
         let dir = std::env::temp_dir().join(format!("keel-object-api-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let source = "func @answer() -> i64 {\nblock0:\n v0 = iconst.i64 42\n return v0\n}\n";
@@ -476,12 +658,12 @@ mod tests {
             keel_asm::assemble_object(&text).unwrap()
         );
         std::fs::remove_file(&output).unwrap();
-        assert!(
-            invoke("x86_64-unknown-linux-gnu", true)
-                .unwrap_err()
-                .contains("requires aarch64")
+        invoke("x86_64-unknown-linux-gnu", true).unwrap();
+        let text = keel_codegen::compile(&module, Target::X86_64LinuxGnu).unwrap();
+        assert_eq!(
+            std::fs::read(&output).unwrap(),
+            keel_asm::x86::assemble_object(&text).unwrap()
         );
-        assert!(!output.exists());
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -645,5 +827,41 @@ mod tuning_tests {
                 .unwrap(),
             Target::X86_64LinuxGnu
         );
+    }
+}
+
+#[cfg(test)]
+mod x86_feature_option_tests {
+    use super::*;
+    #[test]
+    fn x86_features_parse_independently_of_tuning() {
+        let args = [
+            "--target-features",
+            "+avx,bmi2,-avx",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+        ]
+        .map(str::to_owned);
+        let options = parse_options(&args, &["--target-features", "--target"]).unwrap();
+        assert_eq!(
+            options.x86_features,
+            keel_asm::x86::Features {
+                bmi2: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(options.tuning, keel_codegen::tuning::TuningCpu::Generic);
+        for args in [
+            vec!["--target-features"],
+            vec!["--target-features", "unknown"],
+        ] {
+            assert!(
+                parse_options(
+                    &args.into_iter().map(str::to_owned).collect::<Vec<_>>(),
+                    &["--target-features"]
+                )
+                .is_err()
+            );
+        }
     }
 }

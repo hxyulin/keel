@@ -22,10 +22,10 @@ struct Slot {
     bits: Option<BitField>,
 }
 
-impl Parser {
+impl<'a> Parser<'a> {
     /// The initializer after `=` for an object of type `ty`. Returns the
     /// items and the type, completed if it was an array of unknown length.
-    pub(crate) fn initializer(&mut self, ty: &Ty) -> R<(Init, Ty)> {
+    pub(crate) fn initializer(&mut self, ty: &Ty) -> R<(Init<'a>, Ty)> {
         let mut items = Vec::new();
         let slot = Slot {
             ty: ty.unatomic().clone(),
@@ -42,7 +42,7 @@ impl Parser {
 
     /// One initializer for `slot`: a braced list, a string for a character
     /// array, or an expression. Returns how many array elements it gave.
-    fn init_braced_or_expr(&mut self, slot: &Slot, items: &mut Vec<InitItem>) -> R<u64> {
+    fn init_braced_or_expr(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<u64> {
         if let Some(n) = self.init_string(slot, items)? {
             return Ok(n);
         }
@@ -61,7 +61,7 @@ impl Parser {
 
     /// A string literal initializing a character array, if that is what
     /// comes next. Returns the number of characters with the terminator.
-    fn init_string(&mut self, slot: &Slot, items: &mut Vec<InitItem>) -> R<Option<u64>> {
+    fn init_string(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<Option<u64>> {
         let Ty::Array(elem, len) = &slot.ty else {
             return Ok(None);
         };
@@ -77,14 +77,14 @@ impl Parser {
         let ExprKind::Str(i) = e.kind else {
             return Err(Error::new(e.loc, "expected a string literal"));
         };
-        let mut bytes = self.strings[i].bytes.clone();
+        let mut bytes = self.strings[i].bytes;
         let unit = if self.strings[i].wide { 4 } else { 1 };
         if unit != elem_size {
             return Err(Error::new(e.loc, "string literal of the wrong width"));
         }
         let count = (bytes.len() / unit) as u64;
         if let Some(n) = len {
-            bytes.truncate((*n * elem_size as u64) as usize);
+            bytes = &bytes[..bytes.len().min((*n * elem_size as u64) as usize)];
         }
         items.push(InitItem::Bytes {
             offset: slot.offset,
@@ -96,7 +96,7 @@ impl Parser {
     /// An expression initializing `slot`: the whole of it if it is a
     /// scalar or the expression has its struct type, else its first scalar
     /// with the rest taken from the enclosing list.
-    fn init_with(&mut self, slot: &Slot, e: Expr, items: &mut Vec<InitItem>) -> R<()> {
+    fn init_with(&mut self, slot: &Slot, e: Expr<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
         if slot.ty.is_scalar() || (slot.ty.is_struct() && e.ty == slot.ty) {
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
@@ -151,8 +151,8 @@ impl Parser {
     fn init_elided(
         &mut self,
         slot: &Slot,
-        first: Option<Expr>,
-        items: &mut Vec<InitItem>,
+        first: Option<Expr<'a>>,
+        items: &mut Vec<InitItem<'a>>,
     ) -> R<()> {
         let mut first = first;
         for (i, sub) in self.sub_slots(slot).into_iter().enumerate() {
@@ -174,7 +174,12 @@ impl Parser {
     }
 
     /// An undesignated item of a list for `slot`.
-    fn init_item(&mut self, slot: &Slot, pre: Option<Expr>, items: &mut Vec<InitItem>) -> R<()> {
+    fn init_item(
+        &mut self,
+        slot: &Slot,
+        pre: Option<Expr<'a>>,
+        items: &mut Vec<InitItem<'a>>,
+    ) -> R<()> {
         if let Some(e) = pre {
             return self.init_with(slot, e, items);
         }
@@ -191,7 +196,7 @@ impl Parser {
 
     /// A braced list for `slot`, after the `{`. Returns the number of
     /// array elements initialized.
-    fn init_list(&mut self, slot: &Slot, items: &mut Vec<InitItem>) -> R<u64> {
+    fn init_list(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<u64> {
         if slot.ty.is_scalar() {
             if !self.eat("}") {
                 self.init_braced_or_expr(slot, items)?;
@@ -243,7 +248,7 @@ impl Parser {
                 self.init_item(&sub, None, items)?;
             }
             let (n, stride) = range;
-            let one: Vec<InitItem> = items[first..].to_vec();
+            let one: Vec<InitItem<'a>> = items[first..].to_vec();
             for k in 1..n as u64 {
                 items.extend(one.iter().cloned().map(|mut item| {
                     match &mut item {
@@ -298,13 +303,13 @@ impl Parser {
         let def = &self.structs[id];
         // A member of this struct, or of an anonymous member, which then
         // counts as the item's position.
-        let named: Vec<&Member> = def
+        let named: Vec<&Member<'a>> = def
             .members
             .iter()
             .filter(|m| m.name.is_some() || m.bits.is_none())
             .collect();
         for (i, m) in named.iter().enumerate() {
-            if m.name.as_deref() == Some(name.as_str()) {
+            if m.name.as_deref() == Some(name) {
                 let sub = Slot {
                     ty: m.ty.unatomic().clone(),
                     offset: slot.offset + m.offset,
@@ -329,7 +334,7 @@ impl Parser {
     }
 
     /// Further designators, then `=` and the initializer.
-    fn designated_rest(&mut self, slot: &Slot, items: &mut Vec<InitItem>) -> R<()> {
+    fn designated_rest(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<()> {
         if self.is("[") || self.is(".") {
             let loc = self.loc();
             let (_, sub, n) = self.designation(slot)?;

@@ -16,4 +16,6 @@ profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
 
 [dev-dependencies]
+keel-asm = { path = "../keel-asm" }
 keel-opt = { path = "../keel-opt" }
+object = { version = "0.36", default-features = false, features = ["read", "std"] }

@@ -174,3 +174,24 @@ flags = ["-p", "canonicalize,simplify-cfg,instcombine,simplify-cfg,gvn,branch-ra
 name = "keel-O-facts"
 compiler = "keel"
 flags = ["-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
+
+# In-process object emission; opt in to preserve existing benchmark baselines.
+[[config]]
+name = "keel-native"
+compiler = "keel"
+flags = ["--emit-object"]
+
+[[config]]
+name = "keel-O-native"
+compiler = "keel"
+flags = ["-O", "--emit-object"]
+
+[[config]]
+name = "keel-g-native"
+compiler = "keel"
+flags = ["-g", "--emit-object"]
+
+[[config]]
+name = "keel-O-select-native"
+compiler = "keel"
+flags = ["-O", "--isel", "all", "--emit-object"]

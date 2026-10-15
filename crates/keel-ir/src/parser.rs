@@ -26,7 +26,7 @@ use crate::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, DataInit, DataItem,
     DataObject, DataRef, EntityRef, FloatCC, FuncDecl, FuncRef, Function, InlineAsm, InstData,
     IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp, Purpose, RmwOp, SigRef, Signature,
-    SourceFile, SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value,
+    SourceFile, SourceLoc, StackSlot, StackSlotData, Symbol, Type, UnaryOp, Value, VectorBinaryOp,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1209,7 +1209,21 @@ impl Parser {
             }
         };
 
-        let data = if let Some(op) = parse_unary_op(base) {
+        let data = if let Ok(op) = base.parse::<VectorBinaryOp>() {
+            no_suffix()?;
+            let a = self.value(names)?;
+            self.expect(Tok::Punct(','))?;
+            InstData::VectorBinary {
+                op,
+                args: [a, self.value(names)?],
+            }
+        } else if let Some(op) = base.strip_prefix('v').and_then(parse_unary_op) {
+            no_suffix()?;
+            InstData::VectorUnary {
+                op,
+                arg: self.value(names)?,
+            }
+        } else if let Some(op) = parse_unary_op(base) {
             no_suffix()?;
             InstData::Unary {
                 op,
@@ -1239,6 +1253,60 @@ impl Parser {
             }
         } else {
             match base {
+                "vsplat" => InstData::VectorSplat {
+                    ty: suffix_type("vector type")?,
+                    arg: self.value(names)?,
+                },
+                "vextract" => {
+                    no_suffix()?;
+                    let arg = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let lane = self.lane_index()?;
+                    InstData::VectorExtract { arg, lane }
+                }
+                "vinsert" => {
+                    no_suffix()?;
+                    let a = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let b = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::VectorInsert {
+                        args: [a, b],
+                        lane: self.lane_index()?,
+                    }
+                }
+                "vshuffle" => {
+                    no_suffix()?;
+                    let a = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let b = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    self.expect(Tok::Punct('['))?;
+                    let mut lanes = Vec::new();
+                    if !self.eat(&Tok::Punct(']')) {
+                        loop {
+                            lanes.push(self.lane_index()?);
+                            if self.eat(&Tok::Punct(']')) {
+                                break;
+                            }
+                            self.expect(Tok::Punct(','))?;
+                        }
+                    }
+                    InstData::VectorShuffle {
+                        args: [a, b],
+                        lanes,
+                    }
+                }
+                "vselect" => {
+                    no_suffix()?;
+                    let a = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    let b = self.value(names)?;
+                    self.expect(Tok::Punct(','))?;
+                    InstData::VectorSelect {
+                        args: [a, b, self.value(names)?],
+                    }
+                }
                 "iconst" => {
                     let ty = suffix_type("type")?;
                     let imm = self.int("an integer")?;
@@ -1467,7 +1535,7 @@ impl Parser {
                         args: [cond, if_true, self.value(names)?],
                     }
                 }
-                "icmp" => {
+                "icmp" | "vicmp" => {
                     let s = suffix.ok_or_else(|| {
                         error(op_loc, "`icmp` needs a condition like `icmp.eq`".into())
                     })?;
@@ -1475,12 +1543,14 @@ impl Parser {
                         .ok_or_else(|| error(op_loc, format!("unknown condition `{s}`")))?;
                     let a = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
-                    InstData::Icmp {
-                        cond,
-                        args: [a, self.value(names)?],
+                    let args = [a, self.value(names)?];
+                    if base == "vicmp" {
+                        InstData::VectorIcmp { cond, args }
+                    } else {
+                        InstData::Icmp { cond, args }
                     }
                 }
-                "fcmp" => {
+                "fcmp" | "vfcmp" => {
                     let s = suffix.ok_or_else(|| {
                         error(op_loc, "`fcmp` needs a condition like `fcmp.lt`".into())
                     })?;
@@ -1488,9 +1558,11 @@ impl Parser {
                         .ok_or_else(|| error(op_loc, format!("unknown condition `{s}`")))?;
                     let a = self.value(names)?;
                     self.expect(Tok::Punct(','))?;
-                    InstData::Fcmp {
-                        cond,
-                        args: [a, self.value(names)?],
+                    let args = [a, self.value(names)?];
+                    if base == "vfcmp" {
+                        InstData::VectorFcmp { cond, args }
+                    } else {
+                        InstData::Fcmp { cond, args }
                     }
                 }
                 "va_arg" => InstData::VaArg {
@@ -1750,6 +1822,12 @@ impl Parser {
     }
 
     /// `(v0, v1, ...)`
+    fn lane_index(&mut self) -> Result<u8, ParseError> {
+        let loc = self.tokens[self.pos].1;
+        let n = self.int("a lane index")?;
+        u8::try_from(n).map_err(|_| error(loc, "lane index must be in 0..255".into()))
+    }
+
     fn arg_list(&mut self, names: &mut Names) -> Result<Vec<Value>, ParseError> {
         self.expect(Tok::Punct('('))?;
         let mut args = Vec::new();
@@ -1921,7 +1999,8 @@ fn build(
                 continue;
             }
             let ty = match &inst.data {
-                InstData::Iconst { ty, .. }
+                InstData::VectorSplat { ty, .. }
+                | InstData::Iconst { ty, .. }
                 | InstData::Fconst { ty, .. }
                 | InstData::Convert { ty, .. }
                 | InstData::Load { ty, .. }
@@ -1931,7 +2010,19 @@ fn build(
                 InstData::AtomicCas { args, .. } => types[args[1].index()],
                 InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => Some(Type::Ptr),
                 InstData::Icmp { .. } | InstData::Fcmp { .. } => Some(Type::I8),
-                InstData::Unary { arg, .. } => types[arg.index()],
+                InstData::VectorExtract { arg, .. } => {
+                    types[arg.index()].map(|t| t.vector().map_or(Type::I8, |v| v.lane_type()))
+                }
+                InstData::VectorIcmp { args, .. } | InstData::VectorFcmp { args, .. } => types
+                    [args[0].index()]
+                .map(|t| t.vector().map_or(Type::I8, |v| Type::Vector(v.mask()))),
+                InstData::VectorUnary { arg, .. } | InstData::Unary { arg, .. } => {
+                    types[arg.index()]
+                }
+                InstData::VectorBinary { args, .. }
+                | InstData::VectorInsert { args, .. }
+                | InstData::VectorShuffle { args, .. } => types[args[0].index()],
+                InstData::VectorSelect { args } => types[args[1].index()],
                 InstData::Binary { args, .. } => types[args[0].index()],
                 InstData::Select { args } => types[args[1].index()],
                 InstData::Fma { args } => types[args[0].index()],
@@ -2071,7 +2162,7 @@ fn parse_type(s: &str) -> Option<Type> {
         "f32" => Type::F32,
         "f64" => Type::F64,
         "ptr" => Type::Ptr,
-        _ => return None,
+        _ => Type::Vector(s.parse().ok()?),
     })
 }
 

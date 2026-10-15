@@ -99,9 +99,16 @@ impl RegisterAllocator for RematerializingAllocator<'_> {
             // Remove only wholly unused homes. Compressing surviving indices
             // preserves all original lifetime-sharing decisions.
             let mut used = vec![false; allocation.spill_slots as usize];
-            for loc in allocation.locs.iter().flatten().flatten() {
-                if let Loc::Stack(s) = *loc {
-                    used[s as usize] = true;
+            for half in &allocation.locs {
+                for (i, loc) in half.iter().enumerate() {
+                    if let Some(Loc::Stack(s)) = *loc {
+                        used[s as usize] = true;
+                        if input.func.value_type(Value::new(i)).is_vector() {
+                            // Vector homes occupy two adjacent eight-byte units.
+                            // Keep both while removing unused scalar recipe homes.
+                            used[s as usize + 1] = true;
+                        }
+                    }
                 }
             }
             let mut next = 0;
@@ -150,6 +157,50 @@ impl RematerializingAllocator<'_> {
 #[cfg(all(test, feature = "experimental-regalloc"))]
 mod tests {
     use super::*;
+    #[test]
+    fn compacting_scalar_recipes_preserves_both_vector_home_units() {
+        let module = keel_ir::parse(
+            "func @f(ptr) {\nblock0(v0: ptr):\n v1 = iconst.i64 7\n              v2 = load.i32x4 v0\n v3 = vsplat.i64x2 v1\n store v2, v0\n              store v3, v0\n return\n}",
+        ).unwrap();
+        let func = &module.functions[0];
+        let pools = Pools {
+            caller_saved: &[],
+            callee_saved: &[],
+            float_caller_saved: &[],
+            float_callee_saved: &[],
+        };
+        let selection = crate::select::Selection::default();
+        let input = AllocationInput {
+            func,
+            pools: &pools,
+            selection: &selection,
+            is_call: &|_| false,
+            returns_twice: &|_| false,
+        };
+        for base in [AllocationTier::Fast, AllocationTier::Full] {
+            let allocation = RematerializingAllocator {
+                base: &base,
+                prefer_spilling: true,
+                constants: true,
+                stack_addresses: true,
+            }
+            .allocate(&input);
+            assert_eq!(
+                allocation.loc(Value::new(1)),
+                Some(Loc::Remat(Value::new(1)))
+            );
+            let homes: Vec<_> = [Value::new(2), Value::new(3)]
+                .into_iter()
+                .map(|v| match allocation.loc(v).unwrap() {
+                    Loc::Stack(slot) => slot,
+                    loc => panic!("vector should spill with empty pools: {loc:?}"),
+                })
+                .collect();
+            assert!(homes[0].abs_diff(homes[1]) >= 2);
+            assert!(homes.iter().all(|s| s + 2 <= allocation.spill_slots));
+        }
+    }
+
     #[test]
     fn recipes_replace_only_cheap_unconstrained_scalar_spills() {
         let module = keel_ir::parse(

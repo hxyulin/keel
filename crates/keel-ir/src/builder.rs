@@ -10,7 +10,7 @@ use crate::function::InsertPoint;
 use crate::{
     BinaryOp, Block, BlockCall, ConvertOp, FloatCC, FuncRef, Function, InlineAsm, Inst, InstData,
     IntCC, Intrinsic, Ordering, OverflowOp, RmwOp, SigRef, SourceLoc, StackSlot, Symbol, Type,
-    UnaryOp, Value,
+    UnaryOp, Value, VectorBinaryOp,
 };
 
 pub struct InstBuilder<'f> {
@@ -69,6 +69,40 @@ impl InstBuilder<'_> {
         let inst = func.insert_inst(self.at, data);
         func.set_inst_loc(inst, self.loc);
         func.first_result(inst)
+    }
+
+    pub fn vsplat(self, ty: Type, arg: Value) -> Value {
+        self.value(InstData::VectorSplat { ty, arg })
+    }
+    pub fn vector_unary(self, op: UnaryOp, arg: Value) -> Value {
+        self.value(InstData::VectorUnary { op, arg })
+    }
+    pub fn vector_binary(self, op: VectorBinaryOp, a: Value, b: Value) -> Value {
+        self.value(InstData::VectorBinary { op, args: [a, b] })
+    }
+    pub fn vextract(self, arg: Value, lane: u8) -> Value {
+        self.value(InstData::VectorExtract { arg, lane })
+    }
+    pub fn vinsert(self, vector: Value, value: Value, lane: u8) -> Value {
+        self.value(InstData::VectorInsert {
+            args: [vector, value],
+            lane,
+        })
+    }
+    pub fn vshuffle(self, a: Value, b: Value, lanes: Vec<u8>) -> Value {
+        self.value(InstData::VectorShuffle {
+            args: [a, b],
+            lanes,
+        })
+    }
+    pub fn vicmp(self, cond: IntCC, a: Value, b: Value) -> Value {
+        self.value(InstData::VectorIcmp { cond, args: [a, b] })
+    }
+    pub fn vfcmp(self, cond: FloatCC, a: Value, b: Value) -> Value {
+        self.value(InstData::VectorFcmp { cond, args: [a, b] })
+    }
+    pub fn vselect(self, mask: Value, a: Value, b: Value) -> Value {
+        self.value(InstData::VectorSelect { args: [mask, a, b] })
     }
 
     pub fn iconst(self, ty: Type, imm: i64) -> Value {

@@ -111,7 +111,9 @@ fn reference_linear_scan(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let allowed: Vec<Loc> = if cur.crosses_call {
+        let allowed: Vec<Loc> = if cur.crosses_call && cur.vector {
+            Vec::new()
+        } else if cur.crosses_call {
             callee_saved.iter().map(|&r| class(r)).collect()
         } else {
             caller_saved
@@ -171,17 +173,22 @@ fn reference_linear_scan(
 
 fn reference_assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
     spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
-    // (end, slot) of slots in use.
-    let mut active: Vec<(u32, u32)> = Vec::new();
     let mut count = 0;
-    for iv in spilled.iter() {
-        active.retain(|&(end, _)| end >= iv.start());
-        let slot = (0..)
-            .find(|&s| active.iter().all(|&(_, used)| used != s))
-            .expect("some slot is free");
-        active.push((iv.end(), slot));
-        count = count.max(slot + 1);
-        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+    for vector in [false, true] {
+        // Separate fixed-width pools preserve scalar/vector home sizes.
+        let mut active: Vec<(u32, u32)> = Vec::new();
+        let base = count;
+        let units = if vector { 2 } else { 1 };
+        for iv in spilled.iter().filter(|iv| iv.vector == vector) {
+            active.retain(|&(end, _)| end >= iv.start());
+            let slot = (base..)
+                .step_by(units as usize)
+                .find(|&s| active.iter().all(|&(_, used)| used != s))
+                .expect("some slot is free");
+            active.push((iv.end(), slot));
+            count = count.max(slot + units);
+            locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+        }
     }
     count
 }
@@ -243,7 +250,8 @@ fn assert_reference_equivalence(
                 start: b.start(),
                 end: b.end(),
                 crosses_call: b.crosses_call,
-                float: b.float
+                float: b.float,
+                vector: b.vector,
             },
             "{}",
             func.name
