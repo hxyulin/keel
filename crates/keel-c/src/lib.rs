@@ -1,5 +1,5 @@
-//! A C frontend for keel: one preprocessed C file (the output of
-//! `clang -E`) to one keel module.
+//! A C frontend for keel: native preprocessing and compilation to keel IR.
+//! `preprocess` accepts raw C; `compile` accepts its output or `clang -E` text.
 //!
 //! The pipeline is lexer (`lex.rs`) → parser, which resolves names and
 //! types as it goes and builds a typed tree (`parse.rs`, `expr.rs`,
@@ -28,7 +28,10 @@ mod init;
 mod irgen;
 mod lex;
 mod parse;
+mod preprocess;
 mod types;
+
+pub use preprocess::{PreprocessOptions, preprocess};
 
 use std::fmt;
 

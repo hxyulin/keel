@@ -1,6 +1,6 @@
 [package]
 name = "keel-c"
-description = "A C frontend for keel: preprocessed C to keel IR"
+description = "A C frontend for keel: native preprocessing and C to keel IR"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

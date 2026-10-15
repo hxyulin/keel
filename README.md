@@ -2,8 +2,9 @@
 
 An educational compiler written in Rust: a low-level SSA IR, optimizer,
 assembly generators for aarch64 macOS and x86-64 Linux, and a C frontend.
-Clang supplies preprocessing, assembly and linking; keel compiles one
-preprocessed C translation unit or textual IR module to assembly.
+Keel preprocesses and compiles one C translation unit or compiles textual IR
+to assembly. Clang supplies the initial preprocessor compatibility environment,
+assembly and linking.
 
 See [docs/design.md](docs/design.md) for the design decisions.
 
@@ -18,18 +19,37 @@ cargo run -p keel -- opt -p gvn,dce input.keel        # run passes, print the IR
 cargo run -p keel -- passes                           # list the passes
 ```
 
-C goes through clang's preprocessor first; keel compiles one preprocessed
-file to one assembly file:
+C source goes through Keel's native preprocessor. By default it borrows the
+installed Clang's predefined macros, system header search paths, and answers
+to feature queries, including `__clang__` and its version macros:
 
 ```sh
-clang -E -std=c11 hello.c -o hello.i
-cargo run -p keel -- cc -O hello.i -o hello.s         # -g for debug info
-clang -o hello hello.s && ./hello                     # clang -g with -g, then lldb
-cargo run -p keel -- cc --emit-ir hello.i             # print the keel IR
+cargo run -p keel -- cc -O hello.c -o hello.s         # -g for debug info
+clang -o hello hello.s && ./hello
+cargo run -p keel -- cc --emit-ir hello.c            # print the keel IR
+cargo run -p keel -- cc -E -Iinclude -DDEBUG=1 hello.c -o hello.i
+cargo run -p keel -- cc hello.i -o hello.s           # .i bypasses preprocessing
 ```
 
+`-I`, `-D` and `-U` accept joined or separate arguments. `--clang path`
+selects the compatibility compiler. `--no-clang` disables environment and
+feature-query probes; supply header paths and target macros explicitly in
+that mode. The library's `keel_c::preprocess` API uses this standalone mode
+by default; `keel_c::compile` continues to accept preprocessed text.
+Clang compatibility currently describes Clang's capabilities, so feature
+queries can select code that Keel's parser or backend does not support.
+
 Both commands take `--target aarch64-apple-darwin` or
-`--target x86_64-unknown-linux-gnu`; the default is the host.
+`--target x86_64-unknown-linux-gnu`; the default is the host. For raw C,
+this target is also used for the compatibility probes. Cross compilation
+needs matching headers available through that Clang installation or explicit
+include paths. Passing `--target` cannot change an already preprocessed file.
+You can still use `clang -E -std=c11` externally and feed its `.i` output to Keel.
+
+The preprocessor supports object/function macros, variadics, stringification,
+token pasting, conditionals, includes and `include_next`, `#pragma once`,
+`_Pragma`, and line markers. This is an initial Clang compatibility milestone;
+[the design notes](docs/design.md#c-frontend) list the remaining gaps.
 
 Target instruction selection is an optional codegen pass, independent of
 `-O`. `--isel all` enables generated tree patterns, allocation of folded
@@ -39,15 +59,12 @@ removes already folded operands from allocation; ordinary immediate and
 address folding remain active in every mode. For example:
 
 ```sh
-cargo run -p keel -- cc -O --isel all hello.i -o hello.s
+cargo run -p keel -- cc -O --isel all hello.c -o hello.s
 cargo suite run -c keel-O,keel-O-select
 ```
 
 Fewer instructions can still cost more registers or change scheduling, so
 selection remains opt-in while its profitability rules are developed.
-For C, preprocessing must use the same target and its headers, for example
-`clang -E --target=<triple>` with the appropriate sysroot. Passing
-`--target` to keel does not change an already preprocessed file.
 
 `asm`, `compile`, `cc`, and `opt` map input files by default.
 They use a read-only copy-on-write file mapping instead of an owned read
@@ -395,9 +412,11 @@ inputs, not complete applications; the measurements use a warm filesystem cache.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.
 - C tests live in `crates/keel-c/tests/programs/`: each `.c` program is
-  built by clang and by keel (as is and with `-O`), and both must print the
-  same and exit the same. Separate frontend tests cover GNU inference
-  rules where Clang differs and compile selected features for both targets.
+  built by Clang and by Keel with both Clang and native preprocessing
+  (as is and with `-O`); all builds must print and exit the same. Native
+  preprocessing is also compared with Clang at the token level. Separate
+  frontend tests cover GNU inference rules where Clang differs and compile
+  selected features for both targets.
 - `cargo suite test` builds Lua, SQLite and QuickJS with keel and runs
   their test suites; `cargo suite run` builds them with clang and keel in
   every configuration and times them. Each program is a directory in

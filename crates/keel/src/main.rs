@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]  preprocessed C to assembly
+//! keel cc [-O] [-g] [-E|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--clang path|--no-clang] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
@@ -15,8 +15,8 @@
 //! Assembly has debug info if the input names source files (`file`
 //! lines); `-g` gives an input without them its own lines instead, for
 //! stepping through the IR in a debugger.
-//! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
-//! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
+//! `cc` preprocesses raw C (or accepts `.i` files), then compiles to assembly or,
+//! with `--emit-ir`, to keel IR; `-E` stops after preprocessing; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
 //! `compile`/`cc --emit-object -o output.o` compose structured codegen and
 //! object emission in-process for AArch64 Mach-O.
@@ -33,7 +33,7 @@ mod input;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
+  keel cc [-O] [-g] [-E|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--clang path|--no-clang] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O)
   keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
@@ -68,6 +68,11 @@ struct Options {
     ir_lines: bool,
     emit_ir: bool,
     emit_object: bool,
+    preprocess_only: bool,
+    no_clang: bool,
+    clang: Option<String>,
+    include_dirs: Vec<std::path::PathBuf>,
+    defines: Vec<(String, Option<String>)>,
     passes: Option<Vec<String>>,
     target: Option<Target>,
 }
@@ -99,11 +104,42 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
-        let flag = arg.as_str();
+        let raw = arg.as_str();
+        let flag = if raw.starts_with("-I") {
+            "-I"
+        } else if raw.starts_with("-D") {
+            "-D"
+        } else if raw.starts_with("-U") {
+            "-U"
+        } else {
+            raw
+        };
         if flag.starts_with('-') && !allowed.contains(&flag) {
             return Err(format!("unknown flag `{flag}`\n{USAGE}"));
         }
         match flag {
+            "-I" | "-D" | "-U" => {
+                let value = if raw.len() > 2 {
+                    raw[2..].to_string()
+                } else {
+                    args.next()
+                        .ok_or_else(|| format!("`{flag}` needs a value"))?
+                        .clone()
+                };
+                match flag {
+                    "-I" => opts.include_dirs.push(value.into()),
+                    "-D" => {
+                        let (name, body) = value.split_once('=').unwrap_or((&value, "1"));
+                        opts.defines.push((name.into(), Some(body.into())));
+                    }
+                    _ => opts.defines.push((value, None)),
+                }
+            }
+            "-E" => opts.preprocess_only = true,
+            "--no-clang" => opts.no_clang = true,
+            "--clang" => {
+                opts.clang = Some(args.next().ok_or("`--clang` needs an executable")?.clone())
+            }
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
@@ -244,6 +280,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-p",
                     "-g",
                     "--emit-ir",
+                    "-E",
+                    "-I",
+                    "-D",
+                    "-U",
+                    "--clang",
+                    "--no-clang",
                     "--target",
                     "--emit-object",
                     "--isel",
@@ -257,6 +299,28 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
+            if opts.preprocess_only && opts.emit_ir {
+                return Err("`-E` and `--emit-ir` cannot be used together".into());
+            }
+            let src = if opts.preprocess_only || !input.ends_with(".i") {
+                keel_c::preprocess(
+                    &src,
+                    &input,
+                    &keel_c::PreprocessOptions {
+                        include_dirs: opts.include_dirs.clone(),
+                        defines: opts.defines.clone(),
+                        clang: (!opts.no_clang)
+                            .then(|| opts.clang.as_deref().unwrap_or("clang").into()),
+                        target,
+                    },
+                )
+                .map_err(|e| e.to_string())?
+            } else {
+                src
+            };
+            if opts.preprocess_only {
+                return write_output(&opts, &src);
+            }
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
                 target,

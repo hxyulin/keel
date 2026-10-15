@@ -2,8 +2,9 @@
 
 Keel is an educational compiler: a low-level SSA IR, optimizer, assembly
 generators for aarch64 macOS and x86-64 Linux, and a C frontend. Clang
-supplies preprocessing, assembly and linking. This file records the
-implemented design, its limitations and explicitly marked future work.
+supplies the native preprocessor's compatibility environment, assembly and
+linking. This file records the implemented design, its limitations and
+explicitly marked future work.
 
 ## Program shape
 
@@ -920,12 +921,52 @@ jumps to), rather than a panic.
 
 ## C frontend
 
-`keel-c` compiles one preprocessed C file to one module: `keel cc in.i -o
-out.s`. Preprocessing is clang's (`clang -E`): a preprocessor is a separate
-language with little to teach about compiling, and taking clang's means
-the system headers come out exactly as clang sees them. Line markers (`#
-12 "file.c"`) in its output give tokens their original locations, for
-diagnostics and `-g`.
+`keel-c` preprocesses C source and compiles one translation unit to one module:
+`keel cc in.c -o out.s`. `keel cc -E` prints the preprocessed text. `.i` inputs
+and the library's `compile` API bypass preprocessing; the `preprocess` API
+returns text that `compile` accepts. Line markers (`# 12 "file.c"`) carry source
+files and lines through to diagnostics and `-g`; output whitespace and columns
+need not match Clang.
+
+**Native preprocessing.** Phase 2 line splicing precedes comment removal and
+preprocessing tokenization. Macro expansion uses per-token hide sets, argument
+prescan, stringification, placemarkers for empty pasted arguments, and rescanning
+with the remaining input. Both C variadics and GNU named variadics are accepted;
+GNU `, ## __VA_ARGS__` distinguishes missing and explicitly empty arguments.
+Conditional expressions use 64-bit signed/unsigned preprocessing integers,
+operator precedence, short-circuit evaluation and conditional-operator type
+conversion. `defined` produced by macro expansion is accepted as Clang does.
+
+Quoted includes search the physical including file's directory first, then
+`-I` directories and discovered system directories. Angle includes omit the
+first step. Include origins implement `include_next` and `__has_include_next`;
+include guards and canonical-path `#pragma once` suppress repeated inclusion.
+`#line`, `#error`, pragma forwarding, `_Pragma`, `__FILE__`, `__LINE__`,
+`__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, and `__COUNTER__` are supported.
+Includes and macro argument nesting are limited to 200 levels, and each
+expansion has a token/work limit to bound runaway expansion.
+
+**Clang compatibility environment.** The driver probes the selected Clang with
+`-E -dM -v -std=c11` and the compilation target to import predefined macros and
+header paths, including Darwin framework directories. Recognized Clang feature
+and target queries are delegated individually and cached within a translation
+unit. Keel processes source and header text itself. `-D` and `-U` apply in
+command-line order after the imported definitions. `--no-clang` skips all these
+probes, leaving the minimal C11 predefined macros and native location/include
+builtins. Library preprocessing defaults to this mode; set
+`PreprocessOptions::clang` to opt into compatibility.
+
+This deliberately impersonates Clang while compatibility grows. It does not
+establish full Clang preprocessor parity or imply that Keel supports every
+feature Clang advertises. Current gaps include trigraphs, universal character
+names in identifiers, C23 `__VA_OPT__` and newer directives, date/time/timestamp
+builtins, dependency/macro dumps, complete framework/subframework lookup,
+Clang-specific pragma semantics, and exact diagnostic compatibility. `#warning`
+is currently accepted without a warning sink; most pragmas are forwarded to
+the existing lexer, whose implemented semantic pragma is `pack`. The CLI uses
+C11 mode; language-mode, sysroot, and wider compiler-driver flag support remain
+future work. The application suite still shares externally Clang-preprocessed
+inputs across compiler configurations for comparable compiler measurements.
 
 - **Lexer → parser → IR.** C cannot be parsed without knowing which names
   are types (`T * x;` is a declaration if `T` is a typedef), so the parser
@@ -1050,7 +1091,8 @@ Some accepted extensions have deliberately limited behavior:
   parsed as pointers; block literals and the Blocks runtime are not
   implemented.
 - Clang's `__has_builtin`, `__has_feature` and `__has_attribute` checks
-  are evaluated by Clang during preprocessing. Their answers describe
+  use Clang probes in native compatibility mode, or Clang itself when
+  externally preprocessing. Their answers describe
   Clang, not keel, and can enable code that keel does not support.
 
 ### Optimization information at the C/IR boundary
@@ -1198,8 +1240,13 @@ and C inline assembly are useful larger additions. Attributes whose
 semantics are required by a program must be implemented or diagnosed;
 silently parsing them does not establish compatibility.
 
-**Testing.** Test programs are built by clang and by keel and must behave
-the same, so they print what they compute instead of hard-coding answers.
+**Testing.** Test programs use both Clang and native preprocessing, then
+compile with Keel before and after optimization and must behave like Clang.
+Differential raw-token comparisons check native preprocessing against Clang
+for every existing C fixture, including system headers. Focused cases cover
+macro rescanning, variadics, pasting, stringification, conditional expressions,
+include search order and error locations. Programs print what they compute
+instead of hard-coding answers.
 The overflow fixture checks all 18 fixed-type forms at integer boundaries,
 the hint fixture checks argument side effects and returned values, and the
 debugtrap fixture catches SIGTRAP and resumes twice. Separate frontend

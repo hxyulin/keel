@@ -1,5 +1,5 @@
 //! End-to-end tests: every `tests/programs/*.c` is preprocessed with
-//! `clang -E`, compiled by keel (as is and with the default optimization
+//! both Clang and Keel, compiled by keel (as is and with the default optimization
 //! pipeline), linked with clang and run. Its output and exit status must be
 //! the same as the program built by clang alone, so the programs print
 //! what they compute rather than spelling out expected values.
@@ -77,22 +77,42 @@ fn programs() {
             .args(["-E", "-std=c11", "-o"])
             .arg(&i_path)
             .arg(path));
-        for optimize in [false, true] {
-            let name = format!("{stem}{}", if optimize { " (-O)" } else { "" });
-            let exe = out_dir.join(format!("{stem}{}", if optimize { "-opt" } else { "" }));
-            if let Err(e) = build_with_keel(&i_path, &exe, optimize) {
-                failures.push(format!("{name}: {e}"));
-                continue;
-            }
-            let got = Command::new(&exe).output().unwrap();
-            if got.status.code() != want.status.code() || got.stdout != want.stdout {
-                failures.push(format!(
-                    "{name}: exit {:?}, expected {:?}\n--- keel:\n{}--- clang:\n{}",
-                    got.status.code(),
-                    want.status.code(),
-                    String::from_utf8_lossy(&got.stdout),
-                    String::from_utf8_lossy(&want.stdout),
+        let native_path = out_dir.join(format!("{stem}-native.i"));
+        let raw = std::fs::read_to_string(path).unwrap();
+        let native = keel_c::preprocess(
+            &raw,
+            path.to_str().unwrap(),
+            &keel_c::PreprocessOptions {
+                clang: Some("clang".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        std::fs::write(&native_path, native).unwrap();
+        for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &native_path)] {
+            for optimize in [false, true] {
+                let name = format!(
+                    "{stem} ({preprocessor} pp){}",
+                    if optimize { " (-O)" } else { "" }
+                );
+                let exe = out_dir.join(format!(
+                    "{stem}-{preprocessor}{}",
+                    if optimize { "-opt" } else { "" }
                 ));
+                if let Err(e) = build_with_keel(preprocessed, &exe, optimize) {
+                    failures.push(format!("{name}: {e}"));
+                    continue;
+                }
+                let got = Command::new(&exe).output().unwrap();
+                if got.status.code() != want.status.code() || got.stdout != want.stdout {
+                    failures.push(format!(
+                        "{name}: exit {:?}, expected {:?}\n--- keel:\n{}--- clang:\n{}",
+                        got.status.code(),
+                        want.status.code(),
+                        String::from_utf8_lossy(&got.stdout),
+                        String::from_utf8_lossy(&want.stdout),
+                    ));
+                }
             }
         }
     }
