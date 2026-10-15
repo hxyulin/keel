@@ -56,6 +56,8 @@ def main():
     parser.add_argument('--functions', type=int, default=1000)
     parser.add_argument('--baseline-compiler', type=pathlib.Path)
     parser.add_argument('--baseline-profiler', type=pathlib.Path)
+    parser.add_argument('--compiler', type=pathlib.Path, help='measure an existing candidate binary without rebuilding')
+    parser.add_argument('--profiler', type=pathlib.Path, help='stage profiler built from the same candidate')
     parser.add_argument('--input-dir', type=pathlib.Path, help='also measure every .s file in this directory')
     parser.add_argument('--only-inputs', action='store_true', help='skip synthetic/generated-C inputs')
     args = parser.parse_args()
@@ -65,12 +67,18 @@ def main():
         parser.error('--only-inputs requires --input-dir')
     if args.baseline_profiler and not args.baseline_compiler:
         parser.error('--baseline-profiler requires --baseline-compiler')
+    if bool(args.compiler) != bool(args.profiler):
+        parser.error('--compiler and --profiler must be supplied together')
     work = args.work_dir.resolve()
     work.mkdir(parents=True, exist_ok=True)
     clang = pathlib.Path(shutil.which('clang')).resolve()
-    run(['cargo', 'build', '--release', '-p', 'keel', '-p', 'keel-asm', '--example', 'profile', '--bin', 'keel'])
-    keel = ROOT / 'target/release/keel'
-    profiler = ROOT / 'target/release/examples/profile'
+    if args.compiler:
+        keel = args.compiler.resolve()
+        profiler = args.profiler.resolve()
+    else:
+        run(['cargo', 'build', '--release', '-p', 'keel', '-p', 'keel-asm', '--example', 'profile', '--bin', 'keel'])
+        keel = ROOT / 'target/release/keel'
+        profiler = ROOT / 'target/release/examples/profile'
     sources = []
 
     def source(name, text):
