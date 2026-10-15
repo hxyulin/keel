@@ -29,8 +29,8 @@ pub use debug::{
 };
 pub use entity::{Arena, EntityRef};
 pub use function::{
-    AbiParam, ArgExt, CallConv, FuncDecl, Function, InsertPoint, Purpose, Signature, SourceLoc,
-    StackSlotData, ValueData, ValueDef,
+    AbiParam, ArgExt, CallConv, FuncDecl, Function, FunctionAttrs, InsertPoint, Purpose, Signature,
+    SourceLoc, StackSlotData, ValueData, ValueDef,
 };
 pub use inst::{
     BinaryOp, BlockCall, Clause, ConvertOp, FloatCC, InstData, IntCC, Ordering, OverflowOp, RmwOp,

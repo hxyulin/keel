@@ -162,10 +162,58 @@ impl Signature {
     }
 }
 
+/// Function promises and optimization policy, deliberately separate from ABI types.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct FunctionAttrs {
+    pub inlinehint: bool,
+    pub alwaysinline: bool,
+    pub noinline: bool,
+    pub noreturn: bool,
+    pub nounwind: bool,
+}
+
+impl FunctionAttrs {
+    pub fn merge(&mut self, other: Self) {
+        self.inlinehint |= other.inlinehint;
+        self.alwaysinline |= other.alwaysinline;
+        self.noinline |= other.noinline;
+        self.noreturn |= other.noreturn;
+        self.nounwind |= other.nounwind;
+    }
+
+    pub fn validate(self, returns_twice: bool) -> Result<(), &'static str> {
+        if self.alwaysinline && self.noinline {
+            return Err("alwaysinline conflicts with noinline");
+        }
+        if self.noreturn && returns_twice {
+            return Err("noreturn conflicts with returns_twice");
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for FunctionAttrs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (set, name) in [
+            (self.inlinehint, "inlinehint"),
+            (self.alwaysinline, "alwaysinline"),
+            (self.noinline, "noinline"),
+            (self.noreturn, "noreturn"),
+            (self.nounwind, "nounwind"),
+        ] {
+            if set {
+                write!(f, " {name}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A function known by name and signature: a module's `decl`, or an entry in
 /// a function's table of callees.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FuncDecl {
+    pub attrs: FunctionAttrs,
     pub name: String,
     pub sig: Signature,
 }
@@ -241,6 +289,7 @@ pub enum InsertPoint {
 
 #[derive(Clone, Debug)]
 pub struct Function {
+    pub attrs: FunctionAttrs,
     pub name: String,
     pub sig: Signature,
     blocks: Arena<Block, BlockData>,
@@ -281,6 +330,7 @@ pub struct Function {
 impl Function {
     pub fn new(name: impl Into<String>, sig: Signature) -> Self {
         Self {
+            attrs: FunctionAttrs::default(),
             name: name.into(),
             sig,
             blocks: Arena::new(),
@@ -318,9 +368,14 @@ impl Function {
             return func_ref;
         }
         self.callees.push(FuncDecl {
+            attrs: FunctionAttrs::default(),
             name: name.to_string(),
             sig,
         })
+    }
+
+    pub fn callee_mut(&mut self, func_ref: FuncRef) -> &mut FuncDecl {
+        &mut self.callees[func_ref]
     }
 
     pub fn callee(&self, func_ref: FuncRef) -> &FuncDecl {
@@ -701,7 +756,7 @@ impl Function {
 
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "func @{}{}", self.name, self.sig)?;
+        write!(f, "func @{}{}{}", self.name, self.sig, self.attrs)?;
         if self.local {
             f.write_str(" local")?;
         }

@@ -1,0 +1,65 @@
+1	int __attribute__((noinline)) h ( void ); int use(void){h();return 0;}
+0	int h ( __attribute__((noinline)) void ); int use(void){h();return 0;}
+0	int h ( void __attribute__((noinline)) ); int use(void){h();return 0;}
+1	int h ( void ) __attribute__((noinline)); int use(void){h();return 0;}
+1	int __attribute__((noinline)) * h ( void ); int use(void){h();return 0;}
+1	int * __attribute__((noinline)) h ( void ); int use(void){h();return 0;}
+0	int * h ( __attribute__((noinline)) void ); int use(void){h();return 0;}
+0	int * h ( void __attribute__((noinline)) ); int use(void){h();return 0;}
+1	int * h ( void ) __attribute__((noinline)); int use(void){h();return 0;}
+1	int __attribute__((noinline)) * * ( h ) ( void ); int use(void){h();return 0;}
+1	int * __attribute__((noinline)) * ( h ) ( void ); int use(void){h();return 0;}
+1	int * * __attribute__((noinline)) ( h ) ( void ); int use(void){h();return 0;}
+1	int * * ( __attribute__((noinline)) h ) ( void ); int use(void){h();return 0;}
+0	int * * ( h ) ( __attribute__((noinline)) void ); int use(void){h();return 0;}
+0	int * * ( h ) ( void __attribute__((noinline)) ); int use(void){h();return 0;}
+1	int * * ( h ) ( void ) __attribute__((noinline)); int use(void){h();return 0;}
+1	void __attribute__((noinline)) ( * h ( void ) ) ( void ); int use(void){h();return 0;}
+1	void ( __attribute__((noinline)) * h ( void ) ) ( void ); int use(void){h();return 0;}
+1	void ( * __attribute__((noinline)) h ( void ) ) ( void ); int use(void){h();return 0;}
+0	void ( * h ( __attribute__((noinline)) void ) ) ( void ); int use(void){h();return 0;}
+0	void ( * h ( void __attribute__((noinline)) ) ) ( void ); int use(void){h();return 0;}
+0	void ( * h ( void ) ) ( __attribute__((noinline)) void ); int use(void){h();return 0;}
+0	void ( * h ( void ) ) ( void __attribute__((noinline)) ); int use(void){h();return 0;}
+1	void ( * h ( void ) ) ( void ) __attribute__((noinline)); int use(void){h();return 0;}
+1	void __attribute__((noinline)) ( * ( * h ( void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+1	void ( __attribute__((noinline)) * ( * h ( void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+1	void ( * __attribute__((noinline)) ( * h ( void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+1	void ( * ( __attribute__((noinline)) * h ( void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+1	void ( * ( * __attribute__((noinline)) h ( void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+0	void ( * ( * h ( __attribute__((noinline)) void ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+0	void ( * ( * h ( void __attribute__((noinline)) ) ) ( int ) ) ( double ); int use(void){h();return 0;}
+0	void ( * ( * h ( void ) ) ( __attribute__((noinline)) int ) ) ( double ); int use(void){h();return 0;}
+0	void ( * ( * h ( void ) ) ( int __attribute__((noinline)) ) ) ( double ); int use(void){h();return 0;}
+0	void ( * ( * h ( void ) ) ( int ) ) ( __attribute__((noinline)) double ); int use(void){h();return 0;}
+0	void ( * ( * h ( void ) ) ( int ) ) ( double __attribute__((noinline)) ); int use(void){h();return 0;}
+1	void ( * ( * h ( void ) ) ( int ) ) ( double ) __attribute__((noinline)); int use(void){h();return 0;}
+1	void __attribute__((noinline)) ( * ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( __attribute__((noinline)) * ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( * __attribute__((noinline)) ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( * ( __attribute__((noinline)) * ( * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( * ( * __attribute__((noinline)) ( * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( * ( * ( __attribute__((noinline)) * h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+1	void ( * ( * ( * __attribute__((noinline)) h ( void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( __attribute__((noinline)) void ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void __attribute__((noinline)) ) ) ( int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( __attribute__((noinline)) int ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( int __attribute__((noinline)) ) ) ( double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( int ) ) ( __attribute__((noinline)) double ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( int ) ) ( double __attribute__((noinline)) ) ) ( char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( __attribute__((noinline)) char ); int use(void){h();return 0;}
+0	void ( * ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( char __attribute__((noinline)) ); int use(void){h();return 0;}
+1	void ( * ( * ( * h ( void ) ) ( int ) ) ( double ) ) ( char ) __attribute__((noinline)); int use(void){h();return 0;}
+1	int __attribute__((noinline)) ( * h ( void ) ) [ 3 ]; int use(void){h();return 0;}
+1	int ( __attribute__((noinline)) * h ( void ) ) [ 3 ]; int use(void){h();return 0;}
+1	int ( * __attribute__((noinline)) h ( void ) ) [ 3 ]; int use(void){h();return 0;}
+0	int ( * h ( __attribute__((noinline)) void ) ) [ 3 ]; int use(void){h();return 0;}
+0	int ( * h ( void __attribute__((noinline)) ) ) [ 3 ]; int use(void){h();return 0;}
+1	int ( * h ( void ) ) [ __attribute__((noinline)) 3 ]; int use(void){h();return 0;}
+1	int ( * h ( void ) ) [ 3 ] __attribute__((noinline)); int use(void){h();return 0;}
+1	int __attribute__((noinline)) ( ( h ) ) ( void ); int use(void){h();return 0;}
+1	int ( __attribute__((noinline)) ( h ) ) ( void ); int use(void){h();return 0;}
+1	int ( ( __attribute__((noinline)) h ) ) ( void ); int use(void){h();return 0;}
+0	int ( ( h ) ) ( __attribute__((noinline)) void ); int use(void){h();return 0;}
+0	int ( ( h ) ) ( void __attribute__((noinline)) ); int use(void){h();return 0;}
+1	int ( ( h ) ) ( void ) __attribute__((noinline)); int use(void){h();return 0;}

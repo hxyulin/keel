@@ -35,6 +35,37 @@ impl Module {
         })
     }
 
+    pub fn function_attrs(&self, name: &str) -> Option<crate::FunctionAttrs> {
+        self.decls
+            .iter()
+            .find(|d| d.name == name)
+            .map(|d| d.attrs)
+            .or_else(|| {
+                self.functions
+                    .iter()
+                    .find(|f| f.name == name)
+                    .map(|f| f.attrs)
+            })
+    }
+
+    /// Refresh direct callee contracts after constructing a complete module.
+    pub fn sync_function_attrs(&mut self) {
+        let attrs: std::collections::HashMap<_, _> = self
+            .decls
+            .iter()
+            .map(|d| (d.name.clone(), d.attrs))
+            .chain(self.functions.iter().map(|f| (f.name.clone(), f.attrs)))
+            .collect();
+        for f in &mut self.functions {
+            let refs: Vec<_> = f.callees().map(|(r, d)| (r, d.name.clone())).collect();
+            for (r, name) in refs {
+                if let Some(a) = attrs.get(&name) {
+                    f.callee_mut(r).attrs = *a;
+                }
+            }
+        }
+    }
+
     pub fn data_object(&self, name: &str) -> Option<&DataObject> {
         self.data.iter().find(|d| d.name == name)
     }
@@ -80,7 +111,7 @@ impl fmt::Display for Module {
             writeln!(f, "dlanguage {language}")?;
         }
         for decl in &self.decls {
-            writeln!(f, "decl @{}{}", decl.name, decl.sig)?;
+            writeln!(f, "decl @{}{}{}", decl.name, decl.sig, decl.attrs)?;
         }
         for data in &self.data {
             writeln!(f, "{data}")?;

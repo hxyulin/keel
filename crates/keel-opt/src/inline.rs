@@ -1,6 +1,7 @@
 //! Bounded direct-call inlining of private definitions. Templates are frozen at
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
-//! do not depend on module order. ABI by-value arguments get a fresh snapshot.
+//! cannot recursively reconsider cloned sites. The module budget is consumed in
+//! layout order. ABI by-value arguments get a fresh snapshot.
 use crate::Pass;
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
@@ -29,16 +30,41 @@ const MAX_BLOCKS: usize = 8;
 const MAX_STACK: u64 = 512;
 const MAX_GROWTH: usize = 2048;
 const MAX_CALLS: usize = 128;
+const MAX_MODULE_GROWTH: usize = 16_384;
+const HARD_STACK: u64 = 65_536;
+
+/// Reasons an explicit alwaysinline request could not be honored. No stderr
+/// side effects: embedders can display this report alongside their diagnostics.
+#[derive(Debug, Default)]
+pub struct InlineReport {
+    pub changed: bool,
+    pub skipped: Vec<InlineSkip>,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub struct InlineSkip {
+    pub caller: String,
+    pub callee: String,
+    pub site: Inst,
+    pub reason: &'static str,
+}
+
+fn profitable(f: &Function) -> bool {
+    let scale = if f.attrs.inlinehint { 2 } else { 1 };
+    f.attrs.alwaysinline
+        || (f.blocks().count() <= MAX_BLOCKS * scale
+            && f.layout_insts().count() <= MAX_INSTS * scale
+            && f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>()
+                <= MAX_STACK * scale as u64)
+}
 
 fn eligible(f: &Function) -> bool {
     f.local
+        && !f.attrs.noinline
         && !f.sig.variadic
         && !f.sig.returns_twice
         && f.personality.is_none()
         && f.entry_block().is_some()
-        && f.blocks().count() <= MAX_BLOCKS
-        && f.layout_insts().count() <= MAX_INSTS
-        && f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() <= MAX_STACK
+        && f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() <= HARD_STACK
         && f.sig
             .params
             .iter()
@@ -62,6 +88,10 @@ fn eligible(f: &Function) -> bool {
 }
 
 pub fn run(module: &mut Module) -> bool {
+    run_with_report(module).changed
+}
+
+pub fn run_with_report(module: &mut Module) -> InlineReport {
     let definitions: HashMap<_, _> = module
         .functions
         .iter()
@@ -100,31 +130,90 @@ pub fn run(module: &mut Module) -> bool {
     let templates: HashMap<_, _> = module
         .functions
         .iter()
-        .filter(|f| eligible(f) && !recursive(&f.name))
+        .filter(|f| eligible(f) && profitable(f) && !recursive(&f.name))
         .map(|f| (f.name.clone(), f.clone()))
         .collect();
-    let mut changed = false;
+    let rejected: HashMap<_, _> = module
+        .functions
+        .iter()
+        .filter(|f| !templates.contains_key(&f.name))
+        .map(|f| {
+            (
+                f.name.clone(),
+                if f.attrs.noinline {
+                    "noinline policy"
+                } else if recursive(&f.name) {
+                    "recursive callee"
+                } else if !eligible(f) {
+                    "unsupported callee or hard stack bound"
+                } else {
+                    "profitability threshold"
+                },
+            )
+        })
+        .collect();
+    let mut report = InlineReport::default();
+    let mut module_growth = 0;
     for caller in &mut module.functions {
-        if caller.sig.returns_twice || caller.personality.is_some() {
-            continue;
-        }
         let calls: Vec<_> = caller
             .layout_insts()
-            .filter_map(|(_, i)| matches!(caller.inst_data(i), InstData::Call { .. }).then_some(i))
+            .filter_map(|(_, i)| {
+                matches!(
+                    caller.inst_data(i),
+                    InstData::Call { .. } | InstData::Invoke { .. } | InstData::ReturnCall { .. }
+                )
+                .then_some(i)
+            })
             .collect();
         let mut growth = 0;
         let mut count = 0;
+        let mut stack_growth = 0;
         for call in calls {
-            let InstData::Call { func, .. } = caller.inst_data(call) else {
-                unreachable!()
+            let reference = match caller.inst_data(call) {
+                InstData::Call { func, .. }
+                | InstData::Invoke { func, .. }
+                | InstData::ReturnCall { func, .. } => *func,
+                _ => unreachable!(),
             };
-            let decl = caller.callee(*func);
-            let Some(callee) = templates.get(&decl.name) else {
-                continue;
+            let decl = caller.callee(reference);
+            let requested = decl.attrs.alwaysinline
+                || templates
+                    .get(&decl.name)
+                    .is_some_and(|f| f.attrs.alwaysinline);
+            let reason = if caller.sig.returns_twice || caller.personality.is_some() {
+                Some("unsupported caller")
+            } else if !matches!(caller.inst_data(call), InstData::Call { .. }) {
+                Some("unsupported call instruction")
+            } else if decl.attrs.noinline {
+                Some("noinline policy")
+            } else if let Some(callee) = templates.get(&decl.name) {
+                if decl.sig != callee.sig {
+                    Some("ABI signature mismatch")
+                } else if callee.name == caller.name {
+                    Some("recursive callee")
+                } else {
+                    None
+                }
+            } else {
+                Some(
+                    rejected
+                        .get(&decl.name)
+                        .copied()
+                        .unwrap_or("no private definition"),
+                )
             };
-            if decl.sig != callee.sig || callee.name == caller.name {
+            if let Some(reason) = reason {
+                if requested {
+                    report.skipped.push(InlineSkip {
+                        caller: caller.name.clone(),
+                        callee: decl.name.clone(),
+                        site: call,
+                        reason,
+                    });
+                }
                 continue;
             }
+            let callee = &templates[&decl.name];
             // Account for the CFG glue, byval loads/stores, and all cloned IR.
             let cost = callee.layout_insts().count()
                 + 2
@@ -137,16 +226,43 @@ pub fn run(module: &mut Module) -> bool {
                         _ => 0,
                     })
                     .sum::<usize>();
-            if count == MAX_CALLS || growth + cost > MAX_GROWTH {
+            let stack_cost = callee
+                .stack_slots()
+                .map(|(_, s)| u64::from(s.size))
+                .sum::<u64>()
+                + callee
+                    .sig
+                    .params
+                    .iter()
+                    .map(|p| match &p.purpose {
+                        Purpose::ByVal(l) => l.size(),
+                        _ => 0,
+                    })
+                    .sum::<u64>();
+            if count == MAX_CALLS
+                || growth + cost > MAX_GROWTH
+                || module_growth + cost > MAX_MODULE_GROWTH
+                || stack_growth + stack_cost > HARD_STACK
+            {
+                if requested {
+                    report.skipped.push(InlineSkip {
+                        caller: caller.name.clone(),
+                        callee: callee.name.clone(),
+                        site: call,
+                        reason: "hard growth safeguard",
+                    });
+                }
                 continue;
             }
             inline_call(caller, call, callee);
             growth += cost;
             count += 1;
-            changed = true;
+            module_growth += cost;
+            stack_growth += stack_cost;
+            report.changed = true;
         }
     }
-    changed
+    report
 }
 
 fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
@@ -211,7 +327,11 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         .collect();
     let refs: HashMap<_, _> = callee
         .callees()
-        .map(|(r, decl)| (r, caller.import_function(&decl.name, decl.sig.clone())))
+        .map(|(r, decl)| {
+            let imported = caller.import_function(&decl.name, decl.sig.clone());
+            caller.callee_mut(imported).attrs.merge(decl.attrs);
+            (r, imported)
+        })
         .collect();
     let data: HashMap<_, _> = callee
         .data_symbols()

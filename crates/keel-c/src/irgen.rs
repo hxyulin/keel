@@ -97,6 +97,7 @@ impl<'p> Gen<'p> {
                     };
                     self.module.decls.push(FuncDecl {
                         name: global.symbol.to_owned(),
+                        attrs: global.function_attrs,
                         sig,
                     });
                 }
@@ -126,6 +127,7 @@ impl<'p> Gen<'p> {
         if self.debug {
             self.module.debug_language = Some(Language::C11);
         }
+        self.module.sync_function_attrs();
         Ok(self.module)
     }
 
@@ -380,6 +382,7 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
         let mut func = Function::new(global.symbol.to_owned(), sig.clone());
+        func.attrs = global.function_attrs;
         func.local = global.internal;
         let mut b = FunctionBuilder::new(&mut func);
         let entry = b.create_block();

@@ -19,7 +19,16 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
                 | "c_static_assert"
                 | "c_thread_local"
         ),
-        "__has_attribute" => matches!(arg, "aligned" | "packed" | "returns_twice"),
+        "__has_attribute" => matches!(
+            arg,
+            "aligned"
+                | "packed"
+                | "returns_twice"
+                | "noreturn"
+                | "always_inline"
+                | "noinline"
+                | "nothrow"
+        ),
         "__has_c_attribute" | "__has_declspec_attribute" | "__building_module" => false,
         "__is_target_arch" => {
             if apple {
