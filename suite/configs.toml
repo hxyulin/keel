@@ -141,3 +141,24 @@ flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5"]
 name = "keel-m5-fast"
 compiler = "keel"
 flags = ["-O", "--isel-tier", "full", "--tune", "apple-m5", "--regalloc", "fast"]
+
+# Simplification breadth and phase-order experiments.
+[[config]]
+name = "keel-O-cleanup"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,instcombine,simplify-cfg,dce,gcm"]
+
+[[config]]
+name = "keel-O-bits-early"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,known-bits,instcombine,simplify-cfg,gvn,dce,gcm"]
+
+[[config]]
+name = "keel-O-bits-late"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]
+
+[[config]]
+name = "keel-O-bits-repeat"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine,simplify-cfg,dce,gvn,known-bits,instcombine,simplify-cfg,dce,gcm"]

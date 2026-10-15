@@ -171,3 +171,10 @@ is neutral overall (runtime ratio 1.0013), with a 2.3% QuickJS Fibonacci regress
 and 160 fewer text bytes. The isolated multiply dependency-chain improvement
 is about 33%, but this does not translate into a general application speedup.
 M5 tuning is experimental and remains explicit.
+
+The simplification presets `keel-O-cleanup`, `keel-O-bits-early`,
+`keel-O-bits-late`, and `keel-O-bits-repeat` isolate late cleanup, known-bit
+analysis placement, and repetition. Their [ordering sweep](reports/simplification-order-aarch64-2026-10-15.json)
+compares runtime/code size/compile cost on identical preprocessed inputs with
+Keel assembly. See the [simplification audit](../docs/simplification.md) for
+proof tests and the remaining gaps.

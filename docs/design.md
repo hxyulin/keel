@@ -739,11 +739,15 @@ analyses they need; there is no analysis cache yet.
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
 | `instcombine` | fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
 | `memory-forward` (opt-in) | block-local exact-address, same-type load reuse and store-to-load forwarding; every write invalidates all prior facts, and volatile accesses, calls, atomics and lifetime barriers clear them |
+| `known-bits` (opt-in) | propagate integer known-zero/known-one facts through SSA, remove proven redundant masks and fold comparisons from derived bounds |
 | `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
+
+See the [simplification audit](simplification.md) for missing analysis/rewrite
+families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
 The default pipeline (`-O`) is `simplify-cfg, instcombine, simplify-cfg, gvn,
 dce, gcm`. Basic uses `simplify-cfg, instcombine, simplify-cfg, dce`.

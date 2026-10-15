@@ -1,0 +1,29 @@
+; expect: exit 0
+; opt-passes: simplify-cfg, instcombine, simplify-cfg, gvn, known-bits, instcombine, simplify-cfg, dce, gcm
+func @known_bits(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = uext.i64 v1
+    v3 = iconst.i64 255
+    v4 = and v2, v3
+    v5 = iconst.i64 256
+    v6 = icmp.ult v4, v5
+    brif v6, block1, block4
+block1:
+    v7 = uext.i128 v1
+    v8 = iconst.i128 256
+    v9 = icmp.ult v7, v8
+    brif v9, block2, block4
+block2:
+    v10 = iconst.i64 15
+    v11 = and v0, v10
+    v12 = iconst.i64 60
+    v13 = shl v11, v12
+    v14 = ushr v13, v12
+    v15 = icmp.ule v14, v10
+    brif v15, block3, block4
+block3:
+    return v4
+block4:
+    trap
+}

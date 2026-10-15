@@ -18,6 +18,7 @@ mod dce;
 mod gcm;
 mod gvn;
 mod instcombine;
+mod known_bits;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
@@ -82,6 +83,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "forward exact-address ordinary loads and stores within a block",
         run: memory_forward::run,
     },
+    BuiltinPass {
+        name: "known-bits",
+        description: "prove integer bits and ranges to remove redundant masks and fold comparisons",
+        run: known_bits::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -106,6 +112,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[6],
     &BUILTINS[7],
     &BUILTINS[8],
+    &BUILTINS[9],
 ];
 
 /// Independent optimizer effort; Full adds value numbering and code motion.
