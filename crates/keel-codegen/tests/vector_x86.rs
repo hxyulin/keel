@@ -98,15 +98,22 @@ fn vector_operations_execute_unaligned_edges_masks_and_spills() {
     ] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
             for tiny in [false, true] {
-                let features = if std::is_x86_feature_detected!("avx")
-                    && std::is_x86_feature_detected!("bmi1")
-                    && std::is_x86_feature_detected!("bmi2")
-                {
-                    vec![Features::default(), Features::all()]
-                } else {
-                    vec![Features::default()]
-                };
+                let mut features = vec![Features::default()];
+                if std::is_x86_feature_detected!("avx") {
+                    features.push(Features {
+                        avx: true,
+                        ..Features::default()
+                    });
+                    if std::is_x86_feature_detected!("bmi1")
+                        && std::is_x86_feature_detected!("bmi2")
+                    {
+                        features.push(Features::all());
+                    }
+                }
                 for features in features {
+                    println!(
+                        "vector runtime: selection={selection:?} allocation={allocation:?} tiny={tiny} features={features:?}"
+                    );
                     let (_, program) = compile(&source, selection, allocation, tiny, features);
                     let object = dir.join("test.o");
                     fs::write(
@@ -169,30 +176,140 @@ fn vector_sysv_arguments_results_calls_tail_calls_varargs_cycles_and_pressure_ex
     fs::write(&c, harness).unwrap();
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for tiny in [false, true] {
-            let (_, program) = compile(
-                &source,
-                SelectionTier::Full,
-                allocation,
-                tiny,
-                Features::default(),
-            );
-            let object = dir.join("test.o");
-            fs::write(
-                &object,
-                keel_asm::x86::assemble_program_object(&program).unwrap(),
-            )
-            .unwrap();
-            let exe = dir.join("test");
-            command(
-                Command::new("clang")
-                    .args(["-O2", "-ffp-contract=off"])
-                    .arg(&c)
-                    .arg(&object)
-                    .arg("-o")
-                    .arg(&exe),
-            );
-            command(&mut Command::new(exe));
+            let feature_sets = if std::is_x86_feature_detected!("avx") {
+                vec![
+                    Features::default(),
+                    Features {
+                        avx: true,
+                        ..Features::default()
+                    },
+                ]
+            } else {
+                vec![Features::default()]
+            };
+            for features in feature_sets {
+                println!(
+                    "vector ABI runtime: allocation={allocation:?} tiny={tiny} features={features:?}"
+                );
+                let (_, program) =
+                    compile(&source, SelectionTier::Full, allocation, tiny, features);
+                let object = dir.join("test.o");
+                fs::write(
+                    &object,
+                    keel_asm::x86::assemble_program_object_with_features(&program, features)
+                        .unwrap(),
+                )
+                .unwrap();
+                let exe = dir.join("test");
+                command(
+                    Command::new("clang")
+                        .args(["-O2", "-ffp-contract=off"])
+                        .arg(&c)
+                        .arg(&object)
+                        .arg("-o")
+                        .arg(&exe),
+                );
+                command(&mut Command::new(exe));
+            }
         }
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn packed_avx_selection_preserves_sources_and_removes_two_address_copies() {
+    use keel_asm_ir::{
+        Item,
+        x86::{Opcode, Operand},
+    };
+    let features = Features {
+        avx: true,
+        ..Features::default()
+    };
+    let mut source = String::new();
+    for shape in ["f32x4", "f64x2"] {
+        for op in ["add", "sub", "mul", "div"] {
+            // Return register aliases rhs, exercising the SSE preservation path.
+            source += &format!(
+                "func @{op}_{shape}({shape}, {shape}) -> {shape} {{\nblock0(v0: {shape}, v1: {shape}):\n v2 = vf{op} v1, v0\n return v2\n}}\n"
+            );
+        }
+    }
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        let (baseline, bp) = compile(
+            &source,
+            SelectionTier::Baseline,
+            allocation,
+            false,
+            Features::default(),
+        );
+        let (enabled, ep) = compile(
+            &source,
+            SelectionTier::Baseline,
+            allocation,
+            false,
+            features,
+        );
+        let instructions = |p: &keel_asm_ir::Program| {
+            p.items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::X86Instruction(i) => Some(i.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let bi = instructions(&bp);
+        let ei = instructions(&ep);
+        let avx_ops = [
+            Opcode::Vaddps,
+            Opcode::Vsubps,
+            Opcode::Vmulps,
+            Opcode::Vdivps,
+            Opcode::Vaddpd,
+            Opcode::Vsubpd,
+            Opcode::Vmulpd,
+            Opcode::Vdivpd,
+        ];
+        for op in avx_ops {
+            let ops: Vec<_> = ei.iter().filter(|i| i.opcode == op).collect();
+            assert_eq!(ops.len(), 1, "{enabled}");
+            assert_eq!(ops[0].operands.len(), 3);
+            // The ABI puts lhs v1 in xmm1 and rhs v0 in xmm0.
+            for (operand, number) in [(1, 1), (2, 0)] {
+                assert!(
+                    matches!(&ops[0].operands[operand], Operand::Register(r) if r.number == number),
+                    "{enabled}"
+                );
+            }
+        }
+        assert!(
+            !bi.iter().any(|i| avx_ops.contains(&i.opcode)),
+            "{baseline}"
+        );
+        assert!(
+            ei.iter().filter(|i| i.opcode == Opcode::Movaps).count()
+                < bi.iter().filter(|i| i.opcode == Opcode::Movaps).count(),
+            "baseline:\n{baseline}AVX:\n{enabled}"
+        );
+        let bytes = |p: &keel_asm_ir::Program, f| {
+            use object::{Object, ObjectSection};
+            let obj = keel_asm::x86::assemble_program_object_with_features(p, f).unwrap();
+            object::File::parse(obj.as_slice())
+                .unwrap()
+                .section_by_name(".text")
+                .unwrap()
+                .data()
+                .unwrap()
+                .len()
+        };
+        let baseline_bytes = bytes(&bp, Features::default());
+        let avx_bytes = bytes(&ep, features);
+        println!(
+            "packed shape {allocation:?}: baseline {baseline_bytes} bytes/{} movaps; AVX {avx_bytes} bytes/{} movaps",
+            bi.iter().filter(|i| i.opcode == Opcode::Movaps).count(),
+            ei.iter().filter(|i| i.opcode == Opcode::Movaps).count()
+        );
+        assert!(avx_bytes < baseline_bytes);
+    }
 }

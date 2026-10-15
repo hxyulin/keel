@@ -986,6 +986,19 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_freg(result);
                 let a = self.use_freg(args[0], FS0);
                 let b = self.use_freg(args[1], FS1);
+                if let Some(opcode) = self
+                    .features
+                    .avx
+                    .then(|| vector::packed_avx(op, self.ty(args[0]).vector().unwrap()))
+                    .flatten()
+                {
+                    self.emit(
+                        opcode,
+                        [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&xmm(b))],
+                    );
+                    self.def_done(result, d);
+                    return;
+                }
                 // Preserve the second source if writing d would overwrite it.
                 let dst = if d == b && a != d { FS2 } else { d };
                 if dst != a {

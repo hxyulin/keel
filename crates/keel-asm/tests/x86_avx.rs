@@ -74,6 +74,14 @@ fn vex_prefixes_reserved_bits_and_fixup_bias() {
 #[test]
 fn avx_feature_gating_roundtrips_and_invalid_forms() {
     for source in [
+        "vaddps xmm8,xmm1,xmm15",
+        "vaddpd xmm8,xmm1,xmm15",
+        "vsubps xmm8,xmm1,xmm15",
+        "vsubpd xmm8,xmm1,xmm15",
+        "vmulps xmm8,xmm1,xmm15",
+        "vmulpd xmm8,xmm1,xmm15",
+        "vdivps xmm8,xmm1,xmm15",
+        "vdivpd xmm8,xmm1,xmm15",
         "vaddss xmm0,xmm1,xmm2",
         "vsqrtsd xmm15,xmm14,[r12]",
         "vucomisd xmm8,xmm9",
@@ -112,6 +120,13 @@ fn avx_feature_gating_roundtrips_and_invalid_forms() {
         );
     }
     for source in [
+        "vaddps xmm0,xmm1",
+        "vsubpd xmm0,xmm1,qword ptr [rax]",
+        "vmulps xmm0,rax,xmm1",
+        "vdivpd [rax],xmm1,xmm2",
+        "vaddps xmm0,[rax],xmm1",
+        "vsubps xmm0,xmm1,7",
+        "vdivps xmm0,xmm1,xmm2,xmm3",
         "vaddss xmm0,xmm1",
         "vaddsd xmm0,xmm1,xmm2,xmm3",
         "vaddss xmm0,rax,xmm1",
@@ -147,15 +162,17 @@ fn avx_feature_gating_roundtrips_and_invalid_forms() {
 #[test]
 fn typed_avx_rejects_malformed_registers_and_memory() {
     use keel_asm_ir::x86::Operand;
-    for (operand, number, width) in [(0, 16, 128), (1, 1, 64), (2, 17, 128)] {
-        let mut i = Instruction::parse_intel("vaddsd xmm0,xmm1,xmm2").unwrap();
-        if let Operand::Register(r) = &mut i.operands[operand] {
-            r.number = number;
-            r.width = width;
+    for mnemonic in ["vaddsd", "vaddps", "vsubpd", "vmulps", "vdivpd"] {
+        for (operand, number, width) in [(0, 16, 128), (1, 1, 64), (2, 17, 128)] {
+            let mut i = Instruction::parse_intel(&format!("{mnemonic} xmm0,xmm1,xmm2")).unwrap();
+            if let Operand::Register(r) = &mut i.operands[operand] {
+                r.number = number;
+                r.width = width;
+            }
+            let mut p = Program::new();
+            p.x86_instruction(i);
+            assert!(assemble_program_object_with_features(&p, avx()).is_err());
         }
-        let mut p = Program::new();
-        p.x86_instruction(i);
-        assert!(assemble_program_object_with_features(&p, avx()).is_err());
     }
     let mut i = Instruction::parse_intel("vaddsd xmm0,xmm1,[r12+r13]").unwrap();
     if let Operand::Memory(m) = &mut i.operands[2] {
@@ -169,6 +186,14 @@ fn typed_avx_rejects_malformed_registers_and_memory() {
 fn differential_cases() -> Vec<String> {
     let mut cases = Vec::new();
     for (op, width) in [
+        ("vaddps", 128),
+        ("vaddpd", 128),
+        ("vsubps", 128),
+        ("vsubpd", 128),
+        ("vmulps", 128),
+        ("vmulpd", 128),
+        ("vdivps", 128),
+        ("vdivpd", 128),
         ("vaddss", 32),
         ("vaddsd", 64),
         ("vsubss", 32),
@@ -275,7 +300,8 @@ fn differential_cases() -> Vec<String> {
 #[test]
 fn avx_matrix_matches_clang_and_gnu() {
     let cases = differential_cases();
-    assert!(cases.len() > 45_000);
+    assert!(cases.len() > 58_000);
+    println!("AVX differential matrix: {} instructions", cases.len());
     let source = format!(
         ".intel_syntax noprefix\n.text\n{}\nlocal: .zero 16\n",
         cases.join("\n")
@@ -318,7 +344,27 @@ fn avx_matrix_matches_clang_and_gnu() {
         // GNU as retains the written bitwise order and uses load-direction moves
         // by default; LLVM and keel choose VEX2 where possible. Request the same
         // equivalent encoding explicitly, without changing FP arithmetic order.
-        if tool != "clang" {
+        if tool == "clang" {
+            // LLVM swaps packed add/mul sources to obtain VEX2. Force VEX3
+            // when needed so the reference preserves FP source/NaN order.
+            let normalized = cases
+                .iter()
+                .map(|case| {
+                    use keel_asm_ir::x86::{Opcode::*, Operand::Register};
+                    let i = Instruction::parse_intel(case).unwrap();
+                    let force = matches!(i.opcode, Vaddps | Vaddpd | Vmulps | Vmulpd)
+                        && matches!(&i.operands[1], Register(r) if r.number < 8)
+                        && matches!(&i.operands[2], Register(r) if r.number >= 8);
+                    format!("{}{case}", if force { "{vex3} " } else { "" })
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            std::fs::write(
+                &input,
+                format!(".intel_syntax noprefix\n.text\n{normalized}\nlocal: .zero 16\n"),
+            )
+            .unwrap();
+        } else {
             let normalized = cases
                 .iter()
                 .map(|case| {

@@ -9,6 +9,8 @@ The typed assembler parses and displays these Intel-syntax forms:
 
 - `vaddss/sd`, `vsubss/sd`, `vmulss/sd`, `vdivss/sd`, `vminss/sd`,
   `vmaxss/sd`, `vsqrtss/sd`: `xmm_dest, xmm_merge, xmm_or_scalar_memory`.
+- `vaddps/pd`, `vsubps/pd`, `vmulps/pd`, `vdivps/pd`:
+  `xmm_dest, xmm_lhs, xmm_or_128_bit_memory_rhs`.
 - `vandps/pd`, `vorps/pd`, `vxorps/pd`: three XMM operands, with an optional
   128-bit memory final source.
 - `vroundss/sd`: `xmm_dest, xmm_merge, xmm_or_scalar_memory, imm8`.
@@ -33,7 +35,9 @@ Scalar rounding uses map=0F3A. Register moves may use the equivalent store opcod
 and commutative bitwise sources may swap, to obtain VEX2. Floating arithmetic
 operands never swap. No REX or legacy mandatory prefix accompanies VEX.
 
-The compiler selects AVX only for scalar fadd/fsub/fmul/fdiv and fsqrt. Binary
+The compiler selects AVX for scalar fadd/fsub/fmul/fdiv and fsqrt, and packed
+f32x4/f64x2 vfadd/vfsub/vfmul/vfdiv. Packed arithmetic preserves every lane and
+the written source order, including add/mul and destination aliases. Binary
 instructions directly write the allocated destination, including when it aliases
 the second source, eliminating two-address copies. Both output modes use the
 same typed instructions. Baseline selection stays unchanged. There is no FMA,
@@ -51,19 +55,20 @@ functions containing opaque user-authored 256-bit instructions.
 Encoding and operand assumptions follow Intel's [64 and IA-32 Software
 Developer's Manual, Volume 2](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html),
 section 2.3 (VEX format), and the individual ADDSS/ADDSD, SUBSS/SUBSD, MULSS/MULSD,
-DIVSS/DIVSD, SQRTSS/SQRTSD, MIN/MAX, UCOMISS/UCOMISD, MOVSS/MOVSD, MOVAPS/MOVUPS,
+DIVSS/DIVSD, ADDPS/ADDPD, SUBPS/SUBPD, MULPS/MULPD, DIVPS/DIVPD, SQRTSS/SQRTSD, MIN/MAX, UCOMISS/UCOMISD, MOVSS/MOVSD, MOVAPS/MOVUPS,
 MOVAPD/MOVUPD, AND/OR/XORPS/PD, ROUNDSS/ROUNDSD and VZEROUPPER entries.
 In particular, scalar moves have distinct register-merge and memory forms;
 unused vvvv fields must be encoded as 1111, and scalar forms use L=0.
 
-`crates/keel-asm/tests/x86_avx.rs` compares a matrix of over 45,000 instructions
+`crates/keel-asm/tests/x86_avx.rs` compares a matrix of over 58,000 instructions
 against Clang and GNU as, including bytes and relocation offsets/types/addends/
 symbol names. It covers every XMM register in destination/source fields,
 aliases, VEX2/VEX3, extended GPR/SIB operands, displacement boundaries, RIP/local/
 external/GOT fixups, segments and trailing rounding immediates. GNU's reference
 source explicitly requests the equivalent store-direction moves and bitwise
 source ordering that Clang selects automatically, so encoding choices match.
-On Linux GNU as is required; other hosts can set `KEEL_TEST_GNU_AS` to a GNU
+Clang reference source uses `{vex3}` for packed add/mul cases where it would
+otherwise exchange FP sources to shorten the prefix. On Linux GNU as is required; other hosts can set `KEEL_TEST_GNU_AS` to a GNU
 x86-64 cross-assembler. Clang is always required.
 
 The same file checks default/missing-feature rejection, malformed typed operands,
@@ -82,3 +87,27 @@ microbenchmark. No speedup claim is made without measurements on the target CPU.
 The guarded runtime tests passed on the i7-1360P Linux NUC. See the
 [integration report](../suite/reports/native-x86-features-20261015.json) for
 combined AVX/BMI application and baseline compatibility validation.
+
+## Packed arithmetic extension
+
+The packed extension reuses the existing feature selector and address encoder.
+It adds no vector shapes, attributes, ABI rules, fast-math behavior or upper YMM
+state. Baseline SSE2 selection is unchanged; packed sqrt and non-arithmetic
+vector operations keep their existing selection. In particular, the VEX2
+bitwise-source optimization is restricted to AND/OR/XOR and never applies to
+packed FP arithmetic, even when source exchange would shorten the encoding.
+
+The encoding matrix includes all eight packed arithmetic mnemonics in every
+XMM field, register aliases (including destination equal to rhs), high registers,
+128-bit memory sources, SIB/displacement boundaries and RIP/GOT relocations.
+Typed malformed-register rejection and textual malformed-operand/feature
+rejection cover the new forms. The codegen test
+`packed_avx_selection_preserves_sources_and_removes_two_address_copies` compares
+baseline versus AVX instructions, copies and text-section byte counts under
+both allocation tiers, with lhs/rhs supplied in ABI registers in reversed order.
+The vector runtime tests additionally exercise AVX without requiring BMI,
+including unaligned lane data, NaNs, signed zero, infinity, normal/subnormal
+values, calls, forced spills in both allocator tiers, vector arguments and
+returns. Those runtime tests remain guarded by Rust's AVX CPU/OS support check.
+These descriptions identify coverage; execution evidence for this revision is
+recorded separately and historical reports above do not validate this extension.
