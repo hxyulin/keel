@@ -1,6 +1,6 @@
 //! Conservative fixed-width loop vectorization with a scalar fallback.
 //!
-//! Recognizes zero-based, unit-stride, two-block counted loops with one store,
+//! Recognizes unit-stride, two-block counted loops with invariant starts, one store,
 //! a uniform element type and no carried values except the induction variable.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
@@ -63,6 +63,7 @@ struct Candidate {
     body: Block,
     pre: Block,
     iv: Value,
+    start: Value,
     bound: Value,
     signed: bool,
     store: Inst,
@@ -147,15 +148,21 @@ impl Analyze<'_> {
             let D::Binary { op, args } = *self.f.inst_data(scale) else {
                 return None;
             };
-            let amount = constant(self.f, args[1])?;
-            if !(op == B::Shl && amount == i64::from(bytes.trailing_zeros())
-                || op == B::Imul && amount == i64::from(bytes))
-            {
-                return None;
-            }
-            self.index(args[0])?;
+            let (index, amount) = match op {
+                B::Shl if constant(self.f, args[1]) == Some(i64::from(bytes.trailing_zeros())) => {
+                    (args[0], args[1])
+                }
+                B::Imul if constant(self.f, args[1]) == Some(i64::from(bytes)) => {
+                    (args[0], args[1])
+                }
+                B::Imul if constant(self.f, args[0]) == Some(i64::from(bytes)) => {
+                    (args[1], args[0])
+                }
+                _ => return None,
+            };
+            self.index(index)?;
             self.allowed.insert(scale);
-            if let Some(i) = def(self.f, args[1]) {
+            if let Some(i) = def(self.f, amount) {
                 self.allowed.insert(i);
             }
         }
@@ -195,7 +202,12 @@ impl Analyze<'_> {
         Some(())
     }
 }
-fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidate> {
+fn analyze(
+    f: &Function,
+    header: Block,
+    target: VectorTarget,
+    analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
+) -> Option<Candidate> {
     let [iv] = *f.block_params(header) else {
         return None;
     };
@@ -218,41 +230,53 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
     else {
         return None;
     };
-    if f.resolve(cond) != f.first_result(cmp) || !dests[0].args.is_empty() {
+    if f.resolve(cond) != f.first_result(cmp) {
         return None;
     }
-    let cfg = ControlFlowGraph::compute(f);
-    let dom = DominatorTree::compute(f, &cfg);
-    let body = dests[0].block;
-    if body == header || cfg.preds(body) != [header] || !f.block_params(body).is_empty() {
-        return None;
-    }
-    let (bound, signed) = match (
+    let (bound, signed, body_index) = match (
         predicate,
         f.resolve(args[0]) == iv,
         f.resolve(args[1]) == iv,
     ) {
-        (IntCC::Ult, true, false) => (args[1], false),
-        (IntCC::Ugt, false, true) => (args[0], false),
-        (IntCC::Slt, true, false) => (args[1], true),
-        (IntCC::Sgt, false, true) => (args[0], true),
+        (IntCC::Ult, true, false) => (args[1], false, 0),
+        (IntCC::Ugt, false, true) => (args[0], false, 0),
+        (IntCC::Slt, true, false) => (args[1], true, 0),
+        (IntCC::Sgt, false, true) => (args[0], true, 0),
+        (IntCC::Uge, true, false) => (args[1], false, 1),
+        (IntCC::Ule, false, true) => (args[0], false, 1),
+        (IntCC::Sge, true, false) => (args[1], true, 1),
+        (IntCC::Sle, false, true) => (args[0], true, 1),
         _ => return None,
     };
+    let (cfg, dom) = analysis.get_or_insert_with(|| {
+        let cfg = ControlFlowGraph::compute(f);
+        let dom = DominatorTree::compute(f, &cfg);
+        (cfg, dom)
+    });
+    let body = dests[body_index].block;
+    if body == header
+        || cfg.preds(body) != [header]
+        || !f.block_params(body).is_empty()
+        || !dests[body_index].args.is_empty()
+    {
+        return None;
+    }
     let preds = cfg.preds(header);
     if preds.len() != 2 {
         return None;
     }
     let pre = *preds.iter().find(|&&b| b != body)?;
-    if pre == header || !dom.dominates(header, body) || !invariant(f, &dom, pre, bound) {
+    if pre == header || !dom.dominates(header, body) || !invariant(f, dom, pre, bound) {
         return None;
     }
     let pre_jump = *f.block_insts(pre).last()?;
     let D::Jump { dest } = f.inst_data(pre_jump) else {
         return None;
     };
-    if dest.block != header || dest.args.len() != 1 || constant(f, dest.args[0]) != Some(0) {
+    if dest.block != header || dest.args.len() != 1 || !invariant(f, dom, pre, dest.args[0]) {
         return None;
     }
+    let start = f.resolve(dest.args[0]);
     let back = *f.block_insts(body).last()?;
     let D::Jump { dest } = f.inst_data(back) else {
         return None;
@@ -287,19 +311,27 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
     let shape = VectorType::ALL
         .into_iter()
         .find(|s| s.lane_type() == f.value_type(value))?;
-    if let Some(n) = constant(f, bound) {
-        let n = if f.value_type(iv) == Type::I32 {
+    let unsigned = |n: i64| {
+        if f.value_type(iv) == Type::I32 {
             u64::from(n as u32)
         } else {
             n as u64
-        };
-        let negative = signed
+        }
+    };
+    let negative = |n: i64| {
+        signed
             && if f.value_type(iv) == Type::I32 {
                 (n as i32) < 0
             } else {
-                (n as i64) < 0
-            };
-        if negative || n < u64::from(shape.lanes()) * 4 {
+                n < 0
+            }
+    };
+    if constant(f, start).is_some_and(negative) || constant(f, bound).is_some_and(negative) {
+        return None;
+    }
+    if let (Some(start), Some(bound)) = (constant(f, start), constant(f, bound)) {
+        let (start, bound) = (unsigned(start), unsigned(bound));
+        if bound < start || bound - start < u64::from(shape.lanes()) * 4 {
             return None;
         }
     }
@@ -308,6 +340,7 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
         body,
         pre,
         iv,
+        start,
         bound: f.resolve(bound),
         signed,
         store,
@@ -317,7 +350,7 @@ fn analyze(f: &Function, header: Block, target: VectorTarget) -> Option<Candidat
     };
     let mut a = Analyze {
         f,
-        dom: &dom,
+        dom,
         c,
         target,
         allowed: HashSet::from([back, step, store]),
@@ -417,11 +450,21 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
     let bytes = c.shape.lane_type().bytes().unwrap();
     let zero = iconst(f, guard, ty, 0);
     let min = iconst(f, guard, ty, lanes * 4);
+    let from_zero = constant(f, c.start) == Some(0);
+    let count = if from_zero {
+        c.bound
+    } else {
+        bin(f, guard, B::Isub, c.bound, c.start)
+    };
     let enough = cmp(
         f,
         guard,
-        if c.signed { IntCC::Sge } else { IntCC::Uge },
-        c.bound,
+        if c.signed && from_zero {
+            IntCC::Sge
+        } else {
+            IntCC::Uge
+        },
+        count,
         min,
     );
     let n64 = if ty == Type::I64 {
@@ -438,6 +481,23 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         )
     };
     let mut safe = enough;
+    if !from_zero {
+        // Subtraction alone can turn an empty range into a huge unsigned count.
+        let ordered = cmp(
+            f,
+            guard,
+            if c.signed { IntCC::Sge } else { IntCC::Uge },
+            c.bound,
+            c.start,
+        );
+        safe = bin(f, guard, B::And, safe, ordered);
+        if c.signed {
+            // Vector address reconstruction zero-extends i32 indices. Negative
+            // starts retain the original scalar sign-extension and arithmetic.
+            let nonnegative = cmp(f, guard, IntCC::Sge, c.start, zero);
+            safe = bin(f, guard, B::And, safe, nonnegative);
+        }
+    }
     let len = if bytes == 1 {
         n64
     } else {
@@ -485,10 +545,15 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         let ok = bin(f, guard, B::Or, same, disjoint);
         safe = bin(f, guard, B::And, safe, ok);
     }
-    branch(f, guard, safe, setup, vec![], c.header, vec![zero]);
+    branch(f, guard, safe, setup, vec![], c.header, vec![c.start]);
     let round = iconst(f, setup, ty, i64::from(lanes.trailing_zeros()));
-    let groups = bin(f, setup, B::Ushr, c.bound, round);
-    let end = bin(f, setup, B::Shl, groups, round);
+    let groups = bin(f, setup, B::Ushr, count, round);
+    let length = bin(f, setup, B::Shl, groups, round);
+    let end = if from_zero {
+        length
+    } else {
+        bin(f, setup, B::Iadd, c.start, length)
+    };
     let mut mapping = HashMap::from([(c.iv, vi)]);
     // Broadcast invariants once, outside the vector loop. Local literals are
     // cloned here too; the scalar body retains its original definitions.
@@ -512,7 +577,7 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         );
         mapping.insert(v, splat);
     }
-    jump(f, setup, vector, vec![zero]);
+    jump(f, setup, vector, vec![c.start]);
     // Rebuild addresses from the vector induction, avoiding scalar address
     // conversion/sign-extension subtleties after grouping iterations.
     let index = if ty == Type::I64 {
@@ -595,9 +660,13 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
 pub fn run(f: &mut Function, target: VectorTarget) -> bool {
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
+    // Rejected candidates do not change the function. Share these whole-function
+    // analyses until a successful transformation adds blocks and redirects edges.
+    let mut analysis = None;
     for header in headers {
-        if let Some(c) = analyze(f, header, target) {
+        if let Some(c) = analyze(f, header, target, &mut analysis) {
             transform(f, c, target);
+            analysis = None;
             changed = true;
         }
     }

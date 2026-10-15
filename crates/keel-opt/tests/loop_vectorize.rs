@@ -143,3 +143,121 @@ fn ignores_two_instruction_blocks_starting_with_a_store_or_void_call() {
         assert_eq!(before, after.to_string());
     }
 }
+
+#[test]
+fn analyzes_later_loops_after_rejections_and_cfg_changes() {
+    let mut source = kernel(Type::I32, Type::I64, "udiv", false);
+    for loop_index in 1..=2 {
+        let mut next = kernel(Type::I32, Type::I64, "iadd", false);
+        next = next.lines().skip(1).collect::<Vec<_>>().join("\n");
+        next = next.replace("block0(v0: ptr,v1: ptr,v2: ptr,v3: i64):", "block0:");
+        for value in (4..=19).rev() {
+            next = next.replace(
+                &format!("v{value}"),
+                &format!("v{}", value + loop_index * 20),
+            );
+        }
+        for block in (0..=3).rev() {
+            next = next.replace(
+                &format!("block{block}"),
+                &format!("block{}", block + loop_index * 4),
+            );
+        }
+        source = source.replace(
+            " return\n}",
+            &format!(" jump block{}\n{next}", loop_index * 4),
+        );
+    }
+    let m = optimize(&source, VectorTarget::Portable);
+    assert_eq!(packed(&m), 2);
+    let text = m.to_string();
+    let mut twice = m.clone();
+    keel_opt::run_passes(&mut twice, &["loop-vectorize"]).unwrap();
+    assert_eq!(text, twice.to_string());
+}
+
+#[test]
+fn vectorizes_invariant_starts_and_both_branch_orientations() {
+    for shape in VectorType::ALL {
+        let ty = shape.lane_type();
+        let op = if ty.is_float() { "fadd" } else { "iadd" };
+        for index in [Type::I32, Type::I64] {
+            for signed in [false, true] {
+                for dynamic in [false, true] {
+                    let mut source = kernel(ty, index, op, signed);
+                    if dynamic {
+                        source = source
+                            .replace(
+                                &format!("ptr,ptr,ptr,{index})"),
+                                &format!("ptr,ptr,ptr,{index},{index})"),
+                            )
+                            .replace(
+                                &format!("v3: {index}):"),
+                                &format!("v3: {index},v40: {index}):"),
+                            )
+                            .replace("jump block1(v4)", "jump block1(v40)");
+                    } else {
+                        source = source.replace(
+                            &format!("v4 = iconst.{index} 0"),
+                            &format!("v4 = iconst.{index} 7"),
+                        );
+                    }
+                    // Cover operand swapping independently of branch inversion.
+                    let (lt, gt, ge, le) = if signed {
+                        ("slt", "sgt", "sge", "sle")
+                    } else {
+                        ("ult", "ugt", "uge", "ule")
+                    };
+                    for (predicate, operands, inverse) in [
+                        (lt, "v5,v3", false),
+                        (gt, "v3,v5", false),
+                        (ge, "v5,v3", true),
+                        (le, "v3,v5", true),
+                    ] {
+                        let mut variant = source.replace(
+                            &format!("icmp.{lt} v5,v3"),
+                            &format!("icmp.{predicate} {operands}"),
+                        );
+                        if inverse {
+                            variant =
+                                variant.replace("brif v6,block2,block3", "brif v6,block3,block2");
+                        }
+                        let m = optimize(&variant, VectorTarget::Portable);
+                        assert_eq!(packed(&m), 1, "{variant}");
+                        let text = m.to_string();
+                        let mut twice = m.clone();
+                        keel_opt::run_passes(&mut twice, &["loop-vectorize"]).unwrap();
+                        assert_eq!(text, twice.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rejects_known_empty_short_and_negative_start_ranges() {
+    for index in [Type::I32, Type::I64] {
+        for signed in [false, true] {
+            for (start, bound) in [(7, 7), (17, 7), (7, 22), (-1, 100), (i64::MAX, 0)] {
+                let source = kernel(Type::I32, index, "iadd", signed)
+                    .replace(
+                        &format!("v4 = iconst.{index} 0"),
+                        &format!("v40 = iconst.{index} {bound}\n v4 = iconst.{index} {start}"),
+                    )
+                    .replace("v5,v3", "v5,v40");
+                assert_eq!(
+                    packed(&optimize(&source, VectorTarget::Portable)),
+                    0,
+                    "{source}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn accepts_commuted_element_size_multiplication() {
+    let source = kernel(Type::I32, Type::I64, "iadd", false).replace("imul v5,v10", "imul v10,v5");
+    assert_eq!(packed(&optimize(&source, VectorTarget::Portable)), 1);
+}

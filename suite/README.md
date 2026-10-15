@@ -1204,3 +1204,99 @@ symbol keys. Debug-mode changes are similarly small. Peak RSS observations are
 reported as single full counting-process measurements including resident inputs
 and warmup; they do not establish isolated-call peak memory. Source, binary, and
 sample hashes are rechecked before committing the reports.
+
+## Application loop profiles (2026-10-16)
+
+`profile_app_loops.py` profiles the optimized Lua, QuickJS, and SQLite workloads.
+It prints optimized IR and adds line tables while compiling that IR, then checks
+exact object and linked `.text` equality against ordinary `keel cc -O`. It does
+not use frontend `-g`, which would keep locals in memory and change the workload.
+Clang builds provide output references and retained vectorization remarks.
+
+```sh
+python3 suite/profile_app_loops.py \
+  --compiler target/release/keel --work-dir target/app-loop-profile \
+  --seconds 6 --rounds 2
+python3 suite/probe_app_inline.py \
+  --compiler target/release/keel --profile target/app-loop-profile/profile.json \
+  --work-dir target/app-loop-inline-probe
+python3 suite/probe_app_divide.py \
+  --compiler target/release/keel --profile target/app-loop-profile/profile.json \
+  --work-dir target/app-loop-divide-probe
+```
+
+On macOS the profiler uses `sample`; on the NUC it uses task-scoped
+`sudo -n perf record` with `--event cpu_core/cycles/u --cpu 0`. Choose a suitable
+event/core on other Linux CPUs. It changes no perf access settings. Use
+`--variants keel clang` to profile both compilers, `--build-only` to retain builds
+without sampling, and `--reuse-builds --suites <names>` to profile retained builds.
+All repeated workload outputs must match Clang. Single-run durations calibrate
+repetitions and are not comparative latency results. Wall samples and weighted
+user cycles have different denominators.
+
+The two probes are diagnostic application variants, not compiler features.
+The QuickJS probe expands three sampled helpers in one source file and runs all
+nine suite tests in both variants. The SQLite probe replaces only two constant
+division/remainder instructions in `sqlite3FpDecode`, validates native arithmetic
+against a variable-divisor C reference on 100,011 inputs, and checks SQL outputs.
+Both use two warmups and eleven alternating benchmark pairs, retaining raw
+samples, binary/input hashes, and paired bootstrap intervals.
+
+Results and ranked patterns are in
+[`reports/app-hot-loops-20261016.json`](reports/app-hot-loops-20261016.json).
+Forty-eight native captures cover MacHost and the NUC; LinuxHost additionally runs both
+probes and machine-code parity checks. The helper probe reduces QuickJS benchmark
+time by 12–19% on MacHost, 20–48% on LinuxHost, and 4–13% on the NUC. A bounded inliner
+with aggregate-copy cleanup is therefore the strongest measured next feature.
+SQLite constant-division results are smaller (roughly 1–3%, with MacHost's interval
+including no change). The vectorizer-specific candidates are bounded byte scans
+with early exits and short pointer/aggregate copies. Their application benefit
+has not been established; many token runs in these fixtures are only 1–9 bytes.
+
+### Clang comparison and proposed next step
+
+The completed three-host comparison is retained in
+[`reports/clang-vectorization-comparison-20261016.json`](reports/clang-vectorization-comparison-20261016.json).
+Clang already enables loop and SLP vectorization at `-O2`; driver checks and
+successful optimization remarks confirm this for the installed compilers.
+The comparison also disables both vectorizers and adds native CPU targeting
+(`-mcpu=native` on MacHost, `-march=native` on x86), independently. All variants
+use `-ffp-contract=off`, identical prepared inputs, and no LTO/PGO/fast-math.
+Native targeting therefore measures code generation and tuning after
+preprocessing; it does not enable CPU-specific source branches. Disabling the
+two vectorizers does not disable explicit SIMD or SIMD in system libraries.
+
+Each workload has two warmups and twelve measured rounds with rotated/reversed
+configuration order, raw times, and paired bootstrap intervals. Application
+stdout matches across every variant; SQLite's query fixture also matches.
+Arithmetic maps use the self-checking harness's inner elapsed time. Linux
+measurements pin CPU 0. The JSON retains both measurement script revisions:
+application measurements completed before correcting a duration/stdout comparison
+in the kernel harness runner; only the kernel stage was resumed.
+
+The MacHost arithmetic maps take about 1.04–1.05 times Clang O2's time. The x86
+maps take about 1.9–2.3 times as long. Application parity has not been reached:
+Lua takes about 1.5–2.3 times Clang O2's time, unmodified QuickJS 2.6–8.5 times,
+and SQLite 1.8–2.1 times. These ranges use ratios of absolute medians; the report
+also retains same-round ratios and intervals. Compare compiler variants within
+each host, since the installed Clang versions differ.
+
+The proposed next feature is a bounded direct-call inliner, followed by cleanup
+of temporary aggregate copies and ordinary per-function optimization. Start
+with small same-module helpers, reject recursion and unsupported call semantics,
+and cap total code growth. Clone callee blocks, values and stack slots; map
+arguments to parameters and route returns to a continuation. Preserve memory
+and call contracts. Aggregate cleanup must respect aliasing and escaping
+addresses. The QuickJS source-expansion probe motivates this work, but does
+not predict the gain from an IR implementation. This proposal has not been
+implemented or selected for the next development phase.
+
+To reproduce using retained profiles and diagnostic probe builds:
+
+```sh
+python3 suite/compare_app_clang.py \
+  --compiler target/release/keel --profile target/app-loop-profile/profile.json \
+  --inline-probe target/app-loop-inline-probe/probe.json \
+  --divide-probe target/app-loop-divide-probe/probe.json \
+  --work-dir target/clang-comparison
+```

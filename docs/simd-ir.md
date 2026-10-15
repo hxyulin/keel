@@ -188,14 +188,23 @@ There is no frontend dependency in the pass. Basic optimization and unoptimized
 builds retain scalar loops. Explicit `-p` pipelines include the pass only when
 listed, for example `-p simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,dce,gcm,loop-vectorize`.
 
-The initial subset is zero-based, increasing-by-one counted loops with a 32- or
-64-bit induction variable, a separate header and straight-line body, one store,
-and contiguous streams of one scalar element type. Loads, copies, fills, integer
+The supported subset is increasing-by-one counted loops with a 32- or
+64-bit induction variable, an invariant starting index, a separate header and
+straight-line body, one store, and contiguous streams of one scalar element type.
+Loads, copies, fills, integer
 add/subtract/bitwise operations, and floating add/subtract/multiply/divide can be
 widened to the matching 128-bit shape. Uniform scalar operands are broadcast once
 outside the vector loop. NEON broadcasts use typed `DUP` instructions for all six
 shapes. Signed positive bounds and scalar cleanup are supported, without floating
 reassociation or a fast-math requirement.
+
+Starts may be constant or runtime values, for example `for (i = lo; i < n; i++)`.
+Either branch orientation is recognized, including `if (i >= n) break`, as are
+comparisons with swapped operands and commuted element-size multiplication.
+Dynamic signed starts below zero retain the scalar path; known negative starts
+are left unchanged. Empty ranges and subtraction wraparound cannot enter the
+vector path. The trip threshold uses `n - lo`, and the vector tail starts at
+`lo + floor((n - lo) / lanes) * lanes`, without rounding the absolute index.
 
 A runtime guard requires at least four vector groups, checks byte-range overflow,
 and permits each input to be either identical to the output or disjoint from it.
@@ -204,6 +213,9 @@ Partial overlap runs the unchanged scalar loop, preserving dependencies such as
 only complete groups; its final index enters the original scalar loop for the
 tail. Neither path widens access beyond the original iteration range. Accesses
 remain unaligned-safe and volatile operations are excluded.
+Alias and byte-overflow guards conservatively check the full base-to-bound
+range even for nonzero starts; disjoint accessed subranges can therefore still
+fall back to scalar execution.
 
 The first cost gate uses packed operation availability, fixed register pressure
 limits (24 expression values, four streams), and a trip-count threshold. It is
@@ -214,6 +226,10 @@ for `cc`/`compile`, including explicit pipelines. `keel opt --target <triple>`
 selects that target's gate; without a target, `opt` uses portable capabilities.
 For example, i32 multiplication vectorizes for NEON but remains scalar for the
 current SSE2 lowering; i64 multiplication remains scalar on both.
+
+Loop discovery computes control-flow and dominance analysis lazily and reuses it
+across rejected candidates. A successful transformation invalidates both analyses
+before examining another loop, since it adds blocks and redirects edges.
 
 Offsets between streams, non-unit strides, reductions, induction values used as
 lane data or live-outs, additional loop-carried values, calls, atomics, volatile
@@ -231,3 +247,20 @@ both directions, exact aliases, disjoint streams, zero/short inputs, signed
 negative bounds, tails, and protected page boundaries. The reproducible
 `suite/scripts/bench_vectorize.py` compares the same compiler pipeline with and
 without the vectorizer, plus Clang, reporting compilation and runtime separately.
+Additional cases cover sequential loops after rejected candidates, overlapping
+byte/short copies, signed 32-bit indices, and bit-preserving floating copies.
+The three-host follow-up results are recorded in
+`suite/reports/loop-vectorize-fleet-20261015.json`.
+The recognition expansion and its on/off and before/after measurements are in
+`suite/reports/loop-vectorize-recognition-20261015.json`. Use
+`--pattern range`, `--pattern inverted`, or `--pattern fixed-start` with
+`bench_vectorize.py` to measure the newly supported forms; `--pattern zero`
+retains the zero-based control. `--start` selects the runtime starting index.
+
+Runtime profiles and diagnostic application probes are recorded in
+`suite/reports/app-hot-loops-20261016.json`. They identify helper-call and
+aggregate-materialization costs in QuickJS, scalar decimal formatting in SQLite,
+and bounded byte scans/short copies as future vectorization investigations.
+The probes change retained application source or IR copies; they do not add a
+compiler inliner or constant-division pass. See the runtime profiling commands
+in `suite/README.md`.

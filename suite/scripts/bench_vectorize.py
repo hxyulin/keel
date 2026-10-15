@@ -13,22 +13,27 @@ import tempfile
 import time
 
 PIPELINE = "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,dce,gcm"
-KERNEL = "void map(float*d,const float*a,const float*b,unsigned long n){for(unsigned long i=0;i<n;i++)d[i]=a[i]*b[i]+a[i];}\n"
+KERNELS = {
+    "zero": "for(unsigned long i=0;i<n;i++)d[i]=a[i]*b[i]+a[i];",
+    "range": "for(unsigned long i=lo;i<n;i++)d[i]=a[i]*b[i]+a[i];",
+    "inverted": "for(unsigned long i=lo;;i++){if(i>=n)break;d[i]=a[i]*b[i]+a[i];}",
+    "fixed-start": "for(unsigned long i=7;i<n;i++)d[i]=a[i]*b[i]+a[i];",
+}
 HARNESS = r"""
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-extern void map(float*,const float*,const float*,unsigned long);
+extern void map(float*,const float*,const float*,unsigned long,unsigned long);
 int main(int argc,char**argv){
- unsigned long n=strtoul(argv[1],0,10),reps=strtoul(argv[2],0,10);
+ unsigned long n=strtoul(argv[1],0,10),reps=strtoul(argv[2],0,10),lo=strtoul(argv[3],0,10);
  float *d=malloc(n*4),*a=malloc(n*4),*b=malloc(n*4);
  if(!a||!b||!d)return 1;
- for(unsigned long i=0;i<n;i++){a[i]=(float)(i%31);b[i]=(float)(i%7);}
- for(unsigned i=0;i<10;i++)map(d,a,b,n);
+ for(unsigned long i=0;i<n;i++){d[i]=-1;a[i]=(float)(i%31);b[i]=(float)(i%7);}
+ for(unsigned i=0;i<10;i++)map(d,a,b,lo,n);
  struct timespec s,e;clock_gettime(CLOCK_MONOTONIC,&s);
- for(unsigned long i=0;i<reps;i++)map(d,a,b,n);
+ for(unsigned long i=0;i<reps;i++)map(d,a,b,lo,n);
  clock_gettime(CLOCK_MONOTONIC,&e);
- for(unsigned long i=0;i<n;i++)if(d[i]!=a[i]*b[i]+a[i])return 2;
+ for(unsigned long i=0;i<n;i++)if(d[i]!=(i<lo?-1:a[i]*b[i]+a[i]))return 2;
  printf("%.9f\n",(e.tv_sec-s.tv_sec)+(e.tv_nsec-s.tv_nsec)*1e-9);
  free(a);free(b);free(d);return 0;
 }
@@ -40,14 +45,20 @@ def main():
     parser.add_argument("--samples", type=int, default=7)
     parser.add_argument("--count", type=int, default=32768)
     parser.add_argument("--iterations", type=int, default=10000)
+    parser.add_argument("--pattern", choices=KERNELS, default="zero")
+    parser.add_argument("--start", type=int, default=7, help="first index for range/inverted patterns")
     parser.add_argument("--output")
     args = parser.parse_args()
     if min(args.samples, args.count, args.iterations) <= 0:
         parser.error("samples, count and iterations must be positive")
+    start = 0 if args.pattern == "zero" else 7 if args.pattern == "fixed-start" else args.start
+    if not 0 <= start < args.count:
+        parser.error("start must be nonnegative and smaller than count")
+    kernel = "void map(float*d,const float*a,const float*b,unsigned long lo,unsigned long n){" + KERNELS[args.pattern] + "}\n"
     keel = str(pathlib.Path(args.keel).resolve())
     with tempfile.TemporaryDirectory(prefix="keel-vectorize-bench-") as temporary:
         root = pathlib.Path(temporary)
-        (root / "kernel.c").write_text(KERNEL)
+        (root / "kernel.c").write_text(kernel)
         (root / "harness.c").write_text(HARNESS)
         commands = {
             "scalar": [keel, "cc", "-O", "-p", PIPELINE, "--emit-object", "kernel.c", "-o", "scalar.o"],
@@ -58,23 +69,26 @@ def main():
         runtime_samples = {name: [] for name in commands}
         for command in commands.values():
             subprocess.run(command, cwd=root, check=True, capture_output=True)
+        vector_ir = subprocess.run([keel, "cc", "-O", "--emit-ir", "kernel.c"], cwd=root, check=True, capture_output=True, text=True).stdout
         for sample in range(args.samples):
             names = list(commands)
             names = names[sample % 3:] + names[:sample % 3]
             for name in names:
-                start = time.perf_counter()
+                compile_start = time.perf_counter()
                 subprocess.run(commands[name], cwd=root, check=True, capture_output=True)
-                compile_samples[name].append((time.perf_counter() - start) * 1000)
+                compile_samples[name].append((time.perf_counter() - compile_start) * 1000)
         for name in commands:
             subprocess.run(["clang", "-O2", "-ffp-contract=off", "harness.c", f"{name}.o", "-o", name], cwd=root, check=True, capture_output=True)
         for sample in range(args.samples):
             names = list(commands)
             names = names[sample % 3:] + names[:sample % 3]
             for name in names:
-                result = subprocess.run([str(root / name), str(args.count), str(args.iterations)], check=True, capture_output=True, text=True)
+                result = subprocess.run([str(root / name), str(args.count), str(args.iterations), str(start)], check=True, capture_output=True, text=True)
                 runtime_samples[name].append(float(result.stdout))
         report = {
-            "kernel": KERNEL.strip(), "elements": args.count, "iterations": args.iterations,
+            "kernel": kernel.strip(), "pattern": args.pattern, "start_index": start,
+            "vectorized": "load.f32x4" in vector_ir,
+            "elements": args.count, "iterations": args.iterations,
             "samples": args.samples, "compile_cli_ms": compile_samples,
             "runtime_seconds": runtime_samples,
             "compile_cli_median_ms": {name: statistics.median(v) for name, v in compile_samples.items()},
