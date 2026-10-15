@@ -142,6 +142,14 @@ resumed by a debugger, so it is an intrinsic.
 - Out-of-bounds memory access cannot be defined at this level; memory safety
   is the job of a higher-level IR.
 
+Instruction construction and verification share the opcode's result signature.
+An in-place rewrite must retain its result count and types; changing either
+requires a new instruction plus value replacement. Verification checks raw
+value/block/callee/signature/slot/symbol references before CFG construction
+or operand resolution, so invalid pass output produces diagnostics instead
+of indexing panics. Result/parameter indices use u32, matching value handles;
+they do not wrap at 65,536 entries.
+
 ## Memory
 
 - Stack memory is declared per function, not allocated by an instruction:
@@ -159,6 +167,9 @@ resumed by a debugger, so it is an intrinsic.
   is no stack probing yet: an allocation larger than the guard page can
   skip past it.
 - Memory operations are ordered by CFG order.
+- Ordinary, non-atomic accesses follow program memory effects; a conflicting
+  unsynchronized non-atomic access is outside the IR's defined behavior.
+  Volatile is required for externally observable accesses, not synchronization.
 - Non-atomic loads/stores have explicit access properties:
   `load.i32 volatile align 4 notrap v0` and
   `store volatile align 4 notrap v1, v0`. Each flag is optional; default

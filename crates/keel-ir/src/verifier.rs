@@ -1,7 +1,7 @@
 //! IR verifier. Every pass must leave the function in a state this accepts.
 //!
 //! Checks, in order: block structure (one terminator, at the end), operand
-//! and result types, block-call arguments against block parameters, and
+//! and result signatures (including in-place rewrites), block-call arguments, and
 //! that every use is dominated by its definition. All errors are collected.
 //! The module verifier adds names, data objects and cross-references.
 
@@ -318,9 +318,89 @@ fn check_data(module: &Module, init: &DataInit) -> Vec<String> {
     errors
 }
 
+/// Check handles before building a CFG, resolving operands or formatting an
+/// instruction: each of those otherwise assumes in-range references. Passes
+/// can invalidate handles through `inst_data_mut`; report errors, not panics.
+fn check_references(func: &Function) -> Result<(), Vec<VerifierError>> {
+    let mut errors = Vec::new();
+    let callees = func.callees().count();
+    let signatures = func.signatures().count();
+    let symbols = func.data_symbols().count();
+    let mut inserted = vec![false; func.num_blocks()];
+    for block in func.blocks() {
+        inserted[block.index()] = true;
+    }
+    for (_, inst) in func.layout_insts() {
+        let mut bad = |kind: &str, index: usize| {
+            errors.push(VerifierError {
+                location: inst.to_string(),
+                message: format!("{kind} reference {index} is not in the function"),
+            })
+        };
+        let data = func.inst_data(inst);
+        data.for_each_operand(|value| {
+            if value.index() >= func.num_values() {
+                bad("value", value.index());
+            }
+        });
+        for dest in data.branch_dests() {
+            if inserted.get(dest.block.index()) != Some(&true) {
+                bad("block", dest.block.index());
+            }
+        }
+        let mut callee = |reference: crate::FuncRef| {
+            if reference.index() >= callees {
+                bad("function", reference.index());
+            }
+        };
+        match data {
+            InstData::Call { func, .. }
+            | InstData::Invoke { func, .. }
+            | InstData::ReturnCall { func, .. }
+            | InstData::SymbolAddr {
+                symbol: crate::Symbol::Func(func),
+            } => callee(*func),
+            InstData::CallIndirect { sig, .. } | InstData::ReturnCallIndirect { sig, .. } => {
+                if sig.index() >= signatures {
+                    bad("signature", sig.index());
+                }
+            }
+            InstData::StackAddr { slot } => {
+                if slot.index() >= func.num_stack_slots() {
+                    bad("stack slot", slot.index());
+                }
+            }
+            InstData::SymbolAddr {
+                symbol: crate::Symbol::Data(symbol),
+            }
+            | InstData::EhTypeid { typeinfo: symbol } => {
+                if symbol.index() >= symbols {
+                    bad("data symbol", symbol.index());
+                }
+            }
+            InstData::LandingPad { clauses } => {
+                for clause in clauses {
+                    if let Clause::Catch(Some(symbol)) = clause
+                        && symbol.index() >= symbols
+                    {
+                        bad("data symbol", symbol.index());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
 /// Verifies one function on its own; calls are checked against the
 /// signatures in its callee table.
 pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
+    check_references(func)?;
     let cfg = ControlFlowGraph::compute(func);
     let domtree = DominatorTree::compute(func, &cfg);
     let mut v = Verifier {
@@ -549,6 +629,30 @@ impl Verifier<'_> {
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
+        let mut expected = 0;
+        func.for_each_result_type(func.inst_data(inst), |expected_ty| {
+            if let Some(&value) = func.inst_results(inst).get(expected)
+                && func.value_type(value) != expected_ty
+            {
+                self.inst_error(
+                    inst,
+                    format!(
+                        "result {expected} must have type {expected_ty}, got {}",
+                        func.value_type(value)
+                    ),
+                );
+            }
+            expected += 1;
+        });
+        if func.inst_results(inst).len() != expected {
+            self.inst_error(
+                inst,
+                format!(
+                    "instruction must have {expected} result(s), got {}",
+                    func.inst_results(inst).len()
+                ),
+            );
+        }
         if let InstData::Load { flags, .. } | InstData::Store { flags, .. } = func.inst_data(inst)
             && !flags.align.is_power_of_two()
         {
@@ -983,10 +1087,7 @@ impl Verifier<'_> {
 
     fn check_block_call(&mut self, inst: Inst, dest: &BlockCall) {
         let func = self.func;
-        if !func.blocks().any(|b| b == dest.block) {
-            self.inst_error(inst, format!("{} is not in the function", dest.block));
-            return;
-        }
+        // The preflight has checked that every destination is inserted.
         let params = func.block_params(dest.block);
         if params.len() != dest.args.len() {
             self.inst_error(

@@ -171,9 +171,9 @@ pub struct FuncDecl {
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ValueDef {
     /// The `n`th result of an instruction.
-    Result(Inst, u16),
+    Result(Inst, u32),
     /// The `n`th parameter of a block.
-    Param(Block, u16),
+    Param(Block, u32),
     /// Replaced by another value; see [`Function::replace_all_uses`].
     Alias(Value),
 }
@@ -374,7 +374,7 @@ impl Function {
     }
 
     pub fn append_block_param(&mut self, block: Block, ty: Type) -> Value {
-        let n = self.blocks[block].params.len() as u16;
+        let n = self.blocks[block].params.len() as u32;
         let value = self.values.push(ValueData {
             ty,
             def: ValueDef::Param(block, n),
@@ -388,33 +388,55 @@ impl Function {
         self.insert_inst(InsertPoint::End(block), data)
     }
 
-    /// Inserts an instruction at `at` and creates its result values, typed
-    /// from its operands.
-    pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
-        let result_tys = match &data {
+    /// Result signature implied by the opcode and operands. Shared by
+    /// construction and verification; visiting avoids per-instruction
+    /// allocations in the verifier's hot path.
+    pub(crate) fn for_each_result_type(&self, data: &InstData, mut visit: impl FnMut(Type)) {
+        match data {
             InstData::Iconst { ty, .. }
             | InstData::Fconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. }
             | InstData::AtomicLoad { ty, .. }
-            | InstData::VaArg { ty, .. } => vec![*ty],
-            InstData::AtomicRmw { args, .. } => vec![self.value_type(args[1])],
-            InstData::AtomicCas { args, .. } => vec![self.value_type(args[1])],
-            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => vec![Type::Ptr],
-            InstData::Unary { arg, .. } => vec![self.value_type(*arg)],
-            InstData::Binary { args, .. } => vec![self.value_type(args[0])],
-            InstData::Select { args } => vec![self.value_type(args[1])],
-            InstData::Overflow { args, .. } => vec![self.value_type(args[0]), Type::I8],
-            InstData::Fma { args } => vec![self.value_type(args[0])],
-            InstData::Icmp { .. } | InstData::Fcmp { .. } => vec![Type::I8],
-            InstData::Call { func, .. } | InstData::Invoke { func, .. } => {
-                self.callees[*func].sig.return_types()
+            | InstData::VaArg { ty, .. } => visit(*ty),
+            InstData::AtomicRmw { args, .. } => visit(self.value_type(args[1])),
+            InstData::AtomicCas { args, .. } | InstData::Select { args } => {
+                visit(self.value_type(args[1]))
             }
-            InstData::LandingPad { .. } => vec![Type::Ptr, Type::I32],
-            InstData::EhTypeid { .. } => vec![Type::I32],
-            InstData::CallIndirect { sig, .. } => self.signatures[*sig].return_types(),
-            InstData::Intrinsic { id, .. } => id.info().returns.to_vec(),
-            InstData::InlineAsm { asm, .. } => asm.outputs.iter().map(|&(_, ty)| ty).collect(),
+            InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => visit(Type::Ptr),
+            InstData::Unary { arg, .. } => visit(self.value_type(*arg)),
+            InstData::Binary { args, .. } => visit(self.value_type(args[0])),
+            InstData::Fma { args } => visit(self.value_type(args[0])),
+            InstData::Overflow { args, .. } => {
+                visit(self.value_type(args[0]));
+                visit(Type::I8);
+            }
+            InstData::Icmp { .. } | InstData::Fcmp { .. } => visit(Type::I8),
+            InstData::Call { func, .. } | InstData::Invoke { func, .. } => {
+                for param in &self.callees[*func].sig.returns {
+                    visit(param.ty);
+                }
+            }
+            InstData::CallIndirect { sig, .. } => {
+                for param in &self.signatures[*sig].returns {
+                    visit(param.ty);
+                }
+            }
+            InstData::LandingPad { .. } => {
+                visit(Type::Ptr);
+                visit(Type::I32);
+            }
+            InstData::EhTypeid { .. } => visit(Type::I32),
+            InstData::Intrinsic { id, .. } => {
+                for &ty in id.info().returns {
+                    visit(ty);
+                }
+            }
+            InstData::InlineAsm { asm, .. } => {
+                for &(_, ty) in &asm.outputs {
+                    visit(ty);
+                }
+            }
             InstData::Store { .. }
             | InstData::AtomicStore { .. }
             | InstData::Fence { .. }
@@ -424,8 +446,15 @@ impl Function {
             | InstData::Return { .. }
             | InstData::ReturnCall { .. }
             | InstData::ReturnCallIndirect { .. }
-            | InstData::Trap => vec![],
-        };
+            | InstData::Trap => {}
+        }
+    }
+
+    /// Inserts an instruction at `at` and creates its result values, typed
+    /// from its operands.
+    pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
+        let mut result_tys = Vec::new();
+        self.for_each_result_type(&data, |ty| result_tys.push(ty));
         let inst = self.create_inst(data, &result_tys);
         self.place(inst, at);
         inst
@@ -455,7 +484,7 @@ impl Function {
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
                 ty,
-                def: ValueDef::Result(inst, n as u16),
+                def: ValueDef::Result(inst, n as u32),
             });
             self.insts[inst].results.push(value);
         }
@@ -509,6 +538,9 @@ impl Function {
     /// Mutable access to an instruction, for rewriting operands or
     /// replacing it with another instruction **with the same result
     /// types** (e.g. folding an `iadd` to an `iconst`).
+    /// Rewriting data must preserve the result count and types. To change
+    /// the result signature, insert a new instruction, replace its uses and
+    /// remove the old one. The verifier checks this contract after passes.
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
         &mut self.insts[inst].data
     }
@@ -548,7 +580,7 @@ impl Function {
         let value = self.blocks[block].params.remove(index);
         for (n, &param) in self.blocks[block].params.iter().enumerate().skip(index) {
             if matches!(self.values[param].def, ValueDef::Param(..)) {
-                self.values[param].def = ValueDef::Param(block, n as u16);
+                self.values[param].def = ValueDef::Param(block, n as u32);
             }
         }
         value
