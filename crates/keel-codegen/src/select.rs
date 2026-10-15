@@ -40,6 +40,9 @@ pub struct Selection {
     pub matches: HashMap<Inst, Match>,
     covered: HashSet<Inst>,
     allocation_operands: HashMap<Inst, Vec<Value>>,
+    // Operand occurrences removed by fold_operands, so later target folding
+    // (including addresses known only after allocation) does not remove them twice.
+    allocation_folds: HashMap<Inst, Vec<Value>>,
     /// Result-to-input affinities, never constraints: interference wins.
     pub hints: HashMap<Value, Vec<Value>>,
 }
@@ -95,6 +98,20 @@ impl Selection {
     /// Values must be resolved and include every value read by the emitter.
     pub fn set_operands(&mut self, inst: Inst, operands: Vec<Value>) {
         self.allocation_operands.insert(inst, operands);
+        self.allocation_folds.remove(&inst);
+    }
+
+    pub(crate) fn remaining_folds(&self, func: &Function, inst: Inst, folds: &mut Vec<Value>) {
+        for value in folds.iter_mut() {
+            *value = func.resolve(*value);
+        }
+        if let Some(previous) = self.allocation_folds.get(&inst) {
+            for &value in previous {
+                if let Some(i) = folds.iter().position(|&v| v == value) {
+                    folds.swap_remove(i);
+                }
+            }
+        }
     }
 
     pub fn covered(&self, inst: Inst) -> bool {
@@ -143,17 +160,27 @@ impl Selection {
             if self.covered(inst) || self.matches.contains_key(&inst) {
                 continue;
             }
-            let folded = folds(func.inst_data(inst));
+            let mut folded = folds(func.inst_data(inst));
+            self.remaining_folds(func, inst, &mut folded);
             if folded.is_empty() {
                 continue;
             }
             let mut args = self.operands(func, inst);
-            for value in folded {
-                let value = func.resolve(value);
-                if let Some(i) = args.iter().position(|&v| v == value) {
+            folded.retain(|value| {
+                if let Some(i) = args.iter().position(|v| v == value) {
                     args.remove(i);
+                    true
+                } else {
+                    false
                 }
+            });
+            if folded.is_empty() {
+                continue;
             }
+            self.allocation_folds
+                .entry(inst)
+                .or_default()
+                .extend(folded);
             self.allocation_operands.insert(inst, args);
         }
     }

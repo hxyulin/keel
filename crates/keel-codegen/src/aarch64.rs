@@ -208,6 +208,7 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<Output, CodegenError> {
+    backend_scope!(Module);
     pipeline.validate_target(crate::Target::Aarch64AppleDarwin)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -230,18 +231,24 @@ fn compile_output(
     }
     let mut frames = Vec::new();
     for func in &module.functions {
+        #[cfg(feature = "backend-profile")]
+        let _function_profile = crate::backend_profile::function(&func.name);
         let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
     }
-    for data in &module.data {
-        if let Some(init) = &data.init {
-            data::emit_macho(&mut out, data, init);
+    {
+        backend_scope!(Data);
+        for data in &module.data {
+            if let Some(init) = &data.init {
+                data::emit_macho(&mut out, data, init);
+            }
         }
     }
     if debug {
+        backend_scope!(Debug);
         // x29 is DWARF register 29.
         dwarf::emit_debug_info(&mut out, Format::MachO, 29, module, &frames);
     }
@@ -722,11 +729,14 @@ impl<'a> FunctionCompiler<'a> {
             float_callee_saved: &float_callee_saved,
             ..*pools
         };
-        let selection = pipeline
-            .selector
-            .select(func, crate::select::Target::Aarch64, &|data| {
-                folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
-            });
+        let selection = {
+            backend_scope!(Selection);
+            pipeline
+                .selector
+                .select(func, crate::select::Target::Aarch64, &|data| {
+                    folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
+                })
+        };
         let mut alloc = pipeline.allocator.allocate(
             func,
             &pools,
@@ -763,14 +773,26 @@ impl<'a> FunctionCompiler<'a> {
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
+        let (folded_values, fused_compares) = {
+            backend_scope!(Folding);
+            let folded_values = {
+                backend_scope!(FoldValues);
+                fold::folded_values(func, &selection, |data| {
+                    folds(func, &stack_slot_offsets, data)
+                })
+            };
+            let fused_compares = {
+                backend_scope!(CompareFusion);
+                fold::fused_compares(func)
+            };
+            (folded_values, fused_compares)
+        };
         Ok(Self {
             func,
             module,
             alloc,
-            folded_values: fold::folded_values(func, &selection, |data| {
-                folds(func, &stack_slot_offsets, data)
-            }),
-            fused_compares: fold::fused_compares(func),
+            folded_values,
+            fused_compares,
             selection,
             stack_slot_offsets,
             copy_base,
@@ -796,8 +818,12 @@ impl<'a> FunctionCompiler<'a> {
     /// scopes begin and end.
     fn compile(mut self, out: &mut Output) -> Vec<(String, Option<DebugScope>)> {
         profiling::scope!("instruction-lowering");
+        backend_scope!(Lowering);
         let func = self.func;
         let name = &func.name;
+        #[cfg(feature = "backend-profile")]
+        let entry_profile =
+            crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
         if !func.local {
             out.directive(Directive::Global(format!("_{name}")));
         }
@@ -976,36 +1002,48 @@ impl<'a> FunctionCompiler<'a> {
                 self.address(dst, base, offset);
             }
         }
-
-        // Only reachable blocks, in the order the allocator numbered them.
-        let order = self.alloc.order.clone();
-        for (i, &block) in order.iter().enumerate() {
-            self.next_block = order.get(i + 1).copied();
-            let label = self.label(block);
-            self.out.label(label);
-            for &inst in func.block_insts(block) {
-                if !self.out.structured() {
-                    writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+        #[cfg(feature = "backend-profile")]
+        drop(entry_profile);
+        {
+            // Includes instruction comments, debug locations and return epilogues.
+            // Time the whole traversal rather than taking a clock sample per instruction.
+            backend_scope!(LoweringBody);
+            // Only reachable blocks, in the order the allocator numbered them.
+            let order = self.alloc.order.clone();
+            for (i, &block) in order.iter().enumerate() {
+                self.next_block = order.get(i + 1).copied();
+                let label = self.label(block);
+                self.out.label(label);
+                for &inst in func.block_insts(block) {
+                    if !self.out.structured() {
+                        writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+                    }
+                    if self.debug {
+                        self.set_srcloc(func.inst_loc(inst));
+                    }
+                    self.inst(inst);
                 }
-                if self.debug {
-                    self.set_srcloc(func.inst_loc(inst));
-                }
-                self.inst(inst);
             }
         }
-        if self.uses_trap {
-            self.out.label(format!("L{name}_trap"));
-            self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], |out| {
-                out.write_str("brk\t#1")
-            });
+        {
+            backend_scope!(LoweringFinish);
+            if self.uses_trap {
+                self.out.label(format!("L{name}_trap"));
+                self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], |out| {
+                    out.write_str("brk\t#1")
+                });
+            }
+            self.out.label(format!("L{name}_end"));
+            {
+                backend_scope!(Relaxation);
+                self.out.relax(name);
+            }
+            self.out.directive(Directive::Cfi(Cfi::End));
+            if func.personality.is_some() {
+                self.eh.emit(&mut self.out, name);
+            }
+            out.append(self.out);
         }
-        self.out.label(format!("L{name}_end"));
-        self.out.relax(name);
-        self.out.directive(Directive::Cfi(Cfi::End));
-        if func.personality.is_some() {
-            self.eh.emit(&mut self.out, name);
-        }
-        out.append(self.out);
         self.scope_marks
     }
 
@@ -1046,6 +1084,7 @@ impl<'a> FunctionCompiler<'a> {
         if self.out.structured() {
             return;
         }
+        backend_scope!(AllocationAnnotations);
         let mut line = String::from("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
@@ -3765,6 +3804,12 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn spill(&mut self, store: bool, float: bool, register: u8, slot: u32) {
+        #[cfg(feature = "backend-profile")]
+        crate::backend_profile::count(if store {
+            crate::backend_profile::Counter::SpillHelperStores
+        } else {
+            crate::backend_profile::Counter::SpillHelperLoads
+        });
         let opcode = match (store, float) {
             (false, false) => Opcode::LDR_64_ldst_pos,
             (false, true) => Opcode::LDR_D_ldst_pos,

@@ -1,0 +1,7 @@
+; expect: exit 0
+func @folding_duplicate() -> i64 {
+block0:
+    v0 = iconst.i64 7
+    v1 = iadd v0, v0
+    return v1
+}

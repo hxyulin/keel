@@ -44,6 +44,22 @@ fn immediate_product_input_is_materialized_after_fusion() {
     assert!(output.contains("\tmadd\t"), "{output}");
     assert!(output.contains("#0x7"), "{output}");
 }
+
+#[test]
+fn duplicate_immediate_operand_keeps_its_register_definition() {
+    let source = "func @f() -> i64 {
+block0:
+ v0 = iconst.i64 7
+ v1 = iadd v0, v0
+ return v1
+}";
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let output = asm(source, target);
+        // Both targets spell the definition in hex and the add immediate in
+        // decimal, so this checks that the register input is initialized.
+        assert!(output.contains("0x7"), "{output}");
+    }
+}
 #[test]
 fn shifts_cover_both_targets_and_mask_the_count() {
     let source = "func @f(i64, i64) -> i64 {

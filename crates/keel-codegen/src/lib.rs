@@ -1,6 +1,16 @@
 //! Machine code generation: arm64 macOS ([`aarch64`]) and x86-64 Linux
 //! ([`x86_64`]).
 
+// Timing instrumentation is absent from ordinary builds.
+macro_rules! backend_scope {
+    ($stage:ident) => {
+        #[cfg(feature = "backend-profile")]
+        let _backend_scope = crate::backend_profile::scope(crate::backend_profile::Stage::$stage);
+    };
+}
+#[cfg(feature = "backend-profile")]
+pub mod backend_profile;
+
 pub mod aarch64;
 mod abi;
 mod data;

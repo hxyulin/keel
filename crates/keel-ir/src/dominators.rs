@@ -34,6 +34,34 @@ impl ControlFlowGraph {
         cfg
     }
 
+    /// Reachable blocks in reverse postorder, without computing dominators.
+    /// Successor traversal matches [`DominatorTree::compute`], so callers may
+    /// use this order for instruction numbering and assembly emission.
+    pub fn reverse_postorder(&self, func: &Function) -> Vec<Block> {
+        let Some(entry) = func.entry_block() else {
+            return Vec::new();
+        };
+        let mut order = Vec::new();
+        let mut visited = vec![false; func.num_blocks()];
+        let mut stack = vec![(entry, 0usize)];
+        visited[entry.index()] = true;
+        while let Some((block, next)) = stack.last_mut() {
+            let block = *block;
+            if let Some(&succ) = self.succs(block).get(*next) {
+                *next += 1;
+                if !visited[succ.index()] {
+                    visited[succ.index()] = true;
+                    stack.push((succ, 0));
+                }
+            } else {
+                order.push(block);
+                stack.pop();
+            }
+        }
+        order.reverse();
+        order
+    }
+
     pub fn preds(&self, block: Block) -> &[Block] {
         &self.preds[block.index()]
     }
@@ -63,25 +91,7 @@ impl DominatorTree {
         let Some(entry) = func.entry_block() else {
             return tree;
         };
-
-        // Iterative DFS producing postorder.
-        let mut visited = vec![false; n];
-        let mut stack = vec![(entry, 0usize)];
-        visited[entry.index()] = true;
-        while let Some((block, next)) = stack.last_mut() {
-            let block = *block;
-            if let Some(&succ) = cfg.succs(block).get(*next) {
-                *next += 1;
-                if !visited[succ.index()] {
-                    visited[succ.index()] = true;
-                    stack.push((succ, 0));
-                }
-            } else {
-                tree.rpo.push(block);
-                stack.pop();
-            }
-        }
-        tree.rpo.reverse();
+        tree.rpo = cfg.reverse_postorder(func);
         for (i, &block) in tree.rpo.iter().enumerate() {
             tree.rpo_number[block.index()] = i as u32 + 1;
         }
@@ -166,5 +176,47 @@ impl DominatorTree {
             b = self.idom[b.index()].expect("non-entry reachable block has an idom");
         }
         a == b
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cfg_rpo_preserves_successor_order_loops_and_reachability() {
+        let module = crate::parse(
+            "\
+            func @f(i8) -> i64 {
+            block0(v0: i8):
+                brif v0, block1, block2
+            block1:
+                brif v0, block3, block1
+            block2:
+                jump block3
+            block3:
+                v1 = iconst.i64 7
+                return v1
+            block4:
+                jump block1
+            }",
+        )
+        .unwrap();
+        let func = &module.functions[0];
+        let cfg = ControlFlowGraph::compute(func);
+        let expected: Vec<_> = [0, 2, 1, 3].map(Block::new).into();
+        assert_eq!(cfg.reverse_postorder(func), expected);
+        let dom = DominatorTree::compute(func, &cfg);
+        assert_eq!(dom.rpo(), expected);
+        assert_eq!(dom.idom(Block::new(3)), Some(Block::new(0)));
+        assert!(!dom.is_reachable(Block::new(4)));
+    }
+
+    #[test]
+    fn cfg_rpo_is_empty_without_an_entry() {
+        let func = Function::new("empty", crate::Signature::new(&[], &[]));
+        let cfg = ControlFlowGraph::compute(&func);
+        assert!(cfg.reverse_postorder(&func).is_empty());
+        assert!(DominatorTree::compute(&func, &cfg).rpo().is_empty());
     }
 }

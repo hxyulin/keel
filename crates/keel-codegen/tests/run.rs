@@ -253,6 +253,14 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 }
 
 #[test]
+fn folding_duplicate_operands() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/folding_duplicate.keel");
+    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+        run_program(&path, &pools, optimize, suffix, selection, allocation).unwrap();
+    }
+}
+
+#[test]
 fn optimized_regressions_spills() {
     for program in [
         "constant_loop",

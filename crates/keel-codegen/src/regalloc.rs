@@ -78,9 +78,10 @@
 //! happened to a spill slot in between. So a value live across such a call
 //! keeps its location for the whole function.
 
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::dominators::ControlFlowGraph;
+#[cfg(test)]
+use keel_ir::dominators::DominatorTree;
 use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
-use std::collections::BTreeSet;
 
 /// Where a value lives for its whole life.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -153,7 +154,9 @@ pub trait RegisterAllocator {
 }
 
 /// Fast uses conservative contiguous intervals without register affinities.
-/// Full preserves lifetime holes and uses selection affinities.
+/// Full preserves lifetime holes and uses selection affinities. Both tiers
+/// share sparse CFG liveness, but Fast constructs only scalar endpoints and
+/// uses a separate contiguous scan.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AllocationTier {
     Fast,
@@ -225,24 +228,24 @@ fn allocate_tier(
     tier: AllocationTier,
 ) -> Allocation {
     profiling::scope!("register-allocation", tier.name());
+    backend_scope!(Allocation);
     let cfg = ControlFlowGraph::compute(func);
-    let order = DominatorTree::compute(func, &cfg).rpo().to_vec();
-    let mut intervals = build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
-
-    if tier == AllocationTier::Fast {
-        for interval in &mut intervals {
-            interval.ranges = vec![(interval.start(), interval.end())];
-        }
-    }
-    let empty_hints = Default::default();
-    let hints = if tier == AllocationTier::Full {
-        &selection.hints
-    } else {
-        &empty_hints
-    };
+    let order = cfg.reverse_postorder(func);
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
-    let mut spilled = linear_scan(&intervals, pools, &mut locs, hints);
-    let spill_slots = assign_spill_slots(&mut spilled, &mut locs);
+    let spill_slots = match tier {
+        AllocationTier::Fast => {
+            let intervals =
+                build_fast_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
+            let mut spilled = fast_scan(&intervals, pools, &mut locs);
+            assign_fast_spill_slots(&mut spilled, &mut locs)
+        }
+        AllocationTier::Full => {
+            let intervals =
+                build_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
+            let mut spilled = linear_scan(&intervals, pools, &mut locs, &selection.hints);
+            assign_spill_slots(&mut spilled, &mut locs)
+        }
+    };
 
     let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
         let mut regs: Vec<u8> = locs
@@ -324,10 +327,237 @@ impl Interval {
     }
 }
 
+/// A register-number set covering the entire u8 pool API without allocation.
+#[derive(Default)]
+struct RegisterMask([u64; 4]);
+
+impl RegisterMask {
+    fn insert(&mut self, register: u8) {
+        self.0[register as usize / 64] |= 1 << (register % 64);
+    }
+
+    fn contains(&self, register: u8) -> bool {
+        self.0[register as usize / 64] & (1 << (register % 64)) != 0
+    }
+}
+
+fn register_number(loc: Loc) -> u8 {
+    match loc {
+        Loc::Reg(r) | Loc::FReg(r) => r,
+        Loc::Stack(_) => unreachable!("only registers participate in the scan"),
+    }
+}
+
+/// The fast tier never materializes lifetime holes, including for spills.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FastInterval {
+    value: Value,
+    half: usize,
+    start: u32,
+    end: u32,
+    crosses_call: bool,
+    float: bool,
+}
+
+fn build_fast_intervals(
+    func: &Function,
+    cfg: &ControlFlowGraph,
+    order: &[Block],
+    is_call: &dyn Fn(&InstData) -> bool,
+    returns_twice: &dyn Fn(&InstData) -> bool,
+    selection: &crate::select::Selection,
+) -> Vec<FastInterval> {
+    profiling::scope!("contiguous-live-intervals");
+    backend_scope!(Intervals);
+    let live = liveness(func, cfg, order, selection);
+    let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
+    let mut endpoints: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
+    let mut open: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
+    let mut touched = Vec::new();
+    let mut crosses_call = vec![false; func.num_values()];
+    let mut crosses_twice = vec![false; func.num_values()];
+    let mut calls = Vec::new();
+    let mut twice = Vec::new();
+    let mut slot = 0u32;
+
+    fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
+        match &mut open[v.index()] {
+            Some((from, to)) => {
+                *from = (*from).min(point);
+                *to = (*to).max(point);
+            }
+            range @ None => {
+                touched.push(v);
+                *range = Some((point, point));
+            }
+        }
+    }
+    let crosses = |points: &[u32], from: u32, to: u32| {
+        let next = points.partition_point(|&c| c <= from);
+        points.get(next).is_some_and(|&c| c < to)
+    };
+    for &block in order {
+        let header = 2 * slot + 1;
+        slot += 1;
+        for &param in func.block_params(block) {
+            if !is_alias(param) {
+                extend(&mut open, param, header, &mut touched);
+            }
+        }
+        for &v in &live.live_in[block.index()] {
+            extend(&mut open, v, header, &mut touched);
+        }
+        for &inst in func.block_insts(block) {
+            let (read, write) = (2 * slot, 2 * slot + 1);
+            slot += 1;
+            if selection.covered(inst) {
+                continue;
+            }
+            selection.for_each_operand(func, inst, |v| extend(&mut open, v, read, &mut touched));
+            for &result in func.inst_results(inst) {
+                if !is_alias(result) {
+                    extend(&mut open, result, write, &mut touched);
+                }
+            }
+            let data = func.inst_data(inst);
+            if is_call(data) {
+                calls.push(read);
+            }
+            if returns_twice(data) {
+                twice.push(read);
+            }
+        }
+        let end = 2 * slot - 1;
+        for &v in &live.live_out[block.index()] {
+            extend(&mut open, v, end, &mut touched);
+        }
+        // Classify calls using this block's actual live range, before
+        // collapsing the function-wide envelope. Calls in holes do not
+        // restrict the register class or pin returns-twice lifetimes.
+        for v in touched.drain(..) {
+            let i = v.index();
+            let (from, to) = open[i].take().unwrap();
+            endpoints[i] = Some(match endpoints[i] {
+                Some((start, end)) => (start.min(from), end.max(to)),
+                None => (from, to),
+            });
+            crosses_call[i] |= crosses(&calls, from, to);
+            crosses_twice[i] |= crosses(&twice, from, to);
+        }
+        calls.clear();
+        twice.clear();
+    }
+    let mut intervals = Vec::new();
+    for (i, endpoint) in endpoints.into_iter().enumerate() {
+        let Some((mut start, mut end)) = endpoint else {
+            continue;
+        };
+        if crosses_twice[i] {
+            (start, end) = (0, slot * 2);
+        }
+        let value = Value::new(i);
+        let ty = func.value_type(value);
+        for half in 0..if ty == Type::I128 { 2 } else { 1 } {
+            intervals.push(FastInterval {
+                value,
+                half,
+                start,
+                end,
+                crosses_call: crosses_call[i],
+                float: ty.is_float(),
+            });
+        }
+    }
+    intervals
+}
+
+fn fast_scan<'a>(
+    intervals: &'a [FastInterval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+) -> Vec<&'a FastInterval> {
+    profiling::scope!("contiguous-linear-scan");
+    backend_scope!(Scan);
+    let mut sorted: Vec<_> = intervals.iter().collect();
+    sorted.sort_unstable_by_key(|iv| (iv.start, iv.value, iv.half));
+    // With no holes, at most one live interval owns each register.
+    let mut active: Vec<(&FastInterval, Loc)> = Vec::new();
+    let mut spilled = Vec::new();
+    for cur in sorted {
+        active.retain(|&(iv, _)| iv.end >= cur.start);
+        let (caller, callee, class): (_, _, fn(u8) -> Loc) = if cur.float {
+            (
+                pools.float_caller_saved,
+                pools.float_callee_saved,
+                Loc::FReg,
+            )
+        } else {
+            (pools.caller_saved, pools.callee_saved, Loc::Reg)
+        };
+        let caller = if cur.crosses_call { &[][..] } else { caller };
+        let mut occupied = RegisterMask::default();
+        for &(iv, reg) in &active {
+            if iv.float == cur.float {
+                occupied.insert(register_number(reg));
+            }
+        }
+        let free = caller
+            .iter()
+            .chain(callee)
+            .copied()
+            .find(|&r| !occupied.contains(r));
+        if let Some(r) = free {
+            let reg = class(r);
+            locs[cur.half][cur.value.index()] = Some(reg);
+            active.push((cur, reg));
+            continue;
+        }
+        let victim = active
+            .iter()
+            .enumerate()
+            .filter(|(_, (iv, reg))| {
+                iv.float == cur.float
+                    && (caller.contains(&register_number(*reg))
+                        || callee.contains(&register_number(*reg)))
+            })
+            .max_by_key(|(_, (iv, _))| iv.end)
+            .map(|(i, _)| i);
+        match victim {
+            Some(i) if active[i].0.end > cur.end => {
+                let (evicted, reg) = active.swap_remove(i);
+                locs[evicted.half][evicted.value.index()] = None;
+                spilled.push(evicted);
+                locs[cur.half][cur.value.index()] = Some(reg);
+                active.push((cur, reg));
+            }
+            _ => spilled.push(cur),
+        }
+    }
+    spilled
+}
+
+fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
+    profiling::scope!("spill-slot-assignment");
+    backend_scope!(SpillSlots);
+    spilled.sort_unstable_by_key(|iv| (iv.start, iv.value, iv.half));
+    let mut active: Vec<(u32, u32)> = Vec::new();
+    let mut count = 0;
+    for iv in spilled.iter() {
+        active.retain(|&(end, _)| end >= iv.start);
+        let slot = (0..)
+            .find(|&s| active.iter().all(|&(_, used)| used != s))
+            .unwrap();
+        active.push((iv.end, slot));
+        count = count.max(slot + 1);
+        locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
+    }
+    count
+}
+
 /// Live-in and live-out sets, indexed by block.
 struct Liveness {
-    live_in: Vec<BTreeSet<Value>>,
-    live_out: Vec<BTreeSet<Value>>,
+    live_in: Vec<Vec<Value>>,
+    live_out: Vec<Vec<Value>>,
 }
 
 /// The classic backward dataflow:
@@ -340,9 +570,30 @@ struct Liveness {
 /// `uses(B)` are values read in `B` before any definition in `B`; `defs(B)`
 /// are `B`'s parameters and results. Block arguments are ordinary operands
 /// of the predecessor's terminator, and parameters are definitions, so
-/// block arguments need no special case (phi nodes would). Visiting blocks
-/// in postorder makes most information flow in one pass; loops need a
-/// second to carry live-ins back round the back edge.
+/// block arguments need no special case (phi nodes would). The worklist
+/// starts in postorder and revisits predecessors only when a live-in set
+/// changes; loops iterate until the fixed point.
+/// Union two sorted sparse sets into a reusable output buffer.
+fn union_live(a: &[Value], b: &[Value], out: &mut Vec<Value>) {
+    out.clear();
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i] < b[j] {
+            out.push(a[i]);
+            i += 1;
+        } else if a[i] > b[j] {
+            out.push(b[j]);
+            j += 1;
+        } else {
+            out.push(a[i]);
+            i += 1;
+            j += 1;
+        }
+    }
+    out.extend_from_slice(&a[i..]);
+    out.extend_from_slice(&b[j..]);
+}
+
 fn liveness(
     func: &Function,
     cfg: &ControlFlowGraph,
@@ -350,48 +601,84 @@ fn liveness(
     selection: &crate::select::Selection,
 ) -> Liveness {
     profiling::scope!("liveness");
+    backend_scope!(Liveness);
     let n = func.num_blocks();
-    let mut uses = vec![BTreeSet::new(); n];
-    let mut defs = vec![BTreeSet::new(); n];
+    let mut uses = vec![Vec::new(); n];
+    let mut defs = vec![Vec::new(); n];
+    // Block stamps avoid trees and clearing a value-sized set per block.
+    let mut defined = vec![0; func.num_values()];
+    let mut used = vec![0; func.num_values()];
+    let mut reachable = vec![false; n];
     for &block in order {
-        let mut block_uses = BTreeSet::new();
-        let mut block_defs: BTreeSet<Value> = func.block_params(block).iter().copied().collect();
+        let b = block.index();
+        let stamp = b + 1;
+        reachable[b] = true;
+        for &param in func.block_params(block) {
+            defined[param.index()] = stamp;
+            defs[b].push(param);
+        }
         for &inst in func.block_insts(block) {
             if selection.covered(inst) {
                 continue;
             }
             selection.for_each_operand(func, inst, |v| {
-                if !block_defs.contains(&v) {
-                    block_uses.insert(v);
+                let i = v.index();
+                if defined[i] != stamp && used[i] != stamp {
+                    uses[b].push(v);
+                    used[i] = stamp;
                 }
             });
-            block_defs.extend(func.inst_results(inst));
-        }
-        uses[block.index()] = block_uses;
-        defs[block.index()] = block_defs;
-    }
-
-    let mut live = Liveness {
-        live_in: vec![BTreeSet::new(); n],
-        live_out: vec![BTreeSet::new(); n],
-    };
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for &block in order.iter().rev() {
-            let b = block.index();
-            let out: BTreeSet<Value> = cfg
-                .succs(block)
-                .iter()
-                .flat_map(|s| live.live_in[s.index()].iter().copied())
-                .collect();
-            let mut live_in = uses[b].clone();
-            live_in.extend(out.difference(&defs[b]));
-            if live_in != live.live_in[b] {
-                live.live_in[b] = live_in;
-                changed = true;
+            for &v in func.inst_results(inst) {
+                defined[v.index()] = stamp;
+                defs[b].push(v);
             }
-            live.live_out[b] = out;
+        }
+        uses[b].sort_unstable();
+        defs[b].sort_unstable();
+        defs[b].dedup();
+    }
+    let mut live = Liveness {
+        live_in: vec![Vec::new(); n],
+        live_out: vec![Vec::new(); n],
+    };
+    // Seed in postorder; changes only revisit predecessors, including
+    // irreducible backedges. Sparse vectors scale with actual live values,
+    // not the product of all blocks and all values.
+    let mut work: std::collections::VecDeque<Block> = order.iter().rev().copied().collect();
+    let mut queued = reachable.clone();
+    let mut out = Vec::new();
+    let mut merged = Vec::new();
+    let mut inherited = Vec::new();
+    let mut live_in = Vec::new();
+    while let Some(block) = work.pop_front() {
+        let b = block.index();
+        queued[b] = false;
+        out.clear();
+        for &succ in cfg.succs(block) {
+            union_live(&out, &live.live_in[succ.index()], &mut merged);
+            std::mem::swap(&mut out, &mut merged);
+        }
+        inherited.clear();
+        let mut d = 0;
+        for &v in &out {
+            while d < defs[b].len() && defs[b][d] < v {
+                d += 1;
+            }
+            if defs[b].get(d) != Some(&v) {
+                inherited.push(v);
+            }
+        }
+        union_live(&uses[b], &inherited, &mut live_in);
+        std::mem::swap(&mut live.live_out[b], &mut out);
+        if live_in != live.live_in[b] {
+            std::mem::swap(&mut live.live_in[b], &mut live_in);
+            for &pred in cfg.preds(block) {
+                let p = pred.index();
+                if reachable[p] && !queued[p] {
+                    queued[p] = true;
+                    work.push_back(pred);
+                }
+            }
         }
     }
     live
@@ -408,6 +695,7 @@ fn build_intervals(
     selection: &crate::select::Selection,
 ) -> Vec<Interval> {
     profiling::scope!("live-intervals");
+    backend_scope!(Intervals);
     let live = liveness(func, cfg, order, selection);
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
@@ -505,14 +793,21 @@ fn build_intervals(
         }
         let value = Value::new(i);
         let ty = func.value_type(value);
-        let halves = if ty == Type::I128 { 2 } else { 1 };
-        for half in 0..halves {
+        let high_ranges = (ty == Type::I128).then(|| list.clone());
+        intervals.push(Interval {
+            value,
+            half: 0,
+            ranges: list,
+            crosses_call,
+            float: ty.is_float(),
+        });
+        if let Some(ranges) = high_ranges {
             intervals.push(Interval {
                 value,
-                half,
-                ranges: list.clone(),
+                half: 1,
+                ranges,
                 crosses_call,
-                float: ty.is_float(),
+                float: false,
             });
         }
     }
@@ -521,26 +816,27 @@ fn build_intervals(
 
 /// Gives each interval a register from `pools` or spills it. Fills in the
 /// register locations and returns the spilled intervals.
-fn linear_scan(
-    intervals: &[Interval],
+fn linear_scan<'a>(
+    intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &std::collections::HashMap<Value, Vec<Value>>,
-) -> Vec<Interval> {
+) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
+    backend_scope!(Scan);
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
-    sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
+    sorted.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
 
     // Intervals holding a register, with that register: live at the
     // current point (active), or in a hole (inactive).
     let mut active: Vec<(&Interval, Loc)> = Vec::new();
     let mut inactive: Vec<(&Interval, Loc)> = Vec::new();
     let mut spilled = Vec::new();
+    let mut moved = Vec::new();
     for cur in sorted {
         let pos = cur.start();
         // Intervals that have ended give up their register; the others
         // move between active and inactive as they enter or leave holes.
-        let mut moved = Vec::new();
         active.retain(|&(iv, reg)| {
             if iv.end() < pos {
                 false
@@ -561,7 +857,7 @@ fn linear_scan(
                 true
             }
         });
-        inactive.extend(moved);
+        inactive.extend(moved.drain(..));
 
         // Live across a call: only a callee-saved register survives it.
         // Otherwise prefer caller-saved ones, which need no save/restore.
@@ -574,26 +870,36 @@ fn linear_scan(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let allowed: Vec<Loc> = if cur.crosses_call {
-            callee_saved.iter().map(|&r| class(r)).collect()
+        let callers = if cur.crosses_call {
+            &[][..]
         } else {
             caller_saved
-                .iter()
-                .chain(callee_saved)
-                .map(|&r| class(r))
-                .collect()
         };
-        // An inactive interval's register is only taken where `cur`
-        // would need it during one of its ranges.
-        let blocked_by_inactive = |reg: Loc| {
-            inactive
-                .iter()
-                .any(|&(iv, r)| r == reg && iv.intersects(cur))
+        let allowed = |r: Loc| match r {
+            Loc::Reg(n) if !cur.float => callers.contains(&n) || callee_saved.contains(&n),
+            Loc::FReg(n) if cur.float => callers.contains(&n) || callee_saved.contains(&n),
+            _ => false,
         };
+        // Compute these once, rather than rescanning active/inactive for
+        // every candidate register and again for every eviction candidate.
+        let mut occupied = RegisterMask::default();
+        for &(iv, reg) in &active {
+            if iv.float == cur.float {
+                occupied.insert(register_number(reg));
+            }
+        }
+        let mut blocked = RegisterMask::default();
+        for &(iv, reg) in &inactive {
+            if iv.float == cur.float
+                && !blocked.contains(register_number(reg))
+                && iv.intersects(cur)
+            {
+                blocked.insert(register_number(reg));
+            }
+        }
+        let blocked_by_inactive = |reg: Loc| blocked.contains(register_number(reg));
         let available = |r: Loc| {
-            allowed.contains(&r)
-                && active.iter().all(|&(_, used)| used != r)
-                && !blocked_by_inactive(r)
+            allowed(r) && !occupied.contains(register_number(r)) && !blocked_by_inactive(r)
         };
         let preferred = hints
             .get(&cur.value)
@@ -601,7 +907,14 @@ fn linear_scan(
             .flatten()
             .filter_map(|v| locs[cur.half][v.index()])
             .find(|&r| available(r));
-        let free = preferred.or_else(|| allowed.iter().copied().find(|&r| available(r)));
+        let free = preferred.or_else(|| {
+            callers
+                .iter()
+                .chain(callee_saved)
+                .copied()
+                .map(class)
+                .find(|&r| available(r))
+        });
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
             active.push((cur, reg));
@@ -615,18 +928,18 @@ fn linear_scan(
         let victim = active
             .iter()
             .enumerate()
-            .filter(|(_, (_, reg))| allowed.contains(reg) && !blocked_by_inactive(*reg))
+            .filter(|(_, (_, reg))| allowed(*reg) && !blocked_by_inactive(*reg))
             .max_by_key(|(_, (iv, _))| iv.end())
             .map(|(i, _)| i);
         match victim {
             Some(i) if active[i].0.end() > cur.end() => {
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
-                spilled.push(evicted.clone());
+                spilled.push(evicted);
                 locs[cur.half][cur.value.index()] = Some(reg);
                 active.push((cur, reg));
             }
-            _ => spilled.push(cur.clone()),
+            _ => spilled.push(cur),
         }
     }
     spilled
@@ -635,9 +948,10 @@ fn linear_scan(
 /// Gives each spilled interval a stack slot, reusing the slots of intervals
 /// that have ended: linear scan again, with as many "registers" as needed.
 /// Returns the number of slots.
-fn assign_spill_slots(spilled: &mut [Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
+fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2]) -> u32 {
     profiling::scope!("spill-slot-assignment");
-    spilled.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
+    backend_scope!(SpillSlots);
+    spilled.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
     // (end, slot) of slots in use.
     let mut active: Vec<(u32, u32)> = Vec::new();
     let mut count = 0;
@@ -702,7 +1016,7 @@ mod tests {
         let cfg = ControlFlowGraph::compute(&func);
         let order = DominatorTree::compute(&func, &cfg).rpo().to_vec();
         let live = liveness(&func, &cfg, &order, &crate::select::Selection::default());
-        let set = |vs: &[usize]| vs.iter().map(|&i| Value::new(i)).collect::<BTreeSet<_>>();
+        let set = |vs: &[usize]| vs.iter().map(|&i| Value::new(i)).collect::<Vec<_>>();
         // v0 and v1 come round the back edge; v3 is a parameter, so it is
         // defined in block1, not live into it.
         assert_eq!(live.live_in[1], set(&[0, 1]));
@@ -863,3 +1177,6 @@ mod tests {
         assert!(checked > 0);
     }
 }
+
+#[cfg(test)]
+mod differential_tests;

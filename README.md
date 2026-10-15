@@ -332,6 +332,64 @@ runtime. The [October 15 comparison](suite/reports/pipeline-stages-aarch64-2026-
 records the byte-scanning IR lexer, direct assembly formatting, and encoder
 field-validation changes.
 
+For backend attribution on application inputs, build the opt-in profiler:
+
+```sh
+cargo build --release -p keel-asm --features backend-profile --example profile_backend
+python3 suite/profile_backend.py --input-dir target/suite/lua/pre \
+  --rounds 9 --output target/backend-profile/lua.json
+```
+
+Use repeatable `--input file.i` arguments for individual C or `.keel` inputs;
+`--opt`, `--debug`, and `--selection-all` configure the measured backend.
+Source parsing, IR verification, and optional optimization finish before timing.
+The profiler compares text and structured output, verifies identical objects,
+and records nested inclusive and exclusive stage timings, per-function totals,
+and active-collection overhead. Timing scopes compile out unless the
+`keel-codegen/backend-profile` feature is enabled. Library callers can use
+`keel_codegen::backend_profile::capture(|| compile(...))` for a synchronous,
+thread-local capture; nested captures on one thread are rejected.
+
+Register allocation is independently selectable with `--regalloc full` (the
+default) or `--regalloc fast`. Both use reachable reverse postorder and sparse
+worklist liveness. Full preserves lifetime holes and selection affinities;
+Fast builds conservative scalar endpoints directly and uses a separate
+contiguous-interval scanner. It can produce more spills, while avoiding the
+Full allocator's range construction and inactive-interval handling. Both obey
+the same ABI, call-clobber, returns-twice, and i128 rules. `--isel-tier` and
+IR optimization settings remain independent.
+
+The profiler accepts `--regalloc-fast` and records static instruction counts,
+code bytes, aggregate spill slots and callee saves, and explicit spill-helper
+load/store calls. Those helper counts exclude other memory accesses and are
+not dynamic traffic measurements. Additional coarse stages separate
+constant/address folding from compare fusion and lowering entry, body, finish,
+and allocation annotations; no per-instruction timers are used.
+
+The [allocator candidate comparison](suite/reports/backend-tiers-aarch64-2026-10-15/report.html)
+compares saved Fast/Full implementations against the new paths, with identical
+IR/selection settings and separate generated-code runtime measurements.
+`suite/measure_backend_tiers.py` builds direct-object application binaries,
+checks byte-identical output against each saved tier, and performs randomized
+paired measurements using `--build-only`, `--profile-only`, or `--runtime-only`.
+Supply `--suite-cache`, `--baseline-compiler`, `--candidate-compiler`, both
+`--baseline-profiler`/`--candidate-profiler`, `--work-dir`, and `--output`.
+Save the baseline binaries before changing the backend; both profilers must
+support `--regalloc-fast`. The renderer `suite/render_backend_tiers.py` reads
+`builds.json`, `profiles.json`, `runtime.json`, and `compatibility.json` from
+`--input-dir` and writes a summary, interactive HTML, and compressed raw data
+to `--output-dir`. Compiler-speed results exclude the frontend and do not
+establish whole-build gains.
+
+The [application backend profile](suite/reports/backend-profile-aarch64-2026-10-15/report.html)
+covers all 33 Lua files in default, optimized, and debug configurations,
+plus the QuickJS core and SQLite amalgamation. Its directory retains a summary
+and compressed raw samples. `suite/render_backend_profile.py` rebuilds the report
+from `lua.json`, `lua-opt.json`, `lua-debug.json`, and `large.json` using
+`--input-dir` and `--output-dir`. These measurements attribute backend time;
+they exclude the frontend, IR optimization, startup, and file I/O and do not
+establish full-build speedups.
+
 For a before/after comparison, copy the release compiler and stage profiler
 before changing the assembler, then pass `--baseline-compiler <copy>` and
 `--baseline-profiler <copy>`. To measure actual suite assembly, prepare it

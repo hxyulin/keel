@@ -342,6 +342,7 @@ dependencies = [
  "keel-opt",
  "memchr",
  "object",
+ "serde_json",
 ]
 
 [[package]]
