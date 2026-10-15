@@ -253,3 +253,23 @@ median paired ratio corresponds to 5.2% less time after completing the migration
 All 33 objects match all four paths, and the linked interpreter passes Lua's
 portable tests. The earlier [partial API report](reports/compiler-object-api-20261015.json)
 remains available for historical context.
+
+## Native x86-64 Linux bring-up
+
+The [initial NUC report](reports/x86-linux-bringup-20261015.html) ([raw logs](reports/x86-linux-bringup-20261015.json)) contains the
+host/toolchain versions, source commit, commands, logs and known blockers.
+It records correctness, not benchmark comparisons. Run on the Linux host:
+
+```sh
+cargo test --workspace --exclude keel-asm --all-targets
+cargo test -p keel-asm --lib --test structured
+cargo suite test lua --release -c keel,keel-O,keel-select,keel-O-select
+```
+
+Clang/GNU assembly and ELF linking are part of this path; Keel's direct
+`--emit-object` path is currently AArch64 Mach-O only. Lua passes all four
+modes. QuickJS and SQLite encounter the deliberately unsupported aligned
+typedef in glibc's `pthread.h`. The full ARM differential suite requires a
+reference Clang with the requested CPU/features; the NUC's Clang 18 rejects
+`-mcpu=apple-m5`, so that limitation is recorded separately from compiler
+correctness.

@@ -68,6 +68,39 @@ The read comparison requires an archived release driver from before mapping
 became the default, such as commit `cc01b96`. Historical reports retain the
 commands and flags used at the time.
 
+## x86-64 Linux
+
+The native Linux path targets x86-64-v2 and the System V ABI, emitting Intel
+syntax for Clang's integrated assembler or GNU `as`, with ELF linking through
+Clang. On Linux, preprocess against the Linux system headers:
+
+```sh
+cargo build --release -p keel
+clang -E -std=c11 hello.c -o hello.i
+target/release/keel cc --target x86_64-unknown-linux-gnu hello.i -o hello.s
+clang hello.s -o hello
+./hello
+```
+
+The [NUC bring-up report](suite/reports/x86-linux-bringup-20261015.html) records
+native execution on Ubuntu 24.04 / Intel i7-1360P, with Rust 1.99 and Clang 18.
+Compiler tests, ordinary/optimized C fixtures, both assemblers with debug info,
+and Lua's portable tests in all four compiler/selection modes pass. QuickJS
+and SQLite currently stop at an alignment-changing typedef in glibc's
+`pthread.h`; that frontend feature remains unsupported.
+
+`--emit-object` and the structured compiler/assembler API currently target
+AArch64 Mach-O. Native x86 instruction encoding and an ELF writer remain to
+be implemented. The x86 backend also diagnoses exceptions, inline assembly
+and selected i128 operations/conversions it cannot lower yet.
+
+For native compiler checks, use
+`cargo test --workspace --exclude keel-asm --all-targets`. The portable ARM
+assembler core can be tested with
+`cargo test -p keel-asm --lib --test structured`; the full ARM differential
+suite additionally needs a reference Clang that recognizes its requested
+features, including `-mcpu=apple-m5` (Ubuntu Clang 18 does not).
+
 ## Compiler tiers and profiling
 
 The stages can be tuned independently:
