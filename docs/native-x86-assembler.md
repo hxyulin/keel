@@ -84,7 +84,8 @@ exception personality/LSDA directives and general-dynamic TLS are not implemente
 Unsupported directives and operands return errors; they are not silently dropped.
 
 Layout and fixups require memory proportional to the input/object. Symbol lookup
-uses ordered maps. Unneeded local `.L` symbols are omitted from ELF; ordinary
+uses a hash map; ELF emission sorts names to preserve deterministic output.
+Unneeded local `.L` symbols are omitted from ELF; ordinary
 relocations use section symbols plus the target's section offset. Explicit
 global/weak/hidden symbols, undefined symbols, TLS symbols, GOT/TLS references
 and absolute symbols requiring PC-relative linker relocations retain their
@@ -157,7 +158,8 @@ The fixed-source measurement script uses two prebuilt compilers, generates each
 ```sh
 python3 suite/measure_x86_relaxation.py --before /path/to/keel-before \
   --after /path/to/keel-after --prepared /path/to/prepared/target/suite \
-  --out /path/to/isolated/benchmark --cpu 2
+  --out /path/to/isolated/benchmark --cpu 2 \
+  --before-revision BEFORE_COMMIT --after-revision AFTER_COMMIT
 ```
 
 Its output records binary/input hashes, every timing sample, object/text sizes,
@@ -219,3 +221,82 @@ fixture variants plus spills, and the GNU reader/GDB/libgcc metadata checks.
 The report's `review_followup` records these results. Original performance samples
 remain tied to the measured `e3a4bc6` implementation; the final symbol-retention
 correctness fix was not separately timed.
+
+## Assembly speed follow-up
+
+The layout work made assembly slower because it added repeated layout/emission
+passes, but stage profiling also found a larger cost in the existing parser.
+For the optimized SQLite input on MacHost, parsing took about 190 ms out of 336 ms;
+three layout passes took another 93 ms. QuickJS likewise spent about 182 ms out
+of 278 ms parsing. These are warm in-process diagnostic timings excluding file
+reads, rather than the CLI batch measurements below.
+
+The follow-up keeps relaxation and its correctness checks. Register names use a
+direct match, already-lowercase tokens stay borrowed, and short delimiter/address
+lists use inline storage with a heap fallback for larger lists. Symbolic address
+terms no longer construct and discard integer-parse error strings. Assembly uses
+hash-based symbol lookup and sorts symbols once before ELF emission. Tests cover
+mixed case, quoted delimiters, spilled lists and deterministic output across hash
+seeds. Accumulator immediate forms omit the unnecessary ModRM byte while retaining
+shorter sign-extended imm8 forms. Instruction and relocation tests compare these
+encodings with Clang.
+
+A prototype that skipped byte emission on intermediate layout passes did not
+improve the large-input timings and was removed. The current implementation still
+rebuilds per-pass state; neither a globally minimal branch layout nor a direct
+structured x86 compiler sink is implemented by this change.
+
+To inspect the remaining stages without instrumenting normal assembly:
+
+```sh
+cargo build --release -p keel-asm --example profile_x86
+./target/release/examples/profile_x86 input.s 5
+```
+
+Each JSON line records parse time, per-pass layout/branch-check/discard times,
+widening counts, ELF finalization and total in-process time. On the same MacHost
+SQLite input, warm median parsing falls to about 85 ms, layout to 68 ms, and total
+to 188 ms. QuickJS parsing falls to about 71 ms and total to 133 ms. These diagnostic
+samples identify bottlenecks; the paired CLI measurements establish the overall
+speed change.
+
+The [speed follow-up report](../suite/reports/native-x86-speed-20261015.json)
+compares the integrated pre-optimization implementation (`0738fc4`, code-identical
+to the session's `a958895`) with `23e141e`. Seven alternating warm paired batches
+on NUC CPU 2 assemble the same 44 files per mode:
+
+| Input mode | Keel before | Keel after | Clang driver | Paired time reduction |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 1.561 s | 1.139 s | 3.959 s | 27.2% |
+| Optimized | 1.367 s | 0.967 s | 3.618 s | 29.3% |
+
+These timings include process startup, input reads and object writes, and exclude
+C compilation and linking. Keel's CLI is 3.48x/3.74x faster than Clang's driver
+for these inputs; this is not an isolated LLVM assembler-library comparison.
+The baseline/optimized sums of object `.text` shrink a further **225/593 bytes**,
+leaving them **0.071%/0.107%** larger than Clang assembly of the same source.
+This is a small encoding improvement, not a new compiler optimization.
+
+Eleven alternating paired runtime runs give aggregate changes of **-0.02%/+0.12%**
+(baseline/optimized, negative means less time). Individual changes range from
+**-1.34% to +1.38%** and **-1.47% to +1.30%**. These measurements do not establish
+a runtime improvement or regression. Raw samples and paired bootstrap intervals
+are retained in the report.
+
+A separate seven-pair MacHost check assembles just the two large optimized x86
+QuickJS/SQLite files into Linux ELF objects: combined medians are **662.6 ms
+before, 354.6 ms after, and 468.8 ms for Clang**, a **46.5%** paired reduction.
+This is an x86 assembler comparison running on the Mac, not an AArch64 assembler
+measurement. Both hosts use prebuilt binaries and the same source within each
+comparison. The report includes source/binary hashes, Mac timing samples and raw
+stage profiles.
+
+Validation passes all 204 Mac assembler checks, 15 codegen library checks, 47
+selected Linux assembler checks, 424 native runtime fixture variants plus spill
+regressions, and all 12 application configurations (176 objects, 44 test
+invocations). GNU readers, GDB source lines/locals/backtraces and libgcc unwinding
+pass. A seeded layout check verifies 3,200 branch targets across 100 graphs with
+aliases, padding and max-skip alignment. Formatting and strict Clippy pass with
+the existing lint allowances recorded in the report. The measurement helper now
+accepts explicit binary revisions instead of embedding the original experiment's
+base revision.

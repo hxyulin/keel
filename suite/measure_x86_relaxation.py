@@ -54,6 +54,8 @@ def main():
     p.add_argument("--cpu", type=int, default=2)
     p.add_argument("--assembly-pairs", type=int, default=5)
     p.add_argument("--runtime-pairs", type=int, default=11)
+    p.add_argument("--before-revision", help="revision used to build --before (not inferred from the checkout)")
+    p.add_argument("--after-revision", help="revision used to build --after (not inferred from the checkout)")
     a = p.parse_args()
     if min(a.assembly_pairs, a.runtime_pairs) < 3:
         p.error("use at least three paired samples")
@@ -64,7 +66,7 @@ def main():
     os.sched_setaffinity(0, {a.cpu})
     a.out.mkdir(parents=True, exist_ok=True)
     root = Path(__file__).resolve().parents[1]
-    report = {"base_commit": "426d6fc8fa61f74c38dfbc892edf69afd1554278",
+    report = {"base_commit": a.before_revision, "after_commit": a.after_revision,
               "host": platform.node(), "platform": platform.platform(),
               "cpu": a.cpu, "clang": invoke(["clang", "--version"]).decode().splitlines()[0],
               "binaries": {n: {"path": str(path), "sha256": sha(path)}
