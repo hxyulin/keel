@@ -1916,3 +1916,32 @@ units, with input/assembly/binary hashes. DWARF and compact-unwind bytes are
 excluded from this raw-byte audit because equivalent representations can differ;
 focused Rust tests exercise the object metadata and call-frame paths. This is
 an inventory of those exact sources/options, not every compiler mode or syntax.
+
+
+The final compatibility evidence is indexed in
+`suite/reports/assembler-m5-compat-summary-20261015.json`. All nine original
+probes match Clang; all 51 unchanged sources pass the byte/relocation/metadata
+audit, and the 33 linked Lua objects pass guarded sorting, arithmetic, string,
+error-handling and coroutine checks on M5 Max. Validation passed 158 assembler
+and 11 CLI tests, one doctest, generator `--check` and `cargo fmt --check`.
+
+Performance remains a tradeoff: nine paired final-build Lua runs observed
++0.6% serial CLI time and +6.0% aggregate in-process parsing versus 84b5630.
+The final nine-pair comparisons observed +3.6% CLI / +4.8% parsing for 64 MiB
+functions, and +4.7% CLI / +6.2% parsing for dense instructions. The 1 MiB old
+feature workloads observed CLI changes of +4.6% NEON, +4.3% numeric, -1.1% SME
+and -1.0% streaming; corresponding parse changes were -0.2%, -3.5%, -0.7% and
++3.2%. Small changes, especially CLI startup costs, are sensitive to run noise;
+raw samples are retained, and these are observed medians rather than a claim of
+isolated causality. Coverage was not removed to improve these numbers.
+
+Final command timings were about 10.5x faster than direct Clang -cc1as on old
+Keel-generated Lua input, 5.0x on the new PAC/crypto/system encoding workload,
+and 5.6x on the 51 unchanged Clang-generated C/Lua sources. These are warm-cache
+complete command comparisons, not pure parser comparisons or equivalent-facility
+claims. The seven-pair Clang scale reference report predates only the final
+zero-alignment diagnostic fix; the final-build old/new comparison records exact
+final binary hashes and verifies unchanged text. `generate_m5_compat_inputs.py`
+reconstructs feature inputs from checked-in correctness seeds;
+`compare_assembler_builds.py` provides paired old/new measurements when a Clang
+reference run has already established correctness.
