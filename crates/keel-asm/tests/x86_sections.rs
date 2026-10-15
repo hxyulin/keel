@@ -293,11 +293,19 @@ fn normalized(
                 st_info,
                 st_other,
                 s.section_index().map(|i| {
-                    file.section_by_index(i)
-                        .unwrap()
-                        .name()
-                        .unwrap()
-                        .to_string()
+                    let owner = file.section_by_index(i).unwrap().name().unwrap();
+                    if s.scope() == object::SymbolScope::Compilation {
+                        if let Some(group) = file.comdats().find(|group| group.name() == s.name()) {
+                            // GNU as anchors local signatures in .group; Clang
+                            // may retain a defined label in the member section.
+                            // Both identify the same group by the same name.
+                            assert!(
+                                owner == ".group" || group.sections().any(|member| member == i)
+                            );
+                            return "<local-group-signature>".into();
+                        }
+                    }
+                    owner.to_owned()
                 }),
                 s.size(),
             )
