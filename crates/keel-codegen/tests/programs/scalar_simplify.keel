@@ -1,5 +1,5 @@
 ; expect: exit 0
-; opt-passes: canonicalize, simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
+; opt-passes: simplify-cfg, canonicalize, instcombine, simplify-cfg, gvn, dce, gcm
 func @scalar_simplify(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):
     v2 = or v0, v1

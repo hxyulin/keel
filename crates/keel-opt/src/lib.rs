@@ -160,8 +160,8 @@ impl OptimizationTier {
         match self {
             Self::None => &[],
             Self::Basic => &[
-                "canonicalize",
                 "simplify-cfg",
+                "canonicalize",
                 "instcombine",
                 "simplify-cfg",
                 "dce",
@@ -177,8 +177,8 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 
 /// The passes `keel compile -O` runs, in order.
 pub const DEFAULT_PIPELINE: &[&str] = &[
-    "canonicalize",
     "simplify-cfg",
+    "canonicalize",
     "instcombine",
     "simplify-cfg",
     "gvn",

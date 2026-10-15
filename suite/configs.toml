@@ -168,3 +168,9 @@ flags = ["-p", "simplify-cfg,instcombine,simplify-cfg,gvn,known-bits,instcombine
 name = "keel-O-ranges"
 compiler = "keel"
 flags = ["-p", "canonicalize,simplify-cfg,instcombine,simplify-cfg,gvn,branch-ranges,instcombine,simplify-cfg,dce,gcm"]
+
+# Combined scalar analyses after value numbering, with CFG canonicalization first.
+[[config]]
+name = "keel-O-facts"
+compiler = "keel"
+flags = ["-p", "simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,known-bits,branch-ranges,instcombine,simplify-cfg,dce,gcm"]

@@ -191,7 +191,7 @@ measures the initial stage and canonical entry requirements against that compile
 297 literal-left comparisons become zero, text shrinks another 1,056 bytes,
 runtime ratio is 0.9923 (mostly intervals spanning one), and compile-time ratio
 is 1.0768. The census also counts `left_comparison_literals`. Default Basic and
-Full now start with canonicalization; explicit historical recipes retain their
+Full now run CFG cleanup before operand canonicalization; explicit historical recipes retain their
 listed stages, with prerequisites restored for consumers that request them.
 
 `keel-O-ranges` adds conditional-edge integer ranges after GVN, followed by
@@ -199,3 +199,11 @@ combining and CFG cleanup. The [simplification audit](../docs/simplification.md)
 records separate Boolean, cast-chain, wrapping-algebra, carry-fact and
 branch-range measurements. Incremental screens use three paired samples;
 small timing differences should not be treated as established speedups.
+
+The [expanded-scalar ordering comparison](reports/scalar-order-aarch64-2026-10-15.json)
+uses seven paired runtime and five paired compile samples. Moving CFG cleanup
+before operand normalization preserves all 44 IR and assembly files and reduces
+compile time 2.83%; Basic and Full adopt that order. Extra late cleanup and the
+`keel-O-facts` recipe remain opt-in because they increase code size and compile
+cost without an established runtime gain. Static-only second/third rounds test
+corpus convergence; their runtime has not been measured.

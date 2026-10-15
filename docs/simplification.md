@@ -24,8 +24,11 @@ profitability policy. They should not prevent improving scalar reasoning first.
 
 ## Canonicalization contract
 
-Basic and Full begin with `canonicalize`. It performs no constant evaluation,
-reassociation, instruction creation/removal, or motion. Its structural form is:
+Basic and Full first canonicalize the CFG with `simplify-cfg`, then run operand
+`canonicalize` before scalar consumers. This avoids invalidating a freshly
+established operand form during initial CFG cleanup. Operand canonicalization
+performs no constant evaluation, reassociation, instruction creation/removal,
+or motion. Its structural form is:
 
 - Every instruction operand directly names its resolved SSA value. Aliases in
   value tables and block parameter definitions can still exist.
@@ -304,3 +307,47 @@ and unsigned queries, parallel edges, joins, loops, distinct memory reads and
 allocators under restricted registers.
 
 The [incremental branch-range report](../suite/reports/branch-ranges-aarch64-2026-10-15.json) holds late combining/CFG cleanup constant on both sides. Adding the analysis removes 12 IR instructions, changes text by -152 bytes, and measures runtime ratio 0.9997 and compile-time ratio 1.0190. It remains opt-in pending stronger profitability evidence.
+
+## Ordering after the expanded scalar rules
+
+The [new ordering comparison](../suite/reports/scalar-order-aarch64-2026-10-15.json)
+uses one immutable compiler, seven paired runtime samples, two warmups and five
+paired compile samples. The baseline is the former default order with all new
+scalar rules. Variants are:
+
+- `preclean`: CFG cleanup, then operand canonicalization, then the existing
+  combining/CFG/GVN/DCE/GCM stages.
+- `cleanup`: the same prefix with another combining/CFG round after GVN.
+- `facts`: that late round also runs known-bits and branch-ranges before combining.
+
+| Recipe | Runtime ratio | Compile-time ratio | Text delta (bytes) | IR instructions removed |
+|---|---:|---:|---:|---:|
+| preclean | 0.9957 | 0.9717 | +0 | 0 |
+| cleanup | 1.0113 | 1.0547 | +12,328 | 2,794 |
+| facts | 1.0020 | 1.1060 | +10,364 | 3,139 |
+
+Basic and Full adopt `preclean`. Both printed IR and assembly are byte-identical
+across all 44 files; runtime differences for identical assembly are measurement
+variation. Compile time falls 2.83% overall; QuickJS and SQLite intervals exclude
+one, while Lua's interval spans one. Initial CFG edits previously invalidated
+the operand form and requested another scan before combining. The canonical
+entry contract is preserved, with normalization immediately before its consumer.
+
+Extra cleanup and the combined facts recipe stay opt-in. Simpler IR again does
+not establish cheaper machine code; these variants grow text and add compile
+cost without an established runtime benefit. The cause of text growth is not
+isolated. `keel-O-facts` exposes the combined recipe for further investigation.
+
+Static-only extra rounds remove another 141 instructions and 80 blocks in the
+second facts/cleanup round. A third round gives byte-identical printed IR on all
+44 files. This is corpus evidence of convergence, not a general bound. Repeated
+recipes were not runtime/compile benchmarked or promoted; GCM runs only at the
+end, so rematerialization does not fight numbering during these rounds.
+
+Across the default scalar-rule changes (Boolean, cast chains and algebra), the
+same application corpus loses 1,043 IR instructions and 3,988 text bytes relative
+to `26d2da0`. The short incremental timing screens do not establish an aggregate
+application runtime gain. Arithmetic and branch-range analyses remain opt-in.
+The remaining work includes select/De Morgan rewrites, richer expression and
+relational reasoning, path facts through block arguments/arithmetic, integration
+of bit and interval domains, and cheaper targeted feedback between passes.

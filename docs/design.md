@@ -751,9 +751,11 @@ analyses they need; there is no analysis cache yet.
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
-The default pipeline (`-O`) is `canonicalize, simplify-cfg, instcombine,
-simplify-cfg, gvn, dce, gcm`. Basic uses `canonicalize, simplify-cfg, instcombine,
-simplify-cfg, dce`. A pass can request canonical form on entry; the manager
+The default pipeline (`-O`) is `simplify-cfg, canonicalize, instcombine,
+simplify-cfg, gvn, dce, gcm`. Basic uses `simplify-cfg, canonicalize, instcombine,
+simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
+to avoid invalidating it immediately; this order produces identical assembly
+on the measured corpus with lower compile cost. A pass can request canonical form on entry; the manager
 restores it after intervening changes, including lazy aliases. This applies to
 explicit and custom pipelines too. The contract and its limits are documented
 in the [canonicalization section](simplification.md#canonicalization-contract).
