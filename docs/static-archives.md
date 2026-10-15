@@ -166,3 +166,46 @@ temporary-collision probes were run. Linux Clippy was not rerun. The documented
 Darwin Keel common-only extraction boundary remains unchanged and was not
 re-probed directly in this correction. Independent corrective review remains
 pending.
+
+## Corrective implementation after review round 2, 2026-10-16
+
+This correction starts at `44120c5761fe5f59536c05afa857f69ce47d3aec`.
+The raw-table boundary now additionally includes:
+
+- Mach-O non-STABS `N_INDR` values must fit a string-table offset and identify
+  a NUL-terminated string entirely inside the declared raw string table.
+  Alias providers remain indexed, including aliases to undefined names. Empty
+  target strings are structurally accepted; alias resolution belongs to consumers.
+- ARM64 ADDEND records must have external=false, PC-relative=false and length=2,
+  and immediately precede a BRANCH26, PAGE21 or PAGEOFF12 relocation at the same
+  address. The pair must be external, length=2, and PC-relative for BRANCH26 and
+  PAGE21, absolute for PAGEOFF12. Signed 24-bit ADDEND payloads remain exempt
+  from symbol-ordinal checks. The following relocation still receives ordinary
+  reference and site checks. This follows the pair kinds and flags described by
+  [LLVM's ARM64 relocation attributes](https://github.com/llvm/llvm-project/blob/main/lld/MachO/Arch/ARM64.cpp).
+- ELF REL and RELA sites use checked `offset + field width <= target size` for
+  known fixed-width x86-64 fields (1, 2, 4, 8 or 16 bytes), independently of Keel
+  executable-linker support. NONE has no site check. TLSDESC_CALL is an instruction
+  marker and requires an in-section starting byte. Unknown and variable-width
+  kinds, including COPY, also require only an in-section starting byte; their
+  patch width is deliberately not inferred. Mach-O sites use the width encoded
+  by `r_length`; ADDEND's own record has no independent storage field.
+- ELF symbol-table `sh_info` must be at most the symbol count. All entries before
+  that boundary must be local and all remaining entries nonlocal.
+
+These are bounded raw-table, index, pair and site checks. They do not validate
+instruction encodings, resolved values, alias graphs, every relocation pairing
+rule, every symbol invariant, or arbitrary link-time correctness. The existing
+Darwin common-only Keel extraction limitation remains unchanged.
+
+The shared library/CLI fixtures add each new reviewer failure, unterminated
+alias targets, ADDEND pair flag/type/address/reference errors, section-end and
+arithmetic-overflow sites, and symbol partition errors. Positive cases retain
+aliases, signed ADDEND extremes, all three pair types, TLSGD, unknown relocation
+kinds, REL/RELA, and exact field-end boundaries. Historical special-symbol and
+extended-index tests remain in place. Exact retained reviewer objects are checked
+separately without changing the original evidence directories.
+
+See the [round 2 validation record](static-archives-round2-validation-20261016.json)
+for exact source revision, commands, results, hashes and remaining coverage gaps.
+Independent corrective review and integration follow separately.

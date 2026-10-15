@@ -267,7 +267,14 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                     let symbols = sections
                         .symbol_table_by_index(endian, bytes, index)
                         .map_err(|e| e.to_string())?;
+                    let first_global = section.sh_info(endian) as usize;
+                    if first_global > symbols.len() {
+                        return Err("invalid ELF symbol local/global boundary".into());
+                    }
                     for (i, symbol) in symbols.enumerate() {
+                        if (i.0 < first_global) != (symbol.st_bind() == STB_LOCAL) {
+                            return Err("invalid ELF symbol local/global partition".into());
+                        }
                         symbols
                             .symbol_name(endian, symbol)
                             .map_err(|e| e.to_string())?;
@@ -316,7 +323,7 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                         .symbol_table_by_index(endian, bytes, section.link(endian))
                         .map_err(|e| e.to_string())?;
                     // ET_REL sh_info identifies the section being relocated.
-                    sections
+                    let target = sections
                         .section(object::SectionIndex(section.sh_info(endian) as usize))
                         .map_err(|e| e.to_string())?;
                     let data = section.data(endian, bytes).map_err(|e| e.to_string())?;
@@ -325,6 +332,10 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                         let info = u64::from_le_bytes(relocation[8..16].try_into().unwrap());
                         if (info >> 32) as usize >= symbols.len() {
                             return Err("invalid ELF relocation symbol index".into());
+                        }
+                        if let Some(width) = elf_relocation_width(info as u32) {
+                            let offset = u64::from_le_bytes(relocation[..8].try_into().unwrap());
+                            validate_site(offset, width, target.sh_size(endian))?;
                         }
                     }
                 }
@@ -338,6 +349,14 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
             let count = macho.sections().count();
             let symbols = macho.macho_symbol_table();
             for symbol in symbols.iter() {
+                if !symbol.is_stab() && symbol.n_type() & N_TYPE == N_INDR {
+                    let offset = u32::try_from(symbol.n_value(macho.endian()))
+                        .map_err(|_| "invalid Mach-O indirect target offset")?;
+                    symbols
+                        .strings()
+                        .get(offset)
+                        .map_err(|_| "invalid Mach-O indirect target string")?;
+                }
                 // STABS have their own n_type/section semantics.
                 if !symbol.is_stab()
                     && symbol.n_type() & N_TYPE == N_SECT
@@ -347,14 +366,37 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                 }
             }
             for section in macho.sections() {
-                for relocation in section.macho_relocations().map_err(|e| e.to_string())? {
+                let relocations = section.macho_relocations().map_err(|e| e.to_string())?;
+                for (i, relocation) in relocations.iter().enumerate() {
                     let info = relocation.info(macho.endian());
                     // ARM64_RELOC_ADDEND stores a signed 24-bit addend in
                     // r_symbolnum, not a symbol/section reference. Local zero
                     // is R_ABS. Other relocation types need no linker support.
                     if info.r_type == ARM64_RELOC_ADDEND {
+                        let next = relocations.get(i + 1).ok_or("orphan Mach-O ADDEND")?;
+                        let pair = next.info(macho.endian());
+                        if info.r_extern
+                            || info.r_pcrel
+                            || info.r_length != 2
+                            || info.r_address != pair.r_address
+                            || !matches!(
+                                pair.r_type,
+                                ARM64_RELOC_BRANCH26 | ARM64_RELOC_PAGE21 | ARM64_RELOC_PAGEOFF12
+                            )
+                            || pair.r_length != 2
+                            || !pair.r_extern
+                            || pair.r_pcrel != (pair.r_type != ARM64_RELOC_PAGEOFF12)
+                        {
+                            return Err("invalid Mach-O ADDEND pair".into());
+                        }
+                        // The following record is still validated normally.
                         continue;
                     }
+                    validate_site(
+                        u64::from(info.r_address),
+                        1 << info.r_length,
+                        section.size(),
+                    )?;
                     if (info.r_extern && info.r_symbolnum as usize >= symbols.len())
                         || (!info.r_extern && info.r_symbolnum as usize > count)
                     {
@@ -366,4 +408,49 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
         _ => unreachable!("format and width checked above"),
     }
     Ok(())
+}
+
+// Bounds only: no instruction decoding, addend evaluation or linker whitelist.
+fn validate_site(offset: u64, width: u64, size: u64) -> Result<()> {
+    if offset.checked_add(width).is_none_or(|end| end > size) {
+        return Err("relocation site outside target section".into());
+    }
+    Ok(())
+}
+
+fn elf_relocation_width(kind: u32) -> Option<u64> {
+    use object::elf::*;
+    Some(match kind {
+        // NONE does not designate a storage site. TLSDESC_CALL is a marker,
+        // not a patch; require only that its instruction starts in-section.
+        R_X86_64_NONE => return None,
+        R_X86_64_TLSDESC_CALL => 1,
+        R_X86_64_8 | R_X86_64_PC8 => 1,
+        R_X86_64_16 | R_X86_64_PC16 => 2,
+        R_X86_64_PC32
+        | R_X86_64_GOT32
+        | R_X86_64_PLT32
+        | R_X86_64_GOTPCREL
+        | R_X86_64_32
+        | R_X86_64_32S
+        | R_X86_64_TLSGD
+        | R_X86_64_TLSLD
+        | R_X86_64_DTPOFF32
+        | R_X86_64_GOTTPOFF
+        | R_X86_64_TPOFF32
+        | R_X86_64_GOTPC32
+        | R_X86_64_SIZE32
+        | R_X86_64_GOTPC32_TLSDESC
+        | R_X86_64_GOTPCRELX
+        | R_X86_64_REX_GOTPCRELX => 4,
+        R_X86_64_64 | R_X86_64_GLOB_DAT | R_X86_64_JUMP_SLOT | R_X86_64_RELATIVE
+        | R_X86_64_DTPMOD64 | R_X86_64_DTPOFF64 | R_X86_64_TPOFF64 | R_X86_64_PC64
+        | R_X86_64_GOTOFF64 | R_X86_64_GOT64 | R_X86_64_GOTPCREL64 | R_X86_64_GOTPC64
+        | R_X86_64_GOTPLT64 | R_X86_64_PLTOFF64 | R_X86_64_SIZE64 | R_X86_64_IRELATIVE
+        | R_X86_64_RELATIVE64 => 8,
+        R_X86_64_TLSDESC => 16,
+        // Unknown and variable-size kinds (e.g. COPY) must name an in-section
+        // starting byte. Do not invent a patch width or reject the kind.
+        _ => 1,
+    })
 }

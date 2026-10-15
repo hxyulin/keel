@@ -258,6 +258,23 @@ fn archive_cli_raw_validation_both_targets() {
         assert!(!result.stderr.is_empty(), "{name}");
         assert_eq!(std::fs::read(&output).unwrap(), b"preserve", "{name}");
     }
+    for (name, darwin, bytes) in round2_valid_cases(&objects[0], &objects[1]) {
+        std::fs::write(&input, bytes).unwrap();
+        let target = if darwin {
+            "aarch64-apple-darwin"
+        } else {
+            "x86_64-unknown-linux-gnu"
+        };
+        let result = keel(&[
+            "archive",
+            "--target",
+            target,
+            "-o",
+            path(&output),
+            path(&input),
+        ]);
+        assert!(result.status.success(), "{name}: {:?}", result);
+    }
     let (extended, _, _) = extended_elf(&objects[0]);
     std::fs::write(&input, extended).unwrap();
     success(keel(&[

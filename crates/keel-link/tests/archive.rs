@@ -411,6 +411,7 @@ fn extended_indices_and_packaging_only_relocations_are_valid() {
     indirect[symbol + 4] = 0x0b; // N_INDR | N_EXT; n_value is target string offset
     indirect[symbol + 5] = 0;
     put64(&mut indirect, symbol + 8, u32_at(&macho, symbol));
+    let round2 = round2_valid_cases(&elf, &macho);
     for (bytes, target) in [
         (&extended, Target::X86_64LinuxGnu),
         (&elf_tls, Target::X86_64LinuxGnu),
@@ -418,7 +419,18 @@ fn extended_indices_and_packaging_only_relocations_are_valid() {
         (&addend, Target::Aarch64AppleDarwin),
         (&absolute, Target::Aarch64AppleDarwin),
         (&indirect, Target::Aarch64AppleDarwin),
-    ] {
+    ]
+    .into_iter()
+    .chain(round2.iter().map(|(_, darwin, bytes)| {
+        (
+            bytes,
+            if *darwin {
+                Target::Aarch64AppleDarwin
+            } else {
+                Target::X86_64LinuxGnu
+            },
+        )
+    })) {
         let result = archive::build(
             &[Input {
                 name: "valid.o",
