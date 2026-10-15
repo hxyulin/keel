@@ -517,8 +517,10 @@ from Apple arm64 that matter to a frontend:
   and lldb finds the line table through that map.
 - **Call frame information** is emitted for every function, with or without
   locations: C++ exceptions and debuggers unwind through keel frames with
-  it. The assembler turns it into compact unwind info when the saved
-  registers follow Apple's pairing, and into `__eh_frame` otherwise.
+  it. The system assembler can turn it into compact unwind info when
+  saved registers follow Apple's pairing, or `__eh_frame` otherwise. Keel's
+  assembler also selects compact encodings for representable ARM64 layouts,
+  retaining `__eh_frame` for the rest.
 - **Variables and types.** The module has a table of source-level types
   (`dtype dt0 = base "int" signed 4`, pointers, structs and unions with
   byte or bit-field members, arrays, typedefs, `const` and `volatile`,
@@ -1135,3 +1137,403 @@ and without `-O`. These configured workloads found bugs the small
 programs missed (an array of pointers to `const` placed in read-only
 memory, a variable used in its own initializer, `#pragma pack`, the
 `__int128` constant, a function too big for conditional branches).
+
+## Assembler
+
+The first assembler target is A64 for Apple arm64 macOS. `keel-asm` separates
+instruction encoding, assembly syntax, and the Mach-O object container. The
+library can return encoded text and symbols or a complete relocatable object;
+`keel asm input.s -o output.o` writes that object. Apple’s linker remains the
+linker for now.
+
+**Generated encoding tables.** `crates/keel-asm/isa/a64.json` contains selected
+instruction names, conditions, and encoding records copied from Arm’s
+BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
+archive SHA-256, upstream metadata, and license notice are retained. The
+subset currently has 534 instruction forms. Generated requirements retain
+Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, and `FEAT_LSE` availability checks; the fixed
+Apple arm64 target enables those features. Encoding conditions are distinct
+from feature requirements: for example, byte register-offset forms exclude
+`option == 0b011`, which has a separate instruction form. The generator
+handles these predicates and conjunctions explicitly and rejects unknown
+features or conditions instead of discarding them.
+
+The generator extracts fixed bits, masks, and variable field layouts from
+these records; the assembler does not duplicate opcode constants. Partially
+variable fields retain their fixed-bit constraints. Operand interpretation
+remains handwritten: register roles, immediate ranges, shifts, aliases, and
+PC-relative displacements need rules beyond the bit layout.
+
+Normal Cargo builds use the checked-in Rust tables and need no network,
+Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
+
+```sh
+python3 crates/keel-asm/tools/generate.py
+python3 crates/keel-asm/tools/generate.py --check
+```
+
+To reproduce the subset from the original archive:
+
+```sh
+curl -L --fail -o /tmp/aarchmrs.tar.gz \
+  https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-OS-Machine-Readable-Data/AARCHMRS_BSD/AARCHMRS_OPENSOURCE_A_profile_FAT-2025-12.tar.gz
+python3 crates/keel-asm/tools/generate.py --archive /tmp/aarchmrs.tar.gz --check
+```
+
+The importer verifies SHA-256
+`4dc5da62a5c856d7b1086b895075f54807f821ea21a333049cb0f40f9479cecc`
+before reading the archive. Arm-derived data and tables carry BSD-3-Clause
+terms; retain `crates/keel-asm/isa/LICENSE-ARM` with distributions.
+
+**Integer arithmetic and control flow.** `movz`, `movk`, `movn`; `add`, `sub`, `adds`, `subs` with
+immediates or shifted registers; `cmp`, `cmn`; register `mov` (including SP)
+and single-instruction immediate `mov`; `b`, `bl`, `ret`, and `nop`. Both 32-bit
+and 64-bit forms are supported where applicable. Move-wide instructions
+accept `lsl` in 16-bit steps; add/sub immediates accept `lsl #0` or `lsl #12`;
+shifted registers accept `lsl`, `lsr`, and `asr` within the register width.
+Add/sub also supports extended-register forms, including SP arithmetic,
+with `uxtb/uxth/uxtw/uxtx` and `sxtb/sxth/sxtw/sxtx` and shifts 0..4.
+
+Logical operations include `and`, `ands`, `orr`, `eor`, `bic`, `bics`, `orn`,
+and `eon` with shifted registers (`lsl/lsr/asr/ror`). `and/ands/orr/eor`
+also accept A64 logical bitmask immediates: repeated, rotated runs of ones,
+excluding zero and all ones. Signed immediates and hexadecimal bit patterns
+are range-checked against W/X width. `mov #imm` chooses `movz`, `movn`, or
+`orr` as a single instruction; arbitrary multi-instruction constants must
+still be written as `movz`/`movk` sequences.
+
+Other integer operations are `adc/adcs/sbc/sbcs`; `mul/mneg/madd/msub`,
+`smulh/umulh`, `smull/umull/smaddl/umaddl`; `sdiv/udiv`; register and
+immediate `lsl/lsr/asr/ror`; `clz/cls/rbit/rev/rev16`, and X-only `rev32`.
+Bitfield forms include `sbfm/ubfm/bfm/extr`, `bfi/bfxil/ubfx/sbfx`,
+`sxtb/sxth/sxtw`, and W-only `uxtb/uxth`. `neg/negs/mvn/tst` aliases are
+supported. Shift and bitfield bounds are checked before encoding.
+
+Conditional operations include `csel/csinc/csinv/csneg`,
+`cset/csetm/cinc/cinv/cneg`, and `ccmp/ccmn` (register or 5-bit immediate,
+with 4-bit NZCV). Conditions accept the usual names and `hs/cs`, `lo/cc`
+synonyms. Inverting aliases reject `al/nv`; canonical forms accept them.
+Branches include `b.<condition>`, `cbz/cbnz`, and `tbz/tbnz`, with checked
+signed byte-displacement ranges of ±1 MiB and ±32 KiB respectively. Test
+branches allow X names for low bits, but W names require bit indices <32.
+Out-of-range branches are errors; the assembler does not relax them.
+`br/blr` require X registers; `brk` and `svc` take a 16-bit immediate.
+`ngc`/`ngcs` lower to SBC/SBCS with a zero-register first input, for W/X
+operands including zero registers.
+
+**Floating-point and population count.** Scalar S/D forms include
+`fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
+`fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
+(register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
+and `fcvtzs/fcvtzu` convert W/X ↔ S/D. Fixed-point and half-precision forms
+remain unsupported. `fmov` also supports S/W and D/X bitwise transfers and
+all 256 scalar FP immediate encodings (zero needs a register transfer).
+
+Keel’s scalar popcount lowering uses the supported SIMD `cnt` (8B/16B)
+and `addv` reductions (8B/16B, 4H/8H, 4S). `movi` supports all six modified
+immediate forms: byte replication (8B/16B); halfwords (4H/8H) with LSL #0/#8;
+words (2S/4S) with LSL #0/#8/#16/#24 or MSL #8/#16; scalar D and vector 2D
+64-bit masks whose bytes are each 00 or FF. Byte and 64-bit mask forms take
+no shift operand. General vector arithmetic remains unsupported. FP and SIMD
+operand widths and register numbers are checked.
+
+`x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
+against their operand roles. `fp` and `lr` name x29 and x30.
+
+**Load/store syntax.** Single transfers include `ldr`/`str` for W/X and
+scalar B/H/S/D/Q registers; `ldrb`/`strb`, `ldrh`/`strh` for W registers;
+`ldrsb`/`ldrsh` for W/X destinations; and `ldrsw` for X destinations. Each
+has its explicit unscaled counterpart (`ldur`, `stur`, `ldurb`, `sturb`,
+`ldurh`, `sturh`, `ldursb`, `ldursh`, `ldursw`). FP/SIMD register numbers run
+from 0 to 31; general register 31 still requires `sp` or `zr` explicitly.
+
+Memory bases are X registers or SP. Bracket-aware operand splitting keeps
+commas inside addresses separate from instruction operands. Supported forms:
+
+- `[base]` or `[base, #offset]`: unsigned 12-bit offsets scaled by access
+  size. Like clang, the ordinary mnemonic selects the unscaled encoding
+  for small negative or unaligned offsets. Explicit unscaled mnemonics
+  always use a signed 9-bit byte offset (-256..255).
+- `[base, #offset]!` and `[base], #offset`: pre-index and post-index
+  writeback with signed 9-bit byte offsets, without scaling. Explicit
+  unscaled mnemonics do not support writeback.
+- `[base, Xm]`, `[base, Xm, lsl #shift]`, `[base, Xm, sxtx {#shift}]`,
+  or `[base, Wm, uxtw/sxtw {#shift}]`: register offsets. The shift is
+  zero or log2(access size); an explicit byte-transfer `#0` preserves
+  Arm’s distinct S-bit encoding. Register offsets do not support writeback.
+
+`ldp`/`stp` transfer matching W, X, S, D, or Q register pairs using offset,
+pre-index, or post-index addresses. Their signed 7-bit offsets are scaled by
+one register’s size (-64..63 elements). Repeated load-pair destinations
+and integer writeback-base overlaps are rejected because their behavior
+is architecturally constrained unpredictable. FP registers and general
+registers with the same number are distinct and do not overlap.
+
+`ldar`/`stlr` support W/X registers, with `ldarb`/`stlrb` and `ldarh`/`stlrh`
+for byte/halfword W transfers. These accept only `[base]` or `[base, #0]`,
+without writeback. Scalar LSE atomics support LDADD/LDCLR/LDSET/LDEOR,
+LDSMIN/LDSMAX/LDUMIN/LDUMAX, SWP, and CAS, each with relaxed, acquire (`a`),
+release (`l`), and acquire-release (`al`) variants. B/H suffixes select byte
+and halfword W transfers; unsuffixed W/X forms transfer 32/64 bits. Both data
+registers must have the same width; SP is allowed only as the address base,
+and zero registers are accepted as data operands. Addresses are `[Xn|SP]`
+with optional #0 and no writeback/register offsets. Store-only aliases
+STADD/STCLR/STSET/STEOR/STSMIN/STSMAX/STUMIN/STUMAX support relaxed/release
+ordering and map the result to ZR. Acquire behavior with a ZR destination is
+exactly as specified by Arm; no ordering bits are silently rewritten.
+
+DMB and DSB accept OSH/NSH/ISH load/store/full variants and LD/ST/SY. ISB
+accepts SY, its default when omitted. All three also accept a raw 4-bit
+numeric option. LSE requirements are retained in generated records and
+explicitly enabled for the fixed Apple Silicon target. Pair CAS, exclusive
+accesses, non-temporal pairs, unprivileged accesses, and literal loads remain
+unsupported. Symbolic page-offset memory operands are supported below.
+
+Named labels are case-sensitive; mnemonics and register names accept either
+case. Branches resolve forward or backward within text, or accept a numeric
+byte displacement from the instruction address. Signed range and four-byte
+alignment are checked. Numeric local labels and general symbolic
+expressions are not supported; symbol-plus-integer expressions are covered
+below. Semicolons and `//` begin comments.
+
+Directives are `.text`, `.section __TEXT,__text` (optionally with
+`,regular,pure_instructions`), `.globl`/`.global`, and `.p2align N` for
+0 <= N <= 16. Alignment pads text with NOPs and raises the object section’s
+alignment. `.globl`/`.global` and `.extern` may also declare undefined
+external symbols, which are retained for the linker.
+
+**Symbol addressing and relocations.** `adr` accepts a defined text label
+with an optional integer addend, resolved as a signed 21-bit byte displacement
+from the instruction. Numeric `adrp` takes a 4-KiB-aligned byte displacement,
+encoded as a signed 21-bit page count. Both require X destinations (including
+XZR) and check their range.
+
+Symbolic `adrp` uses `symbol@PAGE`, `symbol@GOTPAGE`, or `symbol@TLVPPAGE`.
+`add Rd, Rn, symbol@PAGEOFF` and scaled single load/store addresses
+`[base, symbol@PAGEOFF]` supply the offset within that symbol’s page.
+GOT/TLVP page-offset operands require `ldr Xt, [base, symbol@GOTPAGEOFF]`
+or `@TLVPPAGEOFF`; they load a symbol's address from the GOT or a thread-variable
+descriptor's address. Symbolic memory operands do not support writeback or unscaled
+forms. The linker determines page-offset scaling from the instruction.
+
+Expressions accept one symbol and integer addends: `symbol+8`,
+`symbol@PAGE+8`, and `symbol+8@PAGE` (and their negative forms). Addends must
+fit signed 24 bits. Nonzero ordinary PAGE/PAGEOFF and external branch
+addends use `ARM64_RELOC_ADDEND` immediately before the matching relocation,
+with the signed payload masked to 24 bits. GOT/TLVP addends are rejected.
+Branch addends must be four-byte aligned.
+
+Defined text branches resolve locally while the text section is kept intact.
+Undefined non-local `b`/`bl` targets produce `ARM64_RELOC_BRANCH26` entries.
+Page references produce PAGE21/PAGEOFF12, GOT_LOAD_PAGE21/PAGEOFF12, or
+TLVP_LOAD_PAGE21/PAGEOFF12 entries. These always refer to symbol-table
+indices; instruction immediate fields stay zero until linking. Undefined
+references are retained as external symbols. Names beginning with `L` are
+local by convention and require definitions unless explicitly declared
+external. `adr` and conditional/test branches require definitions in this
+file because Mach-O has no applicable external instruction relocation.
+
+**Data directives and sections.** `.byte`, `.short`, `.long`, and `.quad`
+emit little-endian integers, with comma-separated operands. Constants accept
+decimal/hexadecimal values and addition/subtraction; values must fit the
+signed-or-unsigned range of their width. `.space`/`.zero` reserve bytes with
+an optional byte fill value. Raw strings can be emitted as byte lists or
+with `.ascii`/`.asciz` (see debug/data support below). Floating-point data
+directives remain unsupported; Keel emits their integer bit patterns.
+
+`.data`, `.const`, `.const_data`, and `.bss` switch to `__DATA,__data`,
+`__TEXT,__const`, `__DATA,__const`, and `__DATA,__bss`. `.section` also
+accepts those names with their regular/zerofill types, and
+`__DATA,__thread_data,thread_local_regular`,
+`__DATA,__thread_bss,thread_local_zerofill`, and
+`__DATA,__thread_vars,thread_local_variables` for TLS definitions.
+`.zerofill __DATA,__bss,symbol,size,log2_align` and
+`.tbss symbol,size,log2_align` allocate named zero-fill storage without
+switching the current section. Zero-fill storage reserves virtual space
+without allocating or writing bytes; nonzero initializers and relocations
+in zero-fill sections are errors.
+
+Labels record a section ID and a section-relative offset. `.p2align`
+raises that section’s alignment and pads data with zeros. Text padding uses
+zero bytes up to the next instruction boundary, then NOPs. Instructions
+require aligned `__TEXT,__text` locations; integer data may appear there
+for jump tables. `adr` and conditional branches must stay within that text
+section; cross-section addresses use page relocations.
+
+`.quad symbol [+/- integer]` emits an absolute pointer relocation.
+`.long`/`.quad A-B [+/- integer]` resolve directly when both labels belong
+to the same section (or the same atom with subsection splitting), including
+forward references. Other differences use
+`ARM64_RELOC_SUBTRACTOR` for B followed immediately by `ARM64_RELOC_UNSIGNED`
+for A. Data addends are written into the 4-/8-byte word rather than into an
+ADDEND relocation. Repeated identical symbols cancel even when undefined.
+General algebra, symbol multiplication, and 8-/16-bit symbolic relocations
+remain unsupported.
+
+**Objects and limits.** The writer emits little-endian arm64 `MH_OBJECT`
+with one unnamed segment containing text, initialized data, and zero-fill
+sections. File-backed sections precede zero-fill sections in virtual layout.
+The writer remaps parser section IDs to on-disk ordinals and writes symbol
+values as section addresses plus offsets. Text bytes remain in
+`Assembly::text`; additional sections are in `Assembly::sections`, with
+separate byte and zero-fill contents. Relocations identify their section,
+width, and optional subtracted symbol.
+
+Relocations are ordered by descending offset within each section, preserving
+ADDEND and SUBTRACTOR pairs. Symbol indices follow local definitions,
+external definitions, then undefined symbols. TLS descriptor sections set
+`MH_HAS_TLV_DESCRIPTORS`. The writer checks section/symbol IDs, sizes,
+alignment, duplicate names, overlapping relocations, missing targets,
+relocation widths, and addend constraints. Objects include the macOS 11.0
+build-version command; Apple’s linker still produces the executable.
+
+`.subsections_via_symbols` sets `MH_SUBSECTIONS_VIA_SYMBOLS`, allowing the
+linker to reorder or discard symbol-defined atoms. Non-temporary labels and
+global temporary labels start atoms; aliases at one address share one atom.
+Temporary labels retain source-order ownership, so a function's end label
+belongs to it even if the next function starts at the same offset. Local
+references are rebased onto atom symbols with explicit addends. This avoids
+introducing temporary-symbol boundaries and preserves pointers to atom ends.
+Sections with no preceding atom symbol receive a synthetic local anchor.
+
+B/BL references across atoms use branch relocations. Fixed-displacement ADR
+and conditional branches require targets in their own atom; ADR across atoms
+must use ADRP/ADD instead. Data differences across atoms retain SUBTRACTOR /
+UNSIGNED pairs rather than freezing their original offsets. Symbolic LEB128
+differences must remain within one atom because their variable-width fields
+have no linker relocation. Explicit constant assignments continue to compute
+same-section differences using the original layout, matching compiler use of
+`.set` for DWARF compilation-unit sizes. Other instructions, sections, and
+directives produce source diagnostics. Literal loads and other missing forms
+still prevent assembling arbitrary Keel compiler output.
+
+Tests compare every supported encoding form and operand boundaries against
+clang’s arm64 Mach-O output, inspect our objects with an independent object
+reader, check invalid operands and branch limits, and on Apple Silicon link
+and execute the examples and C drivers checking memory, arithmetic,
+conditions, indirect calls, and FP conversions. Logical-immediate tests cover
+all 1,302 W and 5,334 X bitmasks, and FP-immediate tests cover all 256 values.
+Integration tests compile small integer, FP, and popcount functions with Keel,
+assemble their unmodified output, link, and run them. Instruction relocation
+differential tests isolate instruction records from unwind metadata. Native execution tests have a ten-second
+timeout and reap a timed-out process. Symbol tests compare instruction bytes
+and normalized relocation records against clang and run cross-object calls,
+page-offset integer/SIMD accesses, imported libc functions, GOT and TLVP
+references, and signed addends. Negative addends are also checked with an
+independent object reader and linked programs; some installed Apple clang
+versions emit malformed flags for negative ADDEND records.
+
+
+Data tests compare section bytes, sizes, symbols, and normalized relocations
+against clang, including file-backed/zero-fill layout and TLS descriptors.
+Linked programs check absolute-pointer tables and cross-section differences.
+The existing Keel globals, TLS (including multiple threads), switch/jump-table,
+and local-linkage programs run through the assembler with all directives
+retained, including CFI, source debug metadata, and subsection splitting.
+Native subsection tests reorder functions/data with an order file, enable
+`-dead_strip`, verify unused code is removed, and check pointers/differences
+after layout changes. C++ catches and cleanup also execute after reordering
+and dead stripping.
+
+
+**Unwind and debug metadata.** `.cfi_startproc`/`.cfi_endproc` collect
+address-indexed CFA and saved-register rules. Supported rules include
+`.cfi_def_cfa`, `.cfi_def_cfa_register`, `.cfi_def_cfa_offset`, `.cfi_offset`,
+`.cfi_restore`, `.cfi_same_value`, `.cfi_undefined`, and balanced
+`.cfi_remember_state`/`.cfi_restore_state`. AArch64 X registers have DWARF
+numbers 0–30, SP is 31, and D/V registers are 64–95. The assembler emits
+DWARF CIE/FDE records in `__TEXT,__eh_frame`, using PC-relative pointers and
+Mach-O symbol-difference relocations. Apple’s linker and libunwind consume
+these records. Each function has a `__LD,__compact_unwind` entry. For
+representable layouts it contains an ARM64 frame or frameless encoding,
+with absolute personality and LSDA pointer relocations when present. Other
+layouts use DWARF mode so the linker includes their FDEs in the runtime unwind
+index. Functions with compact encodings omit their FDEs; when all functions
+qualify, the assembler does not create an `__eh_frame` section.
+
+Compact frame mode requires CFA = X29 + 16, X29 saved at CFA - 16, and X30
+at CFA - 8. Optional X19/X20 through X27/X28 and D8/D9 through D14/D15 pairs
+must be packed immediately below FP/LR in increasing register-pair order,
+with all integer pairs before FP pairs. Within a pair, the lower-numbered
+register must have the higher address (X19 at CFA - 24, X20 at CFA - 32).
+Absent pairs consume no space. Selection uses register/offset semantics rather
+than CFI directive order. Frameless mode supports functions with no saved
+registers and one `.cfi_def_cfa_offset` declaration: 0–65520 bytes, aligned
+to 16 bytes. A procedure with no CFI rules has zero stack adjustment.
+
+Single-register saves, reversed pairs, gaps, nonstandard CFA rules, duplicate
+rules, and state changes retain DWARF. Keel's current code generator places
+its paired registers in the opposite order, so those functions retain DWARF;
+its simple FP-only functions can use compact frame mode. Compact personality
+support is limited to the system C++ and Objective-C routines
+(`___gxx_personality_v0` and `___objc_personality_v0`), preserving the limited
+Darwin personality-index slots. Custom personalities always retain a CIE/FDE.
+Tests compare all 512 canonical pair subsets, leaf stack-size boundaries,
+and canonical personality records with Clang. Mixed compact/DWARF objects
+are checked independently. A native exception test with no assembly FDEs
+verifies restoration of integer and FP callee-saved registers through compact
+frames, including after function reordering and dead stripping.
+
+For DWARF fallback, `.cfi_personality 155, symbol` attaches an indirect,
+PC-relative signed-32-bit personality reference through the GOT;
+`.cfi_lsda 16, symbol` attaches a PC-relative native-width LSDA pointer.
+Unsupported encodings and duplicate personality/LSDA directives are errors.
+CIEs are shared only between procedures with the same personality and LSDA
+encoding. LSDA data lives in `__TEXT,__gcc_except_tab`. Its type-table entries
+use `.long typeinfo@GOT-label`, with the subtraction label at that word's
+address and no addend; the writer emits `ARM64_RELOC_POINTER_TO_GOT`.
+
+Darwin temporary `L…` labels stay in the in-memory assembly model. The object
+writer omits unreferenced temporary labels from nlist: treating interior
+labels as linker entries creates spurious ranges without unwind information.
+Absolute pointers to temporary labels use local section relocations, keeping
+them out of nlist too. Other required temporary text symbols are marked
+`N_ALT_ENTRY`. Native tests cover C++ typed catches, catch-all handlers,
+cleanup/rethrow, and propagation across a plain assembled frame containing
+an address-taken interior label. LSDA bytes and GOT relocation records are
+compared with Clang; unresolved GOT placeholder bytes are normalized.
+
+`.file number "path"` and `.loc file line column [prologue_end]` generate a
+DWARF 4 line-number program in `__DWARF,__debug_line`. File numbers are
+contiguous from 1. The line program covers the text section and terminates
+at its end. Explicit debug sections support `__debug_info`, `__debug_abbrev`,
+`__debug_line`, `__debug_ranges`, `__debug_str`, and `__debug_loc`, with
+`regular,debug` attributes. Their Mach-O `S_ATTR_DEBUG` flag excludes them
+from the loaded image. Local debug address relocations use section ordinals
+and preserve original addresses in the data, allowing tools to read unlinked
+objects. `.ascii`/`.asciz` preserve quoted punctuation and support standard
+newline/tab/carriage-return, quote/backslash, and octal escapes.
+`.uleb128`/`.sleb128` encode integer constants and same-section symbol
+differences, including forward labels. Symbolic LEB128 lengths affect label
+positions, so assembly repeats layout passes until positions stabilize, with
+a 32-pass limit that diagnoses cyclic layouts. Constant-only input takes one
+pass. Undefined/cross-section LEB128 expressions, additional `.loc` options,
+and arbitrary string concatenation remain errors.
+Constant assignments (`name = expression` or `.set name, expression`) accept
+constants and same-section differences, including forward labels; they can
+be used in fixed-width numeric directives.
+
+The compiler remains responsible for source-level types, variable locations,
+and lexical scopes. Its existing DWARF data directives now assemble without
+stripping metadata. The assembler supplies the address-dependent line and
+unwind tables. On macOS, the linker records an object-file debug map and
+`dsymutil` combines the referenced DWARF into a dSYM bundle. Tests compare
+line rows and data encodings against Clang, verify Keel’s types/scopes/variables
+with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
+assembled frame. Cross-atom conditional branches and ADR remain errors;
+unrepresentable layouts retain their DWARF unwind records.
+
+
+**Compiler-output coverage.** The assembler suite checks every backend
+fixture with normal/reduced register pools and after optimization, and every
+C fixture with/without optimization and debug information. These checks use
+Keel's assembler for the complete generated source, retaining all directives;
+Clang remains the reference assembler in the separate compiler suites. Native
+assembler tests run the atomic driver (including multithreaded increments and
+CAS locks), 128-bit arithmetic, and inline assembly containing SVC and MOVI.
+Differential tests cover all scalar LSE ordering/width forms, store aliases,
+barrier options, and all modified-immediate MOVI values for supported lane
+arrangements. The initial end-to-end coverage audit assembled, linked, and ran 170
+configurations, with DWARF verification for the 22 C debug configurations;
+the automated assembly checks discover newly added fixtures as the suite grows. Fixture coverage
+does not imply complete A64 ISA or GNU assembler syntax coverage.

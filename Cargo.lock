@@ -319,12 +319,24 @@ dependencies = [
 name = "keel"
 version = "0.1.0"
 dependencies = [
+ "keel-asm",
  "keel-c",
  "keel-codegen",
  "keel-ir",
  "keel-opt",
  "profiling",
  "tracy-client",
+]
+
+[[package]]
+name = "keel-asm"
+version = "0.1.0"
+dependencies = [
+ "keel-c",
+ "keel-codegen",
+ "keel-ir",
+ "keel-opt",
+ "object",
 ]
 
 [[package]]
@@ -432,6 +444,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "object"
+version = "0.36.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

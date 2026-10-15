@@ -124,8 +124,51 @@ release builds for final timings; use instrumented builds to locate costs.
 See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
 
+## Assembler (initial A64 subset)
+
+```sh
+cargo run -p keel -- asm crates/keel-asm/examples/return42.s -o return42.o
+clang -o return42 return42.o
+./return42; echo $?   # 42 on Apple Silicon macOS
+cargo run -p keel -- asm crates/keel-asm/examples/stack_roundtrip.s -o stack.o
+clang -o stack stack.o
+./stack; echo $?      # 42
+cargo run -p keel -- asm crates/keel-asm/examples/compute_loop.s -o loop.o
+clang -o loop loop.o
+./loop; echo $?       # 42
+cargo run -p keel -- asm crates/keel-asm/examples/external_call.s -o caller.o
+cargo run -p keel -- asm crates/keel-asm/examples/answer.s -o answer.o
+clang -o external caller.o answer.o
+./external; echo $?   # 42
+cargo run -p keel -- asm crates/keel-asm/examples/data_roundtrip.s -o data.o
+clang -o data data.o
+./data; echo $?       # 42
+```
+
+The assembler generates Mach-O objects using tables from Arm’s
+machine-readable ISA data. It supports integer arithmetic, logical and
+bitfield operations, conditional branches/selects, indirect calls, scalar
+floating-point arithmetic/conversions, popcount’s SIMD instructions, and
+integer/FP/SIMD loads and stores (including pairs and acquire/release).
+Scalar LSE atomics include read-modify-write operations and compare-and-swap;
+DMB/DSB/ISB barriers, `ngc`/`ngcs`, `svc`, and SIMD `movi` are supported too.
+Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
+page-offset memory operands, and external calls through Mach-O relocations.
+Data support includes initialized/zero-fill/TLS sections, integer directives,
+pointer tables, and symbol differences. It also supports ordinary CFI unwind
+records, compact unwind for canonical ARM64 frames and leaf functions, DWARF 4
+line tables, and debug sections for types and variables.
+Exception personalities, LSDA tables, and C++ exception propagation are
+supported, along with subsection splitting for linker reordering and dead
+stripping. Literal loads and other unsupported forms still prevent assembling
+arbitrary `keel compile` output.
+Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
+source provenance, licensing, and regeneration instructions.
+
 ## Development
 
+- `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,
+  links and runs the assembler’s examples and memory-operation checks.
 - `cargo test --workspace` runs the workspace's unit, golden and
   end-to-end tests on macOS arm64 or x86-64 Linux. End-to-end tests need
   `clang`; C++ codegen drivers also need `clang++`, and ARM64 debug tests
