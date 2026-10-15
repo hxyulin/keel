@@ -440,3 +440,85 @@ pointer: .quad payload
     }
     std::fs::remove_dir_all(temp).unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn mergeable_constants_and_strings_share_storage_after_linking() {
+    let temp = std::env::temp_dir().join(format!("keel-x86-merge-link-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let source = |index| {
+        format!(
+            r#"
+.intel_syntax noprefix
+.section .rodata.str1.1,"aMS",@progbits,1
+.Lstring: .asciz "identical string"
+.section .rodata.cst8,"aM",@progbits,8
+.p2align 3
+.Lconstant: .quad 0x123456789abcdef0
+.text
+.globl get{index}
+.type get{index},@function
+get{index}: lea rax,[rip+.Lstring]
+ret
+.data
+.globl pointer{index}
+pointer{index}: .quad .Lconstant
+.section .note.GNU-stack,"",@progbits
+"#
+        )
+    };
+    let driver = temp.join("main.c");
+    std::fs::write(&driver, "#include <string.h>\nextern const char *get0(void), *get1(void); extern const unsigned long long *pointer0,*pointer1; int main(void) { return get0()!=get1() || strcmp(get0(),\"identical string\") || pointer0!=pointer1 || *pointer0!=0x123456789abcdef0ULL; }\n").unwrap();
+    let mut native = Vec::new();
+    let mut reference = Vec::new();
+    for index in 0..2 {
+        let asm = source(index);
+        let obj = temp.join(format!("native-{index}.o"));
+        std::fs::write(&obj, assemble_object(&asm).unwrap()).unwrap();
+        native.push(obj);
+        let input = temp.join(format!("input-{index}.s"));
+        let obj = temp.join(format!("reference-{index}.o"));
+        std::fs::write(&input, asm).unwrap();
+        let output = Command::new("clang")
+            .args(["-c"])
+            .arg(input)
+            .arg("-o")
+            .arg(&obj)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        reference.push(obj);
+    }
+    for (index, objects) in [
+        vec![&native[0], &native[1]],
+        vec![&reference[0], &reference[1]],
+        vec![&native[0], &reference[1]],
+        vec![&reference[0], &native[1]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let exe = temp.join(format!("check-{index}"));
+        let output = Command::new("clang")
+            .arg(&driver)
+            .args(objects)
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            Command::new(exe).status().unwrap().success(),
+            "link combination {index}"
+        );
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+}
