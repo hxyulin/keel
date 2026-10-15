@@ -1,6 +1,6 @@
-mod vex;
 #[path = "bmi.rs"]
 mod bmi;
+mod vex;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
@@ -726,6 +726,26 @@ fn encode_sse(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
         Movsd => (0xf2, 0x10, 64, true),
         Movaps => (0, 0x28, 128, true),
         Movups => (0, 0x10, 128, true),
+        Paddb => (0x66, 0xfc, 128, false),
+        Paddw => (0x66, 0xfd, 128, false),
+        Paddd => (0x66, 0xfe, 128, false),
+        Paddq => (0x66, 0xd4, 128, false),
+        Psubb => (0x66, 0xf8, 128, false),
+        Psubw => (0x66, 0xf9, 128, false),
+        Psubd => (0x66, 0xfa, 128, false),
+        Psubq => (0x66, 0xfb, 128, false),
+        Pmullw => (0x66, 0xd5, 128, false),
+        Addps => (0x0, 0x58, 128, false),
+        Addpd => (0x66, 0x58, 128, false),
+        Subps => (0x0, 0x5c, 128, false),
+        Subpd => (0x66, 0x5c, 128, false),
+        Mulps => (0x0, 0x59, 128, false),
+        Mulpd => (0x66, 0x59, 128, false),
+        Divps => (0x0, 0x5e, 128, false),
+        Divpd => (0x66, 0x5e, 128, false),
+        Sqrtps => (0x0, 0x51, 128, false),
+        Sqrtpd => (0x66, 0x51, 128, false),
+
         Movapd => (0x66, 0x28, 128, true),
         Movupd => (0x66, 0x10, 128, true),
         Addss => (0xf3, 0x58, 32, false),

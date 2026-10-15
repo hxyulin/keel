@@ -1327,7 +1327,8 @@ fn check_signature(sig: &Signature) -> Vec<String> {
 
 /// Whether arguments of types `got` fit `sig`: exactly its parameters, or
 /// for a variadic signature its parameters followed by any number of the
-/// types C's default argument promotions produce. (An `i8` or `f32` would
+/// types C's default argument promotions produce, or unpromoted SIMD vectors.
+/// (An `i8` or `f32` would
 /// be read back by the callee as an `int` or `double` it is not.)
 fn args_match(sig: &Signature, got: &[Type]) -> bool {
     let params = sig.param_types();
@@ -1339,7 +1340,7 @@ fn args_match(sig: &Signature, got: &[Type]) -> bool {
         && got[..n] == params[..]
         && got[n..]
             .iter()
-            .all(|ty| matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
+            .all(|ty| ty.is_vector() || matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
 }
 
 /// A signature's parameters for messages, with `...` if variadic.

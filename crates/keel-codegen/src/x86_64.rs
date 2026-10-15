@@ -87,6 +87,7 @@ use keel_ir::{
 use std::collections::HashSet;
 use std::fmt::Write;
 mod output;
+mod vector;
 use output::*;
 
 /// The registers values are allocated to.
@@ -171,7 +172,7 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<Output, CodegenError> {
-    crate::reject_unlowered_vectors(module)?;
+    validate_vector_abi(module)?;
     pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -195,8 +196,9 @@ fn compile_output(
         }
     }
     let mut frames = Vec::new();
-    for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, structured)?;
+    for original in &module.functions {
+        let func = vector::lower(original);
+        let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
         let scope_marks = compiler.compile(&mut out);
@@ -217,6 +219,43 @@ fn compile_output(
         nobits: false,
     });
     Ok(out)
+}
+
+// Vector scalars use one XMM register. Aggregate SSEUP classification is a
+// separate ABI feature; reject it rather than treating vector fields as integers.
+fn validate_vector_abi(module: &Module) -> Result<(), CodegenError> {
+    fn contains(l: &Layout) -> bool {
+        match l {
+            Layout::Scalar(t) => t.is_vector(),
+            Layout::Struct(fields) => fields.iter().any(contains),
+            Layout::Array(elem, _) => contains(elem),
+        }
+    }
+    let check = |name: &str, sig: &keel_ir::Signature| {
+        if sig
+            .params
+            .iter()
+            .chain(&sig.returns)
+            .any(|p| p.layout().is_some_and(contains))
+        {
+            Err(CodegenError {func:name.into(),message:"SIMD vector fields in byval/sret aggregates require SSEUP ABI classification and are not supported yet".into()})
+        } else {
+            Ok(())
+        }
+    };
+    for d in &module.decls {
+        check(&d.name, &d.sig)?;
+    }
+    for f in &module.functions {
+        check(&f.name, &f.sig)?;
+        for (_, d) in f.callees() {
+            check(&f.name, &d.sig)?;
+        }
+        for (_, s) in f.signatures() {
+            check(&f.name, s)?;
+        }
+    }
+    Ok(())
 }
 
 /// What this backend does not handle yet, if `inst` needs it.
@@ -314,7 +353,7 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
             }
         }
         InstData::Icmp { args, .. } => imm(args[1], ty_of(args[0])).map(|k| (args[1], k)),
-        InstData::Store { value, .. } if !ty_of(value).is_float() => {
+        InstData::Store { value, .. } if !ty_of(value).is_float() && !ty_of(value).is_vector() => {
             imm(value, ty_of(value)).map(|k| (value, k))
         }
         _ => None,
@@ -365,6 +404,8 @@ struct FunctionCompiler<'a> {
     /// Offset from `rsp` of spill slot 0. Slots past the allocator's are
     /// staging for struct arguments in registers; see [`Self::move_args`].
     spill_base: usize,
+    vector_spills: HashSet<u32>,
+    copy_temp: Option<u32>,
     /// Offset from `rsp` of an 8-byte slot keeping a call's `sret` address
     /// across the call, for results that come back in registers.
     sret_save: Option<usize>,
@@ -546,8 +587,27 @@ impl<'a> FunctionCompiler<'a> {
             &|data| returns_twice(func, data),
             &selection,
         );
+        let mut vector_spills = HashSet::new();
+        let has_vectors = (0..func.num_values()).any(|i| {
+            func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
+        });
+        if has_vectors {
+            for i in 0..func.num_values() {
+                let value = Value::new(i);
+                if func.value_type(value).is_vector()
+                    && let Some(Loc::Stack(slot)) = alloc.loc(value)
+                {
+                    vector_spills.insert(slot);
+                }
+            }
+        }
+        let copy_temp = has_vectors.then_some(alloc.spill_slots + staging as u32);
+        if let Some(slot) = copy_temp {
+            vector_spills.insert(slot);
+        }
         let spill_base = offset.next_multiple_of(8);
-        let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
+        let mut offset = spill_base
+            + 8 * (alloc.spill_slots as usize + staging + if has_vectors { 2 } else { 0 });
         let mut stack_slot_offsets = Vec::new();
         for (_, slot) in func.stack_slots() {
             offset = offset.next_multiple_of(slot.align as usize);
@@ -571,6 +631,8 @@ impl<'a> FunctionCompiler<'a> {
             stack_slot_offsets,
             outgoing,
             spill_base,
+            vector_spills,
+            copy_temp,
             sret_save,
             sret_ptr,
             param_areas,
@@ -854,15 +916,47 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorBinary { op, args } => {
+                let d = self.def_freg(result);
+                let a = self.use_freg(args[0], FS0);
+                let b = self.use_freg(args[1], FS1);
+                // Preserve the second source if writing d would overwrite it.
+                let dst = if d == b && a != d { FS2 } else { d };
+                if dst != a {
+                    self.emit(Opcode::Movaps, [asm_arg(&xmm(dst)), asm_arg(&xmm(a))]);
+                }
+                self.emit(
+                    vector::packed(op, self.ty(args[0]).vector().unwrap())
+                        .expect("legalized packed op"),
+                    [asm_arg(&xmm(dst)), asm_arg(&xmm(b))],
+                );
+                if dst != d {
+                    self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(dst))]);
+                }
+                self.def_done(result, d);
+            }
+            InstData::VectorUnary {
+                op: UnaryOp::Fsqrt,
+                arg,
+            } => {
+                let d = self.def_freg(result);
+                let a = self.use_freg(arg, FS1);
+                let op = if self.ty(arg).vector().unwrap().lane_type() == Type::F32 {
+                    Opcode::Sqrtps
+                } else {
+                    Opcode::Sqrtpd
+                };
+                self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
+                self.def_done(result, d);
+            }
             InstData::VectorSplat { .. }
             | InstData::VectorUnary { .. }
-            | InstData::VectorBinary { .. }
             | InstData::VectorExtract { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorIcmp { .. }
             | InstData::VectorFcmp { .. }
-            | InstData::VectorSelect { .. } => unreachable!("vector IR rejected before lowering"),
+            | InstData::VectorSelect { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
             InstData::Icmp { .. } | InstData::Fcmp { .. }
@@ -1009,7 +1103,9 @@ impl<'a> FunctionCompiler<'a> {
                 self.binary(inst, op, args, d);
                 self.def_done(result, d);
             }
-            InstData::Select { args } if self.ty(args[1]).is_float() => {
+            InstData::Select { args }
+                if self.ty(args[1]).is_float() || self.ty(args[1]).is_vector() =>
+            {
                 let d = self.def_freg(result);
                 let skip = format!(".L{}_{inst}_select", func.name);
                 self.test_value(args[0]);
@@ -1078,7 +1174,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(d)))]);
                 self.def_done(result, d);
             }
-            InstData::Load { ty, addr, .. } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
                 self.emit(movs(ty), [asm_arg(&(xmm(d))), asm_arg(&(a))]);
@@ -1097,7 +1193,9 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. }
+                if self.ty(value).is_float() || self.ty(value).is_vector() =>
+            {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
@@ -1934,6 +2032,12 @@ impl<'a> FunctionCompiler<'a> {
                     if self.ty(arg) == Type::I128 {
                         self.store_stack_arg(self.loc(arg), &at(0));
                         self.store_stack_arg(self.hi(arg), &at(8));
+                    } else if self.ty(arg).is_vector() {
+                        let r = self.use_freg(arg, FS0);
+                        self.emit(
+                            Opcode::Movups,
+                            [asm_arg(&sized(at(0), 128)), asm_arg(&xmm(r))],
+                        );
                     } else {
                         self.store_stack_arg(self.loc(arg), &at(0));
                     }
@@ -2158,7 +2262,10 @@ impl<'a> FunctionCompiler<'a> {
                 [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(xmm(r)))],
             ),
             Loc::Stack(s) => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(self.slot(s)))]);
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                );
                 self.emit(
                     Opcode::Mov,
                     [asm_arg(&(sized((at).clone(), 64))), asm_arg(&(r64(0)))],
@@ -2182,7 +2289,7 @@ impl<'a> FunctionCompiler<'a> {
                 ],
             ),
             Loc::Stack(_) => {
-                let tmp = if ty.is_float() {
+                let tmp = if ty.is_float() || ty.is_vector() {
                     Loc::FReg(FS0)
                 } else {
                     Loc::Reg(S0)
@@ -3237,16 +3344,17 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// r11 breaks cycles, of either register class (`movq` moves bits
-    /// between classes); `emit_move` uses rax for slot-to-slot moves.
+    /// Scalar functions break cycles through r11. With live vectors, a
+    /// 16-byte stack temporary preserves complete XMM values instead.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
-        for (dst, src) in sequentialize(moves, Loc::Reg(S3)) {
+        let temp = self.copy_temp.map_or(Loc::Reg(S3), Loc::Stack);
+        for (dst, src) in sequentialize(moves, temp) {
             self.emit_move(dst, src);
         }
     }
 
-    /// One 64-bit move between any two locations. Narrow values have
-    /// unspecified upper bits, so copying all 64 is always fine.
+    /// Copy between allocated locations. Scalar slots carry 64 bits; vector
+    /// slots and vector register copies preserve all 128 bits.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
         match (dst, src) {
             _ if dst == src => {}
@@ -3262,23 +3370,50 @@ impl<'a> FunctionCompiler<'a> {
             (Loc::FReg(d), Loc::Reg(s)) => {
                 self.emit(Opcode::Movq, [asm_arg(&(xmm(d))), asm_arg(&(r64(s)))])
             }
-            (Loc::Reg(d), Loc::Stack(s)) => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(self.slot(s)))])
-            }
+            (Loc::Reg(d), Loc::Stack(s)) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(r64(d))), asm_arg(&(sized(self.slot(s), 64)))],
+            ),
             (Loc::FReg(d), Loc::Stack(s)) => self.emit(
-                Opcode::Movsd,
+                if self.vector_spills.contains(&s) {
+                    Opcode::Movups
+                } else {
+                    Opcode::Movsd
+                },
                 [asm_arg(&(xmm(d))), asm_arg(&(self.slot(s)))],
             ),
-            (Loc::Stack(d), Loc::Reg(s)) => {
-                self.emit(Opcode::Mov, [asm_arg(&(self.slot(d))), asm_arg(&(r64(s)))])
-            }
+            (Loc::Stack(d), Loc::Reg(s)) => self.emit(
+                Opcode::Mov,
+                [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(s)))],
+            ),
             (Loc::Stack(d), Loc::FReg(s)) => self.emit(
-                Opcode::Movsd,
+                if self.vector_spills.contains(&d) {
+                    Opcode::Movups
+                } else {
+                    Opcode::Movsd
+                },
                 [asm_arg(&(self.slot(d))), asm_arg(&(xmm(s)))],
             ),
+            (Loc::Stack(d), Loc::Stack(s)) if self.vector_spills.contains(&d) => {
+                self.emit(
+                    if self.vector_spills.contains(&s) {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
+                    [asm_arg(&xmm(FS2)), asm_arg(&self.slot(s))],
+                );
+                self.emit(Opcode::Movups, [asm_arg(&self.slot(d)), asm_arg(&xmm(FS2))]);
+            }
             (Loc::Stack(d), Loc::Stack(s)) => {
-                self.emit(Opcode::Mov, [asm_arg(&(r64(0))), asm_arg(&(self.slot(s)))]);
-                self.emit(Opcode::Mov, [asm_arg(&(self.slot(d))), asm_arg(&(r64(0)))]);
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(r64(0))), asm_arg(&(sized(self.slot(s), 64)))],
+                );
+                self.emit(
+                    Opcode::Mov,
+                    [asm_arg(&(sized(self.slot(d), 64))), asm_arg(&(r64(0)))],
+                );
             }
         }
     }
@@ -3362,7 +3497,11 @@ impl<'a> FunctionCompiler<'a> {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
                 self.emit(
-                    Opcode::Movsd,
+                    if self.ty(value).is_vector() {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
                     [asm_arg(&(xmm(scratch))), asm_arg(&(self.slot(s)))],
                 );
                 scratch
@@ -3395,9 +3534,13 @@ impl<'a> FunctionCompiler<'a> {
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
         if let Some(Loc::Stack(s)) = self.alloc.loc(value) {
-            if self.func.value_type(value).is_float() {
+            if self.func.value_type(value).is_float() || self.func.value_type(value).is_vector() {
                 self.emit(
-                    Opcode::Movsd,
+                    if self.func.value_type(value).is_vector() {
+                        Opcode::Movups
+                    } else {
+                        Opcode::Movsd
+                    },
                     [asm_arg(&(self.slot(s))), asm_arg(&(xmm(reg)))],
                 );
             } else {
@@ -3420,9 +3563,16 @@ impl<'a> FunctionCompiler<'a> {
         memory(r64(5), -((top - offset) as i128))
     }
 
-    /// Spill slot `index`, as a 64-bit memory operand.
+    /// Spill slot `index`, with its fixed scalar or vector memory width.
     fn slot(&self, index: u32) -> Memory {
-        sized(self.frame(self.spill_base + 8 * index as usize), 64)
+        sized(
+            self.frame(self.spill_base + 8 * index as usize),
+            if self.vector_spills.contains(&index) {
+                128
+            } else {
+                64
+            },
+        )
     }
 
     fn label(&self, block: Block) -> String {
@@ -3516,6 +3666,7 @@ fn xmm(n: u8) -> Register {
 /// The size keyword of a memory operand of type `ty`.
 fn ptr(ty: Type) -> u16 {
     match ty {
+        Type::Vector(_) => 128,
         Type::I8 => 8,
         Type::I16 => 16,
         Type::I32 | Type::F32 => 32,
@@ -3523,8 +3674,11 @@ fn ptr(ty: Type) -> u16 {
     }
 }
 
-/// The scalar float move.
+/// The scalar float or unaligned vector move.
 fn movs(ty: Type) -> Opcode {
+    if ty.is_vector() {
+        return Opcode::Movups;
+    }
     if ty == Type::F32 {
         Opcode::Movss
     } else {

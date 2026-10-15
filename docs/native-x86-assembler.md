@@ -57,7 +57,8 @@ The source audit includes all mnemonic families emitted by `x86_64.rs`: integer
 arithmetic/logic, comparisons, condition codes, sign/zero extension, shifts and
 rotates (including double shifts), bit scans/counts, multiply/divide, stack and
 control flow, scalar SSE arithmetic/conversions/rounding, XMM moves and logic,
-locked atomics, fences and traps. Addressing includes high registers, signed
+locked atomics, fences and traps. Packed SSE/SSE2 vector arithmetic, square root,
+integer add/subtract and i16 multiply support the [SIMD IR lowering](simd-ir.md). Addressing includes high registers, signed
 displacements, scaled indices, RIP-relative symbols, FS/GS and absolute disp32.
 
 ELF handling includes PROGBITS/NOBITS, writable/executable/allocated/TLS flags,

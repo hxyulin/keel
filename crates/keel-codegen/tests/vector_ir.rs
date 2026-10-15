@@ -11,7 +11,8 @@ fn unlowered_vectors_are_diagnosed_before_native_allocation() {
     ] {
         let module = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&module).unwrap();
-        for target in [Target::X86_64LinuxGnu, Target::Aarch64AppleDarwin] {
+        {
+            let target = Target::Aarch64AppleDarwin;
             let error = keel_codegen::compile(&module, target).unwrap_err();
             assert!(error.message.contains("SIMD vector IR"), "{error}");
             let error = keel_codegen::compile_program(&module, target).unwrap_err();
@@ -32,6 +33,24 @@ fn unlowered_vectors_are_diagnosed_before_native_allocation() {
                     .message
                     .contains("SIMD vector IR")
             );
+        }
+    }
+}
+
+#[test]
+fn vector_aggregate_abi_is_rejected_until_sseup_classification_exists() {
+    for source in [
+        "decl @byval(ptr byval {f32x4})",
+        "decl @sret(ptr sret {i64x2})",
+        "decl @nested(ptr byval {[2 x i8x16]})",
+    ] {
+        let m = keel_ir::parse(source).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        for error in [
+            keel_codegen::compile(&m, Target::X86_64LinuxGnu).unwrap_err(),
+            keel_codegen::compile_program(&m, Target::X86_64LinuxGnu).unwrap_err(),
+        ] {
+            assert!(error.message.contains("SSEUP"), "{error}");
         }
     }
 }

@@ -204,8 +204,7 @@ pub fn compile_program_with_pipeline(
     }
 }
 
-/// Vector IR is accepted by parsing/verification/optimization, but needs a
-/// target lowering and ABI implementation before reaching allocation.
+/// Reject vector IR on targets whose lowering and ABI are not implemented.
 fn reject_unlowered_vectors(module: &Module) -> Result<(), CodegenError> {
     use keel_ir::{AbiParam, Layout, Purpose, Signature};
     fn layout_vector(layout: &Layout) -> bool {
