@@ -82,7 +82,8 @@ these three soft thresholds, but cannot bypass legality or the hard safeguards:
 - At most 2,048 estimated added IR instructions per caller per invocation.
 - At most 16,384 estimated added IR instructions across the module per invocation.
 - At most 65,536 bytes of callee stack slots, and at most 65,536 bytes of added
-  stack storage per caller per invocation (including by-value snapshots).
+  summed slot/snapshot sizes per caller per invocation (excluding backend frame
+  alignment and spills).
 
 The IR estimate includes two glue instructions and a conservative byte-based
 by-value copy allowance. Bounds cap expansion, not the original module's size
