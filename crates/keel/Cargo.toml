@@ -10,6 +10,7 @@ profile-with-tracy = ["profiling/profile-with-tracy", "keel-opt/profile-with-tra
 
 [dependencies]
 memmap2 = "0.9"
+simdutf8 = "0.1"
 profiling.workspace = true
 tracy-client = { version = "0.18", optional = true }
 
@@ -18,3 +19,6 @@ keel-c = { path = "../keel-c" }
 keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }
 keel-asm = { path = "../keel-asm" }
+
+[dev-dependencies]
+ascii = "1"

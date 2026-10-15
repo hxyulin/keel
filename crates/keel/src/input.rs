@@ -34,7 +34,10 @@ impl Source {
     pub(super) fn text(&self) -> io::Result<&str> {
         match self {
             Self::Read(text) => Ok(text),
-            Self::Mapped(map) => std::str::from_utf8(map).map_err(|_| {
+            // Validate ASCII and multibyte UTF-8 together; an ASCII prescan
+            // adds a second pass for Unicode input. The CLI uses a generic
+            // error, so it does not need compat's detailed error position.
+            Self::Mapped(map) => simdutf8::basic::from_utf8(map).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "stream did not contain valid UTF-8",
@@ -93,6 +96,31 @@ mod tests {
             }
         }
         assert!(Source::open(temp.0.join("missing")).is_err());
+    }
+
+    #[test]
+    fn mapped_validation_matches_std_at_vector_boundaries() {
+        let temp = Temp::new();
+        let path = temp.0.join("input.s");
+        for length in [0, 1, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129] {
+            for suffix in [
+                "// λ中🦀\n.asciz \"λ中🦀\"\n".as_bytes(),
+                &[0xff],
+                &[0xe2, 0x82],
+            ] {
+                let mut bytes = vec![b' '; length];
+                bytes.extend_from_slice(suffix);
+                std::fs::write(&path, &bytes).unwrap();
+                let source = Source::open(&path).unwrap();
+                match std::str::from_utf8(&bytes) {
+                    Ok(text) => assert_eq!(source.text().unwrap(), text),
+                    Err(_) => assert_eq!(
+                        source.text().unwrap_err().kind(),
+                        io::ErrorKind::InvalidData
+                    ),
+                }
+            }
+        }
     }
 
     #[test]

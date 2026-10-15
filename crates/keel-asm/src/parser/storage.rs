@@ -21,7 +21,9 @@ impl<T: AsRef<str>> fmt::Display for Upper<T> {
         if let Some(out) = bytes.get_mut(..text.len()) {
             out.copy_from_slice(text.as_bytes());
             out.make_ascii_uppercase();
-            return f.write_str(std::str::from_utf8(out).unwrap());
+            // SAFETY: `text` was valid UTF-8 and ASCII case conversion only
+            // changes single-byte ASCII characters, preserving UTF-8 boundaries.
+            return f.write_str(unsafe { std::str::from_utf8_unchecked(out) });
         }
         for c in text.chars() {
             f.write_char(c.to_ascii_uppercase())?;
@@ -56,11 +58,10 @@ pub(super) fn encode_named(
     if buffer.write_fmt(name).is_err() {
         return crate::encode(&name.to_string(), fields);
     }
-    // write_str only copies complete UTF-8 strings.
-    crate::encode(
-        std::str::from_utf8(&buffer.bytes[..buffer.len]).unwrap(),
-        fields,
-    )
+    // SAFETY: Name::write_str appends only complete &str fragments and updates
+    // len after each successful copy. Failed formatting uses the fallback above.
+    let name = unsafe { std::str::from_utf8_unchecked(&buffer.bytes[..buffer.len]) };
+    crate::encode(name, fields)
 }
 
 pub(super) struct Operands<'a> {
