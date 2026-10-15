@@ -111,3 +111,7 @@ values, calls, forced spills in both allocator tiers, vector arguments and
 returns. Those runtime tests remain guarded by Rust's AVX CPU/OS support check.
 These descriptions identify coverage; execution evidence for this revision is
 recorded separately and historical reports above do not validate this extension.
+
+Final packed-extension execution evidence and exact commands/hashes are in
+[the scoped validation report](x86-avx-packed-validation.md). Independent review
+and coordinator integration remain separate steps.
