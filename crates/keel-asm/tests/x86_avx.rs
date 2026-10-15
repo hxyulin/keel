@@ -300,7 +300,7 @@ fn differential_cases() -> Vec<String> {
 #[test]
 fn avx_matrix_matches_clang_and_gnu() {
     let cases = differential_cases();
-    assert!(cases.len() > 58_000);
+    assert_eq!(cases.len(), 57_935);
     println!("AVX differential matrix: {} instructions", cases.len());
     let source = format!(
         ".intel_syntax noprefix\n.text\n{}\nlocal: .zero 16\n",

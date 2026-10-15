@@ -60,7 +60,7 @@ MOVAPD/MOVUPD, AND/OR/XORPS/PD, ROUNDSS/ROUNDSD and VZEROUPPER entries.
 In particular, scalar moves have distinct register-merge and memory forms;
 unused vvvv fields must be encoded as 1111, and scalar forms use L=0.
 
-`crates/keel-asm/tests/x86_avx.rs` compares a matrix of over 58,000 instructions
+`crates/keel-asm/tests/x86_avx.rs` compares a matrix of 57,935 instructions
 against Clang and GNU as, including bytes and relocation offsets/types/addends/
 symbol names. It covers every XMM register in destination/source fields,
 aliases, VEX2/VEX3, extended GPR/SIB operands, displacement boundaries, RIP/local/

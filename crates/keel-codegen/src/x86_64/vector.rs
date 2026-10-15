@@ -3,7 +3,7 @@ use super::*;
 use keel_ir::{VectorBinaryOp as V, VectorType};
 use std::borrow::Cow;
 
-// Keep FP source order even for add/mul: NaN payload selection is observable.
+// Preserve written FP source order, including add/mul, as in scalar AVX selection.
 pub(super) fn packed_avx(op: V, shape: VectorType) -> Option<Opcode> {
     use VectorType::*;
     Some(match (op, shape) {

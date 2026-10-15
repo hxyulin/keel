@@ -313,3 +313,127 @@ fn packed_avx_selection_preserves_sources_and_removes_two_address_copies() {
         assert!(avx_bytes < baseline_bytes);
     }
 }
+
+// Keep all eighteen inputs live over an opaque call, then exercise each packed
+// operation with the reloaded values. Two-register pools also force scratch use.
+fn packed_pressure_fixture() -> (String, String) {
+    let mut ir = String::new();
+    let mut c = String::from("#include <stdint.h>\n#include <string.h>\n#include <math.h>\n");
+    let mut main = String::from("int main(void) {\n");
+    for (shape, ty, values) in [
+        (
+            "f32x4",
+            "float",
+            "0.0f,-0.0f,1.0f,-1.0f,1.5f,-2.5f,INFINITY,-INFINITY,NAN,0x1p-126f,0x1p-149f,0x1.fffffep127f,0.5f,3.25f",
+        ),
+        (
+            "f64x2",
+            "double",
+            "0.0,-0.0,1.0,-1.0,1.5,-2.5,INFINITY,-INFINITY,NAN,0x1p-1022,0x1p-1074,0x1.fffffffffffffp1023,0.5,3.25",
+        ),
+    ] {
+        ir += &format!("decl @pressure_external_{shape}({shape}) -> {shape}\n");
+        c += &format!(
+            "typedef {ty} V_{shape} __attribute__((vector_size(16)));\n__attribute__((noinline)) V_{shape} pressure_external_{shape}(V_{shape} x) {{return x+x;}}\n"
+        );
+        let lanes = if ty == "float" { 4 } else { 2 };
+        for (op, symbol) in [("add", "+"), ("sub", "-"), ("mul", "*"), ("div", "/")] {
+            let name = format!("packed_pressure_{op}_{shape}");
+            ir += &format!("func @{name}(ptr, ptr) {{\nblock0(v0: ptr, v1: ptr):\n");
+            for j in 0..18 {
+                ir += &format!(
+                    " v{} = iconst.i64 {}\n v{} = ptradd v0, v{}\n v{} = load.{shape} align 1 v{}\n",
+                    2 + 3 * j,
+                    16 * j,
+                    3 + 3 * j,
+                    2 + 3 * j,
+                    4 + 3 * j,
+                    3 + 3 * j
+                );
+            }
+            ir += &format!(" v60 = call @pressure_external_{shape}(v4)\n");
+            for j in 0..18 {
+                ir += &format!(" v{} = vf{op} v{}, v{}\n", 61 + j, 60 + j, 4 + 3 * j);
+            }
+            ir += " store align 1 v78, v1\n return\n}\n";
+            c += &format!("extern void {name}(const void*, void*);\n");
+            main += &format!(
+                "{{ {ty} values[]={{ {values} }}, in[18][{lanes}], out[{lanes}];\nfor(unsigned k=0;k<28;k++) {{for(unsigned j=0;j<18;j++) for(unsigned lane=0;lane<{lanes};lane++) {{ {ty} finite[]={{1.0,-1.0,1.5,-2.5,0.5,3.25}}; in[j][lane]=finite[(k+j+lane)%6]; if(k>=14 && j==k%18) in[j][lane]=values[(k-14+lane)%14]; }}\n{name}(in,out);for(unsigned lane=0;lane<{lanes};lane++) {{ {ty} expected=in[0][lane]+in[0][lane];for(unsigned j=0;j<18;j++) expected=expected {symbol} in[j][lane];\nif(!((isnan(out[lane])&&isnan(expected))||(out[lane]==expected&&(out[lane]!=0||!!signbit(out[lane])==!!signbit(expected)))))return 1; }} }} }}\n"
+            );
+        }
+    }
+    main += "return 0; }\n";
+    (ir, c + &main)
+}
+
+#[test]
+fn packed_pressure_fixture_emits_with_both_allocators() {
+    let (source, harness) = packed_pressure_fixture();
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for avx in [false, true] {
+            let (text, _) = compile(
+                &source,
+                SelectionTier::Baseline,
+                allocation,
+                true,
+                Features {
+                    avx,
+                    ..Features::default()
+                },
+            );
+            assert!(text.contains(if avx { "vdivpd" } else { "divpd" }));
+        }
+    }
+    let dir = temp("packed-pressure-syntax");
+    let c = dir.join("test.c");
+    fs::write(&c, harness).unwrap();
+    command(
+        Command::new("clang")
+            .args(["-Wall", "-Wextra", "-Werror", "-fsyntax-only"])
+            .arg(c),
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn packed_arithmetic_edges_execute_across_calls_and_forced_spills() {
+    if !std::is_x86_feature_detected!("avx") {
+        return;
+    }
+    let (source, harness) = packed_pressure_fixture();
+    let dir = temp("packed-pressure-runtime");
+    let c = dir.join("test.c");
+    fs::write(&c, harness).unwrap();
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for tiny in [false, true] {
+            for avx in [false, true] {
+                println!("packed pressure: allocation={allocation:?} tiny={tiny} avx={avx}");
+                let features = Features {
+                    avx,
+                    ..Features::default()
+                };
+                let (_, program) =
+                    compile(&source, SelectionTier::Baseline, allocation, tiny, features);
+                let object = dir.join("test.o");
+                fs::write(
+                    &object,
+                    keel_asm::x86::assemble_program_object_with_features(&program, features)
+                        .unwrap(),
+                )
+                .unwrap();
+                let exe = dir.join("test");
+                command(
+                    Command::new("clang")
+                        .args(["-O2", "-ffp-contract=off"])
+                        .arg(&c)
+                        .arg(object)
+                        .arg("-o")
+                        .arg(&exe),
+                );
+                command(&mut Command::new(exe));
+            }
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
