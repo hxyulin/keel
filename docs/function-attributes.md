@@ -38,11 +38,12 @@ not a proof result or an excuse to change existing runtime behavior.
 ## C declarations and contracts
 
 C `inline` adds `inlinehint`. Inline-only emission is resolved after all
-translation-unit declarations: a later `extern` or plain non-inline declaration
-makes the definition external, just as an earlier one does. Explicit `static`
+file-scope declarations: a later file-scope `extern` or plain non-inline
+declaration makes the definition external, just as an earlier one does. Explicit `static`
 linkage is tracked independently and remains private. A definition declared only
-`inline` retains the existing private-copy emission behavior. Inline policy does
-not change this determination; an externally emitted definition cannot pass the
+`inline` retains the existing private-copy emission behavior. Block-scope
+function declarations merge visibility/contracts but do not request a public
+definition. Inline policy does not change this determination; an externally emitted definition cannot pass the
 inliner's private-only boundary.
 
 GNU `always_inline`, `noinline`, `noreturn`, `nothrow`
@@ -65,13 +66,28 @@ execution still traps. This includes inlined bodies. Debug locations/scopes
 retain the inliner's existing lexical-subtree treatment.
 
 Contracts apply to the named direct function, including declarations without
-bodies. Contracts written in a pointer qualifier list (after `*` or `^`) are
-conservatively discarded, including when that pointer is the named function's
-return type. They cannot become promises on the factory. This includes
-`returns_twice`; noncontract layout attributes retain their existing handling.
-Declaration-specifier and final named-declarator attributes still apply to the
-named function. This is a bounded ownership correction, not a complete GNU
-attribute-placement compatibility implementation.
+bodies and named functions returning pointers. Declarator parsing keeps the
+function owner of each layer's contracts: a function constructed by an enclosing
+declarator layer owns them; otherwise its suffix constructs the owner. A new
+suffix supplies the incoming owner for the next nested layer without changing
+the owner of attributes already collected. A grouping layer without either
+passes through the nested owner. Only contracts whose owner
+is the declared function survive into named metadata. Identity is separate from
+ABI/type equality. Layout attributes and pointer qualifiers retain their existing
+handling independently of contract ownership.
+
+For example, `int * __attribute__((noinline)) h(void)` retains `noinline` on `h`,
+while `void (* __attribute__((noreturn)) get(void))(void)` and
+`void (__attribute__((noreturn)) (*get(void)))(void)` assign the contract to the
+returned function, so neither promises that `get` cannot return. Parenthesized
+composition preserves the same ownership invariant. Contracts on pointer types
+remain unrepresented, including `returns_twice`; they do not become factory or
+indirect-call promises. Declaration-specifier and final named-declarator
+attributes retain their direct-function handling. Declarator-position contracts
+on a function-pointer typedef base are diagnosed when the hidden function makes
+ownership ambiguous; declaration-specifier/final named-declarator placements and
+unambiguous grouping remain available. This is bounded declarator ownership
+support, not full GNU attribute-placement or C++ grammar support.
 
 Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no

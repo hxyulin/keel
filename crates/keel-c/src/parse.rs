@@ -149,7 +149,7 @@ pub struct Parser<'a> {
     pub strings: Vec<StrLit<'a>>,
     literal_ids: [HashMap<&'a [u8], usize>; 2],
     pub(crate) fs: Option<FuncState<'a>>,
-    /// Functions declared at least once without `inline` (or with
+    /// Functions declared at file scope at least once without `inline` (or with
     /// `extern`), for which inline-only emission does not apply.
     /// Explicit static linkage, recorded in `Global::internal`, still wins.
     external_def: HashSet<usize>,
@@ -693,8 +693,8 @@ impl<'a> Parser<'a> {
             self.declaration(true)?;
         }
         // Until now `internal` records explicit static linkage only. C99
-        // inline-only emission depends on *all* declarations in this unit,
-        // including declarations that follow the definition.
+        // inline-only emission depends on all file-scope declarations in this
+        // unit, including declarations that follow the definition.
         for f in &self.funcs {
             if !self.external_def.contains(&f.global) {
                 self.globals[f.global].internal = true;
@@ -1049,7 +1049,7 @@ impl<'a> Parser<'a> {
         if spec.storage == Storage::Static {
             self.globals[g].internal = true;
         }
-        if !spec.inline || spec.storage == Storage::Extern || !file_scope {
+        if file_scope && (!spec.inline || spec.storage == Storage::Extern) {
             self.external_def.insert(g);
         }
         let returns_twice = attrs.returns_twice
@@ -1542,7 +1542,21 @@ impl<'a> Parser<'a> {
     }
 
     /// A declarator applied to the specifiers' type and its sugar.
-    fn declarator_sugar(&mut self, mut ty: Ty, mut sugar: Sugar) -> R<Declarator<'a>> {
+    fn declarator_sugar(&mut self, ty: Ty, sugar: Sugar) -> R<Declarator<'a>> {
+        self.declarator_layer(ty, sugar, None)
+    }
+
+    fn declarator_layer(
+        &mut self,
+        mut ty: Ty,
+        mut sugar: Sugar,
+        inherited_owner: Option<Rc<FuncTy>>,
+    ) -> R<Declarator<'a>> {
+        // Only functions constructed by enclosing declarator layers supply
+        // inherited ownership. A typedef's hidden function is not that layer.
+        let ambiguous_base = inherited_owner.is_none()
+            && !matches!(ty, Ty::Func(_))
+            && Self::contract_owner(&ty).is_some();
         let (mut is_const, mut is_volatile) = (false, false);
         let mut attrs = Attrs::default();
         // `^` is a block pointer (Apple's closures, in headers when
@@ -1552,15 +1566,7 @@ impl<'a> Parser<'a> {
             ty = self.ptr_type(ty);
             sugar = sugar.wrap(Sugar::Ptr);
             let is_atomic;
-            // Attributes in the pointer's qualifier list describe that
-            // pointer/pointee, even when the named declarator is a function
-            // returning it. We do not represent pointer-call contracts.
-            let mut pointer_attrs = Attrs::default();
-            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut pointer_attrs)?;
-            pointer_attrs.returns_twice = false;
-            pointer_attrs.noreturn = false;
-            pointer_attrs.function_attrs = keel_ir::FunctionAttrs::default();
-            attrs.merge(pointer_attrs);
+            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut attrs)?;
             if is_atomic {
                 ty = self.atomic_type(ty, loc)?;
             }
@@ -1572,6 +1578,16 @@ impl<'a> Parser<'a> {
             }
         }
         self.attributes(&mut attrs)?;
+        if ambiguous_base
+            && (attrs.returns_twice
+                || attrs.noreturn
+                || attrs.function_attrs != keel_ir::FunctionAttrs::default())
+        {
+            return Err(Error::new(
+                self.loc(),
+                "ambiguous function attribute ownership through a function-pointer typedef; use declaration-specifier or final named-declarator attributes",
+            ));
+        }
         if self.is("(") && self.nested_declarator_follows() {
             // `(*name)[3]`: the suffix after the parentheses applies first,
             // so skip the inner declarator, read the suffix, and come back.
@@ -1579,10 +1595,20 @@ impl<'a> Parser<'a> {
             let start = self.pos;
             self.skip_parens()?;
             let (ty, sugar) = self.type_suffix(ty, sugar)?;
+            // The current layer's attributes retain their incoming owner.
+            // A newly constructed suffix becomes the incoming owner for the
+            // nested layer, which may carry separate named-function promises.
+            let nested_owner = Self::named_contract_owner(&ty)
+                .cloned()
+                .or_else(|| inherited_owner.clone());
+            let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty).cloned());
             let end = self.pos;
             self.pos = start;
-            let mut d = self.declarator_sugar(ty, sugar)?;
-            d.attrs.merge(attrs);
+            let mut d = self.declarator_layer(ty, sugar, nested_owner)?;
+            // A purely grouping layer constructs no function of its own;
+            // its attributes follow the nested declarator's owner instead.
+            let owner = owner.or_else(|| Self::named_contract_owner(&d.ty).cloned());
+            Self::merge_declarator_attrs(&mut d.attrs, attrs, owner.as_ref(), &d.ty);
             self.expect(")")?;
             self.pos = end;
             return Ok(d);
@@ -1597,6 +1623,9 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         let (ty, sugar) = self.type_suffix(ty, sugar)?;
+        let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty).cloned());
+        let mut named_attrs = Attrs::default();
+        Self::merge_declarator_attrs(&mut named_attrs, attrs, owner.as_ref(), &ty);
         if !matches!(ty.unatomic(), Ty::Ptr(_)) {
             // Qualifiers apply to the pointer only when it is the object.
             is_const = false;
@@ -1608,8 +1637,49 @@ impl<'a> Parser<'a> {
             sugar,
             is_const,
             is_volatile,
-            attrs,
+            attrs: named_attrs,
         })
+    }
+
+    /// A declarator layer inherits the function constructed by its enclosing
+    /// layer, or otherwise owns the function constructed by its own suffix (or nested
+    /// declarator when this is a purely grouping layer). Parentheses apply
+    /// that suffix before parsing the nested layer. Thus `* attr h(void)` owns
+    /// h when returning a scalar pointer, but owns the returned function in
+    /// `(* attr h(void))(void)`. Rc identity (not ABI equality) distinguishes
+    /// those functions through arbitrary parenthesized composition.
+    fn named_contract_owner(ty: &Ty) -> Option<&Rc<FuncTy>> {
+        match ty {
+            Ty::Func(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    fn contract_owner(ty: &Ty) -> Option<&Rc<FuncTy>> {
+        match ty {
+            Ty::Func(f) => Some(f),
+            Ty::Ptr(t) | Ty::Array(t, _) | Ty::Atomic(t) => Self::contract_owner(t),
+            _ => None,
+        }
+    }
+
+    fn merge_declarator_attrs(
+        named: &mut Attrs,
+        mut layer: Attrs,
+        owner: Option<&Rc<FuncTy>>,
+        declared: &Ty,
+    ) {
+        // Only contracts owned by the actual declared function escape the
+        // declarator. Pointer contracts remain unrepresented; layout attributes
+        // still merge exactly as before, independently of contract ownership.
+        let is_named =
+            matches!((owner, declared), (Some(owner), Ty::Func(f)) if Rc::ptr_eq(owner, f));
+        if !is_named {
+            layer.returns_twice = false;
+            layer.noreturn = false;
+            layer.function_attrs = keel_ir::FunctionAttrs::default();
+        }
+        named.merge(layer);
     }
 
     /// After `(` in a declarator: a nested declarator, or parameters?
