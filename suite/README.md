@@ -222,3 +222,34 @@ python3 suite/summarize_passes.py --report suite/reports/example.json
 
 The aggregate bootstrap resamples pairs within each fixed workload; it does not
 estimate performance uncertainty on unmeasured programs or other machines.
+
+## In-process assembly API
+
+`measure_compiler_object_api.py` compares a current compiler's assembly-text
+round trip with `--emit-object`, verifying whole-object equality before timing.
+Build `keel` and the `keel-asm` `profile_pipeline` example in release mode first.
+Run serially after builds and tests finish:
+
+```sh
+python3 suite/measure_compiler_object_api.py \
+  --input-dir target/suite/lua/pre \
+  --work-dir target/assembler-bench/object-api-complete \
+  --output suite/reports/compiler-object-api-complete-20261015.json \
+  --lua-tests target/suite/lua/lua-5.4.7-tests
+```
+
+`--baseline-compiler <binary> --baseline-commit <commit>` also verifies and times
+the baseline text workflow. Add `--baseline-has-object-api` when that binary
+supports `--emit-object` to compare prior and current direct paths in the same
+randomized CLI rounds. The report retains commands, raw samples and hashes.
+
+The [completed AArch64 migration](reports/compiler-object-api-complete-20261015.html)
+([raw data](reports/compiler-object-api-complete-20261015.json)) reaches
+85,988/85,988 native Lua instructions with zero remaining text bytes. Current
+codegen plus object generation takes 39.92 ms versus 67.69 ms through text;
+full CLI batches take 217.87 ms versus 322.61 ms. These are separate timing
+boundaries. The previous direct API takes 229.21 ms in the same CLI run; the
+median paired ratio corresponds to 5.2% less time after completing the migration.
+All 33 objects match all four paths, and the linked interpreter passes Lua's
+portable tests. The earlier [partial API report](reports/compiler-object-api-20261015.json)
+remains available for historical context.

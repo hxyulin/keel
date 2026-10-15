@@ -249,6 +249,11 @@ Only user inline assembly enters the program as source text; inline macros use
 an explicit validated expansion fallback. Assembly text output remains available.
 Direct object emission currently targets AArch64 Mach-O; see
 [the API design](docs/design.md#assembler).
+The completed migration covers all 85,988 generated Lua instructions, with zero
+source-text bytes. In the [33-file Lua comparison](suite/reports/compiler-object-api-complete-20261015.html),
+the API is 1.68× faster for codegen plus object generation and 1.48× for the
+complete CLI workflow than the assembly-text round trip. Paired CLI time is
+5.2% lower than the previous partial API; all objects are byte-identical.
 
 Instruction metrics are available through `keel asm-metrics input.s` and
 [`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates
