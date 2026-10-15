@@ -28,6 +28,7 @@
 use keel_codegen::Target;
 use keel_ir::Module;
 use std::process::ExitCode;
+mod archive;
 mod asm;
 mod input;
 mod link;
@@ -41,6 +42,7 @@ const USAGE: &str = "usage:
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
+  keel archive [--target <triple>] -o <output.a> <member.o>...
   keel passes
 
   Input files must remain unchanged during parsing.";
@@ -363,6 +365,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
         }
         "asm" => asm::run(rest),
         "link" => link::run(rest),
+        "archive" => archive::run(rest),
         "compile" => {
             let opts = parse_options(
                 rest,
