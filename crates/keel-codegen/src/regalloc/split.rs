@@ -26,7 +26,7 @@ fn physical(loc: Loc) -> usize {
     match loc {
         Loc::Reg(r) => r as usize,
         Loc::FReg(r) => 256 + r as usize,
-        Loc::Stack(_) => unreachable!(),
+        Loc::Stack(_) | Loc::Remat(_) => unreachable!(),
     }
 }
 fn bitset(bits: &mut [u64; 8], loc: Loc, live: bool) {

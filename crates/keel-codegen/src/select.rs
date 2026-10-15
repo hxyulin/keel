@@ -302,88 +302,109 @@ impl Selection {
         if !options.trees && !options.register_hints {
             return plan;
         }
-        let mut uses = vec![0usize; func.num_values()];
-        let mut blocks = HashMap::new();
-        for (block, inst) in func.layout_insts() {
-            blocks.insert(inst, block);
-            func.inst_data(inst)
-                .for_each_operand(|v| uses[func.resolve(v).index()] += 1);
+        // Tree legality only distinguishes exactly one use from zero/many.
+        // Hint-only selection does not need any whole-function use counts.
+        let mut uses = Vec::new();
+        if options.trees {
+            uses.resize(func.num_values(), 0u8);
+            for (_, inst) in func.layout_insts() {
+                func.inst_data(inst).for_each_operand(|v| {
+                    let count = &mut uses[func.resolve(v).index()];
+                    *count = (*count + 1).min(2);
+                });
+            }
         }
-        // Reverse traversal gives larger consumers first choice of their trees.
-        let insts: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
-        for &inst in insts.iter().rev().filter(|_| options.trees) {
-            if plan.covered(inst) {
-                continue;
-            }
-            let InstData::Binary { op, args } = *func.inst_data(inst) else {
-                continue;
-            };
-            let ty = func.value_type(func.resolve(args[0]));
-            if !matches!(ty, Type::I32 | Type::I64 | Type::Ptr) {
-                continue;
-            }
-            'rules: for rule in RULES.iter().filter(|r| r.target == target && r.root == op) {
-                for side in if rule.commute { vec![1, 0] } else { vec![1] } {
-                    let value = func.resolve(args[side]);
-                    if uses[value.index()] != 1 {
-                        continue;
-                    }
-                    let ValueDef::Result(child, _) = func.value_def(value) else {
-                        continue;
-                    };
-                    if blocks.get(&child) != blocks.get(&inst) || plan.covered(child) {
-                        continue;
-                    }
-                    // Keep separately breakable source lines when explicit
-                    // debug locations are present. Same-line expressions can fuse.
-                    if let (Some(a), Some(b)) = (func.inst_loc(child), func.inst_loc(inst))
-                        && (a.file != b.file || a.line != b.line)
-                    {
-                        continue;
-                    }
-                    let InstData::Binary {
-                        op: child_op,
-                        args: child_args,
-                    } = *func.inst_data(child)
-                    else {
-                        continue;
-                    };
-                    if child_op != rule.child {
-                        continue;
-                    }
-                    let other = func.resolve(args[1 - side]);
-                    let mut leaves = vec![other, func.resolve(child_args[0])];
-                    let shift = if child_op == BinaryOp::Shl {
-                        let Some(k) = crate::fold::iconst(func, child_args[1]) else {
-                            continue;
-                        };
-                        // IR masks shift counts by the operand width.
-                        let child_ty = func.value_type(func.resolve(child_args[0]));
-                        let k = (k as u64 & (child_ty.bytes().unwrap() as u64 * 8 - 1)) as u8;
-                        if target == Target::X86 && k > 3 {
+        // Reverse block/instruction order gives larger consumers first choice
+        // without allocating another entry for every instruction. Block ownership
+        // is already stored in Function; no Inst-to-Block hash table is needed.
+        let blocks: Vec<_> = if options.trees {
+            func.blocks().collect()
+        } else {
+            Vec::new()
+        };
+        for &block in blocks.iter().rev() {
+            for &inst in func.block_insts(block).iter().rev() {
+                if plan.covered(inst) {
+                    continue;
+                }
+                let InstData::Binary { op, args } = *func.inst_data(inst) else {
+                    continue;
+                };
+                let ty = func.value_type(func.resolve(args[0]));
+                if !matches!(ty, Type::I32 | Type::I64 | Type::Ptr) {
+                    continue;
+                }
+                'rules: for rule in RULES.iter().filter(|r| r.target == target && r.root == op) {
+                    for &side in if rule.commute { &[1, 0][..] } else { &[1][..] } {
+                        let value = func.resolve(args[side]);
+                        if uses[value.index()] != 1 {
                             continue;
                         }
-                        k
-                    } else {
-                        leaves.push(func.resolve(child_args[1]));
-                        0
-                    };
-                    plan.cover(child);
-                    plan.matches.insert(
-                        inst,
-                        Match {
-                            machine: rule.machine,
-                            args: leaves,
-                            shift,
-                        },
-                    );
-                    break 'rules;
+                        let ValueDef::Result(child, _) = func.value_def(value) else {
+                            continue;
+                        };
+                        if func.is_removed(child)
+                            || func.inst_block(child) != block
+                            || plan.covered(child)
+                        {
+                            continue;
+                        }
+                        // Keep separately breakable source lines when explicit
+                        // debug locations are present. Same-line expressions can fuse.
+                        if let (Some(a), Some(b)) = (func.inst_loc(child), func.inst_loc(inst))
+                            && (a.file != b.file || a.line != b.line)
+                        {
+                            continue;
+                        }
+                        let InstData::Binary {
+                            op: child_op,
+                            args: child_args,
+                        } = *func.inst_data(child)
+                        else {
+                            continue;
+                        };
+                        if child_op != rule.child {
+                            continue;
+                        }
+                        let shift = if child_op == BinaryOp::Shl {
+                            let Some(k) = crate::fold::iconst(func, child_args[1]) else {
+                                continue;
+                            };
+                            // IR masks shift counts by the operand width.
+                            let child_ty = func.value_type(func.resolve(child_args[0]));
+                            let k = (k as u64 & (child_ty.bytes().unwrap() as u64 * 8 - 1)) as u8;
+                            if target == Target::X86 && k > 3 {
+                                continue;
+                            }
+                            k
+                        } else {
+                            0
+                        };
+                        // Allocate leaves only after all legality checks pass.
+                        let mut leaves =
+                            Vec::with_capacity(if child_op == BinaryOp::Shl { 2 } else { 3 });
+                        leaves.push(func.resolve(args[1 - side]));
+                        leaves.push(func.resolve(child_args[0]));
+                        if child_op != BinaryOp::Shl {
+                            leaves.push(func.resolve(child_args[1]));
+                        }
+                        plan.cover(child);
+                        plan.matches.insert(
+                            inst,
+                            Match {
+                                machine: rule.machine,
+                                args: leaves,
+                                shift,
+                            },
+                        );
+                        break 'rules;
+                    }
                 }
             }
         }
         // Generate affinities only for instructions that survive selection.
         // Three-address fused instructions need no destructive-input copy.
-        for &inst in insts.iter().filter(|_| options.register_hints) {
+        for (_, inst) in func.layout_insts().filter(|_| options.register_hints) {
             if plan.covered(inst) {
                 continue;
             }

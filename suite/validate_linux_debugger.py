@@ -24,7 +24,11 @@ def main():
     parser.add_argument('--include-split', action='store_true', help='also validate experimental spill-range splitting')
     parser.add_argument('--include-local', action='store_true', help='also validate experimental local allocation')
     parser.add_argument('--include-weighted', action='store_true', help='also validate experimental loop-weighted allocation')
+    parser.add_argument('--include-remat', action='store_true', help='also validate Fast/Full rematerialization')
+    parser.add_argument('--remat-pressure', action='store_true', help='use pressure-aware recipes in rematerialization builds')
     args = parser.parse_args()
+    if args.remat_pressure and not args.include_remat:
+        parser.error('--remat-pressure requires --include-remat')
     args.work_dir.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent.parent / 'crates/keel-c/tests/debug/vars.c'
     preprocessed = args.work_dir / 'vars.i'
@@ -63,6 +67,8 @@ printf "EXIT=%d\n", $_exitcode
         builds += [('split', 'split', False), ('split-opt', 'split', True)]
     if args.include_weighted:
         builds += [('weighted', 'weighted', False), ('weighted-opt', 'weighted', True)]
+    if args.include_remat:
+        builds += [(tier+'-remat'+('-opt' if opt else ''), tier, opt) for tier in ['fast','full'] for opt in [False,True]]
     for name, allocation, optimized in builds:
         executable = args.work_dir / name
         if allocation is None:
@@ -72,6 +78,8 @@ printf "EXIT=%d\n", $_exitcode
             command = [args.compiler.resolve(), 'cc', preprocessed.resolve(), '-g', '--regalloc', allocation, '-o', assembly.resolve()]
             if optimized:
                 command.append('-O')
+            if '-remat' in name:
+                command.extend(['--remat', 'pressure' if args.remat_pressure else 'all'])
             run(command)
             run(['clang', '-g', assembly, '-o', executable])
         dwarf = run(['llvm-dwarfdump', '--verify', executable])

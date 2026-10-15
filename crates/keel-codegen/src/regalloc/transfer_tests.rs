@@ -9,12 +9,19 @@ fn location(loc: Loc) -> usize {
         Loc::Reg(r) => r as usize,
         Loc::FReg(r) => 256 + r as usize,
         Loc::Stack(s) => 512 + s as usize,
+        Loc::Remat(_) => unreachable!("immutable recipes have no mutable storage"),
     }
 }
-fn copies(state: &mut [Option<u64>], moves: &[(Loc, Loc)]) {
+fn read(state: &[Option<u64>], values: &[Vec<Option<u64>>; 2], loc: Loc) -> Option<u64> {
+    match loc {
+        Loc::Remat(v) => values[0][v.index()],
+        _ => state[location(loc)],
+    }
+}
+fn copies(state: &mut [Option<u64>], moves: &[(Loc, Loc)], current: &[Vec<Option<u64>>; 2]) {
     let values: Vec<_> = moves
         .iter()
-        .map(|&(_, src)| state[location(src)].expect("copy reads an uninitialized location"))
+        .map(|&(_, src)| read(state, current, src).expect("copy reads an uninitialized location"))
         .collect();
     for (&(dst, _), value) in moves.iter().zip(values) {
         state[location(dst)] = Some(value);
@@ -47,7 +54,7 @@ fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
             }
             let index = allocation.edits.instruction_index(inst);
             if let Some(i) = index {
-                copies(&mut state, &allocation.edits.instruction(i).before);
+                copies(&mut state, &allocation.edits.instruction(i).before, &values);
             }
             input.for_each_operand(inst, |op| {
                 if op.kind == OperandKind::Use {
@@ -55,14 +62,14 @@ fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
                         .operand_loc(index, op.part, OperandKind::Use)
                         .expect("missing use location");
                     assert_eq!(
-                        state[location(loc)],
+                        read(&state, &values, loc),
                         values[usize::from(op.part.high)][op.part.value.index()],
                         "{} {inst}: {:?} in {loc:?}",
                         func.name,
                         op.part
                     );
                     assert!(
-                        state[location(loc)].is_some(),
+                        read(&state, &values, loc).is_some(),
                         "use has no reaching definition"
                     );
                 }
@@ -73,12 +80,14 @@ fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
                     token += 1;
                     values[usize::from(op.part.high)][op.part.value.index()] = Some(token);
                     if let Some(loc) = allocation.operand_loc(index, op.part, OperandKind::Def) {
-                        state[location(loc)] = Some(token);
+                        if !matches!(loc, Loc::Remat(_)) {
+                            state[location(loc)] = Some(token);
+                        }
                     }
                 }
             });
             if let Some(i) = index {
-                copies(&mut state, &allocation.edits.instruction(i).after);
+                copies(&mut state, &allocation.edits.instruction(i).after, &values);
             }
         }
         let Some(&term) = func.block_insts(block).last() else {
@@ -114,7 +123,7 @@ fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
                 }
             }
         }
-        copies(&mut state, &moves);
+        copies(&mut state, &moves, &values);
         for (param, high, value) in arguments {
             values[usize::from(high)][param.index()] = value;
         }
@@ -160,7 +169,7 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     is_call: &is_call,
                     returns_twice: &returns_twice,
                 };
-                let tiers = vec![AllocationTier::Full];
+                let tiers = vec![AllocationTier::Fast, AllocationTier::Full];
                 #[cfg(feature = "experimental-regalloc")]
                 let tiers = {
                     let mut tiers = tiers;
@@ -172,19 +181,47 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     tiers
                 };
                 for tier in tiers {
-                    let mut allocation = tier.allocate(&input);
-                    allocation.finish(&input);
-                    allocation.validate(&input).unwrap();
-                    for seed in 0..4 {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            check(&input, &allocation, seed)
-                        }));
-                        assert!(
-                            result.is_ok(),
-                            "{} {} {tier:?} seed {seed}",
-                            path.display(),
-                            func.name
+                    let allocations = vec![tier.allocate(&input)];
+                    #[cfg(feature = "experimental-regalloc")]
+                    let allocations = {
+                        let mut allocations = allocations;
+                        allocations.push(
+                            RematerializingAllocator {
+                                base: &tier,
+                                prefer_spilling: false,
+                                constants: true,
+                                stack_addresses: true,
+                            }
+                            .allocate(&input),
                         );
+                        if matches!(tier, AllocationTier::Fast | AllocationTier::Full) {
+                            allocations.push(
+                                RematerializingAllocator {
+                                    base: &tier,
+                                    prefer_spilling: true,
+                                    constants: true,
+                                    stack_addresses: true,
+                                }
+                                .allocate(&input),
+                            );
+                        }
+                        allocations
+                    };
+                    for mut allocation in allocations {
+                        allocation.finish(&input);
+                        allocation.validate(&input).unwrap();
+                        for seed in 0..4 {
+                            let result =
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    check(&input, &allocation, seed)
+                                }));
+                            assert!(
+                                result.is_ok(),
+                                "{} {} {tier:?} seed {seed}",
+                                path.display(),
+                                func.name
+                            );
+                        }
                     }
                 }
             }

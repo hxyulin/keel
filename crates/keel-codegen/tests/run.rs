@@ -347,12 +347,12 @@ fn debug_info() {
         tiers
     };
     for allocation in tiers {
-        debug_info_with_allocator(allocation);
+        debug_info_with_allocator(&allocation);
     }
 }
 
 #[cfg(target_arch = "aarch64")]
-fn debug_info_with_allocator(allocation: AllocationTier) {
+fn debug_info_with_allocator(allocation: &dyn keel_codegen::regalloc::RegisterAllocator) {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let lldb = debug_session(
         allocation,
@@ -412,11 +412,25 @@ fn debug_info_with_allocator(allocation: AllocationTier) {
     }
 }
 
+#[test]
+#[cfg(all(target_arch = "aarch64", feature = "experimental-regalloc"))]
+fn rematerialization_debug_info() {
+    for base in [AllocationTier::Fast, AllocationTier::Full] {
+        let allocator = keel_codegen::regalloc::RematerializingAllocator {
+            base: &base,
+            prefer_spilling: true,
+            constants: true,
+            stack_addresses: true,
+        };
+        debug_info_with_allocator(&allocator);
+    }
+}
+
 /// Compiles `keel`, links it with `driver` built with `-g`, and runs
 /// `commands` in lldb. Returns lldb's output.
 #[cfg(target_arch = "aarch64")]
 fn debug_session(
-    allocation: AllocationTier,
+    allocation: &dyn keel_codegen::regalloc::RegisterAllocator,
     keel: &Path,
     driver: &Path,
     ir_lines: bool,
@@ -435,7 +449,7 @@ fn debug_session(
         &REGISTERS,
         &keel_codegen::CodegenPipeline {
             selector: &keel_codegen::SelectionTier::Baseline,
-            allocator: &allocation,
+            allocator: allocation,
         },
     )
     .unwrap();
@@ -689,20 +703,77 @@ fn changing_allocation_locations() {
 #[test]
 #[cfg(feature = "experimental-regalloc")]
 fn local_allocator_programs() {
-    experimental_allocator_programs(AllocationTier::Local, "local");
+    experimental_allocator_programs(&AllocationTier::Local, "local");
 }
 #[test]
 #[cfg(feature = "experimental-regalloc")]
 fn split_allocator_programs() {
-    experimental_allocator_programs(AllocationTier::Split, "split");
+    experimental_allocator_programs(&AllocationTier::Split, "split");
 }
 #[test]
 #[cfg(feature = "experimental-regalloc")]
 fn weighted_allocator_programs() {
-    experimental_allocator_programs(AllocationTier::Weighted, "weighted");
+    experimental_allocator_programs(&AllocationTier::Weighted, "weighted");
+}
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn rematerialization_programs() {
+    use keel_codegen::regalloc::RematerializingAllocator;
+    for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        let allocator = RematerializingAllocator {
+            base: &tier,
+            prefer_spilling: false,
+            constants: true,
+            stack_addresses: true,
+        };
+        experimental_allocator_programs(&allocator, &format!("remat-{tier:?}"));
+    }
+}
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn pressure_rematerialization_programs() {
+    use keel_codegen::regalloc::RematerializingAllocator;
+    for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        let allocator = RematerializingAllocator {
+            base: &tier,
+            prefer_spilling: true,
+            constants: true,
+            stack_addresses: true,
+        };
+        experimental_allocator_programs(&allocator, &format!("pressure-remat-{tier:?}"));
+    }
+}
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn rematerialization_all_spilled() {
+    let pools = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let allocator = keel_codegen::regalloc::RematerializingAllocator {
+        base: &AllocationTier::Full,
+        prefer_spilling: false,
+        constants: true,
+        stack_addresses: true,
+    };
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/rematerialization.keel");
+    run_program(
+        &path,
+        &pools,
+        false,
+        "-all-spilled-remat",
+        keel_codegen::SelectionOptions::default(),
+        &allocator,
+    )
+    .unwrap();
 }
 #[cfg(feature = "experimental-regalloc")]
-fn experimental_allocator_programs(tier: AllocationTier, name: &str) {
+fn experimental_allocator_programs(
+    tier: &dyn keel_codegen::regalloc::RegisterAllocator,
+    name: &str,
+) {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let mut paths: Vec<_> = std::fs::read_dir(dir)
         .unwrap()
@@ -739,7 +810,7 @@ fn experimental_allocator_programs(tier: AllocationTier, name: &str) {
             ),
         ] {
             let suffix = format!("-{name}{suffix}");
-            if let Err(error) = run_program(path, &pools, optimize, &suffix, selection, &tier) {
+            if let Err(error) = run_program(path, &pools, optimize, &suffix, selection, tier) {
                 eprintln!("{} ({suffix}): {error}", path.display());
                 failures.push(format!("{} ({suffix}): {error}", path.display()));
             }

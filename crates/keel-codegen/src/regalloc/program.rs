@@ -117,6 +117,7 @@ impl AllocationInput<'_> {
                     || self.pools.float_callee_saved.contains(&r)
             }
             Loc::Stack(_) => true,
+            Loc::Remat(value) => super::remat_recipe(self.func, value).is_some(),
         }
     }
 }
@@ -160,6 +161,9 @@ pub struct AllocationEdits {
     edges: HashMap<(Inst, usize), Vec<Transfer>>,
 }
 impl AllocationEdits {
+    pub fn is_empty(&self) -> bool {
+        self.instructions.is_empty() && self.params.is_empty() && self.edges.is_empty()
+    }
     pub fn instruction_mut(&mut self, inst: Inst) -> &mut InstructionAllocation {
         let index = *self.indices.entry(inst).or_insert_with(|| {
             let index = self.instructions.len();
@@ -224,7 +228,7 @@ impl Allocation {
         let mut mention = |loc| match loc {
             Loc::Reg(r) => gprs[r as usize] = true,
             Loc::FReg(r) => fprs[r as usize] = true,
-            Loc::Stack(_) => {}
+            Loc::Stack(_) | Loc::Remat(_) => {}
         };
         for edit in &self.edits.instructions {
             for &(_, loc) in edit.uses.iter().chain(&edit.defs) {
@@ -284,12 +288,17 @@ impl Allocation {
             Loc::Reg(r) => gpr & 1u64.checked_shl(r.into()).unwrap_or(0) != 0,
             Loc::FReg(r) => fpr & 1u64.checked_shl(r.into()).unwrap_or(0) != 0,
             Loc::Stack(s) => s < self.spill_slots,
+            Loc::Remat(value) => super::remat_recipe(input.func, value).is_some(),
         };
-        for half in &self.locs {
+        for (high, half) in self.locs.iter().enumerate() {
             if half.len() != input.func.num_values() {
                 return Err("allocator returned an invalid location table".into());
             }
-            if half.iter().flatten().any(|&l| !valid_loc(l)) {
+            if half.iter().enumerate().any(|(i, loc)| {
+                loc.is_some_and(|l| {
+                    !valid_loc(l) || matches!(l, Loc::Remat(v) if high != 0 || v.index() != i)
+                })
+            }) {
                 return Err("allocator used a reserved register or invalid spill slot".into());
             }
         }
@@ -306,7 +315,10 @@ impl Allocation {
                 (OperandKind::Def, &edit.defs),
             ] {
                 for (i, &(part, loc)) in bindings.iter().enumerate() {
-                    if !valid_loc(loc) || bindings[..i].iter().any(|&(p, _)| p == part) {
+                    if !valid_loc(loc)
+                        || matches!(loc, Loc::Remat(v) if part.high || v != part.value || kind == OperandKind::Def)
+                        || bindings[..i].iter().any(|&(p, _)| p == part)
+                    {
                         return Err("invalid or duplicate allocation operand binding".into());
                     }
                     let mut found = false;
@@ -328,6 +340,7 @@ impl Allocation {
         for (&(block, part), &loc) in &self.edits.params {
             if !input.func.block_params(block).contains(&part.value)
                 || !valid_loc(loc)
+                || matches!(loc, Loc::Remat(_))
                 || (part.high && input.func.value_type(part.value) != Type::I128)
             {
                 return Err("invalid block parameter location".into());
@@ -388,7 +401,11 @@ impl Allocation {
 }
 fn validate_moves(moves: &[Transfer], valid: &impl Fn(Loc) -> bool) -> Result<(), String> {
     for (i, &(dst, src)) in moves.iter().enumerate() {
-        if !valid(dst) || !valid(src) || moves[..i].iter().any(|&(d, _)| d == dst) {
+        if !valid(dst)
+            || !valid(src)
+            || matches!(dst, Loc::Remat(_))
+            || moves[..i].iter().any(|&(d, _)| d == dst)
+        {
             return Err("invalid allocation parallel copy".into());
         }
     }

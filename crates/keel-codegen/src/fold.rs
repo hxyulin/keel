@@ -43,17 +43,31 @@ pub(crate) fn folded_values(
             selection.remaining_folds(func, inst, &mut folded);
             folded
         };
-        selection.for_each_operand(func, inst, |v| {
-            let v = func.resolve(v);
-            match folds.iter().position(|&f| f == v) {
-                Some(i) => {
-                    folds.swap_remove(i);
+        if folds.is_empty() {
+            // Most selected sequences have no directly encoded operands. Keep
+            // that scan independent of the mutable fold list and its searches.
+            selection.for_each_operand(func, inst, |v| {
+                unfolded[func.resolve(v).index()] = true;
+            });
+        } else {
+            selection.for_each_operand(func, inst, |v| {
+                let v = func.resolve(v);
+                // Once any use needs materialization, other occurrences cannot
+                // make this value folded. Leaving its own fold entries alone
+                // does not affect matching any distinct operand value.
+                if unfolded[v.index()] {
+                    return;
                 }
-                None => {
-                    unfolded[v.index()] = true;
+                match folds.iter().position(|&f| f == v) {
+                    Some(i) => {
+                        folds.swap_remove(i);
+                    }
+                    None => {
+                        unfolded[v.index()] = true;
+                    }
                 }
-            }
-        });
+            });
+        }
     }
     values
         .into_iter()
@@ -89,10 +103,13 @@ pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst,
                 InstData::Fcmp { .. } => true,
                 _ => false,
             };
+            if !compare {
+                continue;
+            }
             let Some(&next) = insts.get(i + 1) else {
                 continue;
             };
-            if let (true, InstData::Brif { cond, .. }) = (compare, func.inst_data(next)) {
+            if let InstData::Brif { cond, .. } = func.inst_data(next) {
                 let result = func.inst_results(inst)[0];
                 if func.resolve(*cond) == result {
                     candidates.push((result, inst, next));
@@ -100,10 +117,8 @@ pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst,
             }
         }
     }
+    candidates.retain(|(v, _, _)| uses[v.index()] == 1);
     candidates
-        .into_iter()
-        .filter(|(v, _, _)| uses[v.index()] == 1)
-        .collect()
 }
 
 #[cfg(test)]

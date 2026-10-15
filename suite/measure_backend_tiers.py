@@ -40,11 +40,15 @@ def main():
     p.add_argument('--profile-rounds', type=int, default=3)
     p.add_argument('--runtime-rounds', type=int, default=7)
     p.add_argument('--opt', action='store_true', help='optimize IR before backend timing and in runtime builds')
+    p.add_argument('--selection-all', action='store_true', help='enable all instruction selection options in builds/profiles')
     p.add_argument('--build-only', action='store_true')
     p.add_argument('--runtime-only', action='store_true')
     p.add_argument('--runtime-tier', choices=['both', 'full', 'fast'], default='both', help='restrict prebuilt runtime-only comparisons')
+    p.add_argument('--runtime-suites', nargs='+', choices=['lua', 'quickjs', 'sqlite'], default=['lua', 'quickjs', 'sqlite'], help='restrict prebuilt runtime-only suites')
     p.add_argument('--profile-only', action='store_true')
     args = p.parse_args()
+    if not args.runtime_only and args.runtime_suites != ['lua', 'quickjs', 'sqlite']:
+        p.error('--runtime-suites requires --runtime-only')
     if min(args.pairs, args.profile_rounds, args.runtime_rounds) < 3:
         p.error('use at least three pairs/profile/runtime rounds')
     root = Path(__file__).resolve().parent.parent
@@ -58,8 +62,8 @@ def main():
         candidates = {name: binary for name, binary in candidates.items() if name.endswith('-' + args.runtime_tier)}
     report = {'host': platform.platform(),
               'cpu': (subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string'], text=True).strip() if platform.system() == 'Darwin' else platform.processor()), 'compiler_hashes': {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in candidates.items()},
-              'optimized': args.opt,
-              'method': 'Fixed cached preprocessed C; baseline selection, identical IR optimization settings. Profiles exclude frontend, IR optimization, verification and file I/O. Balanced randomized process order; first two internal profile rounds discarded. Ratios use paired summed per-file medians; 5000 paired bootstrap resamples, seed 20261015. Runtime rounds are randomized, one warmup, correctness outputs must match. Application objects are direct AArch64 Mach-O. Normal-build runtime executables have no profiling instrumentation.',
+              'optimized': args.opt, 'selection_all': args.selection_all,
+              'method': 'Fixed cached preprocessed C; identical selection and IR optimization settings. Profiles exclude frontend, IR optimization, verification and file I/O. Balanced randomized process order; first two internal profile rounds discarded. Ratios use paired summed per-file medians; 5000 paired bootstrap resamples, seed 20261015. Runtime rounds are randomized, one warmup, correctness outputs must match. Runtime-only comparisons reuse host executables prepared separately; the build phase here emits direct AArch64 Mach-O. Normal-build runtime executables have no profiling instrumentation.',
               'profiler_hashes': {name: hashlib.sha256(path.read_bytes()).hexdigest() for name,path in [('baseline',args.baseline_profiler),('candidate',args.candidate_profiler)] if path},
               'builds': {}, 'profiles': {}, 'runtime': {}}
     rng = random.Random(20261015)
@@ -75,6 +79,8 @@ def main():
                     command = [compiler, 'cc', source, '--emit-object', '--regalloc', name.split('-')[-1], '-o', obj]
                     if args.opt:
                         command.append('-O')
+                    if args.selection_all:
+                        command.extend(['--isel-tier', 'full'])
                     run(command)
                     objects.append(obj)
                 executable = directory / binary
@@ -115,6 +121,8 @@ def main():
                         command = [profiler.resolve(), source.resolve(), args.profile_rounds]
                         if args.opt:
                             command.append('--opt')
+                        if args.selection_all:
+                            command.append('--selection-all')
                         if name.endswith('fast'):
                             command.append('--regalloc-fast')
                         row = json.loads(run(command, text=True).stdout)
@@ -133,6 +141,8 @@ def main():
         workloads = [(f'lua-{case}', 'lua', ['lua', str(root/'suite/lua/bench.lua'), case], None) for case in ['fib', 'sort', 'string', 'float']]
         workloads += [(f'quickjs-{case}', 'quickjs', ['qjs', '--stack-size', '4194304', str(root/'suite/quickjs/bench.js'), case], None) for case in ['fib', 'sort', 'string']]
         workloads += [('sqlite-queries', 'sqlite', ['sqlite3', ':memory:'], (root/'suite/sqlite/bench.sql').read_bytes())]
+        workloads = [w for w in workloads if w[1] in args.runtime_suites]
+        report['runtime_suites'] = args.runtime_suites
         for workload, suite, argv, stdin in workloads:
             samples = {name: [] for name in candidates}
             expected = None

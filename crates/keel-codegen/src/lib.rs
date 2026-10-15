@@ -266,7 +266,7 @@ impl std::error::Error for CodegenError {}
 pub(crate) fn loc_reg(loc: Loc) -> u8 {
     match loc {
         Loc::Reg(r) | Loc::FReg(r) => r,
-        Loc::Stack(_) => unreachable!("not a register"),
+        Loc::Stack(_) | Loc::Remat(_) => unreachable!("not a register"),
     }
 }
 

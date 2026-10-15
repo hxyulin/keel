@@ -848,7 +848,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         match func.inst_data(inst).clone() {
             InstData::StackAddr { .. } | InstData::Iconst { .. }
-                if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
+                if result.is_some_and(|r| {
+                    self.folded_values.contains(&r)
+                        || matches!(self.defined(r), Some(Loc::Remat(_)))
+                }) => {}
             InstData::Icmp { .. } | InstData::Fcmp { .. }
                 if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
             InstData::Iconst { ty, imm } => {
@@ -1460,6 +1463,7 @@ impl<'a> FunctionCompiler<'a> {
             Loc::Reg(r) => r64(r).to_string(),
             Loc::Stack(s) => self.slot(s),
             Loc::FReg(_) => unreachable!("not an integer"),
+            Loc::Remat(_) => unreachable!("i128 halves are not rematerialized"),
         }
     }
 
@@ -1492,7 +1496,16 @@ impl<'a> FunctionCompiler<'a> {
         let [b0, b1] = if self.ty(args[1]) == Type::I128 {
             self.halves(args[1])
         } else {
-            [self.operand(self.loc(args[1])), String::new()]
+            // A scalar shift/rotate count can be rematerialized, unlike
+            // the i128 halves accepted by `operand`.
+            let count = match self.loc(args[1]) {
+                Loc::Remat(value) => {
+                    self.rematerialize(S1, value);
+                    r64(S1).to_string()
+                }
+                loc => self.operand(loc),
+            };
+            [count, String::new()]
         };
         let label = |what: &str| format!(".L{}_{inst}_{what}", self.func.name);
         let pair = |this: &mut Self, lo: &str, hi: &str| {
@@ -1920,6 +1933,10 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("mov\trax, {}", self.slot(s)));
                 self.emit(format!("mov\tqword ptr {at}, rax"));
             }
+            Loc::Remat(value) => {
+                self.rematerialize(S0, value);
+                self.emit(format!("mov\tqword ptr {at}, rax"));
+            }
         }
     }
 
@@ -1937,6 +1954,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.load_into(tmp, ty, src);
                 self.emit_move(dst, tmp);
             }
+            Loc::Remat(_) => unreachable!("rematerialized locations cannot be load destinations"),
         }
     }
 
@@ -2783,7 +2801,20 @@ impl<'a> FunctionCompiler<'a> {
     /// unspecified upper bits, so copying all 64 is always fine.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
         match (dst, src) {
+            (Loc::Remat(_), _) => unreachable!("rematerialized locations are source-only"),
             _ if dst == src => {}
+            (Loc::Reg(d), Loc::Remat(value)) => self.rematerialize(d, value),
+            (Loc::FReg(d), Loc::Remat(value)) => {
+                self.rematerialize(S0, value);
+                self.emit(format!("movq\t{}, {}", xmm(d), r64(S0)));
+            }
+            (Loc::Stack(d), Loc::Remat(value)) => {
+                // Match stack-to-stack copies: rax is reserved, while
+                // rcx can already contain an outgoing argument. Keep the
+                // parallel-copy cycle temporary (r11) intact.
+                self.rematerialize(S0, value);
+                self.emit(format!("mov\t{}, {}", self.slot(d), r64(S0)));
+            }
             (Loc::Reg(d), Loc::Reg(s)) => self.emit(format!("mov\t{}, {}", r64(d), r64(s))),
             (Loc::FReg(d), Loc::FReg(s)) => self.emit(format!("movaps\t{}, {}", xmm(d), xmm(s))),
             (Loc::Reg(d), Loc::FReg(s)) => self.emit(format!("movq\t{}, {}", r64(d), xmm(s))),
@@ -2838,6 +2869,31 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    /// Recreates a pure value without changing flags: some lowering
+    /// sequences load operands between a comparison and its conditional move.
+    fn rematerialize(&mut self, d: u8, value: Value) {
+        use crate::regalloc::{RematRecipe, remat_recipe};
+        match remat_recipe(self.func, value).expect("valid rematerialization recipe") {
+            RematRecipe::Iconst(bits) => {
+                #[cfg(feature = "backend-profile")]
+                crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
+                if bits <= u64::from(u32::MAX) {
+                    self.emit(format!("mov\t{}, {bits:#x}", r32(d)));
+                } else if i32::try_from(bits as i64).is_ok() {
+                    self.emit(format!("mov\t{}, {}", r64(d), bits as i64));
+                } else {
+                    self.emit(format!("movabs\t{}, {bits:#x}", r64(d)));
+                }
+            }
+            RematRecipe::StackAddr(slot) => {
+                #[cfg(feature = "backend-profile")]
+                crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
+                let at = self.frame(self.stack_slot_offsets[slot.index()]);
+                self.emit(format!("lea\t{}, {at}", r64(d)));
+            }
+        }
+    }
+
     fn trap_label(&mut self) -> String {
         self.uses_trap = true;
         format!(".L{}_trap", self.func.name)
@@ -2873,6 +2929,10 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("mov\t{}, {}", r64(scratch), self.slot(s)));
                 scratch
             }
+            Loc::Remat(value) => {
+                self.rematerialize(scratch, value);
+                scratch
+            }
             Loc::FReg(_) => unreachable!("{value} is a float"),
         }
     }
@@ -2885,7 +2945,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("movsd\t{}, {}", xmm(scratch), self.slot(s)));
                 scratch
             }
-            Loc::Reg(_) => unreachable!("{value} is not a float"),
+            Loc::Reg(_) | Loc::Remat(_) => unreachable!("{value} is not a float"),
         }
     }
 

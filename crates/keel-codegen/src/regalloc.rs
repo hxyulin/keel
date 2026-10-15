@@ -86,6 +86,10 @@ use keel_ir::dominators::DominatorTree;
 #[cfg(feature = "experimental-regalloc")]
 mod local;
 mod program;
+mod remat;
+#[cfg(feature = "experimental-regalloc")]
+pub use remat::RematerializingAllocator;
+pub(crate) use remat::{RematRecipe, remat_recipe};
 #[cfg(feature = "experimental-regalloc")]
 mod split;
 #[cfg(feature = "experimental-regalloc")]
@@ -103,6 +107,9 @@ pub enum Loc {
     FReg(u8),
     /// A spill slot, by index; the code generator decides the offset.
     Stack(u32),
+    /// Immutable scalar recipe, computed at each read instead of stored.
+    /// Valid only for the recipe's own value; never a copy destination.
+    Remat(Value),
 }
 
 /// The registers the allocator may hand out.
@@ -299,37 +306,95 @@ fn allocate_tier_inner(
     baseline_allocation(order, locs, spill_slots, pools)
 }
 
+/// Prefer spilling cheap recipes only when the ordinary scan exhausts its
+/// registers. Liveness, free-register choices and slot assignment stay shared
+/// with the reference tiers; the rematerialization wrapper replaces the homes.
+#[cfg(feature = "experimental-regalloc")]
+pub(super) fn allocate_tier_remat(
+    input: &AllocationInput<'_>,
+    tier: AllocationTier,
+    eligible: &[bool],
+) -> Allocation {
+    profiling::scope!("rematerialization-register-allocation", tier.name());
+    backend_scope!(Allocation);
+    let func = input.func;
+    assert_eq!(eligible.len(), func.num_values());
+    let cfg = ControlFlowGraph::compute(func);
+    let order = cfg.reverse_postorder(func);
+    let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
+    let spill_slots = match tier {
+        AllocationTier::Fast => {
+            let intervals = build_fast_intervals(
+                func,
+                &cfg,
+                &order,
+                input.is_call,
+                input.returns_twice,
+                input.selection,
+            );
+            let mut spilled =
+                fast_scan_with_priority(&intervals, input.pools, &mut locs, |a, b| {
+                    (!eligible[a.value.index()])
+                        .cmp(&(!eligible[b.value.index()]))
+                        .then_with(|| b.end.cmp(&a.end))
+                });
+            assign_fast_spill_slots(&mut spilled, &mut locs)
+        }
+        AllocationTier::Full => {
+            let intervals = build_intervals(
+                func,
+                &cfg,
+                &order,
+                input.is_call,
+                input.returns_twice,
+                input.selection,
+            );
+            let mut spilled = linear_scan_with_priority(
+                &intervals,
+                input.pools,
+                &mut locs,
+                &input.selection.hints,
+                |a, b| {
+                    (!eligible[a.value.index()])
+                        .cmp(&(!eligible[b.value.index()]))
+                        .then_with(|| b.end().cmp(&a.end()))
+                },
+            );
+            assign_spill_slots(&mut spilled, &mut locs)
+        }
+        _ => unreachable!("rematerialization pressure policy supports Fast and Full"),
+    };
+    baseline_allocation(order, locs, spill_slots, input.pools)
+}
+
 fn baseline_allocation(
     order: Vec<Block>,
     locs: [Vec<Option<Loc>>; 2],
     spill_slots: u32,
     pools: &Pools,
 ) -> Allocation {
-    let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
-        let mut regs: Vec<u8> = locs
-            .iter()
-            .flatten()
-            .filter_map(|&loc| want(loc?))
-            .filter(|r| pool.contains(r))
-            .collect();
-        regs.sort_unstable();
-        regs.dedup();
-        regs
+    // Visit locations once, without collecting and sorting one entry for every
+    // value that happens to use the same callee-saved register.
+    let mut integer_used = RegisterMask::default();
+    let mut float_used = RegisterMask::default();
+    for &loc in locs.iter().flatten().flatten() {
+        match loc {
+            Loc::Reg(r) => integer_used.insert(r),
+            Loc::FReg(r) => float_used.insert(r),
+            Loc::Stack(_) | Loc::Remat(_) => {}
+        }
+    }
+    let used = |seen: &RegisterMask, pool: &[u8]| {
+        let mut result = RegisterMask::default();
+        for &r in pool {
+            if seen.contains(r) {
+                result.insert(r);
+            }
+        }
+        result.sorted_registers()
     };
-    let callee_saved_used = used(
-        |loc| match loc {
-            Loc::Reg(r) => Some(r),
-            _ => None,
-        },
-        pools.callee_saved,
-    );
-    let float_callee_saved_used = used(
-        |loc| match loc {
-            Loc::FReg(r) => Some(r),
-            _ => None,
-        },
-        pools.float_callee_saved,
-    );
+    let callee_saved_used = used(&integer_used, pools.callee_saved);
+    let float_callee_saved_used = used(&float_used, pools.float_callee_saved);
 
     Allocation {
         edits: AllocationEdits::default(),
@@ -402,12 +467,24 @@ impl RegisterMask {
     fn contains(&self, register: u8) -> bool {
         self.0[register as usize / 64] & (1 << (register % 64)) != 0
     }
+
+    fn sorted_registers(&self) -> Vec<u8> {
+        let mut registers = Vec::new();
+        for (i, &word) in self.0.iter().enumerate() {
+            let mut remaining = word;
+            while remaining != 0 {
+                registers.push((i * 64 + remaining.trailing_zeros() as usize) as u8);
+                remaining &= remaining - 1;
+            }
+        }
+        registers
+    }
 }
 
 fn register_number(loc: Loc) -> u8 {
     match loc {
         Loc::Reg(r) | Loc::FReg(r) => r,
-        Loc::Stack(_) => unreachable!("only registers participate in the scan"),
+        Loc::Stack(_) | Loc::Remat(_) => unreachable!("only registers participate in the scan"),
     }
 }
 
@@ -539,6 +616,15 @@ fn fast_scan<'a>(
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
 ) -> Vec<&'a FastInterval> {
+    fast_scan_with_priority(intervals, pools, locs, |a, b| b.end.cmp(&a.end))
+}
+
+fn fast_scan_with_priority<'a>(
+    intervals: &'a [FastInterval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+    priority: impl Fn(&FastInterval, &FastInterval) -> std::cmp::Ordering,
+) -> Vec<&'a FastInterval> {
     profiling::scope!("contiguous-linear-scan");
     backend_scope!(Scan);
     let mut sorted: Vec<_> = intervals.iter().collect();
@@ -583,10 +669,10 @@ fn fast_scan<'a>(
                     && (caller.contains(&register_number(*reg))
                         || callee.contains(&register_number(*reg)))
             })
-            .max_by_key(|(_, (iv, _))| iv.end)
+            .max_by(|(_, (a, _)), (_, (b, _))| priority(b, a))
             .map(|(i, _)| i);
         match victim {
-            Some(i) if active[i].0.end > cur.end => {
+            Some(i) if priority(cur, active[i].0).is_gt() => {
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted);
@@ -603,18 +689,12 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     profiling::scope!("spill-slot-assignment");
     backend_scope!(SpillSlots);
     spilled.sort_unstable_by_key(|iv| (iv.start, iv.value, iv.half));
-    let mut active: Vec<(u32, u32)> = Vec::new();
-    let mut count = 0;
+    let mut slots = SpillSlots::default();
     for iv in spilled.iter() {
-        active.retain(|&(end, _)| end >= iv.start);
-        let slot = (0..)
-            .find(|&s| active.iter().all(|&(_, used)| used != s))
-            .unwrap();
-        active.push((iv.end, slot));
-        count = count.max(slot + 1);
+        let slot = slots.assign(iv.start, iv.end);
         locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
     }
-    count
+    slots.count
 }
 
 /// Live-in and live-out sets, indexed by block.
@@ -1036,19 +1116,64 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
     profiling::scope!("spill-slot-assignment");
     backend_scope!(SpillSlots);
     spilled.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
-    // (end, slot) of slots in use.
-    let mut active: Vec<(u32, u32)> = Vec::new();
-    let mut count = 0;
+    let mut slots = SpillSlots::default();
     for iv in spilled.iter() {
-        active.retain(|&(end, _)| end >= iv.start());
-        let slot = (0..)
-            .find(|&s| active.iter().all(|&(_, used)| used != s))
-            .expect("some slot is free");
-        active.push((iv.end(), slot));
-        count = count.max(slot + 1);
+        let slot = slots.assign(iv.start(), iv.end());
         locs[iv.half][iv.value.index()] = Some(Loc::Stack(slot));
     }
-    count
+    slots.count
+}
+
+/// Assign the lowest free stack slot after expiring intervals in start order.
+/// The occupancy words avoid scanning every active interval for every smaller
+/// slot when pressure is high; expiration retains inclusive range endpoints.
+#[derive(Default)]
+struct SpillSlots {
+    active: Vec<(u32, u32)>,
+    // Most functions never need more than 64 slots. Keep their occupancy
+    // inline and allocate extra words only under greater spill pressure.
+    first_occupied: u64,
+    occupied_tail: Vec<u64>,
+    count: u32,
+}
+
+impl SpillSlots {
+    fn assign(&mut self, start: u32, end: u32) -> u32 {
+        let first = &mut self.first_occupied;
+        let tail = &mut self.occupied_tail;
+        self.active.retain(|&(until, slot)| {
+            if until >= start {
+                true
+            } else {
+                let word = if slot < 64 {
+                    &mut *first
+                } else {
+                    &mut tail[slot as usize / 64 - 1]
+                };
+                *word &= !(1u64 << (slot % 64));
+                false
+            }
+        });
+        let slot = if self.first_occupied != u64::MAX {
+            let bit = self.first_occupied.trailing_ones();
+            self.first_occupied |= 1u64 << bit;
+            bit
+        } else {
+            let word = match self.occupied_tail.iter().position(|&bits| bits != u64::MAX) {
+                Some(word) => word,
+                None => {
+                    self.occupied_tail.push(0);
+                    self.occupied_tail.len() - 1
+                }
+            };
+            let bit = self.occupied_tail[word].trailing_ones();
+            self.occupied_tail[word] |= 1u64 << bit;
+            (word as u32 + 1) * 64 + bit
+        };
+        self.active.push((end, slot));
+        self.count = self.count.max(slot + 1);
+        slot
+    }
 }
 
 #[cfg(test)]
@@ -1079,6 +1204,167 @@ mod tests {
             .iter()
             .find(|iv| iv.value.index() == index)
             .expect("value has an interval")
+    }
+
+    #[cfg(feature = "experimental-regalloc")]
+    #[test]
+    fn rematerialization_priority_evicts_cheap_values_before_longer_expensive_values() {
+        let pools = Pools {
+            caller_saved: &[9],
+            callee_saved: &[],
+            float_caller_saved: &[],
+            float_callee_saved: &[],
+        };
+        let intervals = [
+            Interval {
+                value: Value::new(0),
+                half: 0,
+                ranges: vec![(0, 5)],
+                crosses_call: false,
+                float: false,
+            },
+            Interval {
+                value: Value::new(1),
+                half: 0,
+                ranges: vec![(2, 9)],
+                crosses_call: false,
+                float: false,
+            },
+        ];
+        let fast = intervals.each_ref().map(|iv| FastInterval {
+            value: iv.value,
+            half: iv.half,
+            start: iv.start(),
+            end: iv.end(),
+            crosses_call: iv.crosses_call,
+            float: iv.float,
+        });
+        // With no eligible recipes, the longer interval is spilled as usual.
+        // Marking the shorter first value cheap must instead preserve the
+        // expensive current value, despite its later endpoint.
+        for eligible in [[false, false], [true, false]] {
+            let mut locs = [vec![None; 2], vec![None; 2]];
+            let spilled = fast_scan_with_priority(&fast, &pools, &mut locs, |a, b| {
+                (!eligible[a.value.index()])
+                    .cmp(&(!eligible[b.value.index()]))
+                    .then_with(|| b.end.cmp(&a.end))
+            });
+            let expected = usize::from(!eligible[0]);
+            assert_eq!(spilled.len(), 1);
+            assert_eq!(spilled[0].value.index(), expected);
+
+            let mut locs = [vec![None; 2], vec![None; 2]];
+            let spilled = linear_scan_with_priority(
+                &intervals,
+                &pools,
+                &mut locs,
+                &Default::default(),
+                |a, b| {
+                    (!eligible[a.value.index()])
+                        .cmp(&(!eligible[b.value.index()]))
+                        .then_with(|| b.end().cmp(&a.end()))
+                },
+            );
+            assert_eq!(spilled.len(), 1);
+            assert_eq!(spilled[0].value.index(), expected);
+        }
+    }
+
+    #[test]
+    fn spill_slots_match_lowest_free_reference() {
+        // Include inclusive endpoint collisions, large simultaneous pressure,
+        // holes in the free slots, and complete expiration between groups.
+        for pattern in 0..8u32 {
+            let mut slots = SpillSlots::default();
+            let mut reference = Vec::new();
+            let mut count = 0;
+            let mut start = 0;
+            for i in 0..1024u32 {
+                start += match pattern {
+                    0 => 0,
+                    1 => 1,
+                    2 => i % 3,
+                    3 => {
+                        if i % 131 == 0 {
+                            1024
+                        } else {
+                            0
+                        }
+                    }
+                    _ => (i.wrapping_mul(1664525).wrapping_add(pattern) >> 20) % 5,
+                };
+                let end = start
+                    + match pattern {
+                        0 => i % 17,
+                        1 => 127,
+                        2 => i % 257,
+                        3 => 1 + i % 128,
+                        _ => (i.wrapping_mul(1013904223) >> 17) % 513,
+                    };
+                reference.retain(|&(until, _)| until >= start);
+                let expected = (0..)
+                    .find(|&slot| reference.iter().all(|&(_, used)| used != slot))
+                    .unwrap();
+                reference.push((end, expected));
+                count = count.max(expected + 1);
+                assert_eq!(
+                    slots.assign(start, end),
+                    expected,
+                    "pattern {pattern}, interval {i}"
+                );
+                assert_eq!(slots.count, count);
+            }
+        }
+    }
+
+    #[test]
+    fn spill_occupancy_is_inline_until_slot_64() {
+        let mut slots = SpillSlots::default();
+        for expected in 0..64 {
+            assert_eq!(slots.assign(0, 0), expected);
+        }
+        assert_eq!(slots.occupied_tail.capacity(), 0);
+        // All 64 expire, and reusing them still needs no overflow allocation.
+        for expected in 0..64 {
+            assert_eq!(slots.assign(1, 1), expected);
+        }
+        assert_eq!(slots.occupied_tail.capacity(), 0);
+        assert_eq!(slots.assign(1, 1), 64);
+        assert_eq!(slots.occupied_tail, [1]);
+        assert_eq!(slots.assign(2, 2), 0);
+        assert_eq!(slots.occupied_tail, [0]);
+    }
+
+    #[test]
+    fn callee_saved_discovery_matches_sorted_unique_locations() {
+        let locs = [
+            vec![
+                Some(Loc::Reg(255)),
+                Some(Loc::Reg(64)),
+                Some(Loc::FReg(64)),
+                None,
+            ],
+            vec![
+                Some(Loc::Reg(64)),
+                Some(Loc::FReg(255)),
+                Some(Loc::Stack(64)),
+                Some(Loc::Reg(7)),
+            ],
+        ];
+        let alloc = baseline_allocation(
+            Vec::new(),
+            locs.clone(),
+            65,
+            &Pools {
+                caller_saved: &[],
+                callee_saved: &[255, 7, 64, 64, 0],
+                float_caller_saved: &[],
+                float_callee_saved: &[255, 64, 255, 0],
+            },
+        );
+        assert_eq!(alloc.locs, locs);
+        assert_eq!(alloc.callee_saved_used, [7, 64, 255]);
+        assert_eq!(alloc.float_callee_saved_used, [64, 255]);
     }
 
     const LOOP: &str = "
@@ -1234,7 +1520,7 @@ mod tests {
                                 match loc {
                                     Loc::Reg(_) => !a.float,
                                     Loc::FReg(_) => a.float,
-                                    Loc::Stack(_) => true,
+                                    Loc::Stack(_) | Loc::Remat(_) => true,
                                 },
                                 "{}: {} is in the wrong register class: {loc:?}",
                                 func.name,

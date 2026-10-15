@@ -64,6 +64,8 @@ struct Options {
     optimization: keel_opt::OptimizationTier,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
+    #[cfg(feature = "experimental-regalloc")]
+    remat: u8,
     tuning: keel_codegen::tuning::TuningCpu,
     ir_lines: bool,
     emit_ir: bool,
@@ -113,6 +115,20 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("full") => keel_opt::OptimizationTier::Full,
                     _ => return Err("`--opt-tier` needs none, basic, or full".into()),
                 };
+            }
+            "--remat" => {
+                #[cfg(not(feature = "experimental-regalloc"))]
+                return Err("--remat requires experimental-regalloc".into());
+                #[cfg(feature = "experimental-regalloc")]
+                {
+                    opts.remat = match args.next().map(String::as_str) {
+                        Some("constants") => 1,
+                        Some("stack") => 2,
+                        Some("all") => 3,
+                        Some("pressure") => 7,
+                        _ => return Err("--remat needs constants, stack, all, or pressure".into()),
+                    };
+                }
             }
             "--regalloc" => {
                 opts.allocation = match args.next().map(String::as_str) {
@@ -182,6 +198,16 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
     }
+    #[cfg(feature = "experimental-regalloc")]
+    if opts.remat & 4 != 0
+        && !matches!(
+            opts.allocation,
+            keel_codegen::regalloc::AllocationTier::Fast
+                | keel_codegen::regalloc::AllocationTier::Full
+        )
+    {
+        return Err("--remat pressure requires --regalloc fast or full".into());
+    }
     Ok(opts)
 }
 
@@ -232,6 +258,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--isel",
                     "--opt-tier",
                     "--regalloc",
+                    "--remat",
                     "--isel-tier",
                     "--tune",
                 ],
@@ -255,6 +282,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--isel",
                     "--opt-tier",
                     "--regalloc",
+                    "--remat",
                     "--isel-tier",
                     "--tune",
                 ],
@@ -326,9 +354,20 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
         options: opts.selection,
         cpu: opts.tuning,
     };
+    #[cfg(feature = "experimental-regalloc")]
+    let remat = keel_codegen::regalloc::RematerializingAllocator {
+        base: &opts.allocation,
+        prefer_spilling: opts.remat & 4 != 0,
+        constants: opts.remat & 1 != 0,
+        stack_addresses: opts.remat & 2 != 0,
+    };
+    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator = &opts.allocation;
+    #[cfg(feature = "experimental-regalloc")]
+    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator =
+        if opts.remat != 0 { &remat } else { allocator };
     let pipeline = keel_codegen::CodegenPipeline {
         selector: &selector,
-        allocator: &opts.allocation,
+        allocator,
     };
     if opts.emit_object {
         let output = opts

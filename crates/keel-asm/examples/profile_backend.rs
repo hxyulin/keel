@@ -28,11 +28,11 @@ struct AllocationMetrics {
     spilled_value_halves: u64,
     callee_saves: u64,
 }
-struct CountingAllocator {
-    tier: keel_codegen::regalloc::AllocationTier,
+struct CountingAllocator<'a> {
+    base: &'a dyn keel_codegen::regalloc::RegisterAllocator,
     metrics: RefCell<AllocationMetrics>,
 }
-impl keel_codegen::regalloc::RegisterAllocator for CountingAllocator {
+impl keel_codegen::regalloc::RegisterAllocator for CountingAllocator<'_> {
     fn name(&self) -> &'static str {
         "metrics"
     }
@@ -40,7 +40,7 @@ impl keel_codegen::regalloc::RegisterAllocator for CountingAllocator {
         &self,
         input: &keel_codegen::regalloc::AllocationInput<'_>,
     ) -> keel_codegen::regalloc::Allocation {
-        let allocation = self.tier.allocate(input);
+        let allocation = self.base.allocate(input);
         let mut metrics = self.metrics.borrow_mut();
         metrics.spill_slots += u64::from(allocation.spill_slots);
         metrics.spilled_value_halves += allocation
@@ -72,6 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "--regalloc-local"
                 | "--regalloc-split"
                 | "--regalloc-weighted"
+                | "--remat-constants"
+                | "--remat-stack"
+                | "--remat-all"
+                | "--remat-pressure"
         ) {
             return Err(format!("unknown flag: {flag}").into());
         }
@@ -116,6 +120,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }) {
         return Err("local/split/weighted require the experimental-regalloc feature".into());
     }
+    let remat_pressure = args.iter().any(|a| a == "--remat-pressure");
+    let remat_constants = args.iter().any(|a| {
+        matches!(
+            a.as_str(),
+            "--remat-constants" | "--remat-all" | "--remat-pressure"
+        )
+    });
+    let remat_stack = args.iter().any(|a| {
+        matches!(
+            a.as_str(),
+            "--remat-stack" | "--remat-all" | "--remat-pressure"
+        )
+    });
+    #[cfg(not(feature = "experimental-regalloc"))]
+    if remat_constants || remat_stack {
+        return Err("rematerialization requires experimental-regalloc".into());
+    }
+    if remat_pressure
+        && !matches!(
+            allocation,
+            keel_codegen::regalloc::AllocationTier::Fast
+                | keel_codegen::regalloc::AllocationTier::Full
+        )
+    {
+        return Err("--remat-pressure requires Fast or Full".into());
+    }
+    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator = &allocation;
+    #[cfg(feature = "experimental-regalloc")]
+    let remat = keel_codegen::regalloc::RematerializingAllocator {
+        base: &allocation,
+        prefer_spilling: remat_pressure,
+        constants: remat_constants,
+        stack_addresses: remat_stack,
+    };
+    #[cfg(feature = "experimental-regalloc")]
+    let allocator: &dyn keel_codegen::regalloc::RegisterAllocator =
+        if remat_constants || remat_stack {
+            &remat
+        } else {
+            allocator
+        };
     let source = std::fs::read_to_string(path)?;
     let mut module = if path.ends_with(".keel") {
         if debug {
@@ -145,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let pipeline = keel_codegen::CodegenPipeline {
         selector: &selector,
-        allocator: &allocation,
+        allocator,
     };
     let target = Target::Aarch64AppleDarwin;
     let features = keel_asm::TargetFeatures::default();
@@ -163,7 +208,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "profiling changed structured output"
     );
     let allocator_metrics = CountingAllocator {
-        tier: allocation,
+        base: allocator,
         metrics: RefCell::new(AllocationMetrics::default()),
     };
     let counted = keel_codegen::compile_program_with_pipeline(
@@ -280,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!(
         "{}",
-        json!({"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_weighted":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "weighted","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
+        json!({"remat_pressure":remat_pressure,"remat_constants":remat_constants,"remat_stack":remat_stack,"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_weighted":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "weighted","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
         "functions":module.functions.len(),"ir_instructions":module.functions.iter().map(|f|f.layout_insts().count()).sum::<usize>(),
         "object_bytes":expected.len(),"code_bytes":assembly.text.len(),"native_instructions":program.stats().instructions,
         "allocation_metrics":{"spill_slots":allocation_metrics.spill_slots,"spilled_value_halves":allocation_metrics.spilled_value_halves,"callee_saves":allocation_metrics.callee_saves},"explicit_spill_helper_calls":spill_counters,"objects_identical":true,"runs":runs,"function_profiles":hot_functions})

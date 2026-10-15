@@ -81,13 +81,22 @@ impl Stage {
 pub enum Counter {
     SpillHelperLoads,
     SpillHelperStores,
+    RematConstants,
+    RematStackAddresses,
 }
 impl Counter {
-    pub const ALL: [Self; 2] = [Self::SpillHelperLoads, Self::SpillHelperStores];
+    pub const ALL: [Self; 4] = [
+        Self::SpillHelperLoads,
+        Self::SpillHelperStores,
+        Self::RematConstants,
+        Self::RematStackAddresses,
+    ];
     pub fn name(self) -> &'static str {
         match self {
             Self::SpillHelperLoads => "spill_helper_loads",
             Self::SpillHelperStores => "spill_helper_stores",
+            Self::RematConstants => "rematerialized_constants",
+            Self::RematStackAddresses => "rematerialized_stack_addresses",
         }
     }
 }
@@ -251,10 +260,10 @@ mod tests {
             let _function = function("second");
             count(Counter::SpillHelperStores);
         });
-        assert_eq!(report.counters, [2, 2]);
-        assert_eq!(report.functions[0].counters, [1, 1]);
-        assert_eq!(report.functions[1].counters, [0, 1]);
-        assert_eq!(capture(|| ()).1.counters, [0, 0]);
+        assert_eq!(report.counters, [2, 2, 0, 0]);
+        assert_eq!(report.functions[0].counters, [1, 1, 0, 0]);
+        assert_eq!(report.functions[1].counters, [0, 1, 0, 0]);
+        assert_eq!(capture(|| ()).1.counters, [0; Counter::ALL.len()]);
     }
 
     #[test]

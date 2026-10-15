@@ -102,7 +102,7 @@ use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::metadata::{Cfi, Directive, Expression, SectionKind, Sink};
 use crate::parallel_copy::sequentialize;
-use crate::regalloc::{self, Allocation, Loc, Pools};
+use crate::regalloc::{self, Allocation, Loc, Pools, RematRecipe};
 use crate::{CodegenError, Format, loc_reg, pieces};
 use keel_ir::{
     AbiParam, ArgExt, AsmClobber, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause,
@@ -1213,7 +1213,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         match func.inst_data(inst).clone() {
             InstData::StackAddr { .. } | InstData::Iconst { .. }
-                if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
+                if result.is_some_and(|r| {
+                    self.folded_values.contains(&r)
+                        || matches!(self.defined(r), Some(Loc::Remat(_)))
+                }) => {}
             InstData::Icmp { .. } | InstData::Fcmp { .. }
                 if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
             InstData::Iconst { imm, .. } => {
@@ -2037,6 +2040,7 @@ impl<'a> FunctionCompiler<'a> {
         let (r, scratch) = match dst {
             Loc::Reg(r) | Loc::FReg(r) => (r, None),
             Loc::Stack(s) => (if ty.is_float() { FS0 } else { S0 }, Some(s)),
+            Loc::Remat(_) => unreachable!("a parameter cannot define a recipe"),
         };
         let op = match ty {
             Type::I8 => "ldrb",
@@ -2780,6 +2784,7 @@ impl<'a> FunctionCompiler<'a> {
     fn address(&mut self, dst: Loc, base: &str, offset: usize) {
         let r = match dst {
             Loc::Reg(r) => r,
+            Loc::Remat(_) => unreachable!("an address destination cannot be a recipe"),
             _ => S0,
         };
         // `add` takes a 12-bit immediate, optionally shifted by 12.
@@ -3557,7 +3562,18 @@ impl<'a> FunctionCompiler<'a> {
     /// unspecified upper bits, so copying all 64 is always fine.
     fn emit_move(&mut self, dst: Loc, src: Loc) {
         match (dst, src) {
+            (Loc::Remat(_), _) => unreachable!("a move cannot define a recipe"),
             _ if dst == src => {}
+            (Loc::Reg(d), Loc::Remat(value)) => self.rematerialize(d, value),
+            (Loc::FReg(d), Loc::Remat(value)) => {
+                self.rematerialize(S1, value);
+                self.emit_move(Loc::FReg(d), Loc::Reg(S1));
+            }
+            (Loc::Stack(d), Loc::Remat(value)) => {
+                // x16 may contain a pending parallel-copy cycle value.
+                self.rematerialize(S1, value);
+                self.spill(true, false, S1, d);
+            }
             (Loc::Reg(d), Loc::Reg(s)) => self.native(
                 Opcode::ORR_64_log_shift,
                 [
@@ -3709,11 +3725,33 @@ impl<'a> FunctionCompiler<'a> {
         Address::base(Reg::x(self.use_reg(addr, scratch)))
     }
 
+    /// Recreates a pure scalar value without changing NZCV. This also runs
+    /// during parallel copies, where flags may hold a pending branch result.
+    fn rematerialize(&mut self, scratch: u8, value: Value) {
+        match regalloc::remat_recipe(self.func, value).expect("validated recipe") {
+            RematRecipe::Iconst(bits) => {
+                #[cfg(feature = "backend-profile")]
+                crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
+                self.materialize(scratch, bits, true);
+            }
+            RematRecipe::StackAddr(slot) => {
+                #[cfg(feature = "backend-profile")]
+                crate::backend_profile::count(crate::backend_profile::Counter::RematStackAddresses);
+                let offset = self.stack_slot_offsets[slot.index()];
+                self.address(Loc::Reg(scratch), self.base, offset);
+            }
+        }
+    }
+
     fn use_reg(&mut self, value: Value, scratch: u8) -> u8 {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
                 self.spill(false, false, scratch, s);
+                scratch
+            }
+            Loc::Remat(value) => {
+                self.rematerialize(scratch, value);
                 scratch
             }
             Loc::FReg(_) => unreachable!("{value} is a float"),
@@ -3728,7 +3766,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.spill(false, false, scratch, s);
                 scratch
             }
-            Loc::FReg(_) => unreachable!("an integer half"),
+            Loc::FReg(_) | Loc::Remat(_) => unreachable!("an integer half"),
         }
     }
 
@@ -3772,7 +3810,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.spill(false, true, scratch, s);
                 scratch
             }
-            Loc::Reg(_) => unreachable!("{value} is not a float"),
+            Loc::Reg(_) | Loc::Remat(_) => unreachable!("{value} is not a float"),
         }
     }
 
@@ -3782,6 +3820,7 @@ impl<'a> FunctionCompiler<'a> {
         let value = result.expect("instruction has a result");
         match self.defined(value) {
             Some(Loc::Reg(r)) => r,
+            Some(Loc::Remat(_)) => unreachable!("a lowered instruction cannot define a recipe"),
             _ => S0,
         }
     }
@@ -3791,6 +3830,7 @@ impl<'a> FunctionCompiler<'a> {
         let value = result.expect("instruction has a result");
         match self.defined(value) {
             Some(Loc::FReg(r)) => r,
+            Some(Loc::Remat(_)) => unreachable!("a float instruction cannot define a recipe"),
             _ => FS0,
         }
     }
@@ -3799,8 +3839,12 @@ impl<'a> FunctionCompiler<'a> {
     /// [`Self::def_freg`].
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
-        if let Some(Loc::Stack(s)) = self.defined(value) {
-            self.spill(true, self.func.value_type(value).is_float(), reg, s);
+        match self.defined(value) {
+            Some(Loc::Stack(s)) => {
+                self.spill(true, self.func.value_type(value).is_float(), reg, s);
+            }
+            Some(Loc::Remat(_)) => unreachable!("a lowered instruction cannot define a recipe"),
+            _ => {}
         }
     }
 
@@ -3819,6 +3863,7 @@ impl<'a> FunctionCompiler<'a> {
             Loc::Reg(r) => format!("x{r}"),
             Loc::FReg(r) => format!("d{r}"),
             Loc::Stack(s) => self.slot(s).to_string(),
+            Loc::Remat(value) => format!("remat({value})"),
         }
     }
 
