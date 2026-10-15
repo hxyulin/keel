@@ -42,6 +42,7 @@ def main():
     p.add_argument('--opt', action='store_true', help='optimize IR before backend timing and in runtime builds')
     p.add_argument('--build-only', action='store_true')
     p.add_argument('--runtime-only', action='store_true')
+    p.add_argument('--runtime-tier', choices=['both', 'full', 'fast'], default='both', help='restrict prebuilt runtime-only comparisons')
     p.add_argument('--profile-only', action='store_true')
     args = p.parse_args()
     if min(args.pairs, args.profile_rounds, args.runtime_rounds) < 3:
@@ -51,6 +52,10 @@ def main():
     candidates = {'baseline-full': args.baseline_compiler.resolve(), 'baseline-fast': args.baseline_compiler.resolve()}
     if args.candidate_compiler:
         candidates.update({'candidate-full': args.candidate_compiler.resolve(), 'candidate-fast': args.candidate_compiler.resolve()})
+    if args.runtime_tier != 'both':
+        if not args.runtime_only:
+            p.error('--runtime-tier requires --runtime-only')
+        candidates = {name: binary for name, binary in candidates.items() if name.endswith('-' + args.runtime_tier)}
     report = {'host': platform.platform(),
               'cpu': (subprocess.check_output(['sysctl', '-n', 'machdep.cpu.brand_string'], text=True).strip() if platform.system() == 'Darwin' else platform.processor()), 'compiler_hashes': {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in candidates.items()},
               'optimized': args.opt,

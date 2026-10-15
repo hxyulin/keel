@@ -1,6 +1,7 @@
 //! Tree patterns matched against the SSA DAG before register allocation.
 //! A cover is local to a block and only consumes single-use, pure nodes.
 //! Shared DAG nodes remain materialized; selected leaves are live at the root.
+use crate::regalloc::{Constraint, OperandKind, ValuePart};
 use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, Type, Value, ValueDef};
 use std::collections::{HashMap, HashSet};
 
@@ -35,11 +36,50 @@ pub struct Match {
     pub args: Vec<Value>,
     pub shift: u8,
 }
+/// Dense instruction indices, sparse operand lists. Fusion makes overrides
+/// common enough that hashing every instruction in each liveness pass is costly.
+#[derive(Default)]
+struct OperandTable {
+    indices: Vec<u32>,
+    lists: Vec<Vec<Value>>,
+}
+impl OperandTable {
+    fn get(&self, inst: &Inst) -> Option<&Vec<Value>> {
+        let index = *self.indices.get(inst.index())?;
+        if index == u32::MAX {
+            None
+        } else {
+            Some(&self.lists[index as usize])
+        }
+    }
+    fn insert(&mut self, inst: Inst, operands: Vec<Value>) {
+        if self.indices.len() <= inst.index() {
+            self.indices.resize(inst.index() + 1, u32::MAX);
+        }
+        let index = &mut self.indices[inst.index()];
+        if *index == u32::MAX {
+            *index = self.lists.len() as u32;
+            self.lists.push(operands);
+        } else {
+            self.lists[*index as usize] = operands;
+        }
+    }
+    fn remove(&mut self, inst: &Inst) {
+        if let Some(index) = self.indices.get_mut(inst.index()) {
+            if *index != u32::MAX {
+                self.lists[*index as usize].clear();
+                *index = u32::MAX;
+            }
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Selection {
+    constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
     pub matches: HashMap<Inst, Match>,
-    covered: HashSet<Inst>,
-    allocation_operands: HashMap<Inst, Vec<Value>>,
+    covered: Vec<bool>,
+    allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
     allocation_folds: HashMap<Inst, Vec<Value>>,
@@ -47,6 +87,68 @@ pub struct Selection {
     pub hints: HashMap<Value, Vec<Value>>,
 }
 impl Selection {
+    /// Require a location at a selected sequence boundary. Parts must be
+    /// resolved and present in the selected operands/results. Allocators must
+    /// satisfy these requirements; emission rejects unsatisfied constraints.
+    /// Fixed registers must belong to the target's allocatable pools.
+    pub fn set_constraint(
+        &mut self,
+        inst: Inst,
+        part: ValuePart,
+        kind: OperandKind,
+        constraint: Constraint,
+    ) {
+        self.constraints.insert((inst, part, kind), constraint);
+    }
+    pub fn constraint(&self, inst: Inst, part: ValuePart, kind: OperandKind) -> Constraint {
+        self.constraints
+            .get(&(inst, part, kind))
+            .copied()
+            .unwrap_or(Constraint::Any)
+    }
+    pub(crate) fn constraints(&self) -> &HashMap<(Inst, ValuePart, OperandKind), Constraint> {
+        &self.constraints
+    }
+
+    /// Fusion changes where operands are read. Publish the compare's selected
+    /// leaves at the branch before allocation, rather than hiding this in emission.
+    pub(crate) fn fuse_compares(
+        &mut self,
+        func: &Function,
+        folds: impl Fn(&InstData) -> Vec<Value>,
+    ) -> HashSet<Value> {
+        let mut fused = HashSet::new();
+        for (cond, compare, branch) in crate::fold::fused_compare_pairs(func) {
+            let mut args = self.operands(func, branch);
+            let Some(i) = args.iter().position(|&v| v == cond) else {
+                continue;
+            };
+            if self.covered(compare)
+                || self.covered(branch)
+                || self
+                    .constraints
+                    .keys()
+                    .any(|&(inst, _, _)| inst == compare || inst == branch)
+            {
+                continue;
+            }
+            args.remove(i);
+            let mut leaves = self.operands(func, compare);
+            let mut folded = folds(func.inst_data(compare));
+            self.remaining_folds(func, compare, &mut folded);
+            for value in folded {
+                if let Some(i) = leaves.iter().position(|&v| v == value) {
+                    leaves.remove(i);
+                }
+            }
+            args.extend(leaves);
+            self.set_operands(branch, args);
+            self.cover(compare);
+            fused.insert(cond);
+        }
+        fused
+    }
+
     /// Choose only measured same-block scalar multiply alternatives.
     pub(crate) fn tune_multiplications(&mut self, func: &Function, cpu: crate::tuning::TuningCpu) {
         for (_, inst) in func.layout_insts() {
@@ -92,7 +194,10 @@ impl Selection {
     /// Suppress an instruction subsumed by a selected root. Custom selectors
     /// must preserve all side effects and every use of its results.
     pub fn cover(&mut self, inst: Inst) {
-        self.covered.insert(inst);
+        if self.covered.len() <= inst.index() {
+            self.covered.resize(inst.index() + 1, false);
+        }
+        self.covered[inst.index()] = true;
     }
     /// Override allocation operands after encoding values in a target operand.
     /// Values must be resolved and include every value read by the emitter.
@@ -115,7 +220,7 @@ impl Selection {
     }
 
     pub fn covered(&self, inst: Inst) -> bool {
-        self.covered.contains(&inst)
+        self.covered.get(inst.index()).copied().unwrap_or(false)
     }
     pub fn operands(&self, func: &Function, inst: Inst) -> Vec<Value> {
         if self.covered(inst) {
@@ -155,7 +260,7 @@ impl Selection {
                 .first()
                 .is_some_and(|v| elided.contains(v))
             {
-                self.covered.insert(inst);
+                self.cover(inst);
             }
             if self.covered(inst) || self.matches.contains_key(&inst) {
                 continue;
@@ -263,7 +368,7 @@ impl Selection {
                         leaves.push(func.resolve(child_args[1]));
                         0
                     };
-                    plan.covered.insert(child);
+                    plan.cover(child);
                     plan.matches.insert(
                         inst,
                         Match {

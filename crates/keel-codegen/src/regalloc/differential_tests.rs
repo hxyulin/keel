@@ -281,7 +281,7 @@ fn assert_reference_equivalence(
             let mut reference_spills =
                 reference_linear_scan(intervals, &pools, &mut expected, hints);
             let expected_slots = reference_assign_spill_slots(&mut reference_spills, &mut expected);
-            let actual = tier.allocate(func, &pools, &is_call, &returns_twice, selection);
+            let actual = allocate_tier(func, &pools, &is_call, &returns_twice, selection, tier);
             assert_eq!(actual.order, order);
             assert_eq!(
                 actual.locs, expected,
@@ -378,7 +378,14 @@ fn returns_twice_pins_both_i128_halves_and_spill_slots() {
         float_caller_saved: &[],
         float_callee_saved: &[],
     };
-    let alloc = AllocationTier::Fast.allocate(&func, &pools, &call, &call, &selection);
+    let alloc = allocate_tier(
+        &func,
+        &pools,
+        &call,
+        &call,
+        &selection,
+        AllocationTier::Fast,
+    );
     let low = alloc.loc(Value::new(0)).unwrap();
     let high = alloc.hi_loc(Value::new(0)).unwrap();
     assert_ne!(low, high);

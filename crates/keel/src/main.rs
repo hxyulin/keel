@@ -117,8 +117,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "--regalloc" => {
                 opts.allocation = match args.next().map(String::as_str) {
                     Some("fast") => keel_codegen::regalloc::AllocationTier::Fast,
+                    #[cfg(feature = "experimental-regalloc")]
+                    Some("local") => keel_codegen::regalloc::AllocationTier::Local,
+                    #[cfg(feature = "experimental-regalloc")]
+                    Some("split") => keel_codegen::regalloc::AllocationTier::Split,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full".into()),
+                    _ => return Err("`--regalloc` needs fast or full (local/split require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {

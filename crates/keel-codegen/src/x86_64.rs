@@ -314,6 +314,8 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    current_inst: Option<Inst>,
+    allocation_index: Option<usize>,
     selection: crate::select::Selection,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: Vec<usize>,
@@ -497,16 +499,25 @@ impl<'a> FunctionCompiler<'a> {
             offset - 176
         });
 
-        let selection = pipeline
+        let mut selection = pipeline
             .selector
             .select(func, crate::select::Target::X86, &|data| folds(func, data));
-        let alloc = pipeline.allocator.allocate(
+        let fused_compares = {
+            backend_scope!(CompareFusion);
+            selection.fuse_compares(func, |data| folds(func, data))
+        };
+        let is_call = |data: &InstData| is_call(func, data);
+        let returns_twice = |data: &InstData| returns_twice(func, data);
+        let input = crate::regalloc::AllocationInput {
             func,
-            pools,
-            &|data| is_call(func, data),
-            &|data| returns_twice(func, data),
-            &selection,
-        );
+            pools: pools,
+            selection: &selection,
+            is_call: &is_call,
+            returns_twice: &returns_twice,
+        };
+        let mut alloc = pipeline.allocator.allocate(&input);
+        alloc.finish(&input);
+        alloc.validate(&input).map_err(err)?;
         let spill_base = offset.next_multiple_of(8);
         let mut offset = spill_base + 8 * (alloc.spill_slots as usize + staging);
         let mut stack_slot_offsets = Vec::new();
@@ -526,8 +537,10 @@ impl<'a> FunctionCompiler<'a> {
             func,
             module,
             alloc,
+            current_inst: None,
+            allocation_index: None,
             folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
-            fused_compares: fold::fused_compares(func),
+            fused_compares,
             selection,
             stack_slot_offsets,
             outgoing,
@@ -608,7 +621,7 @@ impl<'a> FunctionCompiler<'a> {
                 if self.debug {
                     self.set_srcloc(func.inst_loc(inst));
                 }
-                self.inst(inst);
+                self.allocated_inst(inst);
             }
         }
         if self.uses_trap {
@@ -701,20 +714,29 @@ impl<'a> FunctionCompiler<'a> {
         }
         let (mut moves, mut later) = (Vec::new(), Vec::new());
         for (i, (param, loc)) in params.into_iter().zip(locs).enumerate() {
-            let Some(dst) = self.alloc.loc(param) else {
+            let Some(dst) = self
+                .alloc
+                .param_loc(entry, crate::regalloc::ValuePart::low(param))
+            else {
                 continue;
             };
             let abi_param = &func.sig.params[i];
             match loc {
                 ArgLoc::Value(Slot::Regs(regs)) => {
                     moves.push((dst, regs[0]));
-                    if let Some(hi) = self.alloc.hi_loc(param) {
+                    if let Some(hi) = self
+                        .alloc
+                        .param_loc(entry, crate::regalloc::ValuePart::high(param))
+                    {
                         moves.push((hi, regs[1]));
                     }
                 }
                 ArgLoc::Value(Slot::Stack(offset)) => {
                     let at = |o: u32| format!("[rbp + {}]", 16 + offset + o);
-                    match self.alloc.hi_loc(param) {
+                    match self
+                        .alloc
+                        .param_loc(entry, crate::regalloc::ValuePart::high(param))
+                    {
                         Some(hi) => {
                             later.push(Later::Load(dst, Type::I64, at(0)));
                             later.push(Later::Load(hi, Type::I64, at(8)));
@@ -765,6 +787,50 @@ impl<'a> FunctionCompiler<'a> {
             1u8 << matched.shift
         ));
         self.def_done(result, d);
+    }
+
+    #[inline]
+    fn allocated_inst(&mut self, inst: Inst) {
+        self.current_inst = Some(inst);
+        self.allocation_index = self.alloc.edits.instruction_index(inst);
+        if let Some(i) = self.allocation_index {
+            self.allocation_moves(i, true);
+        }
+        self.inst(inst);
+        if let Some(i) = self.allocation_index {
+            self.allocation_moves(i, false);
+        }
+    }
+
+    // Keep vector copying and cycle resolution out of the default loop's
+    // inline path. Existing tiers have no instruction transfers.
+    fn allocation_moves(&mut self, index: usize, before: bool) {
+        let edit = self.alloc.edits.instruction(index);
+        let moves = if before { &edit.before } else { &edit.after };
+        if !moves.is_empty() {
+            let moves = moves.clone();
+            self.parallel_copy(&moves);
+        }
+    }
+
+    fn defined(&self, value: Value) -> Option<Loc> {
+        self.alloc.operand_loc(
+            self.allocation_index,
+            crate::regalloc::ValuePart::low(value),
+            crate::regalloc::OperandKind::Def,
+        )
+    }
+    fn defined_hi(&self, value: Value) -> Option<Loc> {
+        self.alloc.operand_loc(
+            self.allocation_index,
+            crate::regalloc::ValuePart::high(value),
+            crate::regalloc::OperandKind::Def,
+        )
+    }
+    fn edge_moves(&self, successor: usize) -> &[crate::regalloc::Transfer] {
+        self.alloc
+            .edits
+            .edge(self.current_inst.expect("edge in a terminator"), successor)
     }
 
     fn inst(&mut self, inst: Inst) {
@@ -1040,7 +1106,7 @@ impl<'a> FunctionCompiler<'a> {
                     r64(a),
                     reg(new, ty)
                 ));
-                if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+                if let Some(loc) = result.and_then(|r| self.defined(r)) {
                     self.emit_move(loc, Loc::Reg(S0));
                 }
             }
@@ -1050,7 +1116,7 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             InstData::Jump { dest } => {
-                self.block_args(&dest);
+                self.block_args(&dest, 0);
                 self.branch_unless_next(dest.block);
             }
             InstData::Brif {
@@ -1073,17 +1139,17 @@ impl<'a> FunctionCompiler<'a> {
                 // Block arguments are copied on the edge, so a branch with
                 // else-arguments needs its own landing pad. The copies are
                 // `mov`s, which leave the flags alone.
-                if else_dest.args.is_empty() {
+                if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
                     self.emit(format!("j{not}\t{}", self.label(else_dest.block)));
-                    self.block_args(&then_dest);
+                    self.block_args(&then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!(".L{}_{inst}_else", func.name);
                     self.emit(format!("j{not}\t{pad}"));
-                    self.block_args(&then_dest);
+                    self.block_args(&then_dest, 0);
                     self.emit(format!("jmp\t{}", self.label(then_dest.block)));
                     writeln!(self.out, "{pad}:").unwrap();
-                    self.block_args(&else_dest);
+                    self.block_args(&else_dest, 1);
                     self.branch_unless_next(else_dest.block);
                 }
             }
@@ -1373,7 +1439,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("set{code}\tcl"));
                 self.pair_out(result);
                 let flag = self.func.inst_results(inst)[1];
-                if let Some(loc) = self.alloc.loc(flag) {
+                if let Some(loc) = self.defined(flag) {
                     self.emit_move(loc, Loc::Reg(S1));
                 }
             }
@@ -1400,17 +1466,21 @@ impl<'a> FunctionCompiler<'a> {
     /// The location of the high half of `i128` operand `value`.
     fn hi(&self, value: Value) -> Loc {
         self.alloc
-            .hi_loc(self.func.resolve(value))
+            .operand_loc(
+                self.allocation_index,
+                crate::regalloc::ValuePart::high(self.func.resolve(value)),
+                crate::regalloc::OperandKind::Use,
+            )
             .expect("operand in reachable code is allocated")
     }
 
     /// Moves an `i128` result from rax (low) and rdx (high) to its places.
     fn pair_out(&mut self, result: Option<Value>) {
         let Some(value) = result else { return };
-        if let Some(loc) = self.alloc.loc(value) {
+        if let Some(loc) = self.defined(value) {
             self.emit_move(loc, Loc::Reg(S0));
         }
-        if let Some(loc) = self.alloc.hi_loc(value) {
+        if let Some(loc) = self.defined_hi(value) {
             self.emit_move(loc, Loc::Reg(S2));
         }
     }
@@ -1724,10 +1794,10 @@ impl<'a> FunctionCompiler<'a> {
     /// `sret` address.
     fn call_result(&mut self, result: Option<Value>, sret: Option<(Vec<Loc>, &Layout)>) {
         if let Some(value) = result
-            && let Some(loc) = self.alloc.loc(value)
+            && let Some(loc) = self.defined(value)
         {
             self.emit_move(loc, sysv::return_loc(self.func.value_type(value)));
-            if let Some(hi) = self.alloc.hi_loc(value) {
+            if let Some(hi) = self.defined_hi(value) {
                 self.emit_move(hi, Loc::Reg(RDX));
             }
         }
@@ -2454,10 +2524,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         let results = self.func.inst_results(inst);
         let (value, flag) = (results[0], results[1]);
-        if let Some(loc) = self.alloc.loc(value) {
+        if let Some(loc) = self.defined(value) {
             self.emit_move(loc, Loc::Reg(S0));
         }
-        if let Some(loc) = self.alloc.loc(flag) {
+        if let Some(loc) = self.defined(flag) {
             self.emit_move(loc, Loc::Reg(S1));
         }
     }
@@ -2518,7 +2588,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("jne\t{retry}"));
             }
         }
-        if let Some(loc) = result.and_then(|r| self.alloc.loc(r)) {
+        if let Some(loc) = result.and_then(|r| self.defined(r)) {
             self.emit_move(loc, Loc::Reg(S0));
         }
     }
@@ -2534,10 +2604,12 @@ impl<'a> FunctionCompiler<'a> {
         let targets: Vec<String> = dests
             .iter()
             .enumerate()
-            .map(|(i, d)| match d.args.is_empty() {
-                true => self.label(d.block),
-                false => format!(".L{}_{inst}_edge{i}", self.func.name),
-            })
+            .map(
+                |(i, d)| match d.args.is_empty() && self.edge_moves(i).is_empty() {
+                    true => self.label(d.block),
+                    false => format!(".L{}_{inst}_edge{i}", self.func.name),
+                },
+            )
             .collect();
 
         let (min, max) = match (values.iter().min(), values.iter().max()) {
@@ -2590,16 +2662,16 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("cmp\t{}, {operand}", reg(x, width)));
                 self.emit(format!("je\t{}", targets[i + 1]));
             }
-            if dests[0].args.is_empty() {
+            if dests[0].args.is_empty() && self.edge_moves(0).is_empty() {
                 self.branch_unless_next(dests[0].block);
             } else {
                 self.emit(format!("jmp\t{}", targets[0]));
             }
         }
-        for (dest, target) in dests.iter().zip(&targets) {
-            if !dest.args.is_empty() {
+        for (i, (dest, target)) in dests.iter().zip(&targets).enumerate() {
+            if !dest.args.is_empty() || !self.edge_moves(i).is_empty() {
                 writeln!(self.out, "{target}:").unwrap();
-                self.block_args(dest);
+                self.block_args(dest, i);
                 self.emit(format!("jmp\t{}", self.label(dest.block)));
             }
         }
@@ -2676,16 +2748,22 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Copies block-call arguments into the target's parameters, all at
     /// once (`jump block1(v4, v3)` may swap two parameters).
-    fn block_args(&mut self, call: &BlockCall) {
+    fn block_args(&mut self, call: &BlockCall, successor: usize) {
         let params = self.func.block_params(call.block);
-        let mut moves = Vec::new();
+        let mut moves = self.edge_moves(successor).to_vec();
         for (&param, &arg) in params.iter().zip(&call.args) {
             // A parameter with no location is an alias, never read.
-            let Some(dst) = self.alloc.loc(param) else {
+            let Some(dst) = self
+                .alloc
+                .param_loc(call.block, crate::regalloc::ValuePart::low(param))
+            else {
                 continue;
             };
             moves.push((dst, self.loc(arg)));
-            if let Some(hi) = self.alloc.hi_loc(param) {
+            if let Some(hi) = self
+                .alloc
+                .param_loc(call.block, crate::regalloc::ValuePart::high(param))
+            {
                 moves.push((hi, self.hi(arg)));
             }
         }
@@ -2768,7 +2846,11 @@ impl<'a> FunctionCompiler<'a> {
     /// The location of an operand.
     fn loc(&self, value: Value) -> Loc {
         self.alloc
-            .loc(self.func.resolve(value))
+            .operand_loc(
+                self.allocation_index,
+                crate::regalloc::ValuePart::low(self.func.resolve(value)),
+                crate::regalloc::OperandKind::Use,
+            )
             .expect("operand in reachable code is allocated")
     }
 
@@ -2811,7 +2893,7 @@ impl<'a> FunctionCompiler<'a> {
     /// spilled (or an alias, whose value is never read).
     fn def_reg(&self, result: Option<Value>) -> u8 {
         let value = result.expect("instruction has a result");
-        match self.alloc.loc(value) {
+        match self.defined(value) {
             Some(Loc::Reg(r)) => r,
             _ => S0,
         }
@@ -2820,7 +2902,7 @@ impl<'a> FunctionCompiler<'a> {
     /// [`Self::def_reg`] for floats: the result's register, or xmm13.
     fn def_freg(&self, result: Option<Value>) -> u8 {
         let value = result.expect("instruction has a result");
-        match self.alloc.loc(value) {
+        match self.defined(value) {
             Some(Loc::FReg(r)) => r,
             _ => FS0,
         }
@@ -2830,7 +2912,7 @@ impl<'a> FunctionCompiler<'a> {
     /// [`Self::def_freg`].
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
-        if let Some(Loc::Stack(s)) = self.alloc.loc(value) {
+        if let Some(Loc::Stack(s)) = self.defined(value) {
             if self.func.value_type(value).is_float() {
                 self.emit(format!("movsd\t{}, {}", self.slot(s), xmm(reg)));
             } else {

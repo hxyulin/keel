@@ -1,6 +1,6 @@
 //! AArch64 backend profiles on preprocessed C or textual IR. Frontend work and
 //! optimization are outside timing. Both output paths must yield identical objects.
-//! Usage: profile_backend INPUT.i|INPUT.keel ROUNDS [--opt] [--debug] [--selection-all] [--regalloc-fast]
+//! Usage: profile_backend INPUT.i|INPUT.keel ROUNDS [--opt] [--debug] [--selection-all] [--regalloc-fast|--regalloc-local|--regalloc-split]
 use keel_codegen::{
     Target,
     backend_profile::{self, Stage, Timing},
@@ -38,15 +38,9 @@ impl keel_codegen::regalloc::RegisterAllocator for CountingAllocator {
     }
     fn allocate(
         &self,
-        func: &keel_ir::Function,
-        pools: &keel_codegen::Pools,
-        is_call: &dyn Fn(&keel_ir::InstData) -> bool,
-        returns_twice: &dyn Fn(&keel_ir::InstData) -> bool,
-        selection: &keel_codegen::select::Selection,
+        input: &keel_codegen::regalloc::AllocationInput<'_>,
     ) -> keel_codegen::regalloc::Allocation {
-        let allocation = self
-            .tier
-            .allocate(func, pools, is_call, returns_twice, selection);
+        let allocation = self.tier.allocate(input);
         let mut metrics = self.metrics.borrow_mut();
         metrics.spill_slots += u64::from(allocation.spill_slots);
         metrics.spilled_value_halves += allocation
@@ -71,7 +65,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for flag in args.iter().skip(3) {
         if !matches!(
             flag.as_str(),
-            "--opt" | "--debug" | "--selection-all" | "--regalloc-fast"
+            "--opt"
+                | "--debug"
+                | "--selection-all"
+                | "--regalloc-fast"
+                | "--regalloc-local"
+                | "--regalloc-split"
         ) {
             return Err(format!("unknown flag: {flag}").into());
         }
@@ -79,11 +78,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opt = args.iter().any(|arg| arg == "--opt");
     let debug = args.iter().any(|arg| arg == "--debug");
     let selection_all = args.iter().any(|arg| arg == "--selection-all");
+    if args
+        .iter()
+        .filter(|arg| {
+            matches!(
+                arg.as_str(),
+                "--regalloc-fast" | "--regalloc-local" | "--regalloc-split"
+            )
+        })
+        .count()
+        > 1
+    {
+        return Err("choose one register allocator".into());
+    }
     let allocation = if args.iter().any(|arg| arg == "--regalloc-fast") {
         keel_codegen::regalloc::AllocationTier::Fast
     } else {
         keel_codegen::regalloc::AllocationTier::Full
     };
+    #[cfg(feature = "experimental-regalloc")]
+    let allocation = if args.iter().any(|arg| arg == "--regalloc-split") {
+        keel_codegen::regalloc::AllocationTier::Split
+    } else if args.iter().any(|arg| arg == "--regalloc-local") {
+        keel_codegen::regalloc::AllocationTier::Local
+    } else {
+        allocation
+    };
+    #[cfg(not(feature = "experimental-regalloc"))]
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "--regalloc-local" | "--regalloc-split"))
+    {
+        return Err("local/split require the experimental-regalloc feature".into());
+    }
     let source = std::fs::read_to_string(path)?;
     let mut module = if path.ends_with(".keel") {
         if debug {
@@ -248,7 +275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!(
         "{}",
-        json!({"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,
+        json!({"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
         "functions":module.functions.len(),"ir_instructions":module.functions.iter().map(|f|f.layout_insts().count()).sum::<usize>(),
         "object_bytes":expected.len(),"code_bytes":assembly.text.len(),"native_instructions":program.stats().instructions,
         "allocation_metrics":{"spill_slots":allocation_metrics.spill_slots,"spilled_value_halves":allocation_metrics.spilled_value_halves,"callee_saves":allocation_metrics.callee_saves},"explicit_spill_helper_calls":spill_counters,"objects_identical":true,"runs":runs,"function_profiles":hot_functions})

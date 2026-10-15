@@ -135,7 +135,7 @@ fn run_program(
     optimize: bool,
     suffix: &str,
     selection: keel_codegen::SelectionOptions,
-    allocation: AllocationTier,
+    allocation: &dyn keel_codegen::regalloc::RegisterAllocator,
 ) -> Result<(), String> {
     let src = std::fs::read_to_string(path).unwrap();
     let expect = src
@@ -172,7 +172,7 @@ fn run_program(
         pools,
         &keel_codegen::CodegenPipeline {
             selector: &keel_codegen::OptionsSelector(selection),
-            allocator: &allocation,
+            allocator: allocation,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -256,7 +256,7 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 fn folding_duplicate_operands() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/folding_duplicate.keel");
     for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-        run_program(&path, &pools, optimize, suffix, selection, allocation).unwrap();
+        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
     }
 }
 
@@ -287,7 +287,7 @@ fn optimized_regressions_spills() {
                 (AllocationTier::Full, "full"),
             ] {
                 let suffix = format!("-opt-regression-tiny-{selection_name}-{allocation_name}");
-                run_program(&path, &TINY, true, &suffix, selection, allocation).unwrap();
+                run_program(&path, &TINY, true, &suffix, selection, &allocation).unwrap();
             }
         }
     }
@@ -314,7 +314,7 @@ fn programs() {
                 })
         })
         .filter_map(|(p, pools, optimize, suffix, selection, allocation)| {
-            run_program(p, pools, optimize, suffix, selection, allocation)
+            run_program(p, pools, optimize, suffix, selection, &allocation)
                 .err()
                 .map(|e| {
                     let name = p.file_name().unwrap().to_string_lossy();
@@ -335,7 +335,14 @@ fn programs() {
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn debug_info() {
-    for allocation in [AllocationTier::Full, AllocationTier::Fast] {
+    let tiers = vec![AllocationTier::Full, AllocationTier::Fast];
+    #[cfg(feature = "experimental-regalloc")]
+    let tiers = {
+        let mut tiers = tiers;
+        tiers.extend([AllocationTier::Local, AllocationTier::Split]);
+        tiers
+    };
+    for allocation in tiers {
         debug_info_with_allocator(allocation);
     }
 }
@@ -627,4 +634,107 @@ fn rejected() {
             .to_string();
         assert!(err.contains(want), "expected `{want}`, got `{err}`");
     }
+}
+
+#[path = "support/allocation_edits.rs"]
+mod allocation_edits;
+
+#[test]
+fn changing_allocation_locations() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+    for name in [
+        "regalloc_calls",
+        "regalloc_loops",
+        "regalloc_pressure",
+        "phi_loop",
+        "folding_duplicate",
+        "edge_locations",
+        "floats",
+        "i128",
+        "switch",
+        "setjmp",
+        "exceptions",
+        "inline_asm",
+    ] {
+        for (selection, suffix) in [
+            (keel_codegen::SelectionOptions::default(), "-boundary"),
+            (keel_codegen::SelectionOptions::ALL, "-boundary-selected"),
+        ] {
+            run_program(
+                &dir.join(format!("{name}.keel")),
+                &REGISTERS,
+                false,
+                suffix,
+                selection,
+                &allocation_edits::BoundaryAllocator,
+            )
+            .unwrap();
+        }
+    }
+    run_program(
+        &dir.join("edge_locations.keel"),
+        &REGISTERS,
+        false,
+        "-edge-locations",
+        keel_codegen::SelectionOptions::default(),
+        &allocation_edits::EdgeAllocator,
+    )
+    .unwrap();
+}
+
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn local_allocator_programs() {
+    experimental_allocator_programs(AllocationTier::Local, "local");
+}
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn split_allocator_programs() {
+    experimental_allocator_programs(AllocationTier::Split, "split");
+}
+#[cfg(feature = "experimental-regalloc")]
+fn experimental_allocator_programs(tier: AllocationTier, name: &str) {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|e| e == "keel"))
+        .collect();
+    paths.sort();
+    let mut failures = Vec::new();
+    for path in &paths {
+        for (pools, optimize, suffix, selection) in [
+            (
+                REGISTERS,
+                false,
+                "",
+                keel_codegen::SelectionOptions::default(),
+            ),
+            (
+                TINY,
+                false,
+                "-tiny",
+                keel_codegen::SelectionOptions::default(),
+            ),
+            (
+                REGISTERS,
+                true,
+                "-select-opt",
+                keel_codegen::SelectionOptions::ALL,
+            ),
+            (
+                TINY,
+                true,
+                "-select-opt-tiny",
+                keel_codegen::SelectionOptions::ALL,
+            ),
+        ] {
+            let suffix = format!("-{name}{suffix}");
+            if let Err(error) = run_program(path, &pools, optimize, &suffix, selection, &tier) {
+                eprintln!("{} ({suffix}): {error}", path.display());
+                failures.push(format!("{} ({suffix}): {error}", path.display()));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
 }

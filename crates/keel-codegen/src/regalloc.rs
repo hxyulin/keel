@@ -36,6 +36,8 @@
 //!    This is the scan of Wimmer & Franz, "Linear Scan Register Allocation
 //!    on SSA Form" (CGO 2010), without its interval splitting.
 //!
+//! The default Fast and Full tiers use one location per value. [`AllocationEdits`]
+//! also supports per-instruction locations and transfers for splitting allocators.
 //! A spilled value lives in an 8-byte stack slot for its whole life; there
 //! is no interval splitting, so a value spilled anywhere is spilled
 //! everywhere. Spill slots are shared by values whose intervals do not
@@ -81,9 +83,16 @@
 use keel_ir::dominators::ControlFlowGraph;
 #[cfg(test)]
 use keel_ir::dominators::DominatorTree;
+#[cfg(feature = "experimental-regalloc")]
+mod local;
+mod program;
+#[cfg(feature = "experimental-regalloc")]
+mod split;
+pub use program::*;
+
 use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
 
-/// Where a value lives for its whole life.
+/// A physical register or eight-byte frame slot at an allocation boundary.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Loc {
     /// A general-purpose register, by number (`x9` is `Reg(9)`).
@@ -109,9 +118,11 @@ pub struct Pools<'a> {
 }
 
 pub struct Allocation {
+    pub edits: AllocationEdits,
     /// The reachable blocks in the order the intervals were numbered, which
     /// is also the order they must be emitted in.
     pub order: Vec<Block>,
+    /// Default locations, overridden at selected instruction boundaries by `edits`.
     /// By half (0, or 1 for the high half of an `i128`), then value index.
     /// `None` for values with no interval: those defined in unreachable
     /// code, and aliases.
@@ -125,32 +136,26 @@ pub struct Allocation {
 }
 
 impl Allocation {
-    /// The location of `value`. Operands must be resolved through
+    /// The fallback location of `value`, before instruction overrides. Emitters
+    /// use [`Self::operand_loc`] for instruction inputs/results. Resolve through
     /// [`Function::resolve`] first.
     pub fn loc(&self, value: Value) -> Option<Loc> {
         self.locs[0][value.index()]
     }
 
-    /// The location of the high half of `i128` value `value`.
+    /// The fallback location of the high half of `i128` value `value`.
     pub fn hi_loc(&self, value: Value) -> Option<Loc> {
         self.locs[1][value.index()]
     }
 }
 
-/// Replaceable allocation over the selected instruction operands.
-/// Implementations must respect register pools, interference, calls and
-/// returns-twice lifetimes. `locs` must have one entry per IR value in each half;
-/// `order` must be a reachable block order suitable for assembly emission.
+/// Replaceable allocation over selected lowering sequences. Assignments may
+/// change at each instruction; explicit transfers preserve values between them.
+/// Registers outside the input pools remain reserved by lowering. Constraints
+/// must be satisfied or compilation rejects the allocation before emission.
 pub trait RegisterAllocator {
     fn name(&self) -> &'static str;
-    fn allocate(
-        &self,
-        func: &Function,
-        pools: &Pools,
-        is_call: &dyn Fn(&InstData) -> bool,
-        returns_twice: &dyn Fn(&InstData) -> bool,
-        selection: &crate::select::Selection,
-    ) -> Allocation;
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation;
 }
 
 /// Fast uses conservative contiguous intervals without register affinities.
@@ -160,6 +165,12 @@ pub trait RegisterAllocator {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AllocationTier {
     Fast,
+    /// Experimental block-local cache; keep Fast available as the reference.
+    #[cfg(feature = "experimental-regalloc")]
+    Local,
+    /// Experimental splitting of spilled ranges into available registers.
+    #[cfg(feature = "experimental-regalloc")]
+    Split,
     #[default]
     Full,
 }
@@ -167,18 +178,30 @@ impl RegisterAllocator for AllocationTier {
     fn name(&self) -> &'static str {
         match self {
             Self::Fast => "fast",
+            #[cfg(feature = "experimental-regalloc")]
+            Self::Local => "local",
+            #[cfg(feature = "experimental-regalloc")]
+            Self::Split => "split",
             Self::Full => "full",
         }
     }
-    fn allocate(
-        &self,
-        func: &Function,
-        pools: &Pools,
-        is_call: &dyn Fn(&InstData) -> bool,
-        returns_twice: &dyn Fn(&InstData) -> bool,
-        selection: &crate::select::Selection,
-    ) -> Allocation {
-        allocate_tier(func, pools, is_call, returns_twice, selection, *self)
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        #[cfg(feature = "experimental-regalloc")]
+        if *self == Self::Split {
+            return split::allocate(input);
+        }
+        #[cfg(feature = "experimental-regalloc")]
+        if *self == Self::Local {
+            return local::allocate(input);
+        }
+        allocate_tier(
+            input.func,
+            input.pools,
+            input.is_call,
+            input.returns_twice,
+            input.selection,
+            *self,
+        )
     }
 }
 
@@ -229,10 +252,25 @@ fn allocate_tier(
 ) -> Allocation {
     profiling::scope!("register-allocation", tier.name());
     backend_scope!(Allocation);
+    allocate_tier_inner(func, pools, is_call, returns_twice, selection, tier)
+}
+
+fn allocate_tier_inner(
+    func: &Function,
+    pools: &Pools,
+    is_call: impl Fn(&InstData) -> bool,
+    returns_twice: impl Fn(&InstData) -> bool,
+    selection: &crate::select::Selection,
+    tier: AllocationTier,
+) -> Allocation {
     let cfg = ControlFlowGraph::compute(func);
     let order = cfg.reverse_postorder(func);
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
+        #[cfg(feature = "experimental-regalloc")]
+        AllocationTier::Local | AllocationTier::Split => {
+            unreachable!("experimental allocators have their own entry points")
+        }
         AllocationTier::Fast => {
             let intervals =
                 build_fast_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
@@ -247,6 +285,15 @@ fn allocate_tier(
         }
     };
 
+    baseline_allocation(order, locs, spill_slots, pools)
+}
+
+fn baseline_allocation(
+    order: Vec<Block>,
+    locs: [Vec<Option<Loc>>; 2],
+    spill_slots: u32,
+    pools: &Pools,
+) -> Allocation {
     let used = |want: fn(Loc) -> Option<u8>, pool: &[u8]| {
         let mut regs: Vec<u8> = locs
             .iter()
@@ -274,6 +321,7 @@ fn allocate_tier(
     );
 
     Allocation {
+        edits: AllocationEdits::default(),
         order,
         locs,
         spill_slots,
@@ -311,7 +359,11 @@ impl Interval {
 
     /// Whether the two are ever live at the same point.
     fn intersects(&self, other: &Interval) -> bool {
-        let (mut i, mut j) = (0, 0);
+        // New intervals arrive in start order. An inactive interval may have
+        // thousands of ranges behind that start; do not walk those prefixes
+        // again for every later candidate.
+        let mut i = self.ranges.partition_point(|&(_, to)| to < other.start());
+        let mut j = other.ranges.partition_point(|&(_, to)| to < self.start());
         while i < self.ranges.len() && j < other.ranges.len() {
             let (a, b) = (self.ranges[i], other.ranges[j]);
             if a.0 <= b.1 && b.0 <= a.1 {
@@ -603,6 +655,16 @@ fn liveness(
     profiling::scope!("liveness");
     backend_scope!(Liveness);
     let n = func.num_blocks();
+    // In verified SSA, every operand in the only reachable block is defined
+    // there (parameters included). Even a self edge introduces no live-in
+    // value: edge arguments are explicit reads and parameters are definitions.
+    // The exact fixed point is empty, so avoid the worklist and use/def tables.
+    if order.len() <= 1 {
+        return Liveness {
+            live_in: vec![vec![]; n],
+            live_out: vec![vec![]; n],
+        };
+    }
     let mut uses = vec![Vec::new(); n];
     let mut defs = vec![Vec::new(); n];
     // Block stamps avoid trees and clearing a value-sized set per block.
@@ -1126,7 +1188,14 @@ mod tests {
                 for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                     let selection = crate::select::Selection::compute(func, target);
                     for tier in [AllocationTier::Fast, AllocationTier::Full] {
-                        let alloc = tier.allocate(func, &pools, &is_call, &|_| false, &selection);
+                        let alloc = allocate_tier(
+                            func,
+                            &pools,
+                            &is_call,
+                            &|_: &InstData| false,
+                            &selection,
+                            tier,
+                        );
                         let cfg = ControlFlowGraph::compute(func);
                         let ivs = build_intervals(
                             func,
@@ -1180,3 +1249,6 @@ mod tests {
 
 #[cfg(test)]
 mod differential_tests;
+
+#[cfg(test)]
+mod transfer_tests;

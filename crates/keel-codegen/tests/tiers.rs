@@ -1,5 +1,5 @@
 //! Exercise independent stage choices and custom implementations on both targets.
-use keel_codegen::regalloc::{Allocation, AllocationTier, Pools, RegisterAllocator};
+use keel_codegen::regalloc::{Allocation, AllocationInput, AllocationTier, RegisterAllocator};
 use keel_codegen::select::{Selection, Target as SelectionTarget};
 use keel_codegen::{CodegenPipeline, InstructionSelector, SelectionTier, Target};
 use keel_ir::{Function, InstData, Value};
@@ -32,16 +32,9 @@ impl RegisterAllocator for Allocator {
     fn name(&self) -> &'static str {
         "test-allocator"
     }
-    fn allocate(
-        &self,
-        func: &Function,
-        pools: &Pools,
-        is_call: &dyn Fn(&InstData) -> bool,
-        returns_twice: &dyn Fn(&InstData) -> bool,
-        selection: &Selection,
-    ) -> Allocation {
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
         self.0.set(self.0.get() + 1);
-        AllocationTier::Full.allocate(func, pools, is_call, returns_twice, selection)
+        AllocationTier::Full.allocate(input)
     }
 }
 

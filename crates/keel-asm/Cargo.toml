@@ -19,6 +19,7 @@ keel-opt = { path = "../keel-opt" }
 keel-c = { path = "../keel-c" }
 
 [features]
+experimental-regalloc = ["keel-codegen/experimental-regalloc"]
 backend-profile = ["keel-codegen/backend-profile"]
 
 [[example]]

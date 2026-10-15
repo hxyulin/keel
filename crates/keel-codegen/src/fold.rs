@@ -64,7 +64,15 @@ pub(crate) fn folded_values(
 /// The `icmp` and `fcmp` results only used as the condition of the
 /// `brif` right after them: the branch tests the flags of the compare
 /// itself, a compare and a conditional branch, with no 0/1 value in between.
+#[cfg(test)]
 pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
+    fused_compare_pairs(func)
+        .into_iter()
+        .map(|(value, _, _)| value)
+        .collect()
+}
+
+pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
     // Only zero, one, or multiple raw IR uses matter for compare fusion.
     let mut uses = vec![0u8; func.num_values()];
     let mut candidates = Vec::new();
@@ -87,14 +95,14 @@ pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
             if let (true, InstData::Brif { cond, .. }) = (compare, func.inst_data(next)) {
                 let result = func.inst_results(inst)[0];
                 if func.resolve(*cond) == result {
-                    candidates.push(result);
+                    candidates.push((result, inst, next));
                 }
             }
         }
     }
     candidates
         .into_iter()
-        .filter(|v| uses[v.index()] == 1)
+        .filter(|(v, _, _)| uses[v.index()] == 1)
         .collect()
 }
 

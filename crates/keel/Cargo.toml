@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [features]
+experimental-regalloc = ["keel-codegen/experimental-regalloc"]
 profile-with-tracy = ["profiling/profile-with-tracy", "keel-opt/profile-with-tracy", "keel-codegen/profile-with-tracy", "dep:tracy-client"]
 
 [dependencies]

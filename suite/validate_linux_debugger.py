@@ -21,6 +21,8 @@ def main():
     parser.add_argument('--compiler', type=Path, required=True)
     parser.add_argument('--work-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--include-split', action='store_true', help='also validate experimental spill-range splitting')
+    parser.add_argument('--include-local', action='store_true', help='also validate experimental local allocation')
     args = parser.parse_args()
     args.work_dir.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent.parent / 'crates/keel-c/tests/debug/vars.c'
@@ -52,9 +54,13 @@ printf "EXIT=%d\n", $_exitcode
                 'MAIN_EXPR=5 TLS=8 ENUM=5 LEN=16', 'LOOP_I=2 SQ=4 TOTAL=3',
                 'INNER_TOTAL=99', 'EXIT=183']
     report = {'source': str(source), 'expected_markers': expected, 'builds': {}}
-    for name, allocation, optimized in [('clang', None, False), ('full', 'full', False),
-                                       ('full-opt', 'full', True), ('fast', 'fast', False),
-                                       ('fast-opt', 'fast', True)]:
+    builds = [('clang', None, False), ('full', 'full', False),
+              ('full-opt', 'full', True), ('fast', 'fast', False), ('fast-opt', 'fast', True)]
+    if args.include_local:
+        builds += [('local', 'local', False), ('local-opt', 'local', True)]
+    if args.include_split:
+        builds += [('split', 'split', False), ('split-opt', 'split', True)]
+    for name, allocation, optimized in builds:
         executable = args.work_dir / name
         if allocation is None:
             run(['clang', '-O0', '-g', '-std=c11', source, '-o', executable])
