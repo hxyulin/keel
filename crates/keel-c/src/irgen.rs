@@ -25,8 +25,8 @@ use keel_frontend::{FunctionBuilder, Variable};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
     DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, IntCC, Intrinsic,
-    Language, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc, StackSlot,
-    Symbol, Type, Value,
+    Language, MemoryFlags, Module, Ordering, Purpose, RmwOp, Signature, SourceFile, SourceLoc,
+    StackSlot, Symbol, Type, Value,
 };
 use std::collections::HashMap;
 
@@ -290,7 +290,9 @@ impl<'p> Gen<'p> {
                 Storage::Var(fg.b.declare_var(local.ty.ir()))
             } else {
                 let types = fg.g.types();
-                let size = types.size(&local.ty).max(1) as u32;
+                let size = u32::try_from(types.size(&local.ty).max(1)).map_err(|_| {
+                    Error::new(def.loc, "local object exceeds the IR stack-slot size limit")
+                })?;
                 let align = types.align(&local.ty) as u32;
                 if align > 16 {
                     return Err(Error::new(def.loc, "alignment above 16 is not supported"));
@@ -357,7 +359,8 @@ impl<'p> Gen<'p> {
                 }
                 Storage::Slot(slot) => {
                     let addr = fg.b.ins().stack_addr(slot);
-                    fg.b.ins().store(value, addr);
+                    let flags = fg.object_flags(&def.locals[id].ty, &def.locals[id].sugar);
+                    fg.b.ins().store_with_flags(value, addr, flags);
                 }
                 Storage::Addr(_) => unreachable!(),
             }
@@ -521,14 +524,20 @@ enum Storage {
 /// Where an assignment goes.
 enum Place {
     Var(Variable),
-    Mem(Value, Type),
+    Mem(Value, Type, MemoryFlags),
     Bits {
+        flags: MemoryFlags,
         addr: Value,
         unit: Type,
         field: BitField,
         signed: bool,
     },
-    Aggregate(Value),
+    Aggregate {
+        addr: Value,
+        size: u32,
+        align: u32,
+        flags: MemoryFlags,
+    },
 }
 
 struct FnGen<'g, 'p, 'f> {
@@ -1066,9 +1075,9 @@ impl FnGen<'_, '_, '_> {
             ExprKind::Assign(lhs, rhs) => {
                 let place = self.place(lhs)?.unwrap();
                 let v = self.val(rhs)?;
-                self.store_place(&place, v, &lhs.ty);
+                self.store_place(&place, v);
                 match place {
-                    Place::Aggregate(addr) => addr,
+                    Place::Aggregate { addr, .. } => addr,
                     _ => v,
                 }
             }
@@ -1079,7 +1088,7 @@ impl FnGen<'_, '_, '_> {
                 let r = self.val(rhs)?;
                 let new = self.arith(*op, ty, old, r, e.loc)?;
                 let new = self.convert(new, ty, &lhs.ty, e.loc)?;
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 new
             }
             ExprKind::PtrOpAssign { lhs, rhs, size } => {
@@ -1087,7 +1096,7 @@ impl FnGen<'_, '_, '_> {
                 let old = self.load_place(&place);
                 let offset = self.scaled(rhs, *size)?;
                 let new = self.b.ins().ptradd(old, offset);
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 new
             }
             ExprKind::IncDec { lhs, inc, prefix } => {
@@ -1131,7 +1140,7 @@ impl FnGen<'_, '_, '_> {
                         }
                     }
                 };
-                self.store_place(&place, new, &lhs.ty);
+                self.store_place(&place, new);
                 if *prefix { new } else { old }
             }
             ExprKind::Cond(c, a, b) => {
@@ -1383,6 +1392,39 @@ impl FnGen<'_, '_, '_> {
 
     // ---- places ----
 
+    /// Conservatively retain volatile subobjects during aggregate copies.
+    /// Pointer pointee qualifiers do not qualify the pointer object itself.
+    fn object_flags(&self, ty: &Ty, sugar: &Sugar) -> MemoryFlags {
+        let volatile = sugar.is_volatile(&self.g.p.typedefs)
+            || match ty {
+                Ty::Array(elem, _) => {
+                    self.object_flags(elem, &sugar.pointee(&self.g.p.typedefs))
+                        .volatile
+                }
+                Ty::Struct(id) => self.g.p.structs[*id]
+                    .members
+                    .iter()
+                    .any(|m| self.object_flags(&m.ty, &m.sugar).volatile),
+                _ => false,
+            };
+        MemoryFlags {
+            volatile,
+            ..MemoryFlags::default()
+        }
+    }
+
+    fn aggregate_place(&self, addr: Value, ty: &Ty, flags: MemoryFlags, loc: Loc) -> R<Place> {
+        let size = u32::try_from(self.size(ty)).map_err(|_| {
+            Error::new(loc, "aggregate access exceeds the IR stack-slot size limit")
+        })?;
+        Ok(Place::Aggregate {
+            addr,
+            size,
+            align: self.g.types().align(ty) as u32,
+            flags,
+        })
+    }
+
     /// Where an lvalue lives. `None` for a void-typed dereference.
     fn place(&mut self, e: &Expr) -> R<Option<Place>> {
         if e.ty == Ty::Void {
@@ -1402,6 +1444,7 @@ impl FnGen<'_, '_, '_> {
             let base = self.addr(base)?;
             let addr = self.offset(base, *offset);
             return Ok(Some(Place::Bits {
+                flags: self.object_flags(&e.ty, &e.sugar),
                 addr,
                 unit: e.ty.ir(),
                 field: *field,
@@ -1409,29 +1452,52 @@ impl FnGen<'_, '_, '_> {
             }));
         }
         let addr = self.addr(e)?;
+        let flags = self.object_flags(&e.ty, &e.sugar);
         Ok(Some(if Self::is_aggregate(&e.ty) {
-            Place::Aggregate(addr)
+            self.aggregate_place(addr, &e.ty, flags, e.loc)?
         } else {
             if let Some(name) = e.ty.unusable() {
                 return Err(Error::new(e.loc, format!("`{name}` is not supported")));
             }
-            Place::Mem(addr, e.ty.ir())
+            Place::Mem(addr, e.ty.ir(), flags)
         }))
     }
 
     fn load_place(&mut self, place: &Place) -> Value {
         match *place {
             Place::Var(var) => self.b.use_var(var),
-            Place::Mem(addr, ty) => self.b.ins().load(ty, addr),
-            Place::Aggregate(addr) => addr,
+            Place::Mem(addr, ty, flags) => self.b.ins().load_with_flags(ty, addr, flags),
+            Place::Aggregate {
+                addr,
+                size,
+                align,
+                flags,
+            } => {
+                if !flags.volatile {
+                    return addr;
+                }
+                // Materialize a volatile aggregate read now, before an
+                // assignment, return or by-value ABI copy loses the lvalue.
+                let slot = self.b.func.create_stack_slot(size, align);
+                let copy = self.b.ins().stack_addr(slot);
+                self.copy_bytes_with_flags(
+                    copy,
+                    addr,
+                    u64::from(size),
+                    MemoryFlags::default(),
+                    flags,
+                );
+                copy
+            }
             Place::Bits {
+                flags,
                 addr,
                 unit,
                 field,
                 signed,
             } => {
                 let bits = i64::from(unit.bytes().unwrap() * 8);
-                let word = self.b.ins().load(unit, addr);
+                let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let left = bits - i64::from(field.shift) - i64::from(field.width);
                 let l = self.b.ins().iconst(unit, left);
                 let up = self.b.ins().shl(word, l);
@@ -1445,18 +1511,26 @@ impl FnGen<'_, '_, '_> {
         }
     }
 
-    fn store_place(&mut self, place: &Place, v: Value, ty: &Ty) {
+    fn store_place(&mut self, place: &Place, v: Value) {
         match *place {
             Place::Var(var) => self.b.def_var(var, v),
-            Place::Mem(addr, _) => {
-                self.b.ins().store(v, addr);
+            Place::Mem(addr, _, flags) => {
+                self.b.ins().store_with_flags(v, addr, flags);
             }
-            Place::Aggregate(addr) => self.copy(addr, v, ty),
+            Place::Aggregate {
+                addr, size, flags, ..
+            } => {
+                self.copy_bytes_with_flags(addr, v, u64::from(size), flags, MemoryFlags::default())
+            }
             Place::Bits {
-                addr, unit, field, ..
+                flags,
+                addr,
+                unit,
+                field,
+                ..
             } => {
                 let mask = ((1u128 << field.width) - 1) << field.shift;
-                let word = self.b.ins().load(unit, addr);
+                let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let keep = self.b.ins().iconst(unit, !mask as i64);
                 let kept = self.b.ins().and(word, keep);
                 let shift = self.b.ins().iconst(unit, i64::from(field.shift));
@@ -1464,7 +1538,7 @@ impl FnGen<'_, '_, '_> {
                 let m = self.b.ins().iconst(unit, mask as i64);
                 let new = self.b.ins().and(moved, m);
                 let merged = self.b.ins().or(kept, new);
-                self.b.ins().store(merged, addr);
+                self.b.ins().store_with_flags(merged, addr, flags);
             }
         }
     }
@@ -1607,7 +1681,11 @@ impl FnGen<'_, '_, '_> {
             Builtin::Fabs => ins.fabs(vals[0]),
             Builtin::Overflow(op) => {
                 let (value, overflow) = ins.overflow(op, vals[0], vals[1]);
-                self.b.ins().store(value, vals[2]);
+                let flags = self.object_flags(
+                    args[2].ty.pointee().unwrap(),
+                    &args[2].sugar.pointee(&self.g.p.typedefs),
+                );
+                self.b.ins().store_with_flags(value, vals[2], flags);
                 overflow
             }
             Builtin::Hint => vals[0],
@@ -1700,13 +1778,20 @@ impl FnGen<'_, '_, '_> {
                     }
                     Builtin::AtomicCompareExchange => {
                         let ty = args[2].ty.ir();
-                        let expected = ins.load(ty, vals[1]);
+                        let flags = MemoryFlags {
+                            volatile: args[1]
+                                .sugar
+                                .pointee(&self.g.p.typedefs)
+                                .is_volatile(&self.g.p.typedefs),
+                            ..MemoryFlags::default()
+                        };
+                        let expected = ins.load_with_flags(ty, vals[1], flags);
                         let old = self
                             .b
                             .ins()
                             .atomic_cas(ordering, vals[0], expected, vals[2]);
                         // Unconditionally: on success it is the same value.
-                        self.b.ins().store(old, vals[1]);
+                        self.b.ins().store_with_flags(old, vals[1], flags);
                         self.b.ins().icmp(IntCC::Eq, old, expected)
                     }
                     _ => {
@@ -1736,11 +1821,24 @@ impl FnGen<'_, '_, '_> {
     /// loads and stores, big ones with `memcpy`.
     fn copy(&mut self, dst: Value, src: Value, ty: &Ty) {
         let size = self.size(ty);
-        self.copy_bytes(dst, src, size);
+        self.copy_bytes_with_flags(
+            dst,
+            src,
+            size,
+            MemoryFlags::default(),
+            MemoryFlags::default(),
+        );
     }
 
-    fn copy_bytes(&mut self, dst: Value, src: Value, size: u64) {
-        if size > 64 {
+    fn copy_bytes_with_flags(
+        &mut self,
+        dst: Value,
+        src: Value,
+        size: u64,
+        dst_flags: MemoryFlags,
+        src_flags: MemoryFlags,
+    ) {
+        if size > 64 && !dst_flags.volatile && !src_flags.volatile {
             let n = self.b.ins().iconst(Type::I64, size as i64);
             self.b.ins().intrinsic(Intrinsic::Memcpy, &[dst, src, n]);
             return;
@@ -1756,15 +1854,15 @@ impl FnGen<'_, '_, '_> {
             while size - off >= chunk {
                 let s = self.offset(src, off);
                 let d = self.offset(dst, off);
-                let v = self.b.ins().load(ty, s);
-                self.b.ins().store(v, d);
+                let v = self.b.ins().load_with_flags(ty, s, src_flags);
+                self.b.ins().store_with_flags(v, d, dst_flags);
                 off += chunk;
             }
         }
     }
 
-    fn zero_bytes(&mut self, dst: Value, size: u64) {
-        if size > 64 {
+    fn zero_bytes_with_flags(&mut self, dst: Value, size: u64, flags: MemoryFlags) {
+        if size > 64 && !flags.volatile {
             let z = self.b.ins().iconst(Type::I8, 0);
             let n = self.b.ins().iconst(Type::I64, size as i64);
             self.b.ins().intrinsic(Intrinsic::Memset, &[dst, z, n]);
@@ -1780,7 +1878,7 @@ impl FnGen<'_, '_, '_> {
             while size - off >= chunk {
                 let d = self.offset(dst, off);
                 let z = self.b.ins().iconst(ty, 0);
-                self.b.ins().store(z, d);
+                self.b.ins().store_with_flags(z, d, flags);
                 off += chunk;
             }
         }
@@ -1789,6 +1887,7 @@ impl FnGen<'_, '_, '_> {
     /// Runs a local's initializer.
     fn init_local(&mut self, id: LocalId, init: &Init) -> R<()> {
         let ty = self.def.locals[id].ty.clone();
+        let flags = self.object_flags(&ty, &self.def.locals[id].sugar);
         if let Storage::Var(var) = self.locals[id] {
             let v = match init.items.first() {
                 Some(InitItem::Expr { expr, .. }) => self.val(expr)?,
@@ -1805,7 +1904,7 @@ impl FnGen<'_, '_, '_> {
         let whole = matches!(init.items.as_slice(), [InitItem::Expr { offset: 0, expr, bits: None }] if expr.ty == ty);
         if !whole {
             let size = self.size(&ty);
-            self.zero_bytes(base, size);
+            self.zero_bytes_with_flags(base, size, flags);
         }
         for item in &init.items {
             match item {
@@ -1814,15 +1913,18 @@ impl FnGen<'_, '_, '_> {
                     let addr = self.offset(base, *offset);
                     let place = match bits {
                         Some(field) => Place::Bits {
+                            flags,
                             addr,
                             unit: expr.ty.ir(),
                             field: *field,
                             signed: false,
                         },
-                        None if Self::is_aggregate(&expr.ty) => Place::Aggregate(addr),
-                        None => Place::Mem(addr, expr.ty.ir()),
+                        None if Self::is_aggregate(&expr.ty) => {
+                            self.aggregate_place(addr, &expr.ty, flags, expr.loc)?
+                        }
+                        None => Place::Mem(addr, expr.ty.ir(), flags),
                     };
-                    self.store_place(&place, v, &expr.ty);
+                    self.store_place(&place, v);
                 }
                 InitItem::Bytes { offset, bytes } => {
                     let size = (self.size(&ty) - offset).min(bytes.len() as u64);
@@ -1830,7 +1932,7 @@ impl FnGen<'_, '_, '_> {
                     let data = self.b.func.import_data(&name);
                     let src = self.b.ins().symbol_addr(Symbol::Data(data));
                     let dst = self.offset(base, *offset);
-                    self.copy_bytes(dst, src, size);
+                    self.copy_bytes_with_flags(dst, src, size, flags, MemoryFlags::default());
                 }
             }
         }

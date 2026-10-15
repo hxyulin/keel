@@ -14,8 +14,17 @@ pub type LocalId = usize;
 #[derive(Clone, Debug)]
 pub struct Expr {
     pub kind: ExprKind,
+    /// Qualifier/type shape retained through lvalues and pointer values.
+    pub sugar: Sugar,
     pub ty: Ty,
     pub loc: Loc,
+}
+
+impl Expr {
+    pub fn with_sugar(mut self, sugar: Sugar) -> Self {
+        self.sugar = sugar;
+        self
+    }
 }
 
 #[derive(Clone, Debug)]

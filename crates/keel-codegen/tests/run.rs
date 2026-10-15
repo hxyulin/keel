@@ -261,6 +261,7 @@ fn optimized_regressions_spills() {
         "strength_reduce",
         "phi_loop",
         "checked_fold",
+        "memory_flags",
     ] {
         let path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));

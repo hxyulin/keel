@@ -111,7 +111,7 @@ pub struct FuncTy {
 }
 
 /// What a declaration says about a type that [`Ty`] does not keep, for
-/// debuggers: typedef names, enums and qualifiers. It has the shape of
+/// debuggers and access semantics: typedef names, enums and qualifiers. It has the shape of
 /// the `Ty` it goes with, down to where it stops saying more (`Plain`).
 /// Type checking only looks at the `Ty`.
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -131,6 +131,59 @@ pub enum Sugar {
 }
 
 impl Sugar {
+    /// The outer type constructor, resolving typedefs and qualifiers.
+    pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef]) -> &'a Sugar {
+        match self {
+            Self::Typedef(i) => defs[*i].sugar.unqualified(defs),
+            Self::Const(inner) | Self::Volatile(inner) => inner.unqualified(defs),
+            other => other,
+        }
+    }
+
+    pub fn is_volatile(&self, defs: &[TypedefDef]) -> bool {
+        match self {
+            Self::Volatile(_) => true,
+            Self::Const(inner) | Self::Array(inner) => inner.is_volatile(defs),
+            Self::Typedef(i) => defs[*i].sugar.is_volatile(defs),
+            _ => false,
+        }
+    }
+
+    pub fn pointee(&self, defs: &[TypedefDef]) -> Sugar {
+        match self.unqualified(defs) {
+            Self::Ptr(inner) => inner.as_ref().clone(),
+            Self::Array(inner) if self.is_volatile(defs) => Self::Volatile(inner.clone()),
+            Self::Array(inner) => inner.as_ref().clone(),
+            _ => Self::Plain,
+        }
+    }
+
+    pub fn function_return(&self, defs: &[TypedefDef]) -> Sugar {
+        let target = self.pointee(defs);
+        match target.unqualified(defs) {
+            Self::Func(ret) => ret.as_ref().clone(),
+            _ => Self::Plain,
+        }
+    }
+
+    /// Conditional pointers carry qualifiers from both operands. Expand
+    /// aliases here so nested pointer/array qualifications merge by depth.
+    pub fn merge(&self, other: &Sugar, defs: &[TypedefDef]) -> Sugar {
+        let volatile = self.is_volatile(defs) || other.is_volatile(defs);
+        let merged = match (self.unqualified(defs), other.unqualified(defs)) {
+            (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(Rc::new(a.merge(b, defs))),
+            (Self::Array(a), Self::Array(b)) => Self::Array(Rc::new(a.merge(b, defs))),
+            (Self::Func(a), Self::Func(b)) => Self::Func(Rc::new(a.merge(b, defs))),
+            (Self::Plain, b) => b.clone(),
+            (a, _) => a.clone(),
+        };
+        if volatile {
+            Self::Volatile(Rc::new(merged))
+        } else {
+            merged
+        }
+    }
+
     /// `Plain` when nothing is known, else `wrap` of `self`.
     pub fn wrap(self, wrap: fn(Rc<Sugar>) -> Sugar) -> Sugar {
         match self {
@@ -284,14 +337,22 @@ impl Ty {
 impl StructDef {
     /// The member called `name`, looking inside anonymous members; gives
     /// the path of members to it, and its offset.
-    pub fn find(&self, name: &str, structs: &[StructDef]) -> Option<(u64, Member)> {
+    pub fn find(
+        &self,
+        name: &str,
+        structs: &[StructDef],
+        defs: &[TypedefDef],
+    ) -> Option<(u64, Member)> {
         for m in &self.members {
             match &m.name {
                 Some(n) if n == name => return Some((m.offset, m.clone())),
                 None if m.bits.is_none() => {
                     if let Ty::Struct(id) = m.ty
-                        && let Some((off, found)) = structs[id].find(name, structs)
+                        && let Some((off, mut found)) = structs[id].find(name, structs, defs)
                     {
+                        if m.sugar.is_volatile(defs) {
+                            found.sugar = Sugar::Volatile(Rc::new(found.sugar));
+                        }
                         return Some((m.offset + off, found));
                     }
                 }

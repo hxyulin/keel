@@ -314,7 +314,8 @@ impl Parser {
             }
             if m.name.is_none()
                 && let Ty::Struct(inner) = m.ty
-                && let Some((off, found)) = self.structs[inner].find(&name, &self.structs)
+                && let Some((off, found)) =
+                    self.structs[inner].find(&name, &self.structs, &self.typedefs)
             {
                 let sub = Slot {
                     ty: found.ty.unatomic().clone(),

@@ -12,7 +12,12 @@ use keel_ir::{OverflowOp, RmwOp};
 use std::rc::Rc;
 
 pub(crate) fn mk(kind: ExprKind, ty: Ty, loc: Loc) -> Expr {
-    Expr { kind, ty, loc }
+    Expr {
+        kind,
+        ty,
+        loc,
+        sugar: Sugar::Plain,
+    }
 }
 
 fn binary_prec(p: &str) -> Option<u8> {
@@ -45,7 +50,8 @@ impl Parser {
             let r = self.assign()?;
             let r = self.rvalue(r);
             let ty = r.ty.clone();
-            e = mk(ExprKind::Comma(Box::new(e), Box::new(r)), ty, loc);
+            let sugar = r.sugar.clone();
+            e = mk(ExprKind::Comma(Box::new(e), Box::new(r)), ty, loc).with_sugar(sugar);
         }
         Ok(e)
     }
@@ -94,17 +100,22 @@ impl Parser {
                 None => Builtin::AtomicStore,
                 Some(op) => Builtin::AtomicRmw { op, new: true },
             };
+            let sugar = lhs.sugar.clone();
             let args = vec![
                 self.address_of_atomic(lhs),
                 rhs,
                 mk(ExprKind::Int(5), INT, loc),
             ];
-            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc));
+            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc).with_sugar(sugar));
         }
         let ty = lhs.ty.clone();
+        let result_sugar = lhs.sugar.clone();
         if op == "=" {
             let rhs = self.convert_for_assign(rhs, &ty)?;
-            return Ok(mk(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), ty, loc));
+            let sugar = lhs.sugar.clone();
+            return Ok(
+                mk(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), ty, loc).with_sugar(sugar)
+            );
         }
         let rhs = self.rvalue(rhs);
         let bin = &op[..op.len() - 1];
@@ -122,7 +133,8 @@ impl Parser {
                 },
                 ty,
                 loc,
-            ));
+            )
+            .with_sugar(result_sugar));
         }
         let op = bin_op(bin);
         let comp = match op {
@@ -195,12 +207,16 @@ impl Parser {
             };
             let name = self.unique_name("elvis");
             let ty = cond.ty.clone();
-            let t = self.new_local(name, ty.clone(), Sugar::Plain, false);
-            let local = || mk(ExprKind::Local(t), ty.clone(), loc);
+            let sugar = cond.sugar.clone();
+            let t = self.new_local(name, ty.clone(), sugar.clone(), false);
+            let local = || mk(ExprKind::Local(t), ty.clone(), loc).with_sugar(sugar.clone());
             let set = self.assignment("=", local(), cond, loc)?;
             let pick = self.conditional_of(local(), local(), b, loc)?;
             let ty = pick.ty.clone();
-            return Ok(mk(ExprKind::Comma(Box::new(set), Box::new(pick)), ty, loc));
+            let sugar = pick.sugar.clone();
+            return Ok(
+                mk(ExprKind::Comma(Box::new(set), Box::new(pick)), ty, loc).with_sugar(sugar)
+            );
         }
         let a = self.expr()?;
         self.expect(":")?;
@@ -237,11 +253,17 @@ impl Parser {
         } else {
             (self.cast(a, ty.clone()), self.cast(b, ty.clone()))
         };
+        let sugar = if ty.is_ptr() {
+            a.sugar.merge(&b.sugar, &self.typedefs)
+        } else {
+            Sugar::Plain
+        };
         Ok(mk(
             ExprKind::Cond(Box::new(cond), Box::new(a), Box::new(b)),
             ty,
             loc,
-        ))
+        )
+        .with_sugar(sugar))
     }
 
     fn binary(&mut self, min_prec: u8) -> R<Expr> {
@@ -345,11 +367,8 @@ impl Parser {
             n = mk(ExprKind::Unary(UnOp::Neg, Box::new(n)), LONG, loc);
         }
         let ty = ptr.ty.clone();
-        Ok(mk(
-            ExprKind::PtrAdd(Box::new(ptr), Box::new(n), size),
-            ty,
-            loc,
-        ))
+        let sugar = ptr.sugar.clone();
+        Ok(mk(ExprKind::PtrAdd(Box::new(ptr), Box::new(n), size), ty, loc).with_sugar(sugar))
     }
 
     /// The size of what a pointer points to, for arithmetic. `void *`
@@ -371,10 +390,14 @@ impl Parser {
         if self.is("(") && self.type_follows(1) {
             let loc = self.loc();
             self.advance();
-            let ty = self.type_name()?;
+            let (ty, sugar) = self.type_name_sugar()?;
             self.expect(")")?;
             if self.is("{") {
-                let lit = self.compound_literal(ty, loc)?;
+                let lit = self.compound_literal(ty, loc)?.with_sugar(sugar.clone());
+                if let ExprKind::CompoundLit(id, _) = &lit.kind {
+                    self.fs.as_mut().unwrap().locals[*id].sugar = sugar;
+                    self.mark_in_memory(*id);
+                }
                 return self.postfix_ops(lit);
             }
             let e = self.cast_expr()?;
@@ -388,9 +411,10 @@ impl Parser {
             if !ok {
                 return Err(Error::new(loc, "invalid cast"));
             }
-            let mut e = self.cast(e, ty);
-            e.loc = loc;
-            return Ok(e);
+            // Keep a distinct value conversion even when the unqualified
+            // types match: changing result qualifiers must not rewrite the
+            // qualifiers on the operand's actual memory read.
+            return Ok(mk(ExprKind::Cast(Box::new(e)), ty, loc).with_sugar(sugar));
         }
         self.unary()
     }
@@ -481,7 +505,8 @@ impl Parser {
                 let Some(pointee) = e.ty.pointee().cloned() else {
                     return Err(Error::new(loc, "dereferencing a non-pointer"));
                 };
-                Ok(mk(ExprKind::Deref(Box::new(e)), pointee, loc))
+                let sugar = e.sugar.pointee(&self.typedefs);
+                Ok(mk(ExprKind::Deref(Box::new(e)), pointee, loc).with_sugar(sugar))
             }
             "+" | "-" | "~" => {
                 self.advance();
@@ -526,7 +551,8 @@ impl Parser {
         }
         self.mark_address_taken(&e);
         let ty = Ty::ptr_to(e.ty.clone());
-        Ok(mk(ExprKind::Addr(Box::new(e)), ty, loc))
+        let sugar = Sugar::Ptr(Rc::new(e.sugar.clone()));
+        Ok(mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar))
     }
 
     /// A local whose address is taken must live in memory.
@@ -553,6 +579,7 @@ impl Parser {
             let step = mk(ExprKind::Int(step), LONG, loc);
             let step = self.cast(step, rmw_ty.clone());
             let op = if inc { RmwOp::Add } else { RmwOp::Sub };
+            let sugar = e.sugar.clone();
             let args = vec![
                 self.address_of_atomic(e),
                 step,
@@ -560,7 +587,7 @@ impl Parser {
             ];
             let builtin = Builtin::AtomicRmw { op, new: prefix };
             let result = mk(ExprKind::Builtin(builtin, args), rmw_ty, loc);
-            return Ok(self.cast(result, ty));
+            return Ok(self.cast(result, ty).with_sugar(sugar));
         }
         if !e.ty.is_scalar() {
             return Err(Error::new(loc, "`++`/`--` needs a scalar"));
@@ -569,6 +596,7 @@ impl Parser {
             self.elem_size(&e.ty, loc)?;
         }
         let ty = e.ty.clone();
+        let sugar = e.sugar.clone();
         Ok(mk(
             ExprKind::IncDec {
                 lhs: Box::new(e),
@@ -577,7 +605,8 @@ impl Parser {
             },
             ty,
             loc,
-        ))
+        )
+        .with_sugar(sugar))
     }
 
     fn postfix(&mut self) -> R<Expr> {
@@ -595,7 +624,8 @@ impl Parser {
                 let Some(elem) = sum.ty.pointee().cloned() else {
                     return Err(Error::new(loc, "subscript of a non-pointer"));
                 };
-                e = mk(ExprKind::Deref(Box::new(sum)), elem, loc);
+                let sugar = sum.sugar.pointee(&self.typedefs);
+                e = mk(ExprKind::Deref(Box::new(sum)), elem, loc).with_sugar(sugar);
             } else if self.eat("(") {
                 e = self.call(e, loc)?;
             } else if self.eat(".") {
@@ -605,7 +635,8 @@ impl Parser {
                 let Some(pointee) = p.ty.pointee().cloned() else {
                     return Err(Error::new(loc, "`->` on a non-pointer"));
                 };
-                e = mk(ExprKind::Deref(Box::new(p)), pointee, loc);
+                let sugar = p.sugar.pointee(&self.typedefs);
+                e = mk(ExprKind::Deref(Box::new(p)), pointee, loc).with_sugar(sugar);
                 e = self.member(e, loc)?;
             } else if self.is("++") || self.is("--") {
                 let inc = self.is("++");
@@ -626,9 +657,13 @@ impl Parser {
         if !def.complete {
             return Err(Error::new(loc, "member of an incomplete struct"));
         }
-        let Some((offset, m)) = def.find(&name, &self.structs) else {
+        let Some((offset, m)) = def.find(&name, &self.structs, &self.typedefs) else {
             return Err(Error::new(loc, format!("no member `{name}`")));
         };
+        let mut sugar = m.sugar.clone();
+        if base.sugar.is_volatile(&self.typedefs) {
+            sugar = Sugar::Volatile(Rc::new(sugar));
+        }
         Ok(mk(
             ExprKind::Member {
                 base: Box::new(base),
@@ -637,7 +672,8 @@ impl Parser {
             },
             m.ty,
             loc,
-        ))
+        )
+        .with_sugar(sugar))
     }
 
     fn call(&mut self, callee: Expr, loc: Loc) -> R<Expr> {
@@ -675,7 +711,8 @@ impl Parser {
         {
             return Err(Error::new(loc, "call returns an incomplete type"));
         }
-        Ok(mk(ExprKind::Call(Box::new(f), args), fty.ret.clone(), loc))
+        let sugar = f.sugar.function_return(&self.typedefs);
+        Ok(mk(ExprKind::Call(Box::new(f), args), fty.ret.clone(), loc).with_sugar(sugar))
     }
 
     /// Promotions for arguments without a parameter type.
@@ -752,6 +789,7 @@ impl Parser {
                     None => None,
                 };
                 let ty = value.as_ref().map_or(Ty::Void, |v| v.ty.clone());
+                let sugar = value.as_ref().map_or(Sugar::Plain, |v| v.sugar.clone());
                 Ok(mk(
                     ExprKind::StmtExpr {
                         scope,
@@ -760,7 +798,8 @@ impl Parser {
                     },
                     ty,
                     loc,
-                ))
+                )
+                .with_sugar(sugar))
             }
             Tok::Punct("(") => {
                 let e = self.expr()?;
@@ -928,7 +967,9 @@ impl Parser {
                     let Ty::Struct(id) = ty else {
                         return Err(Error::new(loc, "`offsetof` member of a non-struct"));
                     };
-                    let Some((off, m)) = self.structs[id].find(&name, &self.structs) else {
+                    let Some((off, m)) =
+                        self.structs[id].find(&name, &self.structs, &self.typedefs)
+                    else {
                         return Err(Error::new(loc, format!("no member `{name}`")));
                     };
                     offset += off;
@@ -1308,10 +1349,16 @@ impl Parser {
             Builtin::AtomicCasBool | Builtin::AtomicCompareExchange => Ty::Int(IntKind::Bool),
             _ => value_ty.clone(),
         };
+        let sugar = args[0].sugar.pointee(&self.typedefs);
         let result = mk(ExprKind::Builtin(builtin, args), ty, loc);
         // Back from the address to the pointer.
-        Ok(if value_ty != pointee && result.ty == value_ty {
+        let result = if value_ty != pointee && result.ty == value_ty {
             self.cast(result, pointee)
+        } else {
+            result
+        };
+        Ok(if result.ty.is_ptr() {
+            result.with_sugar(sugar)
         } else {
             result
         })
@@ -1518,19 +1565,22 @@ impl Parser {
             Ty::Atomic(ty) => {
                 let ty = ty.as_ref().clone();
                 let loc = e.loc;
+                let sugar = e.sugar.clone();
                 let args = vec![self.address_of_atomic(e), mk(ExprKind::Int(5), INT, loc)];
-                mk(ExprKind::Builtin(Builtin::AtomicLoad, args), ty, loc)
+                mk(ExprKind::Builtin(Builtin::AtomicLoad, args), ty, loc).with_sugar(sugar)
             }
             Ty::Array(elem, _) => {
                 let ty = Ty::Ptr(elem.clone());
                 let loc = e.loc;
                 self.mark_address_taken(&e);
-                mk(ExprKind::Addr(Box::new(e)), ty, loc)
+                let sugar = Sugar::Ptr(Rc::new(e.sugar.pointee(&self.typedefs)));
+                mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
             }
             Ty::Func(_) => {
                 let ty = Ty::ptr_to(e.ty.clone());
                 let loc = e.loc;
-                mk(ExprKind::Addr(Box::new(e)), ty, loc)
+                let sugar = Sugar::Ptr(Rc::new(e.sugar.clone()));
+                mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
             }
             _ => e,
         }
@@ -1549,7 +1599,12 @@ impl Parser {
             return mk(ExprKind::Int(normalize(v, &ty)), ty, e.loc);
         }
         let loc = e.loc;
-        mk(ExprKind::Cast(Box::new(e)), ty, loc)
+        let sugar = if e.ty.is_ptr() && ty.is_ptr() {
+            e.sugar.clone()
+        } else {
+            Sugar::Plain
+        };
+        mk(ExprKind::Cast(Box::new(e)), ty, loc).with_sugar(sugar)
     }
 
     /// The integer promotions.

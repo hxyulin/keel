@@ -1,0 +1,11 @@
+; expect: exit 0
+; opt-passes: sccp, instcombine, simplify-cfg, gvn, dce, gcm
+func @memory_flags(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = load.i64 volatile align 8 v0
+    v2 = iconst.i64 1
+    v3 = iadd v1, v2
+    store volatile align 8 v3, v0
+    v4 = load.i64 align 8 notrap v0
+    return v4
+}

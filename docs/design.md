@@ -171,6 +171,18 @@ resumed by a debugger, so it is an intrinsic.
   Unknown calls, inline assembly, atomic operations and stack-lifetime
   changes invalidate memory facts. A compiler barrier here is conservative
   analysis behavior, not a hardware-fence instruction.
+- C expression qualifier shapes now survive pointer arithmetic, dereferences,
+  casts, array/function decay, members, typedefs, `typeof`, `__auto_type`,
+  conditional pointers and function returns. A volatile pointer object and
+  a pointer to volatile data qualify different accesses. Parameter and local
+  initialization writes retain object qualification; volatile bitfield reads
+  and writes retain it on their storage-unit accesses.
+- Volatile aggregate reads are materialized with explicit qualified accesses
+  before passing a value to assignment, return or the by-value ABI. Copies
+  involving volatile storage cannot become ordinary `memcpy`/`memset` calls.
+  Aggregate copies/initializers containing volatile subobjects conservatively
+  retain volatility on the whole accessed region. Local objects too large
+  for the IR's u32 stack-slot sizes are diagnosed rather than truncated.
 - All loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
   Explicit properties enable later memory-aware passes without silently
   changing current scheduling or fault behavior. Alias classes and call

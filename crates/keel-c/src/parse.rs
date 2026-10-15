@@ -416,17 +416,20 @@ impl Parser {
                 let ty = self.fs.as_ref().unwrap().locals[id].ty.clone();
                 Ok(Expr {
                     kind: ExprKind::Local(id),
+                    sugar: self.fs.as_ref().unwrap().locals[id].sugar.clone(),
                     ty,
                     loc,
                 })
             }
             Some(Sym::Global(g)) => Ok(Expr {
                 kind: ExprKind::Global(g),
+                sugar: self.globals[g].sugar.clone(),
                 ty: self.globals[g].ty.clone(),
                 loc,
             }),
             Some(Sym::Enum(v)) => Ok(Expr {
                 kind: ExprKind::Int(v),
+                sugar: Sugar::Plain,
                 ty: INT,
                 loc,
             }),
@@ -446,7 +449,7 @@ impl Parser {
         sugar: Sugar,
         volatile: bool,
     ) -> LocalId {
-        let in_memory = volatile || !ty.is_scalar();
+        let in_memory = volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar();
         let fs = self.fs.as_mut().unwrap();
         fs.locals.push(Local {
             name: name.clone(),
@@ -574,6 +577,17 @@ impl Parser {
                 } else {
                     expr.ty.clone()
                 };
+                // Inference drops top-level object qualifiers but retains
+                // qualified pointees. Explicit qualifiers remain outermost.
+                let inferred = expr.sugar.unqualified(&self.typedefs).clone();
+                d.sugar = if spec.is_volatile {
+                    Sugar::Volatile(Rc::new(inferred))
+                } else {
+                    inferred
+                };
+                if spec.is_const {
+                    d.sugar = Sugar::Const(Rc::new(d.sugar));
+                }
                 Some(Init {
                     items: vec![InitItem::Expr {
                         offset: 0,
@@ -1050,18 +1064,21 @@ impl Parser {
                         "_Atomic" => {
                             self.advance();
                             self.expect("(")?;
-                            let ty = self.type_name()?;
+                            let (ty, sugar) = self.type_name_sugar()?;
+                            spec.sugar = sugar;
                             self.expect(")")?;
                             Some(self.atomic_type(ty, loc)?)
                         }
                         "typeof" | "__typeof__" | "__typeof" => {
                             self.advance();
                             self.expect("(")?;
-                            let ty = if self.is_typename() {
-                                self.type_name()?
+                            let (ty, sugar) = if self.is_typename() {
+                                self.type_name_sugar()?
                             } else {
-                                self.expr()?.ty
+                                let e = self.expr()?;
+                                (e.ty, e.sugar)
                             };
+                            spec.sugar = sugar;
                             self.expect(")")?;
                             Some(ty)
                         }
@@ -1212,6 +1229,10 @@ impl Parser {
     /// A type name, as in casts and `sizeof`: specifiers and an abstract
     /// declarator.
     pub(crate) fn type_name(&mut self) -> R<Ty> {
+        Ok(self.type_name_sugar()?.0)
+    }
+
+    pub(crate) fn type_name_sugar(&mut self) -> R<(Ty, Sugar)> {
         let spec = self.decl_spec()?;
         if spec.infer {
             return Err(Error::new(
@@ -1219,7 +1240,8 @@ impl Parser {
                 "`__auto_type` is only allowed in variable declarations",
             ));
         }
-        Ok(self.declarator(spec.ty)?.ty)
+        let d = self.declarator_sugar(spec.ty, spec.sugar)?;
+        Ok((d.ty, d.sugar))
     }
 
     /// `_Atomic(ty)`, which keel supports for integers and pointers.
@@ -1253,11 +1275,6 @@ impl Parser {
             }
             self.advance();
         }
-    }
-
-    /// A declarator, possibly abstract, applied to the specifiers' type.
-    pub(crate) fn declarator(&mut self, ty: Ty) -> R<Declarator> {
-        self.declarator_sugar(ty, Sugar::Plain)
     }
 
     /// A declarator applied to the specifiers' type and its sugar.
@@ -1402,7 +1419,7 @@ impl Parser {
             // Arrays and functions are passed as pointers.
             let sugar = match (&d.ty, d.sugar) {
                 (Ty::Func(_), s) => s.wrap(Sugar::Ptr),
-                (_, Sugar::Array(elem)) => Sugar::Ptr(elem),
+                (Ty::Array(_, _), s) => Sugar::Ptr(Rc::new(s.pointee(&self.typedefs))),
                 (_, s) => s,
             };
             let ty = match d.ty {
@@ -1491,7 +1508,7 @@ impl Parser {
             if self.eat(";") {
                 // An anonymous struct or union member.
                 if matches!(spec.ty, Ty::Struct(_)) {
-                    fields.push((None, spec.ty, Sugar::Plain, None));
+                    fields.push((None, spec.ty, spec.sugar, None));
                 }
                 continue;
             }
