@@ -18,18 +18,12 @@ pub(super) fn bits_immediate(text: &str, bits: u32) -> Result<u64, String> {
     } else {
         (false, text.strip_prefix('+').unwrap_or(text))
     };
+    let (digits, radix) = super::text::integer_radix(digits);
     if digits.starts_with(['-', '+']) {
         return Err(format!("invalid bit-pattern immediate `{text}`"));
     }
-    let value = if let Some(s) = digits
-        .strip_prefix("0x")
-        .or_else(|| digits.strip_prefix("0X"))
-    {
-        i128::from_str_radix(s, 16)
-    } else {
-        digits.parse::<i128>()
-    }
-    .map_err(|_| format!("invalid bit-pattern immediate `{text}`"))?;
+    let value = i128::from_str_radix(digits, radix)
+        .map_err(|_| format!("invalid bit-pattern immediate `{text}`"))?;
     let value = if negative { -value } else { value };
     if value < -(1i128 << (bits - 1)) || value >= 1i128 << bits {
         return Err(format!("immediate does not fit {bits} bits"));

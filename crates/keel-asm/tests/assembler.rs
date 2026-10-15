@@ -92,7 +92,6 @@ fn invalid_operands_and_unsupported_syntax_are_diagnostics() {
         "add xzr, x0, #0",
         "adds sp, x0, #0",
         "sub x0, sp, x1, lsl #5",
-        "mov x0, x31",
         "mov x0, x32",
         "mov x0, sp, #0",
         "ret w0",
@@ -331,7 +330,7 @@ fn invalid_memory_operands_have_line_diagnostics() {
         "ldur x0, [x1, #256]",
         "ldr x0, [x1, w2]",
         "ldr x0, [x1, sp]",
-        "ldr x0, [x1, x31]",
+        "ldr x0, [x31]",
         "ldr x0, [x1, x2, uxtw]",
         "ldr x0, [x1, w2, sxtx]",
         "ldr x0, [x1, x2, lsr #3]",
@@ -516,7 +515,7 @@ fn allocation_fast_paths_preserve_case_unicode_and_diagnostics() {
     for (source, message) in [
         (
             "ADD X31, X0, #0",
-            "invalid register `x31`; use sp or zr explicitly",
+            "register `x31` is not allowed in this operand",
         ),
         ("MOV X0, É", "expected register, got `É`"),
         ("ADD X0, Xλ, #0", "invalid register `xλ`"),

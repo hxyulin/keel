@@ -76,9 +76,9 @@ fn reg(s: &str, sp: bool, zero: bool) -> Result<Reg, String> {
             bits: if s == "sp" { 64 } else { 32 },
             kind: Kind::Sp,
         },
-        "xzr" | "wzr" => Reg {
+        "xzr" | "wzr" | "x31" | "w31" => Reg {
             number: 31,
-            bits: if s == "xzr" { 64 } else { 32 },
+            bits: if s.starts_with('x') { 64 } else { 32 },
             kind: Kind::Zero,
         },
         "fp" => Reg {
@@ -129,18 +129,11 @@ fn integer(s: &str) -> Result<i64, String> {
     } else {
         (false, s.strip_prefix('+').unwrap_or(s))
     };
+    let (digits, radix) = text::integer_radix(digits);
     if digits.starts_with(['-', '+']) {
         return Err(format!("invalid integer `{s}`"));
     }
-    let value = if let Some(s) = digits
-        .strip_prefix("0x")
-        .or_else(|| digits.strip_prefix("0X"))
-    {
-        i64::from_str_radix(s, 16)
-    } else {
-        digits.parse()
-    }
-    .map_err(|_| format!("invalid integer `{s}`"))?;
+    let value = i64::from_str_radix(digits, radix).map_err(|_| format!("invalid integer `{s}`"))?;
     Ok(if negative { -value } else { value })
 }
 fn unsigned(s: &str, max: i64) -> Result<u32, String> {
@@ -157,6 +150,13 @@ fn shift(s: &str) -> Result<(&str, u32), String> {
     if parts.next().is_some() {
         return Err("unexpected shift operand".into());
     }
+    let kind = match lower(kind).as_ref() {
+        "lsl" => "lsl",
+        "lsr" => "lsr",
+        "asr" => "asr",
+        "ror" => "ror",
+        _ => kind,
+    };
     Ok((kind, amount))
 }
 fn count(args: &[&str], min: usize, max: usize) -> Result<(), String> {
@@ -480,8 +480,8 @@ fn assemble_pass(
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
-    for (index, raw) in scanning::Lines::new(source).enumerate() {
-        let line = index + 1;
+    for raw in scanning::Lines::new(source, &arena) {
+        let (line, raw) = raw?;
         let err = |message| Error::new(line, message);
         let mut s = raw.trim_fast();
         while let Some((name, rest)) = s

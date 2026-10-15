@@ -220,13 +220,8 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
             return Err("missing data expression term".into());
         }
         if term.as_bytes()[0].is_ascii_digit() {
-            let value =
-                if let Some(digits) = term.strip_prefix("0x").or_else(|| term.strip_prefix("0X")) {
-                    i128::from_str_radix(digits, 16)
-                } else {
-                    term.parse::<i128>()
-                }
-                .map_err(|_| "invalid data integer")?;
+            let (digits, radix) = super::text::integer_radix(term);
+            let value = i128::from_str_radix(digits, radix).map_err(|_| "invalid data integer")?;
             result.constant = result
                 .constant
                 .checked_add(sign.checked_mul(value).ok_or("data integer overflow")?)

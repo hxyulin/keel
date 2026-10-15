@@ -1,7 +1,12 @@
 //! Fused source-line and comment scanning. Blocks span instruction boundaries,
 //! so short lines reuse the delimiter mask instead of starting another search.
 
+use crate::Error;
+use bumpalo::{Bump, collections::String as BumpString};
+
 pub(super) struct Lines<'a> {
+    arena: &'a Bump,
+    line: usize,
     source: &'a str,
     position: usize,
     line_start: usize,
@@ -10,8 +15,10 @@ pub(super) struct Lines<'a> {
 }
 
 impl<'a> Lines<'a> {
-    pub(super) fn new(source: &'a str) -> Self {
+    pub(super) fn new(source: &'a str, arena: &'a Bump) -> Self {
         Self {
+            arena,
+            line: 1,
             source,
             position: 0,
             line_start: 0,
@@ -38,59 +45,95 @@ impl<'a> Lines<'a> {
 }
 
 impl<'a> Iterator for Lines<'a> {
-    type Item = &'a str;
+    type Item = Result<(usize, &'a str), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // `position` can point beyond this line while its mask still contains
-        // later delimiters, so derive the next line's start independently.
-        let start = self.line_start;
+        let mut start = self.line_start;
         if start == self.source.len() {
             return None;
         }
+        let mut line = self.line;
         let bytes = self.source.as_bytes();
-        // The common compiler comment needs only a newline search, even when
-        // there is no buffered structural mask from the previous line.
+        let mut scratch = None;
+        // Compiler full-line comments skip their bodies with a SIMD search.
         if bytes[start] == b';' || (bytes[start] == b'/' && bytes.get(start + 1) == Some(&b'/')) {
-            return Some(self.comment(start, start));
+            let text = self.comment(start, start);
+            return Some(Ok((line, text)));
         }
         let mut quoted = false;
         let mut escaped = None;
         while let Some(index) = self.delimiter() {
             match bytes[index] {
-                b'\n' => {
-                    let end = if index > start && bytes[index - 1] == b'\r' {
-                        index - 1
-                    } else {
-                        index
-                    };
-                    // Save line start separately from the block's mask origin.
-                    return Some(self.finish_line(start, end, index + 1));
+                b'\n' | b'\r' => {
+                    let next = self.after_newline(index);
+                    self.seek(next);
+                    let text = self.finish_line(start, index, next);
+                    return Some(Ok((line, finish(scratch, text))));
                 }
                 _ if escaped == Some(index) => {}
                 b'\\' if quoted => escaped = Some(index + 1),
                 b'"' => quoted = !quoted,
-                b';' if !quoted => return Some(self.comment(start, index)),
+                b';' if !quoted => {
+                    let text = self.comment(start, index);
+                    return Some(Ok((line, finish(scratch, text))));
+                }
                 b'/' if !quoted && bytes.get(index + 1) == Some(&b'/') => {
-                    return Some(self.comment(start, index));
+                    let text = self.comment(start, index);
+                    return Some(Ok((line, finish(scratch, text))));
+                }
+                b'/' if !quoted && bytes.get(index + 1) == Some(&b'*') => {
+                    let Some(offset) = memchr::memmem::find(&bytes[index + 2..], b"*/") else {
+                        self.seek(bytes.len());
+                        self.line_start = bytes.len();
+                        return Some(Err(Error::new(self.line, "unterminated block comment")));
+                    };
+                    let end = index + 2 + offset + 2;
+                    let out = scratch.get_or_insert_with(|| BumpString::new_in(self.arena));
+                    out.push_str(&self.source[start..index]);
+                    out.push(' ');
+                    // A block comment is whitespace even across physical lines;
+                    // keep those lines in diagnostics, not statement boundaries.
+                    self.line += newline_count(&bytes[index..end]);
+                    if out.trim().is_empty() {
+                        line = self.line;
+                    }
+                    start = end;
+                    self.seek(end);
                 }
                 _ => {}
             }
         }
-        Some(self.finish_line(start, bytes.len(), bytes.len()))
+        let text = self.finish_line(start, bytes.len(), bytes.len());
+        Some(Ok((line, finish(scratch, text))))
     }
 }
 
+fn finish<'a>(scratch: Option<BumpString<'a>>, tail: &'a str) -> &'a str {
+    if let Some(mut text) = scratch {
+        text.push_str(tail);
+        text.into_bump_str()
+    } else {
+        tail
+    }
+}
+
+fn newline_count(bytes: &[u8]) -> usize {
+    memchr::memchr2_iter(b'\r', b'\n', bytes)
+        .filter(|&index| bytes[index] == b'\r' || index == 0 || bytes[index - 1] != b'\r')
+        .count()
+}
+
 impl<'a> Lines<'a> {
-    fn finish_line(&mut self, start: usize, end: usize, next: usize) -> &'a str {
-        self.line_start = next;
-        &self.source[start..end]
+    fn after_newline(&self, index: usize) -> usize {
+        index
+            + 1
+            + usize::from(
+                self.source.as_bytes()[index] == b'\r'
+                    && self.source.as_bytes().get(index + 1) == Some(&b'\n'),
+            )
     }
 
-    fn comment(&mut self, start: usize, end: usize) -> &'a str {
-        // In particular, compiler full-line comments never scan their bodies
-        // for quotes or slash pairs. memchr uses the platform's SIMD search.
-        let next = memchr::memchr(b'\n', &self.source.as_bytes()[end..])
-            .map_or(self.source.len(), |offset| end + offset + 1);
+    fn seek(&mut self, next: usize) {
         if next >= self.position {
             self.position = next;
             self.mask = 0;
@@ -98,14 +141,31 @@ impl<'a> Lines<'a> {
             let consumed = (next - self.block) * 4;
             self.mask &= u64::MAX << consumed;
         }
-        self.finish_line(start, end, next)
+    }
+
+    fn finish_line(&mut self, start: usize, end: usize, next: usize) -> &'a str {
+        self.line_start = next;
+        if next > end {
+            self.line += 1;
+        }
+        &self.source[start..end]
+    }
+
+    fn comment(&mut self, start: usize, end: usize) -> &'a str {
+        let newline = memchr::memchr2(b'\r', b'\n', &self.source.as_bytes()[end..])
+            .map(|offset| end + offset);
+        let next = newline.map_or(self.source.len(), |index| self.after_newline(index));
+        self.seek(next);
+        self.line_start = next;
+        self.line += usize::from(newline.is_some());
+        &self.source[start..end]
     }
 }
 
 fn delimiters_scalar(bytes: &[u8]) -> u64 {
     let mut mask = 0;
     for (index, byte) in bytes.iter().take(16).enumerate() {
-        if matches!(byte, b'\n' | b';' | b'/' | b'"' | b'\\') {
+        if matches!(byte, b'\n' | b'\r' | b';' | b'/' | b'"' | b'\\') {
             mask |= 0xf_u64 << (index * 4);
         }
     }
@@ -124,7 +184,7 @@ fn delimiters(bytes: &[u8]) -> u64 {
             use std::arch::aarch64::*;
             let input = vld1q_u8(bytes.as_ptr());
             let mut matches = vceqq_u8(input, vdupq_n_u8(b'\n'));
-            for byte in *b";/\"\\" {
+            for byte in *b"\r;/\"\\" {
                 matches = vorrq_u8(matches, vceqq_u8(input, vdupq_n_u8(byte)));
             }
             return vget_lane_u64::<0>(vreinterpret_u64_u8(vshrn_n_u16::<4>(
@@ -164,9 +224,43 @@ mod tests {
     }
 
     fn check(source: &str) {
-        let expected: Vec<_> = source.lines().map(uncomment).collect();
-        let actual: Vec<_> = Lines::new(source).collect();
+        let normalized = source.replace("\r\n", "\n").replace('\r', "\n");
+        let expected: Vec<_> = normalized.lines().map(uncomment).collect();
+        let arena = Bump::new();
+        let actual: Vec<_> = Lines::new(source, &arena)
+            .map(|line| line.unwrap().1)
+            .collect();
         assert_eq!(actual, expected, "{source:?}");
+    }
+
+    #[test]
+    fn block_comments_cross_vector_boundaries_and_preserve_physical_lines() {
+        for offset in 0..16 {
+            for length in 0..65 {
+                let padding = " ".repeat(offset);
+                let body = "λ".repeat(length);
+                let source = format!(
+                    "{padding}mov x0,/*{body}\r\n; // \"\r*/x1/*tail*/\r\nret// /*ignored\nnop"
+                );
+                let arena = Bump::new();
+                let lines = Lines::new(&source, &arena)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(
+                    lines,
+                    [
+                        (1, format!("{padding}mov x0, x1 ").as_str()),
+                        (4, "ret"),
+                        (5, "nop")
+                    ]
+                );
+
+                let source = format!("{padding}/*{body}\n*/ /*unterminated");
+                let arena = Bump::new();
+                let error = Lines::new(&source, &arena).next().unwrap().unwrap_err();
+                assert_eq!(error.line, 2);
+            }
+        }
     }
 
     #[test]

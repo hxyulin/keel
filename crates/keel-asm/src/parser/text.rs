@@ -38,3 +38,22 @@ mod tests {
         }
     }
 }
+
+/// LLVM/GNU assembler integer spellings; signs are handled by the caller.
+pub(super) fn integer_radix(digits: &str) -> (&str, u32) {
+    if let Some(value) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        (value, 16)
+    } else if let Some(value) = digits
+        .strip_prefix("0b")
+        .or_else(|| digits.strip_prefix("0B"))
+    {
+        (value, 2)
+    } else if digits.len() > 1 && digits.starts_with('0') {
+        (&digits[1..], 8)
+    } else {
+        (digits, 10)
+    }
+}
