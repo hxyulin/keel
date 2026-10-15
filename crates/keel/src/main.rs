@@ -18,6 +18,8 @@
 //! `cc` compiles one preprocessed C file (`clang -E`), to assembly or,
 //! with `--emit-ir`, to keel IR; `-g` gives it debug info, with every
 //! local in memory where a debugger can see it (link with `clang -g`).
+//! `compile`/`cc --emit-object -o output.o` compose structured codegen and
+//! object emission in-process for AArch64 Mach-O.
 //! Text output goes to stdout without `-o`; `asm` requires `-o` and always
 //! writes an Apple arm64 Mach-O object. `--target` picks the machine for codegen,
 //! `aarch64-apple-darwin` or `x86_64-unknown-linux-gnu`; the default is
@@ -33,6 +35,7 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [--emit-ir] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O)
   keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
   keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
@@ -64,6 +67,7 @@ struct Options {
     tuning: keel_codegen::tuning::TuningCpu,
     ir_lines: bool,
     emit_ir: bool,
+    emit_object: bool,
     passes: Option<Vec<String>>,
     target: Option<Target>,
 }
@@ -128,6 +132,7 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
+            "--emit-object" => opts.emit_object = true,
             "--isel" => {
                 let passes = args
                     .next()
@@ -217,6 +222,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-p",
                     "-g",
                     "--target",
+                    "--emit-object",
                     "--isel",
                     "--opt-tier",
                     "--regalloc",
@@ -227,19 +233,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let (input, mut module) = load(&opts)?;
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
-            let asm = keel_codegen::compile_with_pipeline(
-                &module,
-                opts.target()?,
-                &keel_codegen::CodegenPipeline {
-                    selector: &keel_codegen::tuning::TunedSelector {
-                        options: opts.selection,
-                        cpu: opts.tuning,
-                    },
-                    allocator: &opts.allocation,
-                },
-            )
-            .map_err(|e| format!("{input}: {e}"))?;
-            write_output(&opts, &asm)
+            emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
         "cc" => {
             let opts = parse_options(
@@ -251,6 +245,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-g",
                     "--emit-ir",
                     "--target",
+                    "--emit-object",
                     "--isel",
                     "--opt-tier",
                     "--regalloc",
@@ -280,22 +275,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
             }
             opts.optimize(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
+            if opts.emit_ir && opts.emit_object {
+                return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
+            }
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }
-            let asm = keel_codegen::compile_with_pipeline(
-                &module,
-                opts.target()?,
-                &keel_codegen::CodegenPipeline {
-                    selector: &keel_codegen::tuning::TunedSelector {
-                        options: opts.selection,
-                        cpu: opts.tuning,
-                    },
-                    allocator: &opts.allocation,
-                },
-            )
-            .map_err(|e| format!("{input}: {e}"))?;
-            write_output(&opts, &asm)
+            emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
             let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O"])?;
@@ -324,6 +310,35 @@ fn run(args: Vec<String>) -> Result<(), String> {
             Ok(())
         }
         _ => Err(USAGE.into()),
+    }
+}
+
+/// Produce source or an object without crossing a process or filesystem boundary.
+fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
+    let target = opts.target()?;
+    let selector = keel_codegen::tuning::TunedSelector {
+        options: opts.selection,
+        cpu: opts.tuning,
+    };
+    let pipeline = keel_codegen::CodegenPipeline {
+        selector: &selector,
+        allocator: &opts.allocation,
+    };
+    if opts.emit_object {
+        let output = opts
+            .output
+            .as_ref()
+            .ok_or("`--emit-object` requires `-o <output.o>`")?;
+        let program = keel_codegen::compile_program_with_pipeline(module, target, &pipeline)
+            .map_err(|e| e.to_string())?;
+        let object =
+            keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                .map_err(|e| e.to_string())?;
+        std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
+    } else {
+        let source = keel_codegen::compile_with_pipeline(module, target, &pipeline)
+            .map_err(|e| e.to_string())?;
+        write_output(opts, &source)
     }
 }
 
@@ -380,6 +395,49 @@ mod tests {
             let error = run(vec![command.into(), "--mmap".into()]).unwrap_err();
             assert!(error.starts_with("unknown flag `--mmap`"));
         }
+    }
+
+    #[test]
+    fn direct_object_emission_matches_source_path_and_rejects_other_targets() {
+        let dir = std::env::temp_dir().join(format!("keel-object-api-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = "func @answer() -> i64 {\nblock0:\n v0 = iconst.i64 42\n return v0\n}\n";
+        let input = dir.join("answer.keel");
+        let output = dir.join("answer.o");
+        std::fs::write(&input, source).unwrap();
+        let invoke = |target: &str, out: bool| {
+            let mut args = vec![
+                "compile".into(),
+                input.display().to_string(),
+                "--target".into(),
+                target.into(),
+                "--emit-object".into(),
+            ];
+            if out {
+                args.extend(["-o".into(), output.display().to_string()]);
+            }
+            run(args)
+        };
+        assert!(
+            invoke("aarch64-apple-darwin", false)
+                .unwrap_err()
+                .contains("requires `-o")
+        );
+        invoke("aarch64-apple-darwin", true).unwrap();
+        let module = keel_ir::parse(source).unwrap();
+        let text = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+        assert_eq!(
+            std::fs::read(&output).unwrap(),
+            keel_asm::assemble_object(&text).unwrap()
+        );
+        std::fs::remove_file(&output).unwrap();
+        assert!(
+            invoke("x86_64-unknown-linux-gnu", true)
+                .unwrap_err()
+                .contains("requires aarch64")
+        );
+        assert!(!output.exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

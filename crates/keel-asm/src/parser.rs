@@ -42,6 +42,7 @@ mod debug;
 mod float;
 mod memory;
 mod preprocess;
+mod program;
 mod relocate;
 mod scalable;
 mod scanning;
@@ -391,11 +392,12 @@ pub(super) fn assemble(
     metrics: bool,
     features: crate::TargetFeatures,
 ) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
-    match assemble_plain(source, metrics, features) {
+    match assemble_plain(program::Input::Text(source), metrics, features) {
         Err(error) if preprocess::required(&error) => {
             let expanded = preprocess::expand(source)?;
-            let (assembly, mut locations) = assemble_plain(&expanded.source, metrics, features)
-                .map_err(|error| expanded.remap(error))?;
+            let (assembly, mut locations) =
+                assemble_plain(program::Input::Text(&expanded.source), metrics, features)
+                    .map_err(|error| expanded.remap(error))?;
             for location in &mut locations {
                 location.line = expanded.original_line(location.line);
             }
@@ -405,8 +407,22 @@ pub(super) fn assemble(
     }
 }
 
+pub(super) fn assemble_program(
+    source: &keel_asm_ir::Program,
+    features: crate::TargetFeatures,
+) -> Result<Assembly, Error> {
+    match assemble_plain(program::Input::Program(source), false, features) {
+        Err(e) if preprocess::required(&e) => {
+            // Rare inline-assembly macro fallback, explicit and fully validated.
+            let text = program::materialize(source, features)?;
+            assemble(&text, false, features).map(|(assembly, _)| assembly)
+        }
+        result => result.map(|(assembly, _)| assembly),
+    }
+}
+
 fn assemble_plain(
-    source: &str,
+    source: program::Input<'_>,
     metrics: bool,
     features: crate::TargetFeatures,
 ) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
@@ -441,7 +457,7 @@ fn assemble_plain(
     ))
 }
 fn assemble_pass(
-    source: &str,
+    source: program::Input<'_>,
     previous: Option<&BTreeMap<String, data::Location>>,
     metrics: bool,
     features: crate::TargetFeatures,
@@ -480,9 +496,76 @@ fn assemble_pass(
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
-    for raw in scanning::Lines::new(source, &arena) {
+    for raw in source.lines(&arena) {
         let (line, raw) = raw?;
         let err = |message| Error::new(line, message);
+        let raw = match raw {
+            program::Entry::Branch(link, target) => {
+                symbol(target).map_err(err)?;
+                if current != 0 || !result.text.len().is_multiple_of(4) {
+                    return Err(err(
+                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                    ));
+                }
+                if metrics {
+                    locations.push(InstructionLocation {
+                        line,
+                        offset: result.text.len(),
+                    });
+                }
+                branches.push(Branch {
+                    line,
+                    offset: result.text.len(),
+                    spec: control::Branch {
+                        encoding: if link {
+                            "BL_only_branch_imm"
+                        } else {
+                            "B_only_branch_imm"
+                        },
+                        field: FieldId::imm26,
+                        width: 26,
+                        fields: BumpVec::new_in(&arena),
+                        target,
+                    },
+                });
+                result.text.extend_from_slice(&[0; 4]);
+                continue;
+            }
+            program::Entry::Instruction(instruction) => {
+                if current != 0 || !result.text.len().is_multiple_of(4) {
+                    return Err(err(
+                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                    ));
+                }
+                let word = crate::encode_instruction(instruction, features).map_err(err)?;
+                if metrics {
+                    locations.push(InstructionLocation {
+                        line,
+                        offset: result.text.len(),
+                    });
+                }
+                result.text.extend_from_slice(&word.to_le_bytes());
+                continue;
+            }
+            program::Entry::Label(name) => {
+                symbol(name).map_err(err)?;
+                if labels
+                    .insert(
+                        name,
+                        data::Location {
+                            section: current,
+                            offset: data::position(&result, current),
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(err(format!("duplicate label `{name}`")));
+                }
+                label_order.push((name, labels[name]));
+                continue;
+            }
+            program::Entry::Text(raw) => raw,
+        };
         let mut s = raw.trim_fast();
         while let Some((name, rest)) = s
             .split_once(':')

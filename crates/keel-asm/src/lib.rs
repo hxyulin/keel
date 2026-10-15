@@ -241,7 +241,7 @@ pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
     assemble(source)?.to_macho()
 }
 
-use generated::FieldId;
+use keel_asm_ir::FieldId;
 
 /// Optional ISA features added to the fixed Apple FP/NEON/LSE baseline.
 ///
@@ -458,6 +458,35 @@ pub fn assemble_object_with_features(
     assemble_with_features(source, features)?.to_macho()
 }
 
+/// Encode an exact shared instruction without mnemonic/operand parsing or a
+/// name lookup. The same range, reserved-bit and feature checks still apply.
+pub fn encode_instruction(
+    instruction: &keel_asm_ir::Instruction,
+    features: TargetFeatures,
+) -> Result<u32, String> {
+    encode_record(
+        &generated::ENCODINGS[instruction.opcode.index()],
+        &instruction.fields,
+        features,
+    )
+}
+
+/// Assemble a structured program in-process. Explicit text items alone use the
+/// source parser; typed instructions directly use the generated encoder.
+pub fn assemble_program(
+    program: &keel_asm_ir::Program,
+    features: TargetFeatures,
+) -> Result<Assembly, Error> {
+    parser::assemble_program(program, features)
+}
+
+pub fn assemble_program_object(
+    program: &keel_asm_ir::Program,
+    features: TargetFeatures,
+) -> Result<Vec<u8>, Error> {
+    assemble_program(program, features)?.to_macho()
+}
+
 struct Field {
     id: FieldId,
     name: &'static str,
@@ -555,6 +584,14 @@ fn encode_with_features(
 ) -> Result<u32, String> {
     let encoding =
         generated::encoding(name).ok_or_else(|| format!("unsupported encoding `{name}`"))?;
+    encode_record(encoding, values, features)
+}
+
+fn encode_record(
+    encoding: &Encoding,
+    values: &[(FieldId, u32)],
+    features: TargetFeatures,
+) -> Result<u32, String> {
     let name = encoding.name;
     if values.len() != encoding.fields.len() {
         return Err(format!("wrong number of fields for `{name}`"));
@@ -588,6 +625,14 @@ fn encode_with_features(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_opcode_ids_match_generated_encoder_record_order() {
+        assert_eq!(keel_asm_ir::Opcode::ALL.len(), generated::ENCODINGS.len());
+        for opcode in keel_asm_ir::Opcode::ALL {
+            assert_eq!(generated::ENCODINGS[opcode.index()].name, opcode.name());
+        }
+    }
 
     #[test]
     fn numeric_fields_preserve_validation_and_diagnostic_names() {

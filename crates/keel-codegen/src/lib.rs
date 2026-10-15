@@ -166,6 +166,39 @@ pub fn compile_with_pipeline(
     }
 }
 
+/// Produce a shared assembly program without formatting native instructions.
+/// Currently supported for AArch64 Apple Mach-O. Explicit text items preserve
+/// inline assembly and emission paths that have not yet migrated.
+pub fn compile_program(
+    module: &Module,
+    target: Target,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    compile_program_with_pipeline(
+        module,
+        target,
+        &CodegenPipeline {
+            selector: &SelectionTier::Baseline,
+            allocator: &regalloc::AllocationTier::Full,
+        },
+    )
+}
+
+pub fn compile_program_with_pipeline(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    match target {
+        Target::Aarch64AppleDarwin => {
+            aarch64::compile_program_with_pipeline(module, &aarch64::REGISTERS, pipeline)
+        }
+        _ => Err(CodegenError {
+            func: "<target>".into(),
+            message: "structured object emission currently requires aarch64-apple-darwin".into(),
+        }),
+    }
+}
+
 use std::fmt;
 
 /// An object file format's conventions for names and sections, for the

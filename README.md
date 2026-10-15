@@ -221,6 +221,36 @@ The supported subset and expansion limits are described in
 [the assembler design](docs/design.md#assembler); includes, symbolic conditional
 expressions and advanced macro parameter modes are not yet supported.
 
+The compiler can emit an object in-process, without writing an intermediate
+assembly file or starting another assembler process:
+
+```sh
+target/release/keel cc input.i --emit-object -o output.o
+target/release/keel compile input.keel --emit-object -o output.o
+```
+
+Library callers can compose the same stages directly:
+
+```rust,ignore
+let program = keel_codegen::compile_program(
+    &module, keel_codegen::Target::Aarch64AppleDarwin,
+)?;
+let object = keel_asm::assemble_program_object(
+    &program, keel_asm::TargetFeatures::default(),
+)?;
+```
+
+Both stages depend on `keel-asm-ir`, which owns typed generated `Opcode` and
+`FieldId` identities, `Instruction`, and `Program` items for instructions,
+labels, symbolic branches and explicit assembly-text fragments. Native items
+bypass source formatting and operand parsing, with normal encoding and feature
+validation. This is an incremental migration: constants, common integer ALU
+operations, moves, spills, frame operations, returns and direct branches have
+native paths; other instructions, metadata and inline assembly remain explicit
+text fragments. Oversized functions retain the existing text-based branch
+relaxation. Assembly text output remains available. Direct object emission
+currently targets AArch64 Mach-O; see [the API design](docs/design.md#assembler).
+
 Instruction metrics are available through `keel asm-metrics input.s` and
 [`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates
 an inventory of all supported A64 forms, optionally imports CPU scheduling

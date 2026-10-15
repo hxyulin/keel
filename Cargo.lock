@@ -335,12 +335,20 @@ name = "keel-asm"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
+ "keel-asm-ir",
  "keel-c",
  "keel-codegen",
  "keel-ir",
  "keel-opt",
  "memchr",
  "object",
+]
+
+[[package]]
+name = "keel-asm-ir"
+version = "0.1.0"
+dependencies = [
+ "smallvec",
 ]
 
 [[package]]
@@ -357,6 +365,7 @@ dependencies = [
 name = "keel-codegen"
 version = "0.1.0"
 dependencies = [
+ "keel-asm-ir",
  "keel-ir",
  "keel-opt",
  "profiling",

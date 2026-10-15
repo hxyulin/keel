@@ -9,6 +9,7 @@ license.workspace = true
 profile-with-tracy = ["profiling/profile-with-tracy"]
 
 [dependencies]
+keel-asm-ir = { path = "../keel-asm-ir" }
 profiling.workspace = true
 keel-ir = { path = "../keel-ir" }
 

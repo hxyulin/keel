@@ -37,9 +37,29 @@ fn all_backend_fixtures_assemble_in_normal_tiny_and_optimized_configurations() {
                 keel_opt::optimize(&mut module).unwrap();
             }
             let source = compile_with(&module, &pools).unwrap();
-            keel_asm::assemble_object(&source).unwrap_or_else(|e| {
+            let reference = keel_asm::assemble_object(&source).unwrap_or_else(|e| {
                 panic!("{} optimize={opt} pools={pools:?}: {e}", path.display())
             });
+            let program = keel_codegen::aarch64::compile_program_with_pipeline(
+                &module,
+                &pools,
+                &keel_codegen::CodegenPipeline {
+                    selector: &keel_codegen::SelectionTier::Baseline,
+                    allocator: &keel_codegen::regalloc::AllocationTier::Full,
+                },
+            )
+            .unwrap();
+            let direct =
+                keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
+                    .unwrap_or_else(|e| {
+                        panic!("{} structured optimize={opt}: {e}", path.display())
+                    });
+            assert_eq!(
+                direct,
+                reference,
+                "{} structured optimize={opt}",
+                path.display()
+            );
             count += 1;
         }
     }
@@ -79,9 +99,30 @@ fn all_c_fixtures_assemble_with_and_without_optimization_and_debug_info() {
                 let source =
                     keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin)
                         .unwrap();
-                keel_asm::assemble_object(&source).unwrap_or_else(|e| {
+                let reference = keel_asm::assemble_object(&source).unwrap_or_else(|e| {
                     panic!("{} optimize={opt} debug={debug_info}: {e}", path.display())
                 });
+                let program = keel_codegen::compile_program(
+                    &module,
+                    keel_codegen::Target::Aarch64AppleDarwin,
+                )
+                .unwrap();
+                let direct = keel_asm::assemble_program_object(
+                    &program,
+                    keel_asm::TargetFeatures::default(),
+                )
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "{} structured optimize={opt} debug={debug_info}: {e}",
+                        path.display()
+                    )
+                });
+                assert_eq!(
+                    direct,
+                    reference,
+                    "{} optimize={opt} debug={debug_info}",
+                    path.display()
+                );
                 count += 1;
             }
         }

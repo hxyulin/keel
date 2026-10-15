@@ -6,6 +6,7 @@ edition.workspace = true
 license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 
 [dependencies]
+keel-asm-ir = { path = "../keel-asm-ir" }
 memchr = "2"
 bumpalo = { version = "3", features = ["collections"] }
 

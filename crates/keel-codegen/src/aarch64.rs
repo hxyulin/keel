@@ -111,6 +111,9 @@ use keel_ir::{
 };
 use std::collections::HashSet;
 use std::fmt::Write;
+mod output;
+use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
+use output::Output;
 
 /// The registers values are allocated to.
 pub const REGISTERS: Pools = Pools {
@@ -176,6 +179,31 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
+    match compile_output(module, pools, pipeline, false)? {
+        Output::Text(text) => Ok(text),
+        _ => unreachable!(),
+    }
+}
+
+/// Emit structured assembly, with explicit source fragments for unmigrated
+/// instruction/directive paths and user inline assembly.
+pub fn compile_program_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+) -> Result<keel_asm_ir::Program, CodegenError> {
+    match compile_output(module, pools, pipeline, true)? {
+        Output::Structured(program) => Ok(program),
+        _ => unreachable!(),
+    }
+}
+
+fn compile_output(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    structured: bool,
+) -> Result<Output, CodegenError> {
     pipeline.validate_target(crate::Target::Aarch64AppleDarwin)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -185,7 +213,8 @@ pub fn compile_with_pipeline(
             && subset(pools.float_callee_saved, REGISTERS.float_callee_saved),
         "register pools must be subsets of REGISTERS"
     );
-    let mut out = String::from("\t.section\t__TEXT,__text,regular,pure_instructions\n");
+    let mut out = Output::new(structured);
+    out.push_str("\t.section\t__TEXT,__text,regular,pure_instructions\n");
     let debug = !module.files.is_empty() && !module.functions.is_empty();
     if debug {
         for (i, path) in module.files.iter().enumerate() {
@@ -194,20 +223,47 @@ pub fn compile_with_pipeline(
     }
     let mut frames = Vec::new();
     for func in &module.functions {
-        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline)?;
+        let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = compiler.slot_frame_offsets();
-        let scope_marks = compiler.compile(&mut out);
+        let scope_marks = if !structured {
+            compiler.compile(&mut out)
+        } else {
+            let mut function_out = Output::new(true);
+            let mut scope_marks = compiler.compile(&mut function_out);
+            if function_out.needs_relaxation() {
+                // Existing far-branch relaxation operates on text. Re-emit only
+                // oversized functions through that path until it is migrated.
+                let mut compiler = FunctionCompiler::new(func, module, pools, pipeline, false)?;
+                compiler.debug = debug;
+                function_out = Output::new(false);
+                scope_marks = compiler.compile(&mut function_out);
+            }
+            out.append(function_out);
+            scope_marks
+        };
         frames.push(FrameDebug { slots, scope_marks });
     }
     for data in &module.data {
         if let Some(init) = &data.init {
-            data::emit_data(&mut out, Format::MachO, data, init);
+            if let Output::Text(text) = &mut out {
+                data::emit_data(text, Format::MachO, data, init);
+            } else {
+                let mut text = String::new();
+                data::emit_data(&mut text, Format::MachO, data, init);
+                out.push_str(&text);
+            }
         }
     }
     if debug {
         // x29 is DWARF register 29.
-        dwarf::emit_debug_info(&mut out, Format::MachO, 29, module, &frames);
+        if let Output::Text(text) = &mut out {
+            dwarf::emit_debug_info(text, Format::MachO, 29, module, &frames);
+        } else {
+            let mut text = String::new();
+            dwarf::emit_debug_info(&mut text, Format::MachO, 29, module, &frames);
+            out.push_str(&text);
+        }
     }
     out.push_str("\t.subsections_via_symbols\n");
     Ok(out)
@@ -445,7 +501,7 @@ struct FunctionCompiler<'a> {
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
-    out: String,
+    out: Output,
     uses_trap: bool,
     /// Exception handling, for a function with a personality.
     eh: ExceptionTable,
@@ -482,6 +538,7 @@ impl<'a> FunctionCompiler<'a> {
         module: &'a Module,
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
+        structured: bool,
     ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -742,7 +799,7 @@ impl<'a> FunctionCompiler<'a> {
             variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
             next_block: None,
-            out: String::new(),
+            out: Output::new(structured),
             uses_trap: false,
             eh,
             debug: false,
@@ -755,14 +812,17 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Appends the function's assembly to `out`; gives where its lexical
     /// scopes begin and end.
-    fn compile(mut self, out: &mut String) -> Vec<(String, Option<DebugScope>)> {
+    fn compile(mut self, out: &mut Output) -> Vec<(String, Option<DebugScope>)> {
         profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
         if !func.local {
             writeln!(out, "\t.globl\t_{name}").unwrap();
         }
-        writeln!(out, "\t.p2align\t2\n_{name}:\nL{name}_begin:").unwrap();
+        writeln!(out, "\t.p2align\t2").unwrap();
+        out.label(format!("_{name}"));
+        out.label(format!("L{name}_begin"));
+        out.push_str("\n");
         self.allocation_comment();
 
         if self.debug {
@@ -787,8 +847,26 @@ impl<'a> FunctionCompiler<'a> {
             self.emit(format!(".cfi_personality 155, _{personality}"));
             self.emit(format!(".cfi_lsda 16, L{name}_lsda"));
         }
-        self.emit("stp\tx29, x30, [sp, #-16]!");
-        self.emit("mov\tx29, sp");
+        self.native(
+            Opcode::STP_64_ldstpair_pre,
+            [
+                (FieldId::Rt, 29),
+                (FieldId::Rt2, 30),
+                (FieldId::Rn, 31),
+                (FieldId::imm7, 126),
+            ],
+            || "stp\tx29, x30, [sp, #-16]!".into(),
+        );
+        self.native(
+            Opcode::ADD_64_addsub_imm,
+            [
+                (FieldId::Rd, 29),
+                (FieldId::Rn, 31),
+                (FieldId::imm12, 0),
+                (FieldId::sh, 0),
+            ],
+            || "mov\tx29, sp".into(),
+        );
         self.emit(".cfi_def_cfa x29, 16");
         self.emit(".cfi_offset x30, -8");
         self.emit(".cfi_offset x29, -16");
@@ -803,12 +881,37 @@ impl<'a> FunctionCompiler<'a> {
             let offset = 32 + 16 * k;
             match pair {
                 [a, b] => {
-                    self.emit(format!("stp\t{class}{a}, {class}{b}, [sp, #-16]!"));
+                    self.native(
+                        if class == 'x' {
+                            Opcode::STP_64_ldstpair_pre
+                        } else {
+                            Opcode::STP_D_ldstpair_pre
+                        },
+                        [
+                            (FieldId::Rt, u32::from(*a)),
+                            (FieldId::Rt2, u32::from(*b)),
+                            (FieldId::Rn, 31),
+                            (FieldId::imm7, 126),
+                        ],
+                        || format!("stp\t{class}{a}, {class}{b}, [sp, #-16]!"),
+                    );
                     self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
                     self.emit(format!(".cfi_offset {class}{b}, -{}", offset - 8));
                 }
                 [a] => {
-                    self.emit(format!("str\t{class}{a}, [sp, #-16]!"));
+                    self.native(
+                        if class == 'x' {
+                            Opcode::STR_64_ldst_immpre
+                        } else {
+                            Opcode::STR_D_ldst_immpre
+                        },
+                        [
+                            (FieldId::Rt, u32::from(*a)),
+                            (FieldId::Rn, 31),
+                            (FieldId::imm9, 496),
+                        ],
+                        || format!("str\t{class}{a}, [sp, #-16]!"),
+                    );
                     self.emit(format!(".cfi_offset {class}{a}, -{offset}"));
                 }
                 _ => unreachable!(),
@@ -877,9 +980,12 @@ impl<'a> FunctionCompiler<'a> {
         let order = self.alloc.order.clone();
         for (i, &block) in order.iter().enumerate() {
             self.next_block = order.get(i + 1).copied();
-            writeln!(self.out, "{}:", self.label(block)).unwrap();
+            let label = self.label(block);
+            self.out.label(label);
             for &inst in func.block_insts(block) {
-                writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+                if !self.out.structured() {
+                    writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+                }
                 if self.debug {
                     self.set_srcloc(func.inst_loc(inst));
                 }
@@ -887,16 +993,22 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         if self.uses_trap {
-            writeln!(self.out, "L{name}_trap:").unwrap();
-            self.emit("brk\t#1");
+            self.out.label(format!("L{name}_trap"));
+            self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], || {
+                "brk\t#1".into()
+            });
         }
-        writeln!(self.out, "L{name}_end:").unwrap();
-        relax_branches(&mut self.out, name);
+        self.out.label(format!("L{name}_end"));
+        if let Output::Text(text) = &mut self.out {
+            relax_branches(text, name);
+        }
         self.emit(".cfi_endproc");
         if func.personality.is_some() {
-            self.eh.emit(&mut self.out, name);
+            let mut text = String::new();
+            self.eh.emit(&mut text, name);
+            self.out.push_str(&text);
         }
-        out.push_str(&self.out);
+        out.append(self.out);
         self.scope_marks
     }
 
@@ -934,6 +1046,9 @@ impl<'a> FunctionCompiler<'a> {
     /// A comment listing where each value lives, to make the output
     /// readable.
     fn allocation_comment(&mut self) {
+        if self.out.structured() {
+            return;
+        }
         let mut line = String::from("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
@@ -1023,7 +1138,7 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(callee);
                 let sret = self.move_args(&args, &decl.sig.params);
-                self.emit(format!("bl\t_{}", decl.name));
+                self.out.branch(true, format!("_{}", decl.name));
                 self.call_result(result, sret);
             }
             // Only the call itself can throw, so the call-site entry
@@ -1037,7 +1152,7 @@ impl<'a> FunctionCompiler<'a> {
                 let sret = self.move_args(&args, &decl.sig.params);
                 let site = format!("L{}_{inst}", func.name);
                 writeln!(self.out, "{site}_begin:").unwrap();
-                self.emit(format!("bl\t_{}", decl.name));
+                self.out.branch(true, format!("_{}", decl.name));
                 writeln!(self.out, "{site}_end:").unwrap();
                 let pad = self.label(dests[1].block);
                 self.eh.sites.push((site, pad, dests[1].block));
@@ -1068,14 +1183,14 @@ impl<'a> FunctionCompiler<'a> {
                 let decl = func.callee(callee);
                 self.move_args(&args, &decl.sig.params);
                 self.epilogue();
-                self.emit(format!("b\t_{}", decl.name));
+                self.out.branch(false, format!("_{}", decl.name));
             }
             InstData::ReturnCallIndirect { sig, callee, args } => {
                 self.move_args(&args, &func.signature(sig).params);
                 // The epilogue restores callee-saved registers, which may
                 // hold the target, so it moves to x16 first.
                 let target = self.use_reg(callee, S0);
-                self.emit(format!("mov\tx{S0}, x{target}"));
+                self.move_gp(S0, target, true);
                 self.epilogue();
                 self.emit(format!("br\tx{S0}"));
             }
@@ -1238,14 +1353,14 @@ impl<'a> FunctionCompiler<'a> {
                     ConvertOp::Uext => match from {
                         Type::I8 => self.emit(format!("uxtb\tw{d}, w{a}")),
                         Type::I16 => self.emit(format!("uxth\tw{d}, w{a}")),
-                        _ => self.emit(format!("mov\tw{d}, w{a}")),
+                        _ => self.move_gp(d, a, false),
                     },
                     // The low bits are already right; upper bits are
                     // unspecified. A pointer is a 64-bit address already.
                     // Either way the bits just move.
                     ConvertOp::Trunc | ConvertOp::PtrToInt | ConvertOp::IntToPtr => {
                         if a != d {
-                            self.emit(format!("mov\tx{d}, x{a}"));
+                            self.move_gp(d, a, true);
                         }
                     }
                     _ => unreachable!("float conversions are lowered by float_convert"),
@@ -1384,7 +1499,7 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(args[1]);
                 let a = self.use_reg(args[0], S0);
                 let expected = self.use_reg(args[1], S1);
-                self.emit(format!("mov\tx{S2}, x{expected}"));
+                self.move_gp(S2, expected, true);
                 let new = self.use_reg(args[2], S1);
                 let order = ordering_suffix(ordering);
                 let (rs, rt) = (reg(S2, ty), reg(new, ty));
@@ -1535,7 +1650,9 @@ impl<'a> FunctionCompiler<'a> {
                     self.extend_in_place(0, ret.ty, ret.ext);
                 }
                 self.epilogue();
-                self.emit("ret");
+                self.native(Opcode::RET_64R_branch_reg, [(FieldId::Rn, 30)], || {
+                    "ret".into()
+                });
             }
         }
     }
@@ -2290,25 +2407,86 @@ impl<'a> FunctionCompiler<'a> {
         // Point `sp` at the last pair pushed and pop in reverse. Measuring
         // from x29 makes the size of the rest of the frame irrelevant.
         if pairs == 0 {
-            self.emit("mov\tsp, x29");
+            self.native(
+                Opcode::ADD_64_addsub_imm,
+                [
+                    (FieldId::Rd, 31),
+                    (FieldId::Rn, 29),
+                    (FieldId::imm12, 0),
+                    (FieldId::sh, 0),
+                ],
+                || "mov\tsp, x29".into(),
+            );
         } else {
-            self.emit(format!("sub\tsp, x29, #{}", 16 * pairs));
+            self.native(
+                Opcode::SUB_64_addsub_imm,
+                [
+                    (FieldId::Rd, 31),
+                    (FieldId::Rn, 29),
+                    (FieldId::imm12, (16 * pairs) as u32),
+                    (FieldId::sh, 0),
+                ],
+                || format!("sub\tsp, x29, #{}", 16 * pairs),
+            );
         }
         for pair in float_saved.chunks(2).rev() {
             match pair {
-                [a, b] => self.emit(format!("ldp\td{a}, d{b}, [sp], #16")),
-                [a] => self.emit(format!("ldr\td{a}, [sp], #16")),
+                [a, b] => self.native(
+                    Opcode::LDP_D_ldstpair_post,
+                    [
+                        (FieldId::Rt, (*a).into()),
+                        (FieldId::Rt2, (*b).into()),
+                        (FieldId::Rn, 31),
+                        (FieldId::imm7, 2),
+                    ],
+                    || format!("ldp\td{a}, d{b}, [sp], #16"),
+                ),
+                [a] => self.native(
+                    Opcode::LDR_D_ldst_immpost,
+                    [
+                        (FieldId::Rt, (*a).into()),
+                        (FieldId::Rn, 31),
+                        (FieldId::imm9, 16),
+                    ],
+                    || format!("ldr\td{a}, [sp], #16"),
+                ),
                 _ => unreachable!(),
             }
         }
         for pair in saved.chunks(2).rev() {
             match pair {
-                [a, b] => self.emit(format!("ldp\tx{a}, x{b}, [sp], #16")),
-                [a] => self.emit(format!("ldr\tx{a}, [sp], #16")),
+                [a, b] => self.native(
+                    Opcode::LDP_64_ldstpair_post,
+                    [
+                        (FieldId::Rt, (*a).into()),
+                        (FieldId::Rt2, (*b).into()),
+                        (FieldId::Rn, 31),
+                        (FieldId::imm7, 2),
+                    ],
+                    || format!("ldp\tx{a}, x{b}, [sp], #16"),
+                ),
+                [a] => self.native(
+                    Opcode::LDR_64_ldst_immpost,
+                    [
+                        (FieldId::Rt, (*a).into()),
+                        (FieldId::Rn, 31),
+                        (FieldId::imm9, 16),
+                    ],
+                    || format!("ldr\tx{a}, [sp], #16"),
+                ),
                 _ => unreachable!(),
             }
         }
-        self.emit("ldp\tx29, x30, [sp], #16");
+        self.native(
+            Opcode::LDP_64_ldstpair_post,
+            [
+                (FieldId::Rt, 29),
+                (FieldId::Rt2, 30),
+                (FieldId::Rn, 31),
+                (FieldId::imm7, 2),
+            ],
+            || "ldp\tx29, x30, [sp], #16".into(),
+        );
     }
 
     /// Computes `args[0] op args[1]` into `d`.
@@ -2330,7 +2508,47 @@ impl<'a> FunctionCompiler<'a> {
                 BinaryOp::Sshr => self.extend(S0, a, ty, true),
                 _ => a,
             };
-            self.emit(format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)));
+            let is64 = ty.bytes().is_none_or(|n| n > 4);
+            let bits = if is64 { 64 } else { 32 };
+            let opcode = match (mnemonic, is64) {
+                ("add", true) => Opcode::ADD_64_addsub_imm,
+                ("add", false) => Opcode::ADD_32_addsub_imm,
+                ("sub", true) => Opcode::SUB_64_addsub_imm,
+                ("sub", false) => Opcode::SUB_32_addsub_imm,
+                ("asr", true) => Opcode::SBFM_64M_bitfield,
+                ("asr", false) => Opcode::SBFM_32M_bitfield,
+                (_, true) => Opcode::UBFM_64M_bitfield,
+                (_, false) => Opcode::UBFM_32M_bitfield,
+            };
+            if matches!(mnemonic, "add" | "sub") {
+                self.native(
+                    opcode,
+                    [
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, a.into()),
+                        (FieldId::imm12, k as u32),
+                        (FieldId::sh, 0),
+                    ],
+                    || format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                );
+            } else {
+                let amount = k as u32;
+                let (immr, imms) = if mnemonic == "lsl" {
+                    ((bits - amount) % bits, bits - 1 - amount)
+                } else {
+                    (amount, bits - 1)
+                };
+                self.native(
+                    opcode,
+                    [
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, a.into()),
+                        (FieldId::immr, immr),
+                        (FieldId::imms, imms),
+                    ],
+                    || format!("{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                );
+            }
             return;
         }
         let b = self.use_reg(args[1], S1);
@@ -2345,7 +2563,46 @@ impl<'a> FunctionCompiler<'a> {
             _ => None,
         };
         if let Some(mnemonic) = simple {
-            self.emit(format!("{mnemonic}\t{rd}, {ra}, {rb}"));
+            let is64 = ty.bytes().is_none_or(|n| n > 4);
+            let opcode = match (mnemonic, is64) {
+                ("add", true) => Opcode::ADD_64_addsub_shift,
+                ("add", false) => Opcode::ADD_32_addsub_shift,
+                ("sub", true) => Opcode::SUB_64_addsub_shift,
+                ("sub", false) => Opcode::SUB_32_addsub_shift,
+                ("and", true) => Opcode::AND_64_log_shift,
+                ("and", false) => Opcode::AND_32_log_shift,
+                ("orr", true) => Opcode::ORR_64_log_shift,
+                ("orr", false) => Opcode::ORR_32_log_shift,
+                ("eor", true) => Opcode::EOR_64_log_shift,
+                ("eor", false) => Opcode::EOR_32_log_shift,
+                ("mul", true) => Opcode::MADD_64A_dp_3src,
+                ("mul", false) => Opcode::MADD_32A_dp_3src,
+                _ => unreachable!(),
+            };
+            if mnemonic == "mul" {
+                self.native(
+                    opcode,
+                    [
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, a.into()),
+                        (FieldId::Rm, b.into()),
+                        (FieldId::Ra, 31),
+                    ],
+                    || format!("{mnemonic}\t{rd}, {ra}, {rb}"),
+                );
+            } else {
+                self.native(
+                    opcode,
+                    [
+                        (FieldId::Rd, d.into()),
+                        (FieldId::Rn, a.into()),
+                        (FieldId::Rm, b.into()),
+                        (FieldId::shift, 0),
+                        (FieldId::imm6, 0),
+                    ],
+                    || format!("{mnemonic}\t{rd}, {ra}, {rb}"),
+                );
+            }
             return;
         }
         match op {
@@ -2571,14 +2828,15 @@ impl<'a> FunctionCompiler<'a> {
             if dests[0].args.is_empty() {
                 self.branch_unless_next(dests[0].block);
             } else {
-                self.emit(format!("b\t{}", targets[0]));
+                self.out.branch(false, targets[0].clone());
             }
         }
         for (dest, target) in dests.iter().zip(&targets) {
             if !dest.args.is_empty() {
                 writeln!(self.out, "{target}:").unwrap();
                 self.block_args(dest);
-                self.emit(format!("b\t{}", self.label(dest.block)));
+                let label = self.label(dest.block);
+                self.out.branch(false, label);
             }
         }
     }
@@ -2671,24 +2929,47 @@ impl<'a> FunctionCompiler<'a> {
     fn emit_move(&mut self, dst: Loc, src: Loc) {
         match (dst, src) {
             _ if dst == src => {}
-            (Loc::Reg(d), Loc::Reg(s)) => self.emit(format!("mov\tx{d}, x{s}")),
-            (Loc::FReg(d), Loc::FReg(s)) => self.emit(format!("fmov\td{d}, d{s}")),
-            (Loc::Reg(d), Loc::FReg(s)) => self.emit(format!("fmov\tx{d}, d{s}")),
-            (Loc::FReg(d), Loc::Reg(s)) => self.emit(format!("fmov\td{d}, x{s}")),
-            (Loc::Reg(d), Loc::Stack(s)) => self.emit(format!("ldr\tx{d}, {}", self.slot(s))),
-            (Loc::FReg(d), Loc::Stack(s)) => self.emit(format!("ldr\td{d}, {}", self.slot(s))),
-            (Loc::Stack(d), Loc::Reg(s)) => self.emit(format!("str\tx{s}, {}", self.slot(d))),
-            (Loc::Stack(d), Loc::FReg(s)) => self.emit(format!("str\td{s}, {}", self.slot(d))),
+            (Loc::Reg(d), Loc::Reg(s)) => self.native(
+                Opcode::ORR_64_log_shift,
+                [
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, 31),
+                    (FieldId::Rm, s.into()),
+                    (FieldId::shift, 0),
+                    (FieldId::imm6, 0),
+                ],
+                || format!("mov\tx{d}, x{s}"),
+            ),
+            (Loc::FReg(d), Loc::FReg(s)) => self.native(
+                Opcode::FMOV_D_floatdp1,
+                [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
+                || format!("fmov\td{d}, d{s}"),
+            ),
+            (Loc::Reg(d), Loc::FReg(s)) => self.native(
+                Opcode::FMOV_64D_float2int,
+                [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
+                || format!("fmov\tx{d}, d{s}"),
+            ),
+            (Loc::FReg(d), Loc::Reg(s)) => self.native(
+                Opcode::FMOV_D64_float2int,
+                [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
+                || format!("fmov\td{d}, x{s}"),
+            ),
+            (Loc::Reg(d), Loc::Stack(s)) => self.spill(false, false, d, s),
+            (Loc::FReg(d), Loc::Stack(s)) => self.spill(false, true, d, s),
+            (Loc::Stack(d), Loc::Reg(s)) => self.spill(true, false, s, d),
+            (Loc::Stack(d), Loc::FReg(s)) => self.spill(true, true, s, d),
             (Loc::Stack(d), Loc::Stack(s)) => {
-                self.emit(format!("ldr\tx{S1}, {}", self.slot(s)));
-                self.emit(format!("str\tx{S1}, {}", self.slot(d)));
+                self.spill(false, false, S1, s);
+                self.spill(true, false, S1, d);
             }
         }
     }
 
     fn branch_unless_next(&mut self, target: Block) {
         if self.next_block != Some(target) {
-            self.emit(format!("b\t{}", self.label(target)));
+            let label = self.label(target);
+            self.out.branch(false, label);
         }
     }
 
@@ -2709,27 +2990,65 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Loads a constant with `movz` and up to three `movk`s.
     fn materialize(&mut self, reg: u8, bits: u64, is64: bool) {
-        let r = if is64 {
-            format!("x{reg}")
-        } else {
-            format!("w{reg}")
-        };
+        let class = if is64 { 'x' } else { 'w' };
         let chunks = if is64 { 4 } else { 2 };
-        self.emit(format!("movz\t{r}, #{:#x}", bits & 0xffff));
+        self.native(
+            if is64 {
+                Opcode::MOVZ_64_movewide
+            } else {
+                Opcode::MOVZ_32_movewide
+            },
+            [
+                (FieldId::Rd, reg.into()),
+                (FieldId::imm16, (bits & 0xffff) as u32),
+                (FieldId::hw, 0),
+            ],
+            || format!("movz\t{class}{reg}, #{:#x}", bits & 0xffff),
+        );
         for k in 1..chunks {
             let chunk = (bits >> (16 * k)) & 0xffff;
             if chunk != 0 {
-                self.emit(format!("movk\t{r}, #{chunk:#x}, lsl #{}", 16 * k));
+                self.native(
+                    if is64 {
+                        Opcode::MOVK_64_movewide
+                    } else {
+                        Opcode::MOVK_32_movewide
+                    },
+                    [
+                        (FieldId::Rd, reg.into()),
+                        (FieldId::imm16, chunk as u32),
+                        (FieldId::hw, k),
+                    ],
+                    || format!("movk\t{class}{reg}, #{chunk:#x}, lsl #{}", 16 * k),
+                );
             }
         }
     }
 
     fn sub_sp(&mut self, bytes: usize) {
         if bytes >> 12 != 0 {
-            self.emit(format!("sub\tsp, sp, #{}, lsl #12", bytes >> 12));
+            self.native(
+                Opcode::SUB_64_addsub_imm,
+                [
+                    (FieldId::Rd, 31),
+                    (FieldId::Rn, 31),
+                    (FieldId::imm12, (bytes >> 12) as u32),
+                    (FieldId::sh, 1),
+                ],
+                || format!("sub\tsp, sp, #{}, lsl #12", bytes >> 12),
+            );
         }
         if bytes & 0xfff != 0 {
-            self.emit(format!("sub\tsp, sp, #{}", bytes & 0xfff));
+            self.native(
+                Opcode::SUB_64_addsub_imm,
+                [
+                    (FieldId::Rd, 31),
+                    (FieldId::Rn, 31),
+                    (FieldId::imm12, (bytes & 0xfff) as u32),
+                    (FieldId::sh, 0),
+                ],
+                || format!("sub\tsp, sp, #{}", bytes & 0xfff),
+            );
         }
     }
 
@@ -2761,7 +3080,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("ldr\tx{scratch}, {}", self.slot(s)));
+                self.spill(false, false, scratch, s);
                 scratch
             }
             Loc::FReg(_) => unreachable!("{value} is a float"),
@@ -2773,7 +3092,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.hi(value) {
             Loc::Reg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("ldr\tx{scratch}, {}", self.slot(s)));
+                self.spill(false, false, scratch, s);
                 scratch
             }
             Loc::FReg(_) => unreachable!("an integer half"),
@@ -2806,7 +3125,7 @@ impl<'a> FunctionCompiler<'a> {
         match self.loc(value) {
             Loc::FReg(r) => r,
             Loc::Stack(s) => {
-                self.emit(format!("ldr\td{scratch}, {}", self.slot(s)));
+                self.spill(false, true, scratch, s);
                 scratch
             }
             Loc::Reg(_) => unreachable!("{value} is not a float"),
@@ -2837,12 +3156,7 @@ impl<'a> FunctionCompiler<'a> {
     fn def_done(&mut self, result: Option<Value>, reg: u8) {
         let Some(value) = result else { return };
         if let Some(Loc::Stack(s)) = self.alloc.loc(value) {
-            let class = if self.func.value_type(value).is_float() {
-                'd'
-            } else {
-                'x'
-            };
-            self.emit(format!("str\t{class}{reg}, {}", self.slot(s)));
+            self.spill(true, self.func.value_type(value).is_float(), reg, s);
         }
     }
 
@@ -2870,6 +3184,66 @@ impl<'a> FunctionCompiler<'a> {
 
     fn emit(&mut self, line: impl AsRef<str>) {
         writeln!(self.out, "\t{}", line.as_ref()).unwrap();
+    }
+
+    fn native<const N: usize>(
+        &mut self,
+        opcode: Opcode,
+        fields: [(FieldId, u32); N],
+        text: impl FnOnce() -> String,
+    ) {
+        self.out
+            .native(NativeInstruction::new(opcode, fields), text);
+    }
+
+    fn spill(&mut self, store: bool, float: bool, register: u8, slot: u32) {
+        let opcode = match (store, float) {
+            (false, false) => Opcode::LDR_64_ldst_pos,
+            (false, true) => Opcode::LDR_D_ldst_pos,
+            (true, false) => Opcode::STR_64_ldst_pos,
+            (true, true) => Opcode::STR_D_ldst_pos,
+        };
+        let offset = self.spill_base + 8 * slot as usize;
+        let base = self.base;
+        self.native(
+            opcode,
+            [
+                (FieldId::Rt, register.into()),
+                (FieldId::Rn, if base == "sp" { 31 } else { 19 }),
+                (FieldId::imm12, (offset / 8) as u32),
+            ],
+            || {
+                format!(
+                    "{}\t{}{register}, [{base}, #{offset}]",
+                    if store { "str" } else { "ldr" },
+                    if float { 'd' } else { 'x' }
+                )
+            },
+        );
+    }
+
+    fn move_gp(&mut self, d: u8, n: u8, is64: bool) {
+        self.native(
+            if is64 {
+                Opcode::ORR_64_log_shift
+            } else {
+                Opcode::ORR_32_log_shift
+            },
+            [
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, 31),
+                (FieldId::Rm, n.into()),
+                (FieldId::shift, 0),
+                (FieldId::imm6, 0),
+            ],
+            || {
+                format!(
+                    "mov\t{}{d}, {}{n}",
+                    if is64 { 'x' } else { 'w' },
+                    if is64 { 'x' } else { 'w' }
+                )
+            },
+        );
     }
 }
 

@@ -221,20 +221,8 @@ def generate(data):
         "// Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.",
         "// Do not edit; regenerate from isa/a64.json.",
         "use super::{Encoding, Field, Requirement};",
+        "use keel_asm_ir::FieldId;",
     ]
-    # Small numeric field identities avoid repeated string comparisons during
-    # encoding. Keep names for diagnostics, generated from the same ISA source.
-    field_names = sorted({field["name"] for instruction in data["instructions"]
-                          for field in instruction["encoding"]["values"]
-                          if "x" in field["value"]["value"]})
-    declarations = ["#[allow(non_camel_case_types)]", "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
-                    "pub(super) enum FieldId {" + ",".join(field_names) + "}",
-                    "impl std::fmt::Display for FieldId {",
-                    "fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {",
-                    "f.write_str(match self {"]
-    declarations += [f'Self::{name} => "{name}",' for name in field_names]
-    declarations += ["})", "}", "}"]
-    lines.extend(declarations)
     lines.append("pub(super) static ENCODINGS: &[Encoding] = &[")
     for instruction in data["instructions"]:
         conditions = requirements(instruction["condition"])
@@ -297,6 +285,27 @@ def generate(data):
                           text=True, capture_output=True, check=True).stdout
 
 
+def generate_ids(data):
+    fields = sorted({f['name'] for i in data['instructions'] for f in i['encoding']['values']
+                     if 'x' in f['value']['value']})
+    lines = ['// Generated from Arm AARCHMRS 2025-12 by keel-asm/tools/generate.py.',
+             '// Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.',
+             '// Arm-derived data: BSD-3-Clause; see ../LICENSE-ARM.']
+    for kind, names in [('FieldId', fields), ('Opcode', [i['name'] for i in data['instructions']])]:
+        lines += ['#[allow(non_camel_case_types)]', '#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]',
+                  '#[repr(u16)]', f'pub enum {kind} {{' + ','.join(names) + '}', f'impl {kind} {{',
+                  'pub fn name(self) -> &\'static str { match self {']
+        lines += [f'Self::{name} => "{name}",' for name in names]
+        lines += ['} }']
+        if kind == 'Opcode':
+            lines += ['pub fn index(self) -> usize { self as usize }',
+                      'pub const ALL: &\'static [Self] = &[' + ','.join(f'Self::{n}' for n in names) + '];']
+        lines += ['}', f'impl std::fmt::Display for {kind} {{',
+                  'fn fmt(&self, f: &mut std::fmt::Formatter<\'_>) -> std::fmt::Result { f.write_str(self.name()) }', '}']
+    return subprocess.run(['rustfmt', '--edition', '2024'], input='\n'.join(lines), text=True,
+                          capture_output=True, check=True).stdout
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, help="import the checksum-verified upstream tar.gz")
@@ -304,10 +313,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.archive:
         import_archive(args.archive)
-    output = generate(json.loads((ROOT / "isa/a64.json").read_text()))
-    target = ROOT / "src/generated.rs"
-    if args.check:
-        if target.read_text() != output:
-            raise SystemExit("generated.rs is stale; run tools/generate.py")
-    else:
-        target.write_text(output)
+    data = json.loads((ROOT / "isa/a64.json").read_text())
+    for target, output in [(ROOT / 'src/generated.rs', generate(data)),
+                           (ROOT.parent / 'keel-asm-ir/src/generated.rs', generate_ids(data))]:
+        if args.check:
+            if target.read_text() != output:
+                raise SystemExit(f'{target} is stale; run tools/generate.py')
+        else:
+            target.write_text(output)
