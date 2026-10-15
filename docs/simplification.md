@@ -227,3 +227,20 @@ three paired runtime and compile samples and one warmup; these short screens
 can expose regressions but do not establish small application speedups.
 
 The [incremental Boolean report](../suite/reports/boolean-aarch64-2026-10-15.json) records 0 fewer IR instructions, +0 text bytes, runtime ratio 1.0053, and compile-time ratio 0.9936. These three-pair results are screening measurements, not an established runtime gain.
+
+## Integer cast chains
+
+Combining bypasses an intermediate integer conversion when its bits can be
+computed directly: successive truncations, successive equal extensions,
+sign extension of a zero extension, and truncation of an extension. The last
+case chooses truncation, identity, or the original extension according to the
+final width relative to the original source width. Zero extension of a sign
+extension and extension after truncation retain both operations when required.
+Floating-point and pointer conversions are outside these rules.
+
+The test matrix enumerates every valid pair across i8/i16/i32/i64/i128, asserts
+whether it should collapse, verifies idempotence, and checks concrete narrow
+inputs and wider sign boundaries. Native tests include i128 intermediates and
+a sign-then-zero extension that must preserve its intermediate sign bits.
+
+The [incremental cast-chain report](../suite/reports/cast-chains-aarch64-2026-10-15.json) records 914 fewer IR instructions, -3,628 text bytes, runtime ratio 0.9991, and compile-time ratio 1.0017. Three-pair timing does not establish a small runtime gain.

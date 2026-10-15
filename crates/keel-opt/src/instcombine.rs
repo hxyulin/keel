@@ -230,11 +230,31 @@ fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
                 arg: original,
                 ..
             } = *func.inst_data(inner)
-                && op == ConvertOp::Trunc
-                && matches!(inner_op, ConvertOp::Uext | ConvertOp::Sext)
-                && ty == func.value_type(original)
+                && matches!(op, ConvertOp::Trunc | ConvertOp::Uext | ConvertOp::Sext)
+                && matches!(
+                    inner_op,
+                    ConvertOp::Trunc | ConvertOp::Uext | ConvertOp::Sext
+                )
             {
-                return Some(Fold::Value(original));
+                let original = func.resolve(original);
+                let from = func.value_type(original);
+                let combined = match (op, inner_op) {
+                    (ConvertOp::Trunc, _) if ty == from => return Some(Fold::Value(original)),
+                    (ConvertOp::Trunc, _) if ty.bytes() < from.bytes() => Some(ConvertOp::Trunc),
+                    (ConvertOp::Trunc, ConvertOp::Uext | ConvertOp::Sext) => Some(inner_op),
+                    (ConvertOp::Uext | ConvertOp::Sext, ConvertOp::Uext) => Some(ConvertOp::Uext),
+                    (ConvertOp::Sext, ConvertOp::Sext) => Some(ConvertOp::Sext),
+                    // Zero-extending a sign extension preserves the intermediate
+                    // width's sign bits, not those of the final width.
+                    _ => None,
+                };
+                if let Some(op) = combined {
+                    return Some(Fold::Data(InstData::Convert {
+                        op,
+                        ty,
+                        arg: original,
+                    }));
+                }
             }
         }
         InstData::Icmp { cond, args: [a, b] } if a == b => {

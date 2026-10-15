@@ -9,3 +9,20 @@ block0(v0: i64, v1: i64):
     v6 = xor v3, v5
     return v6
 }
+
+func @scalar_casts(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = uext.i16 v1
+    v3 = sext.i128 v2
+    v4 = trunc.i32 v3
+    v5 = uext.i64 v4
+    return v5
+}
+func @scalar_mixed_casts(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = sext.i16 v1
+    v3 = uext.i64 v2
+    return v3
+}
