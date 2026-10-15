@@ -289,6 +289,13 @@ lea rax,[rax+tls@tpoff]
 lea r11,[rip+.Ldata+3]
 mov dword ptr [rip+.Ldata],42
 .data
+.set .Labs_before,42
+.long .Labs_before-.
+.long .Labs_forward-.
+.set .Labs_forward,43
+.set .Labs_alias,.Labs_later
+.long .Labs_alias-.
+.set .Labs_later,44
 .Ldata: .quad external+7
 .long external+3
 .short external+2
@@ -829,4 +836,38 @@ ret
         );
     }
     std::fs::remove_dir_all(temp).unwrap();
+}
+
+#[test]
+fn temporary_absolute_symbols_survive_converted_pc_relative_differences() {
+    let bytes = assemble_object(
+        ".data\n.set .Labs_before,42\n.long .Labs_before-.\n.long .Labs_forward-.\n.set .Labs_forward,43\n.set .Labs_alias,.Labs_later\n.long .Labs_alias-.\n.set .Labs_later,44\n.set .Lresolved_only,73\n.set .Lresolved_minus,20\n.long .Lresolved_only-.Lresolved_minus\n",
+    ).unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let data = file.section_by_name(".data").unwrap();
+    assert_eq!(&data.data().unwrap()[12..], &53u32.to_le_bytes());
+    let relocations: Vec<_> = data.relocations().collect();
+    assert_eq!(relocations.len(), 3);
+    for ((offset, relocation), (name, value)) in relocations.iter().zip([
+        (".Labs_before", 42),
+        (".Labs_forward", 43),
+        (".Labs_alias", 44),
+    ]) {
+        assert!([0, 4, 8].contains(offset));
+        assert_eq!(
+            relocation.flags(),
+            object::RelocationFlags::Elf { r_type: 2 }
+        );
+        assert_eq!(relocation.addend(), 0);
+        let object::RelocationTarget::Symbol(id) = relocation.target() else {
+            panic!("absolute symbol identity missing")
+        };
+        let symbol = file.symbol_by_index(id).unwrap();
+        assert_eq!(symbol.name().unwrap(), name);
+        assert_eq!(symbol.section(), object::SymbolSection::Absolute);
+        assert_eq!(symbol.address(), value);
+    }
+    for name in [".Lresolved_only", ".Lresolved_minus"] {
+        assert!(!file.symbols().any(|symbol| symbol.name() == Ok(name)));
+    }
 }

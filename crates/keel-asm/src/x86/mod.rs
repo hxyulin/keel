@@ -839,8 +839,22 @@ impl Assembler {
             .fixes
             .iter()
             .filter(|f| {
+                // A 32-bit data difference against this section becomes PC32
+                // below. An absolute positive symbol still needs its identity
+                // in that relocation, just like an explicit PC-relative fixup.
+                let pc_relative = matches!(f.kind, 2 | 4)
+                    || f.kind == 10
+                        && f.width == 4
+                        && f.address
+                            .expression
+                            .subtract
+                            .as_deref()
+                            .is_some_and(|name| {
+                                self.eval_symbol(name, 0)
+                                    .is_ok_and(|(section, _)| section == Some(f.section))
+                            });
                 f.address.modifier != Modifier::None
-                    || matches!(f.kind, 2 | 4)
+                    || pc_relative
                         && f.address.expression.add.as_deref().is_some_and(|name| {
                             self.eval_symbol(name, 0)
                                 .is_ok_and(|(section, _)| section.is_none())
