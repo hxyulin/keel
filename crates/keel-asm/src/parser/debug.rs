@@ -51,26 +51,6 @@ pub(super) fn sleb(mut n: i64, out: &mut impl Extend<u8>) {
         }
     }
 }
-/// Strip assembly comments while preserving quoted strings and escaped quotes.
-pub(super) fn uncomment(s: &str) -> &str {
-    let b = s.as_bytes();
-    let mut quoted = false;
-    let mut i = 0;
-    while i < b.len() {
-        if quoted && b[i] == b'\\' {
-            i += 2;
-            continue;
-        }
-        if b[i] == b'"' {
-            quoted = !quoted;
-        }
-        if !quoted && (b[i] == b';' || (b[i] == b'/' && b.get(i + 1) == Some(&b'/'))) {
-            return &s[..i];
-        }
-        i += 1;
-    }
-    s
-}
 pub(super) fn string(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim();
     if !s.starts_with('"') || !s.ends_with('"') || s.len() < 2 {

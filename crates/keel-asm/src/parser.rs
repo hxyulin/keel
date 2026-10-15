@@ -40,6 +40,7 @@ mod debug;
 mod float;
 mod memory;
 mod relocate;
+mod scanning;
 mod storage;
 mod vector;
 
@@ -415,10 +416,10 @@ fn assemble_pass(
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
-    for (index, raw) in source.lines().enumerate() {
+    for (index, raw) in scanning::Lines::new(source).enumerate() {
         let line = index + 1;
         let err = |message| Error::new(line, message);
-        let mut s = debug::uncomment(raw).trim();
+        let mut s = raw.trim();
         while let Some((name, rest)) = s
             .split_once(':')
             .filter(|(name, _)| !name.trim().contains(['"', ' ', '\t']))

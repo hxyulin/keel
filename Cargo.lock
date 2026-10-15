@@ -338,6 +338,7 @@ dependencies = [
  "keel-codegen",
  "keel-ir",
  "keel-opt",
+ "memchr",
  "object",
 ]
 
