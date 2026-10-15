@@ -35,6 +35,11 @@ def run(command, stdin=None):
     return result.stdout
 
 
+def optimizer_arguments(passes):
+    # An empty -p is one empty pass name to the CLI, not an empty pipeline.
+    return ["-p", passes] if passes else ["--opt-tier", "none"]
+
+
 def summary(samples, rng):
     ratios = [a / b for a, b in zip(samples["after"], samples["before"])]
     boots = sorted(
@@ -145,7 +150,7 @@ def main():
                 def build(source, out=out, driver=driver, passes=passes, extra=extra):
                     asm = out / (source.stem + ".s")
                     obj = asm.with_suffix(".o")
-                    run([driver, "cc", *extra, "-p", passes, str(source), "-o", str(asm)])
+                    run([driver, "cc", *extra, *optimizer_arguments(passes), str(source), "-o", str(asm)])
                     if args.assembler == "keel":
                         run([driver, "asm", str(asm), "-o", str(obj)])
                     else:
@@ -266,8 +271,7 @@ def main():
                                     driver,
                                     "cc",
                                     *(args.baseline_arg if config == "baseline" else args.compiler_arg),
-                                    "-p",
-                                    passes,
+                                    *optimizer_arguments(passes),
                                     str(source),
                                     "-o",
                                     "/dev/null",

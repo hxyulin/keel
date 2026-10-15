@@ -351,3 +351,50 @@ application runtime gain. Arithmetic and branch-range analyses remain opt-in.
 The remaining work includes select/De Morgan rewrites, richer expression and
 relational reasoning, path facts through block arguments/arithmetic, integration
 of bit and interval domains, and cheaper targeted feedback between passes.
+
+## Final paired benchmark of the complete change
+
+The [before/after report](../suite/reports/scalar-final-before-after-aarch64-2026-10-15.json)
+compares Full at `26d2da0` with Full at `d6961e6`. The
+[comparison against None](../suite/reports/scalar-final-vs-none-aarch64-2026-10-15.json)
+uses the same current compiler for None, default Full, and the opt-in combined
+facts recipe. All use the same 44 preprocessed C files, generic target tuning,
+baseline instruction selection, full allocation, and Keel assembly on Apple M5
+Max. There are eight runtime workloads (four Lua, three QuickJS, one SQLite).
+Runtime measurements use 15 alternating paired samples after three warmups;
+compilation uses seven pairs after one warmup, excluding assembly and linking.
+Benchmark stdout matches for every pair. Existing correctness checks cover the
+same candidate binary, whose hash was revalidated against the previous report.
+
+| Comparison | Runtime ratio (95% interval) | Compile-time ratio (95% interval) | Text delta |
+|---|---:|---:|---:|
+| New Full / previous Full | 0.99583 [0.99277, 0.99881] | 0.96736 [0.95304, 0.98630] | −3,988 bytes |
+| Full / None | 0.94882 [0.94550, 0.95142] | 1.35481 [1.34436, 1.35813] | −240,292 bytes |
+| Combined facts / None | 0.94862 [0.94575, 0.95331] | 1.55566 [1.54473, 1.57398] | −229,928 bytes |
+
+Ratios are geometric means of each workload's median paired time ratios.
+Runtime weights the eight fixed workloads equally; compile time weights the
+three suite totals equally. `suite/summarize_passes.py` bootstraps paired ratios
+independently within each workload (20,000 samples). Its intervals describe
+measurement uncertainty on this corpus, not generalization to other programs
+or systematic machine-state bias. The report records its seed and script hash.
+
+The complete default change measures 0.42% less runtime (interval 0.12–0.72%
+less), 3.26% less compile time, and 3,988 fewer text bytes. This supports a small
+improvement on this corpus, not a large runtime gain.
+
+Full versus None is uneven: Lua fib improves 23.37%, Lua sort 3.85%, Lua float
+15.72%, and QuickJS fib 1.26%. QuickJS sort regresses 6.36% (interval
+5.78–6.69%); Lua/QuickJS string and SQLite intervals span no change. The
+aggregate runtime benefit is 5.12%, at 35.48% more compiler time. Full emits
+2,938,140 text bytes versus None's 3,178,432 bytes, a 7.56% reduction.
+
+Combined facts has essentially the same aggregate runtime ratio, but grows
+text by 10,364 bytes versus Full and raises compiler time to 55.57% above None.
+Those analyses remain opt-in. The QuickJS sort regression is a concrete target
+for subsequent profiling and profitability work.
+
+The runner now supports an empty pipeline via explicit `--opt-tier none` in
+both timing and IR census commands. Previously `-p` with an empty string was
+rejected as an empty pass name; that failed build produced no timing samples.
+The compiler and optimizer code are unchanged by this benchmark task.

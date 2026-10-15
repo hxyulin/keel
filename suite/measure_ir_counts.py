@@ -80,7 +80,8 @@ def main():
             if report.get("compiler_arguments", {}).get(name):
                 parser.error("this census expects reports without extra compiler arguments")
             driver = baseline if name == "baseline" else compiler
-            ir = subprocess.run([str(driver), "cc", "--emit-ir", "-p", ",".join(passes), str(path)],
+            optimization = ["-p", ",".join(passes)] if passes else ["--opt-tier", "none"]
+            ir = subprocess.run([str(driver), "cc", "--emit-ir", *optimization, str(path)],
                                 text=True, capture_output=True, check=True).stdout
             counts = count(ir)
             totals[name].setdefault(suite, collections.Counter()).update(counts)

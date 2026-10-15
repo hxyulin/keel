@@ -207,3 +207,18 @@ compile time 2.83%; Basic and Full adopt that order. Extra late cleanup and the
 `keel-O-facts` recipe remain opt-in because they increase code size and compile
 cost without an established runtime gain. Static-only second/third rounds test
 corpus convergence; their runtime has not been measured.
+
+The final 15-pair [before/after comparison](reports/scalar-final-before-after-aarch64-2026-10-15.json)
+and [Full/facts versus None comparison](reports/scalar-final-vs-none-aarch64-2026-10-15.json)
+record the complete default change and its total optimizer cost. See the
+[final benchmark interpretation](../docs/simplification.md#final-paired-benchmark-of-the-complete-change).
+An empty `--baseline-passes ''` now selects explicit `--opt-tier none` in the
+runner and IR census. To add reproducible confidence intervals for aggregate
+ratios after timing completes:
+
+```sh
+python3 suite/summarize_passes.py --report suite/reports/example.json
+```
+
+The aggregate bootstrap resamples pairs within each fixed workload; it does not
+estimate performance uncertainty on unmeasured programs or other machines.
