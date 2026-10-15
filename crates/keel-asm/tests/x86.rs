@@ -286,10 +286,10 @@ jmp external@PLT
 mov r9,[rip+external@GOTPCREL+8]
 mov r10,[rip+tls@gottpoff]
 lea rax,[rax+tls@tpoff]
-lea r11,[rip+data+3]
-mov dword ptr [rip+data],42
+lea r11,[rip+.Ldata+3]
+mov dword ptr [rip+.Ldata],42
 .data
-data: .quad external+7
+.Ldata: .quad external+7
 .long external+3
 .short external+2
 .byte external+1
@@ -749,4 +749,84 @@ fn layout_dependent_absolute_operands_are_reencoded() {
     // fits an imm8. This is the before-definition versus forward-alias rule.
     let code = text("push forward\n.set forward,1\n");
     assert_eq!(code, [0x68, 1, 0, 0, 0]);
+}
+
+#[test]
+fn got_and_tls_aliases_link_and_execute_like_clang() {
+    use std::process::Command;
+    let source = r#".intel_syntax noprefix
+.text
+.globl main
+.type main,@function
+main:
+mov rax,[rip+.Lgot_alias@GOTPCREL]
+cmp qword ptr [rax],9
+jne .Lbad
+mov eax,dword ptr fs:.Ltls_alias@tpoff
+cmp eax,42
+jne .Lbad
+xor eax,eax
+ret
+.Lbad: mov eax,1
+ret
+.data
+.Lvalue: .quad 9
+.set .Lgot_alias,.Lvalue
+.section .tdata,"awT",@progbits
+.Ltls: .long 42
+.set .Ltls_alias,.Ltls
+.section .note.GNU-stack,"",@progbits
+"#;
+    let temp = std::env::temp_dir().join(format!("keel-x86-tls-alias-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let input = temp.join("input.s");
+    let ours = temp.join("ours.o");
+    let reference = temp.join("clang.o");
+    std::fs::write(&input, source).unwrap();
+    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
+    let output = Command::new("clang")
+        .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&reference)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for path in [&ours, &reference] {
+        let bytes = std::fs::read(path).unwrap();
+        let file = object::File::parse(&*bytes).unwrap();
+        let code = file.section_by_name(".text").unwrap();
+        let types: Vec<_> = code.relocations().map(|(_, r)| r.flags()).collect();
+        assert!(types.contains(&object::RelocationFlags::Elf { r_type: 23 }));
+        assert!(
+            types
+                .iter()
+                .any(|r| matches!(r, object::RelocationFlags::Elf { r_type: 9 | 42 }))
+        );
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    for (name, obj) in [("ours", &ours), ("clang", &reference)] {
+        let exe = temp.join(name);
+        let output = Command::new("clang")
+            .arg(obj)
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            Command::new(&exe).status().unwrap().code(),
+            Some(0),
+            "{name}"
+        );
+    }
+    std::fs::remove_dir_all(temp).unwrap();
 }

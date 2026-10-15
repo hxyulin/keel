@@ -164,3 +164,39 @@ Its output records binary/input hashes, every timing sample, object/text sizes,
 linked and stripped sizes, temporary-symbol counts, and alternating paired
 runtime measurements. Run it on an otherwise idle Linux host; it pins itself
 and its children to the requested CPU.
+
+The [layout follow-up report](../suite/reports/native-x86-layout-20261015.json)
+compares `426d6fc` with `e3a4bc6` on the i7-1360P NUC. Each mode uses the same
+44 fixed Keel-generated assembly files, prebuilt assemblers and the system linker.
+Baseline/optimized aggregate object text shrinks **6.88%/6.21%**, leaving it only
+**0.08%/0.13%** larger than Clang's. No `.L` symbols remain in the three native
+executables. SQLite's linked file shrinks from **5,632,640 to 1,994,048 bytes**
+(baseline) and **4,865,824 to 1,924,416 bytes** (optimized), matching Clang's file
+sizes. SQLite's stripped sizes also match Clang; exact text, section and symbol counts
+are retained in the report.
+
+Five alternating warm assembly batches measure **1.070 to 1.587 seconds**
+(baseline) and **0.982 to 1.394 seconds** (optimized): layout iteration costs
+**48%/42%** assembly time compared with the original single-pass assembler.
+Native assembly remains **2.50x/2.57x faster** than Clang's driver on these files.
+The cache retains only symbol-free encodings in a contiguous byte buffer;
+symbolic instructions and layout-dependent absolute operands are reencoded.
+These timings exclude C compilation and linking.
+
+Eleven alternating paired runtime runs on CPU 2 give baseline/optimized geomeans
+**0.65%/0.41% faster** than the original, and **0.08%/0.39% faster** than Clang
+assembly of the same source. Individual changes versus the original range from
+**1.97% faster to 1.50% slower** (baseline) and **2.69% faster to 0.94% slower**
+(optimized). These small, warm measurements include startup and are descriptive;
+they do not establish a general runtime speedup. All samples and per-workload
+bootstrap intervals are retained.
+
+Validation for this follow-up passes 201 Mac assembler checks (including the
+AArch64 suites), 15 codegen library checks, 44 selected Linux assembler checks,
+all 424 native runtime fixture variants plus spill regressions, and all 12
+application builds (176 objects, 44 test invocations). GNU readers, GDB source
+lines/locals/backtraces, libgcc unwinding, and native/Clang GOT/TLS alias execution
+pass. The relocation differential also checks temporary section targets with
+trailing instruction immediates. Modern AArch64 differential checks run on Mac,
+not Linux Clang 18. Strict assembler library/x86-test Clippy passes with the
+existing AArch64/parser lint categories allowed; the report names those allowances.
