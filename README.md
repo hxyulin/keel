@@ -194,6 +194,17 @@ with `cargo suite test lua -c keel`, then pass
 per-file measurements and summed serial assembly costs; those totals are
 distinct from a parallel build's wall time.
 
+`suite/measure_assembler_candidates.py` compares multiple prebuilt candidates
+in randomized paired rounds, including in-process timings and command-line
+costs. Supply `--candidate NAME CLI PROFILE` for each candidate, including
+`baseline`, plus `--input-dir`, `--work-dir` and `--output`. Each input must
+produce byte-identical Mach-O objects across candidates. The October 15
+[candidate measurements](suite/reports/assembler-candidates-aarch64-2026-10-15.json)
+cover all 33 Lua files, mixed instructions, debug output, and separate scanning
+stress inputs. Allocation reduction was retained; the SIMD comment-scanning
+experiment remains on `perf/simd-source-scanning` (`ac18b71`) because its
+strong stress-input gains did not improve ordinary Lua parsing.
+
 ## Development
 
 - `cargo test -p keel-asm` checks encodings against clang and, on Apple Silicon,

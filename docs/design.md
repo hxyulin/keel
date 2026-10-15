@@ -1147,6 +1147,13 @@ in one static table; every generated arm returns the corresponding record.
 Field range, reserved-bit, and feature checks still run after lookup. A unit
 test checks dispatch for every record and rejects unknown names.
 
+The parser borrows already-lowercase tokens and uses inline storage for the
+first eight operands, falling back to a vector for longer lists. Temporary
+encoding names are formatted into a 128-byte stack buffer with a heap fallback;
+branch names and memory-transfer tags use static strings where possible.
+These capacities do not impose syntax limits. Uppercase normalization,
+diagnostics, and the encoding validation rules are preserved.
+
 Normal Cargo builds use the checked-in Rust tables and need no network,
 Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
 
