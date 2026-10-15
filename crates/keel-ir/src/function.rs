@@ -395,7 +395,8 @@ impl Function {
     /// allocations in the verifier's hot path.
     pub(crate) fn for_each_result_type(&self, data: &InstData, mut visit: impl FnMut(Type)) {
         match data {
-            InstData::Iconst { ty, .. }
+            InstData::VectorSplat { ty, .. }
+            | InstData::Iconst { ty, .. }
             | InstData::Fconst { ty, .. }
             | InstData::Convert { ty, .. }
             | InstData::Load { ty, .. }
@@ -406,7 +407,23 @@ impl Function {
                 visit(self.value_type(args[1]))
             }
             InstData::StackAddr { .. } | InstData::SymbolAddr { .. } => visit(Type::Ptr),
-            InstData::Unary { arg, .. } => visit(self.value_type(*arg)),
+            InstData::VectorExtract { arg, .. } => visit(
+                self.value_type(*arg)
+                    .vector()
+                    .map_or(Type::I8, |v| v.lane_type()),
+            ),
+            InstData::VectorIcmp { args, .. } | InstData::VectorFcmp { args, .. } => visit(
+                self.value_type(args[0])
+                    .vector()
+                    .map_or(Type::I8, |v| Type::Vector(v.mask())),
+            ),
+            InstData::VectorBinary { args, .. }
+            | InstData::VectorInsert { args, .. }
+            | InstData::VectorShuffle { args, .. } => visit(self.value_type(args[0])),
+            InstData::VectorSelect { args } => visit(self.value_type(args[1])),
+            InstData::VectorUnary { arg, .. } | InstData::Unary { arg, .. } => {
+                visit(self.value_type(*arg))
+            }
             InstData::Binary { args, .. } => visit(self.value_type(args[0])),
             InstData::Fma { args } => visit(self.value_type(args[0])),
             InstData::Overflow { args, .. } => {
@@ -845,6 +862,27 @@ impl Function {
                 }
             }
             InstData::Trap => f.write_str("trap"),
+            InstData::VectorSplat { ty, arg } => write!(f, "vsplat.{ty} {}", v(*arg)),
+            InstData::VectorUnary { op, arg } => write!(f, "v{op} {}", v(*arg)),
+            InstData::VectorBinary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
+            InstData::VectorExtract { arg, lane } => write!(f, "vextract {}, {lane}", v(*arg)),
+            InstData::VectorInsert { args, lane } => {
+                write!(f, "vinsert {}, {}, {lane}", v(args[0]), v(args[1]))
+            }
+            InstData::VectorShuffle { args, lanes } => {
+                write!(f, "vshuffle {}, {}, [", v(args[0]), v(args[1]))?;
+                write_list(f, lanes.iter())?;
+                f.write_str("]")
+            }
+            InstData::VectorIcmp { cond, args } => {
+                write!(f, "vicmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            }
+            InstData::VectorFcmp { cond, args } => {
+                write!(f, "vfcmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            }
+            InstData::VectorSelect { args } => {
+                write!(f, "vselect {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            }
             InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
             InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
             InstData::Overflow { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),

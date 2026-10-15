@@ -674,6 +674,81 @@ impl Verifier<'_> {
             );
         }
         match func.inst_data(inst) {
+            InstData::VectorSplat { ty: to, arg } => {
+                if to.vector().is_none_or(|v| v.lane_type() != ty(*arg)) {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "vsplat needs a vector result and matching scalar lane, got {} to {to}",
+                            ty(*arg)
+                        ),
+                    );
+                }
+            }
+            InstData::VectorUnary { op, arg } => {
+                let t = ty(*arg);
+                if t.vector().is_none_or(|v| {
+                    v.lane_type().is_float() != op.is_float()
+                        || *op == UnaryOp::Bswap && v.lane_type() == Type::I8
+                }) {
+                    self.inst_error(
+                        inst,
+                        format!("v{op} needs compatible vector lanes, got {t}"),
+                    );
+                }
+            }
+            InstData::VectorBinary { op, args } => {
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if a != b
+                    || a.vector()
+                        .is_none_or(|v| v.lane_type().is_float() != op.is_float())
+                {
+                    self.inst_error(
+                        inst,
+                        format!(
+                            "{op} needs equal vector shapes with compatible lanes, got ({a}, {b})"
+                        ),
+                    );
+                }
+            }
+            InstData::VectorExtract { arg, lane } => {
+                let t = ty(*arg);
+                if t.vector().is_none_or(|v| *lane >= v.lanes()) {
+                    self.inst_error(inst, format!("vextract lane {lane} is invalid for {t}"));
+                }
+            }
+            InstData::VectorInsert { args, lane } => {
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if a.vector()
+                    .is_none_or(|v| *lane >= v.lanes() || b != v.lane_type())
+                {
+                    self.inst_error(inst, format!("vinsert needs a valid lane and matching scalar, got ({a}, {b}), lane {lane}"));
+                }
+            }
+            InstData::VectorShuffle { args, lanes } => {
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if a != b
+                    || a.vector().is_none_or(|v| {
+                        lanes.len() != usize::from(v.lanes())
+                            || lanes.iter().any(|i| *i >= 2 * v.lanes())
+                    })
+                {
+                    self.inst_error(inst, format!("vshuffle needs equal vectors, one index per output lane and indices below twice the lane count, got ({a}, {b}), {lanes:?}"));
+                }
+            }
+            InstData::VectorIcmp { args, .. } | InstData::VectorFcmp { args, .. } => {
+                let float = matches!(func.inst_data(inst), InstData::VectorFcmp { .. });
+                let (a, b) = (ty(args[0]), ty(args[1]));
+                if a != b || a.vector().is_none_or(|v| v.lane_type().is_float() != float) {
+                    self.inst_error(inst, format!("vector comparison needs equal vectors with compatible lanes, got ({a}, {b})"));
+                }
+            }
+            InstData::VectorSelect { args } => {
+                let (mask, a, b) = (ty(args[0]), ty(args[1]), ty(args[2]));
+                if a != b || a.vector().is_none_or(|v| mask != Type::Vector(v.mask())) {
+                    self.inst_error(inst, format!("vselect needs equal vector arms and an integer mask of the same lane shape, got ({mask}, {a}, {b})"));
+                }
+            }
             InstData::Iconst { ty, .. } => {
                 if !ty.is_int() {
                     self.inst_error(inst, format!("iconst type must be an integer, got {ty}"));
@@ -1186,9 +1261,13 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         }
         ConvertOp::Sitofp | ConvertOp::Uitofp => small_int(from) && to.is_float(),
         ConvertOp::Bitcast => {
-            from.is_float() != to.is_float()
-                && (from.is_int() || to.is_int())
-                && from.bytes() == to.bytes()
+            if from.is_vector() || to.is_vector() {
+                from.bytes() == to.bytes() && from.bytes().is_some()
+            } else {
+                from.is_float() != to.is_float()
+                    && (from.is_int() || to.is_int())
+                    && from.bytes() == to.bytes()
+            }
         }
         ConvertOp::PtrToInt => (from, to) == (Type::Ptr, Type::I64),
         ConvertOp::IntToPtr => (from, to) == (Type::I64, Type::Ptr),
@@ -1203,7 +1282,9 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         ConvertOp::Fptrunc => "converts f64 to f32",
         ConvertOp::Fptosi | ConvertOp::Fptoui => "converts a float to i32 or i64",
         ConvertOp::Sitofp | ConvertOp::Uitofp => "converts an integer up to i64 to a float",
-        ConvertOp::Bitcast => "converts between an integer and a float of the same size",
+        ConvertOp::Bitcast => {
+            "converts between same-size vectors/scalars, or a scalar integer and float"
+        }
         ConvertOp::PtrToInt => "converts ptr to i64",
         ConvertOp::IntToPtr => "converts i64 to ptr",
     })

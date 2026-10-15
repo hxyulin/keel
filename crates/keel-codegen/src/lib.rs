@@ -204,6 +204,64 @@ pub fn compile_program_with_pipeline(
     }
 }
 
+/// Vector IR is accepted by parsing/verification/optimization, but needs a
+/// target lowering and ABI implementation before reaching allocation.
+fn reject_unlowered_vectors(module: &Module) -> Result<(), CodegenError> {
+    use keel_ir::{AbiParam, Layout, Purpose, Signature};
+    fn layout_vector(layout: &Layout) -> bool {
+        match layout {
+            Layout::Scalar(t) => t.is_vector(),
+            Layout::Struct(fields) => fields.iter().any(layout_vector),
+            Layout::Array(elem, _) => layout_vector(elem),
+        }
+    }
+    fn param_vector(p: &AbiParam) -> bool {
+        p.ty.is_vector()
+            || match &p.purpose {
+                Purpose::Normal => false,
+                Purpose::ByVal(l) | Purpose::Sret(l) => layout_vector(l),
+            }
+    }
+    let signature_vector =
+        |sig: &Signature| sig.params.iter().chain(&sig.returns).any(param_vector);
+    let error = |name: &str| {
+        CodegenError { func: name.into(), message: "SIMD vector IR requires target lowering and vector ABI support; native vector code generation is not implemented yet".into() }
+    };
+    for decl in &module.decls {
+        if signature_vector(&decl.sig) {
+            return Err(error(&decl.name));
+        }
+    }
+    for func in &module.functions {
+        if signature_vector(&func.sig)
+            || func.callees().any(|(_, d)| signature_vector(&d.sig))
+            || func.signatures().any(|(_, sig)| signature_vector(sig))
+        {
+            return Err(error(&func.name));
+        }
+        for block in func.blocks() {
+            if func
+                .block_params(block)
+                .iter()
+                .any(|v| func.value_type(*v).is_vector())
+            {
+                return Err(error(&func.name));
+            }
+            for inst in func.block_insts(block) {
+                if func.inst_data(*inst).is_vector_instruction()
+                    || func
+                        .inst_results(*inst)
+                        .iter()
+                        .any(|v| func.value_type(*v).is_vector())
+                {
+                    return Err(error(&func.name));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 use std::fmt;
 
 /// An object file format's conventions for names and sections, for the

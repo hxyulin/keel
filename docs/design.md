@@ -41,8 +41,11 @@ explicitly marked future work.
 
 ## Types
 
-- Values: `i8 i16 i32 i64 i128 f32 f64 ptr`; vector types (`i32x4`…) later.
-- Signedness is on operations, not types. Comparisons return `i8` 0/1.
+- Scalar values: `i8 i16 i32 i64 i128 f32 f64 ptr`. Fixed 128-bit SIMD values:
+  `i8x16 i16x8 i32x4 i64x2 f32x4 f64x2`; see [SIMD IR](simd-ir.md) for operations,
+  lane semantics and the current native lowering boundary.
+- Signedness is on operations, not types. Scalar comparisons return `i8` 0/1;
+  vector comparisons return integer vectors with all-ones/zero lanes.
 - `ptr` is opaque. Memory is untyped bytes. `ptrtoint.i64` and
   `inttoptr.ptr` convert between a pointer and its address.
 - There are no aggregate values: a struct lives in memory and is handled

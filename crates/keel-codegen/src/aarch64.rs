@@ -208,6 +208,7 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<Output, CodegenError> {
+    crate::reject_unlowered_vectors(module)?;
     pipeline.validate_target(crate::Target::Aarch64AppleDarwin)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
     assert!(
@@ -1113,6 +1114,15 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorSplat { .. }
+            | InstData::VectorUnary { .. }
+            | InstData::VectorBinary { .. }
+            | InstData::VectorExtract { .. }
+            | InstData::VectorInsert { .. }
+            | InstData::VectorShuffle { .. }
+            | InstData::VectorIcmp { .. }
+            | InstData::VectorFcmp { .. }
+            | InstData::VectorSelect { .. } => unreachable!("vector IR rejected before lowering"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| self.folded_values.contains(&r)) => {}
             InstData::Icmp { .. } | InstData::Fcmp { .. }
