@@ -1,15 +1,18 @@
 //! Scalar integer / FP / SIMD memory operands. Immediate offsets are byte
 //! offsets in source; scaling and signed field packing happen only at encoding.
+use super::storage::Operands;
+use super::storage::{encode_named, lower, upper};
+use super::text::Trim;
 use super::{Kind, Reg, count, integer, is_integer, reg, unsigned};
-use crate::encode;
+use crate::FieldId;
 
 /// Keep bracketed addresses together when splitting instruction operands.
 /// This also catches malformed addresses before they reach an encoder.
-pub(super) fn operands(text: &str) -> Result<Vec<&str>, String> {
+pub(super) fn operands(text: &str) -> Result<Operands<'_>, String> {
     if text.is_empty() {
-        return Ok(Vec::new());
+        return Ok(Operands::new());
     }
-    let mut result = Vec::new();
+    let mut result = Operands::new();
     let mut bracket = false;
     let mut start = 0;
     for (index, c) in text.char_indices() {
@@ -19,7 +22,7 @@ pub(super) fn operands(text: &str) -> Result<Vec<&str>, String> {
             ']' if !bracket => return Err("unexpected closing memory bracket".into()),
             ']' => bracket = false,
             ',' if !bracket => {
-                result.push(text[start..index].trim());
+                result.push(text[start..index].trim_fast());
                 start = index + 1;
             }
             _ => {}
@@ -28,7 +31,7 @@ pub(super) fn operands(text: &str) -> Result<Vec<&str>, String> {
     if bracket {
         return Err("unclosed memory bracket".into());
     }
-    result.push(text[start..].trim());
+    result.push(text[start..].trim_fast());
     Ok(result)
 }
 
@@ -54,7 +57,7 @@ struct Address {
 
 fn address(args: &[&str]) -> Result<Address, String> {
     count(args, 1, 2)?;
-    let text = args[0].trim();
+    let text = args[0].trim_fast();
     let (text, pre) = if let Some(text) = text.strip_suffix('!') {
         (text.trim_end(), true)
     } else {
@@ -64,7 +67,7 @@ fn address(args: &[&str]) -> Result<Address, String> {
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))
         .ok_or("expected bracketed memory address; literal loads are not supported yet")?;
-    let args_inner: Vec<_> = inner.split(',').map(str::trim).collect();
+    let args_inner = Operands::collect(inner.split(',').map(str::trim));
     count(&args_inner, 1, 3)?;
     let base = reg(args_inner[0], true, false)?;
     if base.bits != 64 {
@@ -104,11 +107,11 @@ fn address(args: &[&str]) -> Result<Address, String> {
     }
     let index = reg(args_inner[1], false, true)?;
     let (option, amount) = if args_inner.len() == 3 {
-        let words: Vec<_> = args_inner[2].split_whitespace().collect();
+        let words = Operands::collect(args_inner[2].split_whitespace());
         count(&words, 1, 2)?;
-        let kind = words[0].to_ascii_lowercase();
+        let kind = lower(words[0]);
         let option =
-            match (kind.as_str(), index.bits) {
+            match (kind.as_ref(), index.bits) {
                 ("uxtw", 32) => 2,
                 ("lsl", 64) => 3,
                 ("sxtw", 32) => 6,
@@ -149,10 +152,10 @@ struct Transfer {
     number: u32,
     bits: u32,
     class: Class,
-    tag: String,
+    tag: &'static str,
 }
 fn transfer(s: &str) -> Result<Transfer, String> {
-    let s = s.to_ascii_lowercase();
+    let s = lower(s);
     let bits = match s.as_bytes().first() {
         Some(b'b') => 8,
         Some(b'h') => 16,
@@ -165,7 +168,7 @@ fn transfer(s: &str) -> Result<Transfer, String> {
                 number: r.number,
                 bits: r.bits,
                 class: Class::Gpr,
-                tag: r.bits.to_string(),
+                tag: if r.bits == 64 { "64" } else { "32" },
             });
         }
     };
@@ -179,7 +182,14 @@ fn transfer(s: &str) -> Result<Transfer, String> {
         number,
         bits,
         class: Class::Fp,
-        tag: s[..1].to_ascii_uppercase(),
+        tag: match bits {
+            8 => "B",
+            16 => "H",
+            32 => "S",
+            64 => "D",
+            128 => "Q",
+            _ => unreachable!(),
+        },
     })
 }
 
@@ -216,8 +226,19 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     let t = transfer(args[0])?;
     let address = address(&args[1..])?;
     let unscaled = op.starts_with("ldur") || op.starts_with("stur");
-    let plain = op.replace("ldur", "ldr").replace("stur", "str");
-    let bytes = match plain.as_str() {
+    let plain = match op {
+        "ldur" => "ldr",
+        "stur" => "str",
+        "ldurb" => "ldrb",
+        "sturb" => "strb",
+        "ldurh" => "ldrh",
+        "sturh" => "strh",
+        "ldursb" => "ldrsb",
+        "ldursh" => "ldrsh",
+        "ldursw" => "ldrsw",
+        _ => op,
+    };
+    let bytes = match plain {
         "ldrb" | "strb" | "ldrh" | "strh" => {
             if t.class != Class::Gpr || t.bits != 32 {
                 return Err("byte/halfword transfers require a W register".into());
@@ -240,32 +261,49 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
         _ => return Err(format!("unsupported memory instruction `{op}`")),
     };
     writeback_overlap(&t, &address)?;
-    let base_fields = [("Rt", t.number), ("Rn", address.base.number)];
-    let mut fields = base_fields.to_vec();
+    let mut fields = [
+        (FieldId::Rt, t.number),
+        (FieldId::Rn, address.base.number),
+        (FieldId::Rd, 0),
+        (FieldId::Rd, 0),
+        (FieldId::Rd, 0),
+    ];
+    let mut field_count = 3;
     let (encoding_op, tag, form) = match address.offset {
         Offset::Immediate(offset) => {
             if unscaled && address.mode != Mode::Offset {
                 return Err("unscaled instructions do not support writeback".into());
             }
             let (encoding_op, form) = match address.mode {
-                Mode::Pre => (op.to_string(), "immpre"),
-                Mode::Post => (op.to_string(), "immpost"),
+                Mode::Pre => (op, "immpre"),
+                Mode::Post => (op, "immpost"),
                 Mode::Offset
                     if !unscaled
                         && offset >= 0
                         && offset % i64::from(bytes) == 0
                         && offset / i64::from(bytes) <= 4095 =>
                 {
-                    fields.push(("imm12", (offset / i64::from(bytes)) as u32));
-                    (op.to_string(), "pos")
+                    fields[2] = (FieldId::imm12, (offset / i64::from(bytes)) as u32);
+                    (op, "pos")
                 }
                 Mode::Offset => (
-                    plain.replace("ldr", "ldur").replace("str", "stur"),
+                    match plain {
+                        "ldr" => "ldur",
+                        "str" => "stur",
+                        "ldrb" => "ldurb",
+                        "strb" => "sturb",
+                        "ldrh" => "ldurh",
+                        "strh" => "sturh",
+                        "ldrsb" => "ldursb",
+                        "ldrsh" => "ldursh",
+                        "ldrsw" => "ldursw",
+                        _ => unreachable!(),
+                    },
                     "unscaled",
                 ),
             };
             if form != "pos" {
-                fields.push(("imm9", signed_scaled(offset, 1, 9)?));
+                fields[2] = (FieldId::imm9, signed_scaled(offset, 1, 9)?);
             }
             (encoding_op, t.tag, form)
         }
@@ -284,29 +322,40 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             }
             // For byte transfers, explicit #0 sets S=1; omitted shift sets S=0.
             let scaled = u32::from(shift.is_some() && amount == scale);
-            fields.extend_from_slice(&[("Rm", index.number), ("S", scaled)]);
+            fields[2] = (FieldId::Rm, index.number);
+            fields[3] = (FieldId::S, scaled);
+            field_count = 4;
             let tag = if bytes == 1 {
-                let tag = if t.class == Class::Fp {
-                    t.tag
-                } else {
-                    format!("{}B", t.tag)
-                };
                 if option == 3 {
-                    format!("{tag}L")
+                    if t.class == Class::Fp {
+                        "BL"
+                    } else if t.bits == 64 {
+                        "64BL"
+                    } else {
+                        "32BL"
+                    }
                 } else {
-                    fields.push(("option", option));
-                    tag
+                    fields[4] = (FieldId::option, option);
+                    field_count = 5;
+                    if t.class == Class::Fp {
+                        "B"
+                    } else if t.bits == 64 {
+                        "64B"
+                    } else {
+                        "32B"
+                    }
                 }
             } else {
-                fields.push(("option", option));
+                fields[4] = (FieldId::option, option);
+                field_count = 5;
                 t.tag
             };
-            (op.to_string(), tag, "regoff")
+            (op, tag, "regoff")
         }
     };
-    encode(
-        &format!("{}_{}_ldst_{form}", encoding_op.to_ascii_uppercase(), tag),
-        &fields,
+    encode_named(
+        format_args!("{}_{}_ldst_{form}", upper(encoding_op), tag),
+        &fields[..field_count],
     )
 }
 
@@ -332,13 +381,13 @@ fn pair(op: &str, args: &[&str]) -> Result<u32, String> {
         Mode::Pre => "pre",
         Mode::Post => "post",
     };
-    encode(
-        &format!("{}_{}_ldstpair_{form}", op.to_ascii_uppercase(), a.tag),
+    encode_named(
+        format_args!("{}_{}_ldstpair_{form}", upper(op), a.tag),
         &[
-            ("Rt", a.number),
-            ("Rt2", b.number),
-            ("Rn", address.base.number),
-            ("imm7", imm7),
+            (FieldId::Rt, a.number),
+            (FieldId::Rt2, b.number),
+            (FieldId::Rn, address.base.number),
+            (FieldId::imm7, imm7),
         ],
     )
 }
@@ -356,9 +405,9 @@ fn ordered(op: &str, args: &[&str]) -> Result<u32, String> {
         );
     }
     let order = if op.starts_with("ld") { "LR" } else { "SL" };
-    encode(
-        &format!("{}_{order}{}_ldstord", op.to_ascii_uppercase(), t.bits),
-        &[("Rt", t.number), ("Rn", address.base.number)],
+    encode_named(
+        format_args!("{}_{order}{}_ldstord", upper(op), t.bits),
+        &[(FieldId::Rt, t.number), (FieldId::Rn, address.base.number)],
     )
 }
 

@@ -25,6 +25,7 @@
 use keel_codegen::Target;
 use keel_ir::Module;
 use std::process::ExitCode;
+mod input;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
@@ -32,7 +33,9 @@ const USAGE: &str = "usage:
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel asm <input.s> -o <output.o>
   keel asm-metrics <input.s> [-o <metrics.json>]
-  keel passes";
+  keel passes
+
+  Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
     #[cfg(feature = "profile-with-tracy")]
@@ -208,8 +211,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 .output
                 .as_ref()
                 .ok_or("`asm` requires `-o <output.o>`")?;
-            let src = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
-            let object = keel_asm::assemble_object(&src).map_err(|e| format!("{input}: {e}"))?;
+            let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
+            let text = src.text().map_err(|e| format!("{input}: {e}"))?;
+            let object = keel_asm::assemble_object(text).map_err(|e| format!("{input}: {e}"))?;
+            // Release the mapping before opening output, including in-place output.
+            drop(src);
             std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
         }
         "compile" => {
@@ -263,7 +269,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
-            let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
+            let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
+            let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
@@ -271,8 +278,9 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             let mut module = {
                 profiling::scope!("c-frontend");
-                keel_c::compile(&src, &input, c_opts).map_err(|e| e.to_string())?
+                keel_c::compile(text, &input, c_opts).map_err(|e| e.to_string())?
             };
+            drop(src);
             if let Err(errors) = keel_ir::verify_module(&module) {
                 let lines: Vec<String> = errors.iter().map(|e| format!("  {e}")).collect();
                 return Err(format!(
@@ -333,11 +341,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
 fn load(opts: &Options) -> Result<(String, Module), String> {
     profiling::scope!("parse-and-verify");
     let input = opts.input.clone().ok_or(USAGE)?;
-    let src = std::fs::read_to_string(&input).map_err(|e| format!("{input}: {e}"))?;
+    let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
+    let text = src.text().map_err(|e| format!("{input}: {e}"))?;
     let module = if opts.ir_lines {
-        keel_ir::parse_with_ir_lines(&src, &input)
+        keel_ir::parse_with_ir_lines(text, &input)
     } else {
-        keel_ir::parse(&src)
+        keel_ir::parse(text)
     };
     let module = module.map_err(|e| format!("{input}:{e}"))?;
     if let Err(errors) = keel_ir::verify_module(&module) {
@@ -373,6 +382,14 @@ mod tests {
                 "--regalloc",
             ],
         )
+    }
+
+    #[test]
+    fn removed_mmap_flag_is_rejected_for_every_input_command() {
+        for command in ["asm", "compile", "cc", "opt"] {
+            let error = run(vec![command.into(), "--mmap".into()]).unwrap_err();
+            assert!(error.starts_with("unknown flag `--mmap`"));
+        }
     }
 
     #[test]

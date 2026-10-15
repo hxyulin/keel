@@ -324,7 +324,9 @@ dependencies = [
  "keel-codegen",
  "keel-ir",
  "keel-opt",
+ "memmap2",
  "profiling",
+ "simdutf8",
  "tracy-client",
 ]
 
@@ -332,10 +334,12 @@ dependencies = [
 name = "keel-asm"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "keel-c",
  "keel-codegen",
  "keel-ir",
  "keel-opt",
+ "memchr",
  "object",
 ]
 
@@ -436,6 +440,15 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "nu-ansi-term"
@@ -623,6 +636,12 @@ name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+
+[[package]]
+name = "simdutf8"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "slab"

@@ -1,13 +1,14 @@
 //! Scalar LSE atomics and memory barriers. Ordering and transfer width select
 //! distinct Arm encoding records; no ordering bits are inferred or discarded.
+use super::storage::{encode_named, lower, upper};
 use super::{count, memory, reg, same_width, unsigned};
-use crate::encode;
+use crate::FieldId;
 
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String> {
     if matches!(op, "dmb" | "dsb" | "isb") {
         count(args, usize::from(op != "isb"), 1)?;
-        let option = args.first().copied().unwrap_or("sy").to_ascii_lowercase();
-        let crm = match option.as_str() {
+        let option = lower(args.first().copied().unwrap_or("sy"));
+        let crm = match option.as_ref() {
             "sy" => 15,
             _ if option.starts_with('#') => unsigned(&option, 15)?,
             _ if op == "isb" => return Err("isb requires sy or a 4-bit immediate".into()),
@@ -24,13 +25,13 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
             "st" => 14,
             _ => return Err("invalid barrier option".into()),
         };
-        return encode(
-            &format!(
+        return encode_named(
+            format_args!(
                 "{}_{}_barriers",
-                op.to_ascii_uppercase(),
+                upper(op),
                 if op == "isb" { "BI" } else { "BO" }
             ),
-            &[("CRm", crm)],
+            &[(FieldId::CRm, crm)],
         )
         .map(Some);
     }
@@ -79,13 +80,13 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
     };
     let form = if root == "cas" { "comswap" } else { "memop" };
     let tag = format!("{}{}", if root == "cas" { "C" } else { "" }, rs.bits);
-    encode(
-        &format!(
-            "{}{}{width}_{tag}_{form}",
-            name.to_ascii_uppercase(),
-            order.to_ascii_uppercase()
-        ),
-        &[("Rs", rs.number), ("Rt", rt.number), ("Rn", rn.number)],
+    encode_named(
+        format_args!("{}{}{width}_{tag}_{form}", upper(name), upper(order)),
+        &[
+            (FieldId::Rs, rs.number),
+            (FieldId::Rt, rt.number),
+            (FieldId::Rn, rn.number),
+        ],
     )
     .map(Some)
 }

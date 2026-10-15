@@ -49,6 +49,25 @@ For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
 
+`asm`, `compile`, `cc`, and `opt` map input files by default.
+They use a read-only copy-on-write file mapping instead of an owned read
+buffer for nonempty regular files, while retaining UTF-8 validation. Keep
+mapped inputs unchanged until parsing completes; copy-on-write does not
+protect against another process truncating the file. Empty files, streams,
+and filesystems that reject mapping fall back to ordinary reads. Mappings
+are released before writing output, including when output reuses the input
+path.
+
+To compare the two paths on already generated Lua assembly, run
+`python3 suite/measure_assembler_io.py --compiler target/release/keel
+--read-compiler target/assembler-bench/pre-default-read-keel
+--input-dir target/suite/lua/build/keel --work-dir target/assembler-bench/io
+--output target/assembler-bench/io/report.json`. Builds and tests should finish
+before timing. This measures warm-cache CLI costs, not cold-storage latency.
+The read comparison requires an archived release driver from before mapping
+became the default, such as commit `cc01b96`. Historical reports retain the
+commands and flags used at the time.
+
 ## Compiler tiers and profiling
 
 The stages can be tuned independently:
@@ -130,7 +149,7 @@ release builds for final timings; use instrumented builds to locate costs.
 See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
 
-## Assembler (initial A64 subset)
+## Assembler (A64 subset)
 
 ```sh
 cargo run -p keel -- asm crates/keel-asm/examples/return42.s -o return42.o
@@ -160,14 +179,19 @@ Scalar LSE atomics include read-modify-write operations and compare-and-swap;
 DMB/DSB/ISB barriers, `ngc`/`ngcs`, `svc`, and SIMD `movi` are supported too.
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
+The generated table currently contains 534 encoding forms, counting register
+widths, addressing modes, and atomic ordering variants separately. This is
+a supported subset, rather than complete A64 or GNU assembler compatibility.
 Data support includes initialized/zero-fill/TLS sections, integer directives,
 pointer tables, and symbol differences. It also supports ordinary CFI unwind
 records, compact unwind for canonical ARM64 frames and leaf functions, DWARF 4
 line tables, and debug sections for types and variables.
 Exception personalities, LSDA tables, and C++ exception propagation are
 supported, along with subsection splitting for linker reordering and dead
-stripping. Literal loads and other unsupported forms still prevent assembling
-arbitrary `keel compile` output.
+stripping. The tests assemble all current backend fixtures and C fixtures
+(including optimization and debug configurations). Literal loads, exclusive
+accesses, general SIMD arithmetic, and other unsupported forms still limit
+arbitrary assembly and inline assembly.
 Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
 
@@ -177,6 +201,79 @@ an inventory of all supported A64 forms, optionally imports CPU scheduling
 estimates from LLVM, and compares equivalent sequences by size or modeled
 execution cost. See [instruction costs](docs/instruction-costs.md) for coverage,
 provenance, and the limits of the shared LLVM Apple CPU model.
+
+To measure assembly speed against Clang on Apple Silicon macOS:
+
+```sh
+python3 suite/measure_assembler.py --output target/assembler-bench/report.json
+```
+
+The script builds release binaries, checks instruction bytes against Clang,
+and records randomized paired timings for `keel asm`, `clang -x assembler -c`,
+and the direct `clang -cc1as` entry point. Preprocessing and C compilation are
+outside timing. Inputs cover tiny files, 1K–100K mixed instructions, and
+generated C with 1,000 functions, with/without debug information. These are
+scaling workloads, not an application-suite performance claim. Raw samples,
+tool versions, source hashes, and in-process parse/encode versus Mach-O writer
+timings are retained. The stage profiler can also run separately with
+`cargo run --release -p keel-asm --example profile -- input.s 30`.
+
+For a before/after comparison, copy the release compiler and stage profiler
+before changing the assembler, then pass `--baseline-compiler <copy>` and
+`--baseline-profiler <copy>`. To measure actual suite assembly, prepare it
+with `cargo suite test lua -c keel`, then pass
+`--only-inputs --input-dir target/suite/lua/build/keel`. The report includes
+per-file measurements and summed serial assembly costs; those totals are
+distinct from a parallel build's wall time.
+
+`suite/measure_assembler_candidates.py` compares multiple prebuilt candidates
+in randomized paired rounds, including in-process timings and command-line
+costs. Supply `--candidate NAME CLI PROFILE` for each candidate, including
+`baseline`, plus `--input-dir`, `--work-dir` and `--output`. Each input must
+produce byte-identical Mach-O objects across candidates. The October 15
+[candidate measurements](suite/reports/assembler-candidates-aarch64-2026-10-15.json)
+cover all 33 Lua files, mixed instructions, debug output, and separate scanning
+stress inputs. Allocation reduction was retained; the SIMD comment-scanning
+experiment remains on `perf/simd-source-scanning` (`ac18b71`) because its
+strong stress-input gains did not improve ordinary Lua parsing.
+
+A subsequent scanner fuses line splitting and comment removal, reusing NEON
+delimiter masks across ordinary instruction lines and using a scalar fallback
+on other targets. Combined with per-pass bump scratch and borrowed symbol
+names, the [second candidate run](suite/reports/assembler-arena-simd-aarch64-2026-10-15.json)
+reduced Lua's in-process assembly time by about 15% and summed CLI time by
+about 5%, relative to the allocation-reduced baseline. All 37 inputs produced
+identical objects. Arena scratch covers fixup queues, label order, debug rows,
+frames and CFI data; independently owned outputs, ordered-map nodes, and some
+parser/writer buffers remain heap allocated. The allocation audit is at the
+top of `crates/keel-asm/src/parser.rs`. Separate
+[memory measurements](suite/reports/assembler-arena-memory-aarch64-2026-10-15.json)
+show the debug-heavy input's peak RSS increasing by about 0.6 MiB.
+
+The [mapped-input comparison](suite/reports/assembler-mmap-aarch64-2026-10-15.json)
+found no clear overall warm-cache speedup before these parser changes. These measurements
+do not establish cold-storage behavior or benefits on larger applications.
+
+For synthetic large-file scaling checks:
+
+```sh
+python3 suite/generate_assembler_scale.py --output-dir target/assembler-bench/scale --mib 64 256
+python3 suite/measure_assembler_io.py --compiler target/release/keel \
+  --read-compiler target/assembler-bench/pre-default-read-keel \
+  --input-dir target/assembler-bench/scale --input-group synthetic-scale \
+  --work-dir target/assembler-bench/scale-objects --rounds 11 --warmups 1 \
+  --output target/assembler-bench/scale-report.json
+```
+
+The [64/256 MiB scaling run](suite/reports/assembler-mmap-scale-aarch64-2026-10-15.json)
+found less than 1% paired end-to-end speed change on both instruction-dense
+and function-heavy inputs. The function-heavy 256 MiB case had a small
+measurable gain; the instruction-dense case's interval included no gain.
+The [memory check](suite/reports/assembler-mmap-scale-memory-aarch64-2026-10-15.json)
+showed a larger benefit: macOS peak memory footprint dropped by approximately
+the input file size, while peak resident size stayed similar because mapped
+file pages still count toward residency. These generated files are scaling
+inputs, not complete applications; the measurements use a warm filesystem cache.
 
 ## Development
 

@@ -196,14 +196,17 @@ pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
     assemble(source)?.to_macho()
 }
 
+use generated::FieldId;
+
 struct Field {
+    id: FieldId,
     name: &'static str,
     start: u8,
     width: u8,
 }
 enum Requirement {
     Feature(&'static str),
-    NotEqual(&'static str, u32),
+    NotEqual(FieldId, u32),
 }
 
 // Fixed Apple Silicon target: scalar FP, Advanced SIMD, and LSE atomics.
@@ -219,17 +222,16 @@ struct Encoding {
 
 /// Every variable field must be supplied once. Fixed bits within partially
 /// variable fields (e.g. MOVZ wN's `hw`) remain constrained by the ISA mask.
-fn encode(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
-    let encoding = generated::ENCODINGS
-        .iter()
-        .find(|e| e.name == name)
-        .ok_or_else(|| format!("unsupported encoding `{name}`"))?;
+fn encode(name: &str, values: &[(FieldId, u32)]) -> Result<u32, String> {
+    let encoding =
+        generated::encoding(name).ok_or_else(|| format!("unsupported encoding `{name}`"))?;
+    let name = encoding.name;
     if values.len() != encoding.fields.len() {
         return Err(format!("wrong number of fields for `{name}`"));
     }
     let mut word = encoding.base;
     for field in encoding.fields {
-        let mut matches = values.iter().filter(|(n, _)| *n == field.name);
+        let mut matches = values.iter().filter(|(n, _)| *n == field.id);
         let (_, value) = matches
             .next()
             .ok_or_else(|| format!("missing field `{}`", field.name))?;
@@ -259,4 +261,64 @@ fn encode(name: &str, values: &[(&str, u32)]) -> Result<u32, String> {
         }
     }
     Ok(word)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_fields_preserve_validation_and_diagnostic_names() {
+        use FieldId::*;
+        for encoding in generated::ENCODINGS {
+            for field in encoding.fields {
+                assert_eq!(field.name, field.id.to_string());
+            }
+        }
+        let name = "MOVZ_64_movewide";
+        let fields = generated::encoding(name).unwrap().fields;
+        let mut duplicate: Vec<_> = fields.iter().map(|field| (field.id, 0)).collect();
+        duplicate.pop();
+        duplicate.push((fields[0].id, 0));
+        assert_eq!(
+            encode(name, &duplicate).unwrap_err(),
+            format!("duplicate field `{}`", fields[0].name)
+        );
+        assert!(
+            encode(name, &[(Rd, 0), (imm12, 0), (hw, 0)])
+                .unwrap_err()
+                .contains("missing field `imm16`")
+        );
+        assert!(
+            encode(name, &[(Rd, 32), (imm16, 0), (hw, 0)])
+                .unwrap_err()
+                .contains("field `Rd` is out of range")
+        );
+        assert!(
+            encode("MOVZ_32_movewide", &[(Rd, 0), (imm16, 0), (hw, 2)])
+                .unwrap_err()
+                .contains("reserved field value")
+        );
+    }
+
+    #[test]
+    fn generated_lookup_returns_every_encoding_record() {
+        for expected in generated::ENCODINGS {
+            let actual = generated::encoding(expected.name).unwrap();
+            assert!(std::ptr::eq(actual, expected), "{}", expected.name);
+        }
+        for unsupported in [
+            "",
+            "add",
+            "ADD_64_addsub_imm ",
+            "add_64_addsub_imm",
+            "UNKNOWN",
+        ] {
+            assert!(generated::encoding(unsupported).is_none());
+            assert_eq!(
+                encode(unsupported, &[]),
+                Err(format!("unsupported encoding `{unsupported}`"))
+            );
+        }
+    }
 }

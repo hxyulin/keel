@@ -3,22 +3,26 @@
 //! offset; retain source order rather than inferring all ownership by address.
 use super::data::Location;
 use crate::{Assembly, Error, RelocationKind};
-use std::collections::{BTreeMap, BTreeSet};
+use bumpalo::{Bump, collections::Vec as BumpVec};
+use std::collections::BTreeMap;
 
-pub(super) struct Atoms {
-    boundaries: BTreeMap<(usize, u64), String>,
-    owners: BTreeMap<String, String>,
-    defaults: BTreeMap<usize, String>,
+pub(super) struct Atoms<'a> {
+    arena: &'a Bump,
+    boundaries: BTreeMap<(usize, u64), &'a str>,
+    owners: BTreeMap<&'a str, &'a str>,
+    defaults: BTreeMap<usize, &'a str>,
 }
-impl Atoms {
+impl<'a> Atoms<'a> {
     pub(super) fn new(
-        order: &[(String, Location)],
-        globals: &BTreeMap<String, usize>,
-        labels: &mut BTreeMap<String, Location>,
+        arena: &'a Bump,
+        order: &[(&'a str, Location)],
+        globals: &BTreeMap<&'a str, usize>,
+        labels: &mut BTreeMap<&'a str, Location>,
         prefix: &str,
         enabled: bool,
     ) -> Self {
         let mut result = Self {
+            arena,
             boundaries: BTreeMap::new(),
             owners: BTreeMap::new(),
             defaults: BTreeMap::new(),
@@ -30,11 +34,10 @@ impl Atoms {
         for (name, location) in order {
             if !name.starts_with('L') || globals.contains_key(name) {
                 // Aliases at one address share an atom.
-                let owner = result
+                let owner = *result
                     .boundaries
                     .entry((location.section, location.offset))
-                    .or_insert_with(|| name.clone())
-                    .clone();
+                    .or_insert(*name);
                 // A leading temporary label can precede its public alias.
                 // Both denote the initial atom at offset zero.
                 if location.offset == 0
@@ -42,7 +45,7 @@ impl Atoms {
                 {
                     for previous in result.owners.values_mut() {
                         if *previous == default {
-                            *previous = owner.clone();
+                            *previous = owner;
                         }
                     }
                 }
@@ -52,11 +55,11 @@ impl Atoms {
                 .get(&location.section)
                 .cloned()
                 .unwrap_or_else(|| result.default(location.section, prefix));
-            result.owners.insert(name.clone(), owner);
+            result.owners.insert(*name, owner);
         }
         for (section, name) in &result.defaults {
             labels.insert(
-                name.clone(),
+                *name,
                 Location {
                     section: *section,
                     offset: 0,
@@ -65,24 +68,20 @@ impl Atoms {
         }
         result
     }
-    fn default(&mut self, section: usize, prefix: &str) -> String {
-        self.defaults
-            .entry(section)
-            .or_insert_with(|| format!("ltmp_{prefix}section{section}"))
-            .clone()
+    fn default(&mut self, section: usize, prefix: &str) -> &'a str {
+        self.defaults.entry(section).or_insert_with(|| {
+            bumpalo::format!(in self.arena, "ltmp_{}section{}", prefix, section).into_bump_str()
+        })
     }
-    pub(super) fn owner(&self, name: &str, location: Location) -> Option<&str> {
-        self.owners
-            .get(name)
-            .map(String::as_str)
-            .or_else(|| self.at(location))
+    pub(super) fn owner(&self, name: &str, location: Location) -> Option<&'a str> {
+        self.owners.get(name).copied().or_else(|| self.at(location))
     }
-    fn at(&self, location: Location) -> Option<&str> {
+    fn at(&self, location: Location) -> Option<&'a str> {
         self.boundaries
             .range((location.section, 0)..=(location.section, location.offset))
             .next_back()
-            .map(|(_, s)| s.as_str())
-            .or_else(|| self.defaults.get(&location.section).map(String::as_str))
+            .map(|(_, s)| *s)
+            .or_else(|| self.defaults.get(&location.section).copied())
     }
     pub(super) fn same(&self, a: (&str, Location), b: (&str, Location)) -> bool {
         a.1.section == b.1.section && self.owner(a.0, a.1) == self.owner(b.0, b.1)
@@ -95,16 +94,19 @@ impl Atoms {
     pub(super) fn rebase(
         &mut self,
         a: &mut Assembly,
-        labels: &mut BTreeMap<String, Location>,
-        globals: &BTreeMap<String, usize>,
+        labels: &mut BTreeMap<&'a str, Location>,
+        globals: &BTreeMap<&'a str, usize>,
         prefix: &str,
     ) -> Result<(), Error> {
-        let names: BTreeSet<_> = a
-            .relocations
-            .iter()
-            .flat_map(|r| std::iter::once(&r.symbol).chain(r.subtract_symbol.iter()))
-            .cloned()
-            .collect();
+        let mut names = BumpVec::from_iter_in(
+            a.relocations
+                .iter()
+                .flat_map(|r| std::iter::once(&r.symbol).chain(r.subtract_symbol.iter()))
+                .map(String::as_str),
+            self.arena,
+        );
+        names.sort_unstable();
+        names.dedup();
         let mut targets = BTreeMap::new();
         for name in names {
             if !name.starts_with('L') || globals.contains_key(&name) {
@@ -114,16 +116,15 @@ impl Atoms {
                 continue;
             };
             let owner = self
-                .owner(&name, location)
-                .map(str::to_string)
+                .owner(name, location)
                 .unwrap_or_else(|| self.default(location.section, prefix));
             let base = labels.get(&owner).copied().unwrap_or(Location {
                 section: location.section,
                 offset: 0,
             });
-            labels.entry(owner.clone()).or_insert(base);
+            labels.entry(owner).or_insert(base);
             targets.insert(
-                name,
+                &*self.arena.alloc_str(name),
                 (owner, i128::from(location.offset) - i128::from(base.offset)),
             );
         }
@@ -138,12 +139,16 @@ impl Atoms {
                 continue;
             }
             let mut addend = i128::from(r.addend);
-            if let Some((name, delta)) = targets.get(&r.symbol) {
-                r.symbol = name.clone();
+            if let Some((name, delta)) = targets.get(r.symbol.as_str()) {
+                r.symbol = name.to_string();
                 addend += delta;
             }
-            if let Some((name, delta)) = r.subtract_symbol.as_ref().and_then(|s| targets.get(s)) {
-                r.subtract_symbol = Some(name.clone());
+            if let Some((name, delta)) = r
+                .subtract_symbol
+                .as_ref()
+                .and_then(|s| targets.get(s.as_str()))
+            {
+                r.subtract_symbol = Some(name.to_string());
                 addend -= delta;
             }
             r.addend = i64::try_from(addend)

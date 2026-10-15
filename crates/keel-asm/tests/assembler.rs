@@ -496,3 +496,50 @@ int main(void) {
         .arg(&executable));
     assert_eq!(execute(&executable).code(), Some(0));
 }
+
+#[test]
+fn allocation_fast_paths_preserve_case_unicode_and_diagnostics() {
+    let source = ".text\nMOVZ X0, #42\nADD W1, W2, W3\nCMP X0, #1\nLDR X4, [SP, W5, UXTW #3]\nLDRSB X6, [X7, X8]\nLDR B9, [X10, X11, LSL #0]\nSTUR D12, [X13, #-8]\nFMOV D0, D1\nCSEL X0, X1, X2, EQ\nCNT V0.8B, V1.8B\nB.EQ Lend\nCBNZ W0, Lend\nTBZ X0, #40, Lend\nLend: RET LR\n";
+    compare_clang(source);
+    assert_eq!(
+        assemble(source).unwrap().text,
+        assemble(&source.replace("Lend", "lend").to_ascii_lowercase())
+            .unwrap()
+            .text
+    );
+
+    // Normalization must leave quoted payloads and UTF-8 bytes intact.
+    let source = ".data\n.ASCIZ \"MiXeD λ中, [X0] // quoted\"\n.BYTE 1,2,3,4,5,6,7,8,9,10,11,12\n";
+    let assembly = assemble(source).unwrap();
+    let mut expected = "MiXeD λ中, [X0] // quoted\0".as_bytes().to_vec();
+    expected.extend(1..=12);
+    assert!(assembly.sections.iter().any(|s| s.data() == expected));
+
+    for (source, message) in [
+        (
+            "ADD X31, X0, #0",
+            "invalid register `x31`; use sp or zr explicitly",
+        ),
+        ("MOV X0, É", "expected register, got `É`"),
+        ("ADD X0, Xλ, #0", "invalid register `xλ`"),
+        (
+            "LDR X0, [X1, [X2]]",
+            "nested memory brackets are not supported",
+        ),
+        ("LDR X0, [X1", "unclosed memory bracket"),
+    ] {
+        let error = assemble(source).unwrap_err();
+        assert_eq!(error.line, 1);
+        assert_eq!(error.message, message);
+    }
+}
+
+#[test]
+fn spilled_operands_keep_trailing_empty_operand_diagnostic() {
+    let error = assemble(".BYTE 1,2,3,4,5,6,7,8,").unwrap_err();
+    assert_eq!(error.line, 1);
+    assert_eq!(
+        error.message,
+        format!("expected 1..={} operand(s)", usize::MAX)
+    );
+}

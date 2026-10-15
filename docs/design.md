@@ -1176,6 +1176,35 @@ variable fields retain their fixed-bit constraints. Operand interpretation
 remains handwritten: register roles, immediate ranges, shifts, aliases, and
 PC-relative displacements need rules beyond the bit layout.
 
+Encoding-name dispatch is generated alongside the records as a Rust string
+`match`, replacing a linear scan through the encoding table. The records live
+in one static table; every generated arm returns the corresponding record.
+Field range, reserved-bit, and feature checks still run after lookup. A unit
+test checks dispatch for every record and rejects unknown names.
+
+The parser borrows already-lowercase tokens and uses inline storage for the
+first eight operands, falling back to a vector for longer lists. Temporary
+encoding names are formatted into a 128-byte stack buffer with a heap fallback;
+branch names and memory-transfer tags use static strings where possible.
+These capacities do not impose syntax limits. Uppercase normalization,
+diagnostics, and the encoding validation rules are preserved.
+
+Each assembly layout pass also owns a bump arena for fixup queues, label
+ordering, symbol-name sorting, debug rows/frames and CFI rules/events. Symbol
+bookkeeping borrows source names; generated names live in the arena. Local
+collections drop their elements before the arena, including on errors, and
+each symbolic LEB pass destroys its own scratch. Escaping assembly buffers,
+names and errors remain independently owned. Ordered-map nodes and some
+parser/Mach-O scratch still use the system allocator; the parser module
+documents this allocation boundary and arena growth costs.
+
+Line and comment scanning share one structural scan. On little-endian AArch64
+targets with NEON enabled, a 16-byte block generates masks for newline,
+semicolon, slash, quote and backslash; subsequent lines reuse unconsumed mask
+bits. Full-line comments skip to newline. Other targets and short tails use
+scalar masks. Quoting state resets at each physical line, matching the
+original `str::lines`/comment-removal behavior, including CRLF and UTF-8.
+
 Normal Cargo builds use the checked-in Rust tables and need no network,
 Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
 

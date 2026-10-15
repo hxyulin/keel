@@ -1,5 +1,7 @@
 //! The two Advanced SIMD forms used by Keel's scalar popcount lowering.
 use super::count;
+use super::storage::{encode_named, lower};
+use crate::FieldId;
 use crate::encode;
 
 fn number(text: &str, prefix: char) -> Result<u32, String> {
@@ -31,8 +33,8 @@ fn vector(text: &str) -> Result<(u32, &str, u32, u32), String> {
 }
 pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
     count(args, 2, 2)?;
-    let d = args[0].to_ascii_lowercase();
-    let n = args[1].to_ascii_lowercase();
+    let d = lower(args[0]);
+    let n = lower(args[1]);
     let (rn, arrangement, q, size) = vector(&n)?;
     let rd = if op == "cnt" {
         let (rd, dest_arrangement, _, _) = vector(&d)?;
@@ -56,7 +58,12 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
         } else {
             "ADDV_asimdall_only"
         },
-        &[("Rd", rd), ("Rn", rn), ("Q", q), ("size", size)],
+        &[
+            (FieldId::Rd, rd),
+            (FieldId::Rn, rn),
+            (FieldId::Q, q),
+            (FieldId::size, size),
+        ],
     )
 }
 
@@ -64,7 +71,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
 /// words, low-one MSL words, and one immediate bit per 00/FF byte in 64-bit lanes.
 pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
     count(args, 2, 3)?;
-    let dest = args[0].to_ascii_lowercase();
+    let dest = lower(args[0]);
     let (rd, arrangement, q) = if dest.starts_with('d') {
         (number(&dest, 'd')?, "d", 0)
     } else {
@@ -111,18 +118,27 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
         ("2d", ("lsl", 0)) if args.len() == 2 => ("D2_d", None),
         _ => return Err("invalid movi shift for lane arrangement".into()),
     };
-    let mut fields = vec![("Rd", rd)];
+    let mut fields = vec![(FieldId::Rd, rd)];
     if !wide {
-        fields.push(("Q", q));
+        fields.push((FieldId::Q, q));
     }
     if let Some(cmode) = cmode {
-        fields.push(("cmode", cmode));
+        fields.push((FieldId::cmode, cmode));
     }
-    for (i, name) in ["a", "b", "c", "d", "e", "f", "g", "h"]
-        .into_iter()
-        .enumerate()
+    for (i, name) in [
+        FieldId::a,
+        FieldId::b,
+        FieldId::c,
+        FieldId::d,
+        FieldId::e,
+        FieldId::f,
+        FieldId::g,
+        FieldId::h,
+    ]
+    .into_iter()
+    .enumerate()
     {
         fields.push((name, (imm >> (7 - i)) & 1));
     }
-    encode(&format!("MOVI_asimdimm_{form}"), &fields)
+    encode_named(format_args!("MOVI_asimdimm_{form}"), &fields)
 }

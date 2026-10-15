@@ -3,7 +3,105 @@
 // Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.
 // Do not edit; regenerate from isa/a64.json.
 use super::{Encoding, Field, Requirement};
-pub(super) const ENCODINGS: &[Encoding] = &[
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FieldId {
+    CRm,
+    N,
+    Q,
+    Ra,
+    Rd,
+    Rm,
+    Rn,
+    Rs,
+    Rt,
+    Rt2,
+    S,
+    a,
+    b,
+    b40,
+    b5,
+    c,
+    cmode,
+    cond,
+    d,
+    e,
+    f,
+    g,
+    h,
+    hw,
+    imm12,
+    imm14,
+    imm16,
+    imm19,
+    imm26,
+    imm3,
+    imm5,
+    imm6,
+    imm7,
+    imm8,
+    imm9,
+    immhi,
+    immlo,
+    immr,
+    imms,
+    nzcv,
+    option,
+    sh,
+    shift,
+    size,
+}
+impl std::fmt::Display for FieldId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::CRm => "CRm",
+            Self::N => "N",
+            Self::Q => "Q",
+            Self::Ra => "Ra",
+            Self::Rd => "Rd",
+            Self::Rm => "Rm",
+            Self::Rn => "Rn",
+            Self::Rs => "Rs",
+            Self::Rt => "Rt",
+            Self::Rt2 => "Rt2",
+            Self::S => "S",
+            Self::a => "a",
+            Self::b => "b",
+            Self::b40 => "b40",
+            Self::b5 => "b5",
+            Self::c => "c",
+            Self::cmode => "cmode",
+            Self::cond => "cond",
+            Self::d => "d",
+            Self::e => "e",
+            Self::f => "f",
+            Self::g => "g",
+            Self::h => "h",
+            Self::hw => "hw",
+            Self::imm12 => "imm12",
+            Self::imm14 => "imm14",
+            Self::imm16 => "imm16",
+            Self::imm19 => "imm19",
+            Self::imm26 => "imm26",
+            Self::imm3 => "imm3",
+            Self::imm5 => "imm5",
+            Self::imm6 => "imm6",
+            Self::imm7 => "imm7",
+            Self::imm8 => "imm8",
+            Self::imm9 => "imm9",
+            Self::immhi => "immhi",
+            Self::immlo => "immlo",
+            Self::immr => "immr",
+            Self::imms => "imms",
+            Self::nzcv => "nzcv",
+            Self::option => "option",
+            Self::sh => "sh",
+            Self::shift => "shift",
+            Self::size => "size",
+        })
+    }
+}
+pub(super) static ENCODINGS: &[Encoding] = &[
     Encoding {
         name: "ADCS_32_addsub_carry",
         base: 0x3a000000,
@@ -11,16 +109,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -34,16 +135,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -57,16 +161,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -80,16 +187,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -103,26 +213,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -136,21 +251,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -164,26 +283,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -197,26 +321,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -230,21 +359,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -258,26 +391,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -291,21 +429,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "size",
+                id: FieldId::size,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -319,26 +461,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -352,21 +499,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -380,26 +531,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -413,26 +569,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -446,21 +607,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -474,26 +639,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -507,16 +677,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immlo",
+                id: FieldId::immlo,
                 start: 29,
                 width: 2,
             },
             Field {
                 name: "immhi",
+                id: FieldId::immhi,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -530,16 +703,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immlo",
+                id: FieldId::immlo,
                 start: 29,
                 width: 2,
             },
             Field {
                 name: "immhi",
+                id: FieldId::immhi,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -553,21 +729,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -581,26 +761,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -614,26 +799,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "N",
+                id: FieldId::N,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -647,26 +837,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -680,21 +875,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -708,26 +907,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -741,26 +945,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "N",
+                id: FieldId::N,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -774,26 +983,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -807,16 +1021,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -830,16 +1047,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -853,21 +1073,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -881,21 +1105,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -909,26 +1137,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -942,26 +1175,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -975,26 +1213,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1008,26 +1251,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1040,6 +1288,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -1051,6 +1300,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfc000000,
         fields: &[Field {
             name: "imm26",
+            id: FieldId::imm26,
             start: 0,
             width: 26,
         }],
@@ -1062,6 +1312,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xffe0001f,
         fields: &[Field {
             name: "imm16",
+            id: FieldId::imm16,
             start: 5,
             width: 16,
         }],
@@ -1073,6 +1324,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -1084,6 +1336,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfc000000,
         fields: &[Field {
             name: "imm26",
+            id: FieldId::imm26,
             start: 0,
             width: 26,
         }],
@@ -1096,11 +1349,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm19",
+                id: FieldId::imm19,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 0,
                 width: 4,
             },
@@ -1114,16 +1369,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1137,16 +1395,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1160,16 +1421,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1183,16 +1447,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1206,16 +1473,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1229,16 +1499,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1252,16 +1525,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1275,16 +1551,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1298,16 +1577,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1321,16 +1603,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1344,16 +1629,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1367,16 +1655,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1390,16 +1681,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1413,16 +1707,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1436,16 +1733,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1459,16 +1759,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1482,11 +1785,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm19",
+                id: FieldId::imm19,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1500,11 +1805,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm19",
+                id: FieldId::imm19,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1518,11 +1825,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm19",
+                id: FieldId::imm19,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1536,11 +1845,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm19",
+                id: FieldId::imm19,
                 start: 5,
                 width: 19,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -1554,21 +1865,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm5",
+                id: FieldId::imm5,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1582,21 +1897,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1610,21 +1929,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm5",
+                id: FieldId::imm5,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1638,21 +1961,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1666,21 +1993,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm5",
+                id: FieldId::imm5,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1694,21 +2025,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1722,21 +2057,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm5",
+                id: FieldId::imm5,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1750,21 +2089,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "nzcv",
+                id: FieldId::nzcv,
                 start: 0,
                 width: 4,
             },
@@ -1778,11 +2121,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1796,11 +2141,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1814,11 +2161,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1832,11 +2181,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1850,21 +2201,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "size",
+                id: FieldId::size,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1878,21 +2233,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1906,21 +2265,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1934,21 +2297,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1962,21 +2329,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -1990,21 +2361,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2018,21 +2393,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2046,21 +2425,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2074,21 +2457,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2101,6 +2488,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffff0ff,
         fields: &[Field {
             name: "CRm",
+            id: FieldId::CRm,
             start: 8,
             width: 4,
         }],
@@ -2112,6 +2500,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffff0ff,
         fields: &[Field {
             name: "CRm",
+            id: FieldId::CRm,
             start: 8,
             width: 4,
         }],
@@ -2124,26 +2513,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2157,26 +2551,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2190,21 +2589,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2218,26 +2621,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2251,26 +2659,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "N",
+                id: FieldId::N,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2284,26 +2697,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2317,21 +2735,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2345,21 +2767,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2373,11 +2799,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2391,11 +2819,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2409,16 +2839,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2432,16 +2865,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2454,6 +2890,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -2466,11 +2903,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
@@ -2483,6 +2922,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -2495,11 +2935,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
@@ -2512,6 +2954,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -2524,11 +2967,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
@@ -2541,6 +2986,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -2553,11 +2999,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
@@ -2571,21 +3019,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2599,21 +3051,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "cond",
+                id: FieldId::cond,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2627,11 +3083,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2645,11 +3103,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2663,11 +3123,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2681,11 +3143,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2699,11 +3163,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2717,11 +3183,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2735,11 +3203,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2753,11 +3223,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2771,11 +3243,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2789,11 +3263,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2807,16 +3283,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2830,16 +3309,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2853,21 +3335,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2881,21 +3367,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2909,16 +3399,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2932,16 +3425,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2955,16 +3451,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -2978,16 +3477,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3001,11 +3503,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3019,11 +3523,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3037,11 +3543,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3055,11 +3563,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3073,11 +3583,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm8",
+                id: FieldId::imm8,
                 start: 13,
                 width: 8,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3091,11 +3603,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3109,11 +3623,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3127,11 +3643,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm8",
+                id: FieldId::imm8,
                 start: 13,
                 width: 8,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3145,21 +3663,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3173,21 +3695,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3201,16 +3727,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3224,16 +3753,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3247,11 +3779,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3265,11 +3799,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3283,21 +3819,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3311,21 +3851,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3339,21 +3883,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3367,21 +3915,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3395,11 +3947,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3413,11 +3967,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3431,11 +3987,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3449,11 +4007,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3467,11 +4027,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3485,11 +4047,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3503,11 +4067,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3521,11 +4087,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3539,11 +4107,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3557,11 +4127,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3575,16 +4147,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3598,16 +4173,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -3620,6 +4198,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffff0ff,
         fields: &[Field {
             name: "CRm",
+            id: FieldId::CRm,
             start: 8,
             width: 4,
         }],
@@ -3632,16 +4211,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3655,16 +4237,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3678,16 +4263,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3701,16 +4289,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3724,16 +4315,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3747,16 +4341,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3770,16 +4367,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3793,16 +4393,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3816,16 +4419,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3839,16 +4445,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3862,16 +4471,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3885,16 +4497,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3908,16 +4523,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3931,16 +4549,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3954,16 +4575,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -3977,16 +4601,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4000,11 +4627,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4018,11 +4647,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4036,11 +4667,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4054,11 +4687,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4072,16 +4707,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4095,16 +4733,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4118,16 +4759,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4141,16 +4785,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4164,16 +4811,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4187,16 +4837,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4210,16 +4863,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4233,16 +4889,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4256,16 +4915,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4279,16 +4941,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4302,16 +4967,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4325,16 +4993,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4348,16 +5019,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4371,16 +5045,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4394,16 +5071,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4417,16 +5097,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4440,16 +5123,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4463,16 +5149,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4486,16 +5175,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4509,16 +5201,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4532,16 +5227,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4555,16 +5253,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4578,16 +5279,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4601,16 +5305,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4624,16 +5331,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4647,16 +5357,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4670,16 +5383,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4693,16 +5409,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4716,16 +5435,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4739,16 +5461,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4762,16 +5487,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4785,16 +5513,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4808,21 +5539,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4836,21 +5571,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4864,21 +5603,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4892,21 +5635,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4920,21 +5667,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4948,21 +5699,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -4976,21 +5731,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5004,21 +5763,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5032,21 +5795,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5060,21 +5827,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5088,21 +5859,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5116,21 +5891,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5144,21 +5923,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5172,21 +5955,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5200,21 +5987,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5228,21 +6019,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5256,31 +6051,36 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
-        requirements: &[Requirement::NotEqual("option", 3)],
+        requirements: &[Requirement::NotEqual(FieldId::option, 3)],
     },
     Encoding {
         name: "LDRB_32_ldst_immpost",
@@ -5289,16 +6089,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5312,16 +6115,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5335,16 +6141,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5358,16 +6167,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5381,16 +6193,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5404,16 +6219,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5427,26 +6245,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5460,21 +6283,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5488,31 +6315,36 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
-        requirements: &[Requirement::NotEqual("option", 3)],
+        requirements: &[Requirement::NotEqual(FieldId::option, 3)],
     },
     Encoding {
         name: "LDRSB_32_ldst_immpost",
@@ -5521,16 +6353,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5544,16 +6379,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5567,16 +6405,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5590,21 +6431,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5618,31 +6463,36 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
-        requirements: &[Requirement::NotEqual("option", 3)],
+        requirements: &[Requirement::NotEqual(FieldId::option, 3)],
     },
     Encoding {
         name: "LDRSB_64_ldst_immpost",
@@ -5651,16 +6501,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5674,16 +6527,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5697,16 +6553,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5720,16 +6579,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5743,16 +6605,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5766,16 +6631,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5789,26 +6657,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5822,16 +6695,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5845,16 +6721,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5868,16 +6747,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5891,26 +6773,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5924,16 +6811,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5947,16 +6837,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5970,16 +6863,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -5993,26 +6889,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6026,16 +6927,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6049,16 +6953,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6072,16 +6979,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6095,26 +7005,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6128,16 +7043,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6151,16 +7069,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6174,16 +7095,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6197,26 +7121,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6230,21 +7159,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6258,16 +7191,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6281,16 +7217,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6304,16 +7243,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6327,33 +7269,38 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
         requirements: &[
             Requirement::Feature("FEAT_FP"),
-            Requirement::NotEqual("option", 3),
+            Requirement::NotEqual(FieldId::option, 3),
         ],
     },
     Encoding {
@@ -6363,16 +7310,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6386,16 +7336,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6409,16 +7362,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6432,26 +7388,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6465,16 +7426,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6488,16 +7452,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6511,16 +7478,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6534,26 +7504,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6567,16 +7542,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6590,16 +7568,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6613,16 +7594,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6636,26 +7620,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6669,16 +7658,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6692,16 +7684,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6715,16 +7710,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6738,26 +7736,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6771,16 +7774,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6794,16 +7800,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6817,16 +7826,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6840,16 +7852,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6863,16 +7878,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6886,16 +7904,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6909,16 +7930,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6932,16 +7956,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6955,16 +7982,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -6978,16 +8008,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7001,16 +8034,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7024,16 +8060,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7047,16 +8086,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7070,16 +8112,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7093,16 +8138,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7116,16 +8164,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7139,16 +8190,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7162,16 +8216,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7185,16 +8242,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7208,16 +8268,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7231,16 +8294,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7254,16 +8320,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7277,16 +8346,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7300,16 +8372,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7323,16 +8398,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7346,16 +8424,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7369,16 +8450,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7392,16 +8476,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7415,16 +8502,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7438,16 +8528,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7461,16 +8554,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7484,16 +8580,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7507,16 +8606,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7530,16 +8632,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7553,16 +8658,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7576,16 +8684,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7599,16 +8710,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7622,16 +8736,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7645,16 +8762,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7668,16 +8788,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7691,16 +8814,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7714,16 +8840,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7737,16 +8866,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7760,16 +8892,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7783,16 +8918,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7806,16 +8944,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7829,16 +8970,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7852,16 +8996,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7875,16 +9022,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7898,16 +9048,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7921,16 +9074,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7944,16 +9100,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7967,16 +9126,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -7990,16 +9152,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8013,16 +9178,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8036,16 +9204,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8059,16 +9230,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8082,16 +9256,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8105,16 +9282,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8128,16 +9308,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8151,16 +9334,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8174,16 +9360,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8197,16 +9386,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8220,16 +9412,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8243,16 +9438,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8266,16 +9464,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8289,16 +9490,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8312,16 +9516,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8335,16 +9542,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8358,16 +9568,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8381,16 +9594,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8404,16 +9620,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8427,16 +9646,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8450,16 +9672,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8473,16 +9698,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8496,16 +9724,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8519,16 +9750,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8542,16 +9776,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8565,16 +9802,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8588,16 +9828,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8611,16 +9854,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8634,16 +9880,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8657,16 +9906,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8680,16 +9932,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8703,16 +9958,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8726,16 +9984,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8749,16 +10010,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8772,16 +10036,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8795,16 +10062,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8818,16 +10088,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8841,16 +10114,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8864,16 +10140,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8887,16 +10166,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8910,16 +10192,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -8933,16 +10218,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -8956,16 +10244,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -8979,16 +10270,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9002,16 +10296,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9025,21 +10322,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9053,21 +10354,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9081,46 +10386,55 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9134,46 +10448,55 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9187,56 +10510,67 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "cmode",
+                id: FieldId::cmode,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9250,56 +10584,67 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "cmode",
+                id: FieldId::cmode,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9313,56 +10658,67 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "cmode",
+                id: FieldId::cmode,
                 start: 12,
                 width: 4,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9376,51 +10732,61 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Q",
+                id: FieldId::Q,
                 start: 30,
                 width: 1,
             },
             Field {
                 name: "a",
+                id: FieldId::a,
                 start: 18,
                 width: 1,
             },
             Field {
                 name: "b",
+                id: FieldId::b,
                 start: 17,
                 width: 1,
             },
             Field {
                 name: "c",
+                id: FieldId::c,
                 start: 16,
                 width: 1,
             },
             Field {
                 name: "d",
+                id: FieldId::d,
                 start: 9,
                 width: 1,
             },
             Field {
                 name: "e",
+                id: FieldId::e,
                 start: 8,
                 width: 1,
             },
             Field {
                 name: "f",
+                id: FieldId::f,
                 start: 7,
                 width: 1,
             },
             Field {
                 name: "g",
+                id: FieldId::g,
                 start: 6,
                 width: 1,
             },
             Field {
                 name: "h",
+                id: FieldId::h,
                 start: 5,
                 width: 1,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9434,16 +10800,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9457,16 +10826,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9480,16 +10852,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9503,16 +10878,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9526,16 +10904,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9549,16 +10930,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "hw",
+                id: FieldId::hw,
                 start: 21,
                 width: 2,
             },
             Field {
                 name: "imm16",
+                id: FieldId::imm16,
                 start: 5,
                 width: 16,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9572,21 +10956,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9600,21 +10988,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9635,26 +11027,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9668,26 +11065,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9701,21 +11103,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9729,26 +11135,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9762,26 +11173,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "N",
+                id: FieldId::N,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9795,26 +11211,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9828,11 +11249,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9846,11 +11269,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9863,6 +11288,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xfffffc1f,
         fields: &[Field {
             name: "Rn",
+            id: FieldId::Rn,
             start: 5,
             width: 5,
         }],
@@ -9875,11 +11301,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9893,11 +11321,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9911,11 +11341,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9929,11 +11361,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9947,11 +11381,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9965,16 +11401,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -9988,16 +11427,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10011,16 +11453,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10034,16 +11479,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10057,16 +11505,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10080,16 +11531,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10103,21 +11557,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10131,21 +11589,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10159,11 +11621,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10177,11 +11641,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10195,11 +11661,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10213,11 +11681,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10231,16 +11701,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10254,16 +11727,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10277,21 +11753,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10305,16 +11785,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -10328,11 +11811,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10346,11 +11831,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10364,11 +11851,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10382,11 +11871,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10400,21 +11891,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10428,21 +11923,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10456,21 +11955,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10484,21 +11987,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10512,21 +12019,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10540,21 +12051,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10568,21 +12083,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10596,21 +12115,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10624,21 +12147,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10652,21 +12179,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10680,21 +12211,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10708,21 +12243,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10736,21 +12275,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10764,21 +12307,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10792,21 +12339,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm7",
+                id: FieldId::imm7,
                 start: 15,
                 width: 7,
             },
             Field {
                 name: "Rt2",
+                id: FieldId::Rt2,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10820,21 +12371,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10848,31 +12403,36 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
-        requirements: &[Requirement::NotEqual("option", 3)],
+        requirements: &[Requirement::NotEqual(FieldId::option, 3)],
     },
     Encoding {
         name: "STRB_32_ldst_immpost",
@@ -10881,16 +12441,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10904,16 +12467,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10927,16 +12493,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10950,16 +12519,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10973,16 +12545,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -10996,16 +12571,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11019,26 +12597,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11052,16 +12635,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11075,16 +12661,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11098,16 +12687,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11121,26 +12713,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11154,16 +12751,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11177,16 +12777,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11200,16 +12803,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11223,26 +12829,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11256,21 +12867,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11284,16 +12899,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11307,16 +12925,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11330,16 +12951,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11353,33 +12977,38 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
         ],
         requirements: &[
             Requirement::Feature("FEAT_FP"),
-            Requirement::NotEqual("option", 3),
+            Requirement::NotEqual(FieldId::option, 3),
         ],
     },
     Encoding {
@@ -11389,16 +13018,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11412,16 +13044,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11435,16 +13070,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11458,26 +13096,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11491,16 +13134,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11514,16 +13160,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11537,16 +13186,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11560,26 +13212,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11593,16 +13250,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11616,16 +13276,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11639,16 +13302,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11662,26 +13328,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11695,16 +13366,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11718,16 +13392,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11741,16 +13418,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11764,26 +13444,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "S",
+                id: FieldId::S,
                 start: 12,
                 width: 1,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11797,16 +13482,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11820,16 +13508,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11843,16 +13534,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11866,16 +13560,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11889,16 +13586,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11912,16 +13612,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11935,16 +13638,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11958,16 +13664,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -11981,16 +13690,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "imm9",
+                id: FieldId::imm9,
                 start: 12,
                 width: 9,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12004,26 +13716,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12037,21 +13754,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12065,26 +13786,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12098,26 +13824,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12131,21 +13862,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12159,26 +13894,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12192,26 +13932,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12225,21 +13970,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12253,26 +14002,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12286,26 +14040,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "option",
+                id: FieldId::option,
                 start: 13,
                 width: 3,
             },
             Field {
                 name: "imm3",
+                id: FieldId::imm3,
                 start: 10,
                 width: 3,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12319,21 +14078,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "sh",
+                id: FieldId::sh,
                 start: 22,
                 width: 1,
             },
             Field {
                 name: "imm12",
+                id: FieldId::imm12,
                 start: 10,
                 width: 12,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12347,26 +14110,31 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "shift",
+                id: FieldId::shift,
                 start: 22,
                 width: 2,
             },
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "imm6",
+                id: FieldId::imm6,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12379,6 +14147,7 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         mask: 0xffe0001f,
         fields: &[Field {
             name: "imm16",
+            id: FieldId::imm16,
             start: 5,
             width: 16,
         }],
@@ -12391,16 +14160,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12414,16 +14186,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12437,16 +14212,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12460,16 +14238,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12483,16 +14264,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12506,16 +14290,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12529,16 +14316,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12552,16 +14342,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12575,16 +14368,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12598,16 +14394,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12621,16 +14420,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12644,16 +14446,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12667,16 +14472,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12690,16 +14498,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12713,16 +14524,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12736,16 +14550,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rs",
+                id: FieldId::Rs,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12759,21 +14576,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "b5",
+                id: FieldId::b5,
                 start: 31,
                 width: 1,
             },
             Field {
                 name: "b40",
+                id: FieldId::b40,
                 start: 19,
                 width: 5,
             },
             Field {
                 name: "imm14",
+                id: FieldId::imm14,
                 start: 5,
                 width: 14,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12787,21 +14608,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "b5",
+                id: FieldId::b5,
                 start: 31,
                 width: 1,
             },
             Field {
                 name: "b40",
+                id: FieldId::b40,
                 start: 19,
                 width: 5,
             },
             Field {
                 name: "imm14",
+                id: FieldId::imm14,
                 start: 5,
                 width: 14,
             },
             Field {
                 name: "Rt",
+                id: FieldId::Rt,
                 start: 0,
                 width: 5,
             },
@@ -12815,21 +14640,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12843,21 +14672,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "immr",
+                id: FieldId::immr,
                 start: 16,
                 width: 6,
             },
             Field {
                 name: "imms",
+                id: FieldId::imms,
                 start: 10,
                 width: 6,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12871,11 +14704,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12889,11 +14724,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12907,11 +14744,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12925,11 +14764,13 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12943,16 +14784,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12966,16 +14810,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -12989,21 +14836,25 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Ra",
+                id: FieldId::Ra,
                 start: 10,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -13017,16 +14868,19 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         fields: &[
             Field {
                 name: "Rm",
+                id: FieldId::Rm,
                 start: 16,
                 width: 5,
             },
             Field {
                 name: "Rn",
+                id: FieldId::Rn,
                 start: 5,
                 width: 5,
             },
             Field {
                 name: "Rd",
+                id: FieldId::Rd,
                 start: 0,
                 width: 5,
             },
@@ -13034,3 +14888,543 @@ pub(super) const ENCODINGS: &[Encoding] = &[
         requirements: &[],
     },
 ];
+
+pub(super) fn encoding(name: &str) -> Option<&'static Encoding> {
+    Some(match name {
+        "ADCS_32_addsub_carry" => &ENCODINGS[0],
+        "ADCS_64_addsub_carry" => &ENCODINGS[1],
+        "ADC_32_addsub_carry" => &ENCODINGS[2],
+        "ADC_64_addsub_carry" => &ENCODINGS[3],
+        "ADDS_32S_addsub_ext" => &ENCODINGS[4],
+        "ADDS_32S_addsub_imm" => &ENCODINGS[5],
+        "ADDS_32_addsub_shift" => &ENCODINGS[6],
+        "ADDS_64S_addsub_ext" => &ENCODINGS[7],
+        "ADDS_64S_addsub_imm" => &ENCODINGS[8],
+        "ADDS_64_addsub_shift" => &ENCODINGS[9],
+        "ADDV_asimdall_only" => &ENCODINGS[10],
+        "ADD_32_addsub_ext" => &ENCODINGS[11],
+        "ADD_32_addsub_imm" => &ENCODINGS[12],
+        "ADD_32_addsub_shift" => &ENCODINGS[13],
+        "ADD_64_addsub_ext" => &ENCODINGS[14],
+        "ADD_64_addsub_imm" => &ENCODINGS[15],
+        "ADD_64_addsub_shift" => &ENCODINGS[16],
+        "ADRP_only_pcreladdr" => &ENCODINGS[17],
+        "ADR_only_pcreladdr" => &ENCODINGS[18],
+        "ANDS_32S_log_imm" => &ENCODINGS[19],
+        "ANDS_32_log_shift" => &ENCODINGS[20],
+        "ANDS_64S_log_imm" => &ENCODINGS[21],
+        "ANDS_64_log_shift" => &ENCODINGS[22],
+        "AND_32_log_imm" => &ENCODINGS[23],
+        "AND_32_log_shift" => &ENCODINGS[24],
+        "AND_64_log_imm" => &ENCODINGS[25],
+        "AND_64_log_shift" => &ENCODINGS[26],
+        "ASRV_32_dp_2src" => &ENCODINGS[27],
+        "ASRV_64_dp_2src" => &ENCODINGS[28],
+        "BFM_32M_bitfield" => &ENCODINGS[29],
+        "BFM_64M_bitfield" => &ENCODINGS[30],
+        "BICS_32_log_shift" => &ENCODINGS[31],
+        "BICS_64_log_shift" => &ENCODINGS[32],
+        "BIC_32_log_shift" => &ENCODINGS[33],
+        "BIC_64_log_shift" => &ENCODINGS[34],
+        "BLR_64_branch_reg" => &ENCODINGS[35],
+        "BL_only_branch_imm" => &ENCODINGS[36],
+        "BRK_EX_exception" => &ENCODINGS[37],
+        "BR_64_branch_reg" => &ENCODINGS[38],
+        "B_only_branch_imm" => &ENCODINGS[39],
+        "B_only_condbranch" => &ENCODINGS[40],
+        "CASAB_C32_comswap" => &ENCODINGS[41],
+        "CASAH_C32_comswap" => &ENCODINGS[42],
+        "CASALB_C32_comswap" => &ENCODINGS[43],
+        "CASALH_C32_comswap" => &ENCODINGS[44],
+        "CASAL_C32_comswap" => &ENCODINGS[45],
+        "CASAL_C64_comswap" => &ENCODINGS[46],
+        "CASA_C32_comswap" => &ENCODINGS[47],
+        "CASA_C64_comswap" => &ENCODINGS[48],
+        "CASB_C32_comswap" => &ENCODINGS[49],
+        "CASH_C32_comswap" => &ENCODINGS[50],
+        "CASLB_C32_comswap" => &ENCODINGS[51],
+        "CASLH_C32_comswap" => &ENCODINGS[52],
+        "CASL_C32_comswap" => &ENCODINGS[53],
+        "CASL_C64_comswap" => &ENCODINGS[54],
+        "CAS_C32_comswap" => &ENCODINGS[55],
+        "CAS_C64_comswap" => &ENCODINGS[56],
+        "CBNZ_32_compbranch" => &ENCODINGS[57],
+        "CBNZ_64_compbranch" => &ENCODINGS[58],
+        "CBZ_32_compbranch" => &ENCODINGS[59],
+        "CBZ_64_compbranch" => &ENCODINGS[60],
+        "CCMN_32_condcmp_imm" => &ENCODINGS[61],
+        "CCMN_32_condcmp_reg" => &ENCODINGS[62],
+        "CCMN_64_condcmp_imm" => &ENCODINGS[63],
+        "CCMN_64_condcmp_reg" => &ENCODINGS[64],
+        "CCMP_32_condcmp_imm" => &ENCODINGS[65],
+        "CCMP_32_condcmp_reg" => &ENCODINGS[66],
+        "CCMP_64_condcmp_imm" => &ENCODINGS[67],
+        "CCMP_64_condcmp_reg" => &ENCODINGS[68],
+        "CLS_32_dp_1src" => &ENCODINGS[69],
+        "CLS_64_dp_1src" => &ENCODINGS[70],
+        "CLZ_32_dp_1src" => &ENCODINGS[71],
+        "CLZ_64_dp_1src" => &ENCODINGS[72],
+        "CNT_asimdmisc_R" => &ENCODINGS[73],
+        "CSEL_32_condsel" => &ENCODINGS[74],
+        "CSEL_64_condsel" => &ENCODINGS[75],
+        "CSINC_32_condsel" => &ENCODINGS[76],
+        "CSINC_64_condsel" => &ENCODINGS[77],
+        "CSINV_32_condsel" => &ENCODINGS[78],
+        "CSINV_64_condsel" => &ENCODINGS[79],
+        "CSNEG_32_condsel" => &ENCODINGS[80],
+        "CSNEG_64_condsel" => &ENCODINGS[81],
+        "DMB_BO_barriers" => &ENCODINGS[82],
+        "DSB_BO_barriers" => &ENCODINGS[83],
+        "EON_32_log_shift" => &ENCODINGS[84],
+        "EON_64_log_shift" => &ENCODINGS[85],
+        "EOR_32_log_imm" => &ENCODINGS[86],
+        "EOR_32_log_shift" => &ENCODINGS[87],
+        "EOR_64_log_imm" => &ENCODINGS[88],
+        "EOR_64_log_shift" => &ENCODINGS[89],
+        "EXTR_32_extract" => &ENCODINGS[90],
+        "EXTR_64_extract" => &ENCODINGS[91],
+        "FABS_D_floatdp1" => &ENCODINGS[92],
+        "FABS_S_floatdp1" => &ENCODINGS[93],
+        "FADD_D_floatdp2" => &ENCODINGS[94],
+        "FADD_S_floatdp2" => &ENCODINGS[95],
+        "FCMPE_DZ_floatcmp" => &ENCODINGS[96],
+        "FCMPE_D_floatcmp" => &ENCODINGS[97],
+        "FCMPE_SZ_floatcmp" => &ENCODINGS[98],
+        "FCMPE_S_floatcmp" => &ENCODINGS[99],
+        "FCMP_DZ_floatcmp" => &ENCODINGS[100],
+        "FCMP_D_floatcmp" => &ENCODINGS[101],
+        "FCMP_SZ_floatcmp" => &ENCODINGS[102],
+        "FCMP_S_floatcmp" => &ENCODINGS[103],
+        "FCSEL_D_floatsel" => &ENCODINGS[104],
+        "FCSEL_S_floatsel" => &ENCODINGS[105],
+        "FCVTZS_32D_float2int" => &ENCODINGS[106],
+        "FCVTZS_32S_float2int" => &ENCODINGS[107],
+        "FCVTZS_64D_float2int" => &ENCODINGS[108],
+        "FCVTZS_64S_float2int" => &ENCODINGS[109],
+        "FCVTZU_32D_float2int" => &ENCODINGS[110],
+        "FCVTZU_32S_float2int" => &ENCODINGS[111],
+        "FCVTZU_64D_float2int" => &ENCODINGS[112],
+        "FCVTZU_64S_float2int" => &ENCODINGS[113],
+        "FCVT_DS_floatdp1" => &ENCODINGS[114],
+        "FCVT_SD_floatdp1" => &ENCODINGS[115],
+        "FDIV_D_floatdp2" => &ENCODINGS[116],
+        "FDIV_S_floatdp2" => &ENCODINGS[117],
+        "FMADD_D_floatdp3" => &ENCODINGS[118],
+        "FMADD_S_floatdp3" => &ENCODINGS[119],
+        "FMAX_D_floatdp2" => &ENCODINGS[120],
+        "FMAX_S_floatdp2" => &ENCODINGS[121],
+        "FMIN_D_floatdp2" => &ENCODINGS[122],
+        "FMIN_S_floatdp2" => &ENCODINGS[123],
+        "FMOV_32S_float2int" => &ENCODINGS[124],
+        "FMOV_64D_float2int" => &ENCODINGS[125],
+        "FMOV_D64_float2int" => &ENCODINGS[126],
+        "FMOV_D_floatdp1" => &ENCODINGS[127],
+        "FMOV_D_floatimm" => &ENCODINGS[128],
+        "FMOV_S32_float2int" => &ENCODINGS[129],
+        "FMOV_S_floatdp1" => &ENCODINGS[130],
+        "FMOV_S_floatimm" => &ENCODINGS[131],
+        "FMSUB_D_floatdp3" => &ENCODINGS[132],
+        "FMSUB_S_floatdp3" => &ENCODINGS[133],
+        "FMUL_D_floatdp2" => &ENCODINGS[134],
+        "FMUL_S_floatdp2" => &ENCODINGS[135],
+        "FNEG_D_floatdp1" => &ENCODINGS[136],
+        "FNEG_S_floatdp1" => &ENCODINGS[137],
+        "FNMADD_D_floatdp3" => &ENCODINGS[138],
+        "FNMADD_S_floatdp3" => &ENCODINGS[139],
+        "FNMSUB_D_floatdp3" => &ENCODINGS[140],
+        "FNMSUB_S_floatdp3" => &ENCODINGS[141],
+        "FRINTM_D_floatdp1" => &ENCODINGS[142],
+        "FRINTM_S_floatdp1" => &ENCODINGS[143],
+        "FRINTN_D_floatdp1" => &ENCODINGS[144],
+        "FRINTN_S_floatdp1" => &ENCODINGS[145],
+        "FRINTP_D_floatdp1" => &ENCODINGS[146],
+        "FRINTP_S_floatdp1" => &ENCODINGS[147],
+        "FRINTZ_D_floatdp1" => &ENCODINGS[148],
+        "FRINTZ_S_floatdp1" => &ENCODINGS[149],
+        "FSQRT_D_floatdp1" => &ENCODINGS[150],
+        "FSQRT_S_floatdp1" => &ENCODINGS[151],
+        "FSUB_D_floatdp2" => &ENCODINGS[152],
+        "FSUB_S_floatdp2" => &ENCODINGS[153],
+        "ISB_BI_barriers" => &ENCODINGS[154],
+        "LDADDAB_32_memop" => &ENCODINGS[155],
+        "LDADDAH_32_memop" => &ENCODINGS[156],
+        "LDADDALB_32_memop" => &ENCODINGS[157],
+        "LDADDALH_32_memop" => &ENCODINGS[158],
+        "LDADDAL_32_memop" => &ENCODINGS[159],
+        "LDADDAL_64_memop" => &ENCODINGS[160],
+        "LDADDA_32_memop" => &ENCODINGS[161],
+        "LDADDA_64_memop" => &ENCODINGS[162],
+        "LDADDB_32_memop" => &ENCODINGS[163],
+        "LDADDH_32_memop" => &ENCODINGS[164],
+        "LDADDLB_32_memop" => &ENCODINGS[165],
+        "LDADDLH_32_memop" => &ENCODINGS[166],
+        "LDADDL_32_memop" => &ENCODINGS[167],
+        "LDADDL_64_memop" => &ENCODINGS[168],
+        "LDADD_32_memop" => &ENCODINGS[169],
+        "LDADD_64_memop" => &ENCODINGS[170],
+        "LDARB_LR32_ldstord" => &ENCODINGS[171],
+        "LDARH_LR32_ldstord" => &ENCODINGS[172],
+        "LDAR_LR32_ldstord" => &ENCODINGS[173],
+        "LDAR_LR64_ldstord" => &ENCODINGS[174],
+        "LDCLRAB_32_memop" => &ENCODINGS[175],
+        "LDCLRAH_32_memop" => &ENCODINGS[176],
+        "LDCLRALB_32_memop" => &ENCODINGS[177],
+        "LDCLRALH_32_memop" => &ENCODINGS[178],
+        "LDCLRAL_32_memop" => &ENCODINGS[179],
+        "LDCLRAL_64_memop" => &ENCODINGS[180],
+        "LDCLRA_32_memop" => &ENCODINGS[181],
+        "LDCLRA_64_memop" => &ENCODINGS[182],
+        "LDCLRB_32_memop" => &ENCODINGS[183],
+        "LDCLRH_32_memop" => &ENCODINGS[184],
+        "LDCLRLB_32_memop" => &ENCODINGS[185],
+        "LDCLRLH_32_memop" => &ENCODINGS[186],
+        "LDCLRL_32_memop" => &ENCODINGS[187],
+        "LDCLRL_64_memop" => &ENCODINGS[188],
+        "LDCLR_32_memop" => &ENCODINGS[189],
+        "LDCLR_64_memop" => &ENCODINGS[190],
+        "LDEORAB_32_memop" => &ENCODINGS[191],
+        "LDEORAH_32_memop" => &ENCODINGS[192],
+        "LDEORALB_32_memop" => &ENCODINGS[193],
+        "LDEORALH_32_memop" => &ENCODINGS[194],
+        "LDEORAL_32_memop" => &ENCODINGS[195],
+        "LDEORAL_64_memop" => &ENCODINGS[196],
+        "LDEORA_32_memop" => &ENCODINGS[197],
+        "LDEORA_64_memop" => &ENCODINGS[198],
+        "LDEORB_32_memop" => &ENCODINGS[199],
+        "LDEORH_32_memop" => &ENCODINGS[200],
+        "LDEORLB_32_memop" => &ENCODINGS[201],
+        "LDEORLH_32_memop" => &ENCODINGS[202],
+        "LDEORL_32_memop" => &ENCODINGS[203],
+        "LDEORL_64_memop" => &ENCODINGS[204],
+        "LDEOR_32_memop" => &ENCODINGS[205],
+        "LDEOR_64_memop" => &ENCODINGS[206],
+        "LDP_32_ldstpair_off" => &ENCODINGS[207],
+        "LDP_32_ldstpair_post" => &ENCODINGS[208],
+        "LDP_32_ldstpair_pre" => &ENCODINGS[209],
+        "LDP_64_ldstpair_off" => &ENCODINGS[210],
+        "LDP_64_ldstpair_post" => &ENCODINGS[211],
+        "LDP_64_ldstpair_pre" => &ENCODINGS[212],
+        "LDP_D_ldstpair_off" => &ENCODINGS[213],
+        "LDP_D_ldstpair_post" => &ENCODINGS[214],
+        "LDP_D_ldstpair_pre" => &ENCODINGS[215],
+        "LDP_Q_ldstpair_off" => &ENCODINGS[216],
+        "LDP_Q_ldstpair_post" => &ENCODINGS[217],
+        "LDP_Q_ldstpair_pre" => &ENCODINGS[218],
+        "LDP_S_ldstpair_off" => &ENCODINGS[219],
+        "LDP_S_ldstpair_post" => &ENCODINGS[220],
+        "LDP_S_ldstpair_pre" => &ENCODINGS[221],
+        "LDRB_32BL_ldst_regoff" => &ENCODINGS[222],
+        "LDRB_32B_ldst_regoff" => &ENCODINGS[223],
+        "LDRB_32_ldst_immpost" => &ENCODINGS[224],
+        "LDRB_32_ldst_immpre" => &ENCODINGS[225],
+        "LDRB_32_ldst_pos" => &ENCODINGS[226],
+        "LDRH_32_ldst_immpost" => &ENCODINGS[227],
+        "LDRH_32_ldst_immpre" => &ENCODINGS[228],
+        "LDRH_32_ldst_pos" => &ENCODINGS[229],
+        "LDRH_32_ldst_regoff" => &ENCODINGS[230],
+        "LDRSB_32BL_ldst_regoff" => &ENCODINGS[231],
+        "LDRSB_32B_ldst_regoff" => &ENCODINGS[232],
+        "LDRSB_32_ldst_immpost" => &ENCODINGS[233],
+        "LDRSB_32_ldst_immpre" => &ENCODINGS[234],
+        "LDRSB_32_ldst_pos" => &ENCODINGS[235],
+        "LDRSB_64BL_ldst_regoff" => &ENCODINGS[236],
+        "LDRSB_64B_ldst_regoff" => &ENCODINGS[237],
+        "LDRSB_64_ldst_immpost" => &ENCODINGS[238],
+        "LDRSB_64_ldst_immpre" => &ENCODINGS[239],
+        "LDRSB_64_ldst_pos" => &ENCODINGS[240],
+        "LDRSH_32_ldst_immpost" => &ENCODINGS[241],
+        "LDRSH_32_ldst_immpre" => &ENCODINGS[242],
+        "LDRSH_32_ldst_pos" => &ENCODINGS[243],
+        "LDRSH_32_ldst_regoff" => &ENCODINGS[244],
+        "LDRSH_64_ldst_immpost" => &ENCODINGS[245],
+        "LDRSH_64_ldst_immpre" => &ENCODINGS[246],
+        "LDRSH_64_ldst_pos" => &ENCODINGS[247],
+        "LDRSH_64_ldst_regoff" => &ENCODINGS[248],
+        "LDRSW_64_ldst_immpost" => &ENCODINGS[249],
+        "LDRSW_64_ldst_immpre" => &ENCODINGS[250],
+        "LDRSW_64_ldst_pos" => &ENCODINGS[251],
+        "LDRSW_64_ldst_regoff" => &ENCODINGS[252],
+        "LDR_32_ldst_immpost" => &ENCODINGS[253],
+        "LDR_32_ldst_immpre" => &ENCODINGS[254],
+        "LDR_32_ldst_pos" => &ENCODINGS[255],
+        "LDR_32_ldst_regoff" => &ENCODINGS[256],
+        "LDR_64_ldst_immpost" => &ENCODINGS[257],
+        "LDR_64_ldst_immpre" => &ENCODINGS[258],
+        "LDR_64_ldst_pos" => &ENCODINGS[259],
+        "LDR_64_ldst_regoff" => &ENCODINGS[260],
+        "LDR_BL_ldst_regoff" => &ENCODINGS[261],
+        "LDR_B_ldst_immpost" => &ENCODINGS[262],
+        "LDR_B_ldst_immpre" => &ENCODINGS[263],
+        "LDR_B_ldst_pos" => &ENCODINGS[264],
+        "LDR_B_ldst_regoff" => &ENCODINGS[265],
+        "LDR_D_ldst_immpost" => &ENCODINGS[266],
+        "LDR_D_ldst_immpre" => &ENCODINGS[267],
+        "LDR_D_ldst_pos" => &ENCODINGS[268],
+        "LDR_D_ldst_regoff" => &ENCODINGS[269],
+        "LDR_H_ldst_immpost" => &ENCODINGS[270],
+        "LDR_H_ldst_immpre" => &ENCODINGS[271],
+        "LDR_H_ldst_pos" => &ENCODINGS[272],
+        "LDR_H_ldst_regoff" => &ENCODINGS[273],
+        "LDR_Q_ldst_immpost" => &ENCODINGS[274],
+        "LDR_Q_ldst_immpre" => &ENCODINGS[275],
+        "LDR_Q_ldst_pos" => &ENCODINGS[276],
+        "LDR_Q_ldst_regoff" => &ENCODINGS[277],
+        "LDR_S_ldst_immpost" => &ENCODINGS[278],
+        "LDR_S_ldst_immpre" => &ENCODINGS[279],
+        "LDR_S_ldst_pos" => &ENCODINGS[280],
+        "LDR_S_ldst_regoff" => &ENCODINGS[281],
+        "LDSETAB_32_memop" => &ENCODINGS[282],
+        "LDSETAH_32_memop" => &ENCODINGS[283],
+        "LDSETALB_32_memop" => &ENCODINGS[284],
+        "LDSETALH_32_memop" => &ENCODINGS[285],
+        "LDSETAL_32_memop" => &ENCODINGS[286],
+        "LDSETAL_64_memop" => &ENCODINGS[287],
+        "LDSETA_32_memop" => &ENCODINGS[288],
+        "LDSETA_64_memop" => &ENCODINGS[289],
+        "LDSETB_32_memop" => &ENCODINGS[290],
+        "LDSETH_32_memop" => &ENCODINGS[291],
+        "LDSETLB_32_memop" => &ENCODINGS[292],
+        "LDSETLH_32_memop" => &ENCODINGS[293],
+        "LDSETL_32_memop" => &ENCODINGS[294],
+        "LDSETL_64_memop" => &ENCODINGS[295],
+        "LDSET_32_memop" => &ENCODINGS[296],
+        "LDSET_64_memop" => &ENCODINGS[297],
+        "LDSMAXAB_32_memop" => &ENCODINGS[298],
+        "LDSMAXAH_32_memop" => &ENCODINGS[299],
+        "LDSMAXALB_32_memop" => &ENCODINGS[300],
+        "LDSMAXALH_32_memop" => &ENCODINGS[301],
+        "LDSMAXAL_32_memop" => &ENCODINGS[302],
+        "LDSMAXAL_64_memop" => &ENCODINGS[303],
+        "LDSMAXA_32_memop" => &ENCODINGS[304],
+        "LDSMAXA_64_memop" => &ENCODINGS[305],
+        "LDSMAXB_32_memop" => &ENCODINGS[306],
+        "LDSMAXH_32_memop" => &ENCODINGS[307],
+        "LDSMAXLB_32_memop" => &ENCODINGS[308],
+        "LDSMAXLH_32_memop" => &ENCODINGS[309],
+        "LDSMAXL_32_memop" => &ENCODINGS[310],
+        "LDSMAXL_64_memop" => &ENCODINGS[311],
+        "LDSMAX_32_memop" => &ENCODINGS[312],
+        "LDSMAX_64_memop" => &ENCODINGS[313],
+        "LDSMINAB_32_memop" => &ENCODINGS[314],
+        "LDSMINAH_32_memop" => &ENCODINGS[315],
+        "LDSMINALB_32_memop" => &ENCODINGS[316],
+        "LDSMINALH_32_memop" => &ENCODINGS[317],
+        "LDSMINAL_32_memop" => &ENCODINGS[318],
+        "LDSMINAL_64_memop" => &ENCODINGS[319],
+        "LDSMINA_32_memop" => &ENCODINGS[320],
+        "LDSMINA_64_memop" => &ENCODINGS[321],
+        "LDSMINB_32_memop" => &ENCODINGS[322],
+        "LDSMINH_32_memop" => &ENCODINGS[323],
+        "LDSMINLB_32_memop" => &ENCODINGS[324],
+        "LDSMINLH_32_memop" => &ENCODINGS[325],
+        "LDSMINL_32_memop" => &ENCODINGS[326],
+        "LDSMINL_64_memop" => &ENCODINGS[327],
+        "LDSMIN_32_memop" => &ENCODINGS[328],
+        "LDSMIN_64_memop" => &ENCODINGS[329],
+        "LDUMAXAB_32_memop" => &ENCODINGS[330],
+        "LDUMAXAH_32_memop" => &ENCODINGS[331],
+        "LDUMAXALB_32_memop" => &ENCODINGS[332],
+        "LDUMAXALH_32_memop" => &ENCODINGS[333],
+        "LDUMAXAL_32_memop" => &ENCODINGS[334],
+        "LDUMAXAL_64_memop" => &ENCODINGS[335],
+        "LDUMAXA_32_memop" => &ENCODINGS[336],
+        "LDUMAXA_64_memop" => &ENCODINGS[337],
+        "LDUMAXB_32_memop" => &ENCODINGS[338],
+        "LDUMAXH_32_memop" => &ENCODINGS[339],
+        "LDUMAXLB_32_memop" => &ENCODINGS[340],
+        "LDUMAXLH_32_memop" => &ENCODINGS[341],
+        "LDUMAXL_32_memop" => &ENCODINGS[342],
+        "LDUMAXL_64_memop" => &ENCODINGS[343],
+        "LDUMAX_32_memop" => &ENCODINGS[344],
+        "LDUMAX_64_memop" => &ENCODINGS[345],
+        "LDUMINAB_32_memop" => &ENCODINGS[346],
+        "LDUMINAH_32_memop" => &ENCODINGS[347],
+        "LDUMINALB_32_memop" => &ENCODINGS[348],
+        "LDUMINALH_32_memop" => &ENCODINGS[349],
+        "LDUMINAL_32_memop" => &ENCODINGS[350],
+        "LDUMINAL_64_memop" => &ENCODINGS[351],
+        "LDUMINA_32_memop" => &ENCODINGS[352],
+        "LDUMINA_64_memop" => &ENCODINGS[353],
+        "LDUMINB_32_memop" => &ENCODINGS[354],
+        "LDUMINH_32_memop" => &ENCODINGS[355],
+        "LDUMINLB_32_memop" => &ENCODINGS[356],
+        "LDUMINLH_32_memop" => &ENCODINGS[357],
+        "LDUMINL_32_memop" => &ENCODINGS[358],
+        "LDUMINL_64_memop" => &ENCODINGS[359],
+        "LDUMIN_32_memop" => &ENCODINGS[360],
+        "LDUMIN_64_memop" => &ENCODINGS[361],
+        "LDURB_32_ldst_unscaled" => &ENCODINGS[362],
+        "LDURH_32_ldst_unscaled" => &ENCODINGS[363],
+        "LDURSB_32_ldst_unscaled" => &ENCODINGS[364],
+        "LDURSB_64_ldst_unscaled" => &ENCODINGS[365],
+        "LDURSH_32_ldst_unscaled" => &ENCODINGS[366],
+        "LDURSH_64_ldst_unscaled" => &ENCODINGS[367],
+        "LDURSW_64_ldst_unscaled" => &ENCODINGS[368],
+        "LDUR_32_ldst_unscaled" => &ENCODINGS[369],
+        "LDUR_64_ldst_unscaled" => &ENCODINGS[370],
+        "LDUR_B_ldst_unscaled" => &ENCODINGS[371],
+        "LDUR_D_ldst_unscaled" => &ENCODINGS[372],
+        "LDUR_H_ldst_unscaled" => &ENCODINGS[373],
+        "LDUR_Q_ldst_unscaled" => &ENCODINGS[374],
+        "LDUR_S_ldst_unscaled" => &ENCODINGS[375],
+        "LSLV_32_dp_2src" => &ENCODINGS[376],
+        "LSLV_64_dp_2src" => &ENCODINGS[377],
+        "LSRV_32_dp_2src" => &ENCODINGS[378],
+        "LSRV_64_dp_2src" => &ENCODINGS[379],
+        "MADD_32A_dp_3src" => &ENCODINGS[380],
+        "MADD_64A_dp_3src" => &ENCODINGS[381],
+        "MOVI_asimdimm_D2_d" => &ENCODINGS[382],
+        "MOVI_asimdimm_D_ds" => &ENCODINGS[383],
+        "MOVI_asimdimm_L_hl" => &ENCODINGS[384],
+        "MOVI_asimdimm_L_sl" => &ENCODINGS[385],
+        "MOVI_asimdimm_M_sm" => &ENCODINGS[386],
+        "MOVI_asimdimm_N_b" => &ENCODINGS[387],
+        "MOVK_32_movewide" => &ENCODINGS[388],
+        "MOVK_64_movewide" => &ENCODINGS[389],
+        "MOVN_32_movewide" => &ENCODINGS[390],
+        "MOVN_64_movewide" => &ENCODINGS[391],
+        "MOVZ_32_movewide" => &ENCODINGS[392],
+        "MOVZ_64_movewide" => &ENCODINGS[393],
+        "MSUB_32A_dp_3src" => &ENCODINGS[394],
+        "MSUB_64A_dp_3src" => &ENCODINGS[395],
+        "NOP_HI_hints" => &ENCODINGS[396],
+        "ORN_32_log_shift" => &ENCODINGS[397],
+        "ORN_64_log_shift" => &ENCODINGS[398],
+        "ORR_32_log_imm" => &ENCODINGS[399],
+        "ORR_32_log_shift" => &ENCODINGS[400],
+        "ORR_64_log_imm" => &ENCODINGS[401],
+        "ORR_64_log_shift" => &ENCODINGS[402],
+        "RBIT_32_dp_1src" => &ENCODINGS[403],
+        "RBIT_64_dp_1src" => &ENCODINGS[404],
+        "RET_64R_branch_reg" => &ENCODINGS[405],
+        "REV16_32_dp_1src" => &ENCODINGS[406],
+        "REV16_64_dp_1src" => &ENCODINGS[407],
+        "REV32_64_dp_1src" => &ENCODINGS[408],
+        "REV_32_dp_1src" => &ENCODINGS[409],
+        "REV_64_dp_1src" => &ENCODINGS[410],
+        "RORV_32_dp_2src" => &ENCODINGS[411],
+        "RORV_64_dp_2src" => &ENCODINGS[412],
+        "SBCS_32_addsub_carry" => &ENCODINGS[413],
+        "SBCS_64_addsub_carry" => &ENCODINGS[414],
+        "SBC_32_addsub_carry" => &ENCODINGS[415],
+        "SBC_64_addsub_carry" => &ENCODINGS[416],
+        "SBFM_32M_bitfield" => &ENCODINGS[417],
+        "SBFM_64M_bitfield" => &ENCODINGS[418],
+        "SCVTF_D32_float2int" => &ENCODINGS[419],
+        "SCVTF_D64_float2int" => &ENCODINGS[420],
+        "SCVTF_S32_float2int" => &ENCODINGS[421],
+        "SCVTF_S64_float2int" => &ENCODINGS[422],
+        "SDIV_32_dp_2src" => &ENCODINGS[423],
+        "SDIV_64_dp_2src" => &ENCODINGS[424],
+        "SMADDL_64WA_dp_3src" => &ENCODINGS[425],
+        "SMULH_64_dp_3src" => &ENCODINGS[426],
+        "STLRB_SL32_ldstord" => &ENCODINGS[427],
+        "STLRH_SL32_ldstord" => &ENCODINGS[428],
+        "STLR_SL32_ldstord" => &ENCODINGS[429],
+        "STLR_SL64_ldstord" => &ENCODINGS[430],
+        "STP_32_ldstpair_off" => &ENCODINGS[431],
+        "STP_32_ldstpair_post" => &ENCODINGS[432],
+        "STP_32_ldstpair_pre" => &ENCODINGS[433],
+        "STP_64_ldstpair_off" => &ENCODINGS[434],
+        "STP_64_ldstpair_post" => &ENCODINGS[435],
+        "STP_64_ldstpair_pre" => &ENCODINGS[436],
+        "STP_D_ldstpair_off" => &ENCODINGS[437],
+        "STP_D_ldstpair_post" => &ENCODINGS[438],
+        "STP_D_ldstpair_pre" => &ENCODINGS[439],
+        "STP_Q_ldstpair_off" => &ENCODINGS[440],
+        "STP_Q_ldstpair_post" => &ENCODINGS[441],
+        "STP_Q_ldstpair_pre" => &ENCODINGS[442],
+        "STP_S_ldstpair_off" => &ENCODINGS[443],
+        "STP_S_ldstpair_post" => &ENCODINGS[444],
+        "STP_S_ldstpair_pre" => &ENCODINGS[445],
+        "STRB_32BL_ldst_regoff" => &ENCODINGS[446],
+        "STRB_32B_ldst_regoff" => &ENCODINGS[447],
+        "STRB_32_ldst_immpost" => &ENCODINGS[448],
+        "STRB_32_ldst_immpre" => &ENCODINGS[449],
+        "STRB_32_ldst_pos" => &ENCODINGS[450],
+        "STRH_32_ldst_immpost" => &ENCODINGS[451],
+        "STRH_32_ldst_immpre" => &ENCODINGS[452],
+        "STRH_32_ldst_pos" => &ENCODINGS[453],
+        "STRH_32_ldst_regoff" => &ENCODINGS[454],
+        "STR_32_ldst_immpost" => &ENCODINGS[455],
+        "STR_32_ldst_immpre" => &ENCODINGS[456],
+        "STR_32_ldst_pos" => &ENCODINGS[457],
+        "STR_32_ldst_regoff" => &ENCODINGS[458],
+        "STR_64_ldst_immpost" => &ENCODINGS[459],
+        "STR_64_ldst_immpre" => &ENCODINGS[460],
+        "STR_64_ldst_pos" => &ENCODINGS[461],
+        "STR_64_ldst_regoff" => &ENCODINGS[462],
+        "STR_BL_ldst_regoff" => &ENCODINGS[463],
+        "STR_B_ldst_immpost" => &ENCODINGS[464],
+        "STR_B_ldst_immpre" => &ENCODINGS[465],
+        "STR_B_ldst_pos" => &ENCODINGS[466],
+        "STR_B_ldst_regoff" => &ENCODINGS[467],
+        "STR_D_ldst_immpost" => &ENCODINGS[468],
+        "STR_D_ldst_immpre" => &ENCODINGS[469],
+        "STR_D_ldst_pos" => &ENCODINGS[470],
+        "STR_D_ldst_regoff" => &ENCODINGS[471],
+        "STR_H_ldst_immpost" => &ENCODINGS[472],
+        "STR_H_ldst_immpre" => &ENCODINGS[473],
+        "STR_H_ldst_pos" => &ENCODINGS[474],
+        "STR_H_ldst_regoff" => &ENCODINGS[475],
+        "STR_Q_ldst_immpost" => &ENCODINGS[476],
+        "STR_Q_ldst_immpre" => &ENCODINGS[477],
+        "STR_Q_ldst_pos" => &ENCODINGS[478],
+        "STR_Q_ldst_regoff" => &ENCODINGS[479],
+        "STR_S_ldst_immpost" => &ENCODINGS[480],
+        "STR_S_ldst_immpre" => &ENCODINGS[481],
+        "STR_S_ldst_pos" => &ENCODINGS[482],
+        "STR_S_ldst_regoff" => &ENCODINGS[483],
+        "STURB_32_ldst_unscaled" => &ENCODINGS[484],
+        "STURH_32_ldst_unscaled" => &ENCODINGS[485],
+        "STUR_32_ldst_unscaled" => &ENCODINGS[486],
+        "STUR_64_ldst_unscaled" => &ENCODINGS[487],
+        "STUR_B_ldst_unscaled" => &ENCODINGS[488],
+        "STUR_D_ldst_unscaled" => &ENCODINGS[489],
+        "STUR_H_ldst_unscaled" => &ENCODINGS[490],
+        "STUR_Q_ldst_unscaled" => &ENCODINGS[491],
+        "STUR_S_ldst_unscaled" => &ENCODINGS[492],
+        "SUBS_32S_addsub_ext" => &ENCODINGS[493],
+        "SUBS_32S_addsub_imm" => &ENCODINGS[494],
+        "SUBS_32_addsub_shift" => &ENCODINGS[495],
+        "SUBS_64S_addsub_ext" => &ENCODINGS[496],
+        "SUBS_64S_addsub_imm" => &ENCODINGS[497],
+        "SUBS_64_addsub_shift" => &ENCODINGS[498],
+        "SUB_32_addsub_ext" => &ENCODINGS[499],
+        "SUB_32_addsub_imm" => &ENCODINGS[500],
+        "SUB_32_addsub_shift" => &ENCODINGS[501],
+        "SUB_64_addsub_ext" => &ENCODINGS[502],
+        "SUB_64_addsub_imm" => &ENCODINGS[503],
+        "SUB_64_addsub_shift" => &ENCODINGS[504],
+        "SVC_EX_exception" => &ENCODINGS[505],
+        "SWPAB_32_memop" => &ENCODINGS[506],
+        "SWPAH_32_memop" => &ENCODINGS[507],
+        "SWPALB_32_memop" => &ENCODINGS[508],
+        "SWPALH_32_memop" => &ENCODINGS[509],
+        "SWPAL_32_memop" => &ENCODINGS[510],
+        "SWPAL_64_memop" => &ENCODINGS[511],
+        "SWPA_32_memop" => &ENCODINGS[512],
+        "SWPA_64_memop" => &ENCODINGS[513],
+        "SWPB_32_memop" => &ENCODINGS[514],
+        "SWPH_32_memop" => &ENCODINGS[515],
+        "SWPLB_32_memop" => &ENCODINGS[516],
+        "SWPLH_32_memop" => &ENCODINGS[517],
+        "SWPL_32_memop" => &ENCODINGS[518],
+        "SWPL_64_memop" => &ENCODINGS[519],
+        "SWP_32_memop" => &ENCODINGS[520],
+        "SWP_64_memop" => &ENCODINGS[521],
+        "TBNZ_only_testbranch" => &ENCODINGS[522],
+        "TBZ_only_testbranch" => &ENCODINGS[523],
+        "UBFM_32M_bitfield" => &ENCODINGS[524],
+        "UBFM_64M_bitfield" => &ENCODINGS[525],
+        "UCVTF_D32_float2int" => &ENCODINGS[526],
+        "UCVTF_D64_float2int" => &ENCODINGS[527],
+        "UCVTF_S32_float2int" => &ENCODINGS[528],
+        "UCVTF_S64_float2int" => &ENCODINGS[529],
+        "UDIV_32_dp_2src" => &ENCODINGS[530],
+        "UDIV_64_dp_2src" => &ENCODINGS[531],
+        "UMADDL_64WA_dp_3src" => &ENCODINGS[532],
+        "UMULH_64_dp_3src" => &ENCODINGS[533],
+        _ => return None,
+    })
+}

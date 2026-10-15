@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 
+[dependencies]
+memchr = "2"
+bumpalo = { version = "3", features = ["collections"] }
+
 [dev-dependencies]
 object = { version = "0.36", default-features = false, features = ["read", "std"] }
 keel-codegen = { path = "../keel-codegen" }

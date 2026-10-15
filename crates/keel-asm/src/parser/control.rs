@@ -1,8 +1,11 @@
+use super::storage::{encode_named, lower, upper};
 use super::{count, reg, unsigned};
+use crate::FieldId;
 use crate::encode;
+use bumpalo::{Bump, collections::Vec as BumpVec};
 
 pub(super) fn condition(text: &str) -> Result<u32, String> {
-    match text.to_ascii_lowercase().as_str() {
+    match lower(text).as_ref() {
         "eq" => Ok(0),
         "ne" => Ok(1),
         "cs" | "hs" => Ok(2),
@@ -23,41 +26,54 @@ pub(super) fn condition(text: &str) -> Result<u32, String> {
     }
 }
 
-pub(super) struct Branch {
-    pub encoding: String,
-    pub field: &'static str,
+pub(super) struct Branch<'a> {
+    pub encoding: &'static str,
+    pub field: FieldId,
     pub width: u32,
-    pub fields: Vec<(&'static str, u32)>,
-    pub target: String,
+    pub fields: BumpVec<'a, (FieldId, u32)>,
+    pub target: &'a str,
 }
 
-pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> {
+pub(super) fn branch<'a>(
+    op: &str,
+    args: &[&'a str],
+    arena: &'a Bump,
+) -> Result<Option<Branch<'a>>, String> {
     let (encoding, field, width, fields, target) = if op == "b" || op == "bl" {
         count(args, 1, 1)?;
         (
-            format!("{}_only_branch_imm", op.to_ascii_uppercase()),
-            "imm26",
+            if op == "bl" {
+                "BL_only_branch_imm"
+            } else {
+                "B_only_branch_imm"
+            },
+            FieldId::imm26,
             26,
-            vec![],
+            bumpalo::vec![in arena;],
             args[0],
         )
     } else if let Some(cc) = op.strip_prefix("b.") {
         count(args, 1, 1)?;
         (
-            "B_only_condbranch".into(),
-            "imm19",
+            "B_only_condbranch",
+            FieldId::imm19,
             19,
-            vec![("cond", condition(cc)?)],
+            bumpalo::vec![in arena; (FieldId::cond, condition(cc)?)],
             args[0],
         )
     } else if op == "cbz" || op == "cbnz" {
         count(args, 2, 2)?;
         let r = reg(args[0], false, true)?;
         (
-            format!("{}_{}_compbranch", op.to_ascii_uppercase(), r.bits),
-            "imm19",
+            match (op, r.bits) {
+                ("cbz", 64) => "CBZ_64_compbranch",
+                ("cbz", _) => "CBZ_32_compbranch",
+                (_, 64) => "CBNZ_64_compbranch",
+                _ => "CBNZ_32_compbranch",
+            },
+            FieldId::imm19,
             19,
-            vec![("Rt", r.number)],
+            bumpalo::vec![in arena; (FieldId::Rt, r.number)],
             args[1],
         )
     } else if op == "tbz" || op == "tbnz" {
@@ -65,10 +81,14 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
         let r = reg(args[0], false, true)?;
         let bit = unsigned(args[1], i64::from(r.bits - 1))?;
         (
-            format!("{}_only_testbranch", op.to_ascii_uppercase()),
-            "imm14",
+            if op == "tbz" {
+                "TBZ_only_testbranch"
+            } else {
+                "TBNZ_only_testbranch"
+            },
+            FieldId::imm14,
             14,
-            vec![("Rt", r.number), ("b5", bit >> 5), ("b40", bit & 31)],
+            bumpalo::vec![in arena; (FieldId::Rt, r.number), (FieldId::b5, bit >> 5), (FieldId::b40, bit & 31)],
             args[2],
         )
     } else {
@@ -79,7 +99,7 @@ pub(super) fn branch(op: &str, args: &[&str]) -> Result<Option<Branch>, String> 
         field,
         width,
         fields,
-        target: target.into(),
+        target,
     }))
 }
 
@@ -92,15 +112,15 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 "SVC_EX_exception"
             },
-            &[("imm16", unsigned(args[0], 65535)?)],
+            &[(FieldId::imm16, unsigned(args[0], 65535)?)],
         );
     }
     let r = reg(args[0], false, true)?;
     if r.bits != 64 {
         return Err("indirect branches require an X register".into());
     }
-    encode(
-        &format!("{}_64_branch_reg", op.to_ascii_uppercase()),
-        &[("Rn", r.number)],
+    encode_named(
+        format_args!("{}_64_branch_reg", upper(op)),
+        &[(FieldId::Rn, r.number)],
     )
 }

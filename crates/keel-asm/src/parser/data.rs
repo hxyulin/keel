@@ -1,5 +1,6 @@
 //! Data sections and deferred symbol expressions. Zero-fill reserves virtual
 //! space without allocating bytes; all offsets remain relative to a section.
+use super::text::Trim;
 use super::{count, symbol, unsigned};
 use crate::{Assembly, Section, SectionContents, SectionKind};
 
@@ -164,18 +165,18 @@ pub(super) fn align(a: &mut Assembly, section: usize, power: u32) -> Result<(), 
     Ok(())
 }
 
-pub(super) struct Expression {
-    pub add: Option<String>,
-    pub subtract: Option<String>,
+pub(super) struct Expression<'a> {
+    pub add: Option<&'a str>,
+    pub subtract: Option<&'a str>,
     pub constant: i128,
 }
-pub(super) fn expression(text: &str) -> Result<Expression, String> {
+pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
     let mut result = Expression {
         add: None,
         subtract: None,
         constant: 0,
     };
-    let mut rest = text.trim();
+    let mut rest = text.trim_fast();
     let mut first = true;
     while !rest.is_empty() {
         let sign = match rest.as_bytes()[0] {
@@ -191,7 +192,7 @@ pub(super) fn expression(text: &str) -> Result<Expression, String> {
             _ => return Err("expected + or - in data expression".into()),
         };
         let end = rest.find(['+', '-']).unwrap_or(rest.len());
-        let term = rest[..end].trim();
+        let term = rest[..end].trim_fast();
         if term.is_empty() {
             return Err("missing data expression term".into());
         }
@@ -214,7 +215,7 @@ pub(super) fn expression(text: &str) -> Result<Expression, String> {
             } else {
                 &mut result.subtract
             };
-            if slot.replace(term.into()).is_some() {
+            if slot.replace(term).is_some() {
                 return Err(
                     "data expressions allow at most one added and one subtracted symbol".into(),
                 );

@@ -106,7 +106,7 @@ def requirements(node):
         if node["op"] == "!=":
             assert node["left"] == {"_type": "AST.Identifier", "value": "option"}
             assert node["right"] == {"_type": "Values.Value", "meaning": None, "value": "'011'"}
-            return ['Requirement::NotEqual("option", 3)']
+            return ['Requirement::NotEqual(FieldId::option, 3)']
     raise AssertionError(f"unsupported ISA condition: {node}")
 
 
@@ -118,8 +118,22 @@ def generate(data):
         "// Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.",
         "// Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.",
         "// Do not edit; regenerate from isa/a64.json.",
-        "use super::{Encoding, Field, Requirement};", "pub(super) const ENCODINGS: &[Encoding] = &[",
+        "use super::{Encoding, Field, Requirement};",
     ]
+    # Small numeric field identities avoid repeated string comparisons during
+    # encoding. Keep names for diagnostics, generated from the same ISA source.
+    field_names = sorted({field["name"] for instruction in data["instructions"]
+                          for field in instruction["encoding"]["values"]
+                          if "x" in field["value"]["value"]})
+    declarations = ["#[allow(non_camel_case_types)]", "#[derive(Clone, Copy, Debug, PartialEq, Eq)]",
+                    "pub(super) enum FieldId {" + ",".join(field_names) + "}",
+                    "impl std::fmt::Display for FieldId {",
+                    "fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {",
+                    "f.write_str(match self {"]
+    declarations += [f'Self::{name} => "{name}",' for name in field_names]
+    declarations += ["})", "}", "}"]
+    lines.extend(declarations)
+    lines.append("pub(super) static ENCODINGS: &[Encoding] = &[")
     for instruction in data["instructions"]:
         conditions = requirements(instruction["condition"])
         encoding = instruction["encoding"]
@@ -146,9 +160,15 @@ def generate(data):
         assert len({f[0] for f in fields}) == len(fields)
         lines.append(f'Encoding {{ name: "{instruction["name"]}", base: 0x{base:08x}, mask: 0x{mask:08x}, fields: &[')
         for name, start, width in fields:
-            lines.append(f'Field {{ name: "{name}", start: {start}, width: {width} }},')
+            lines.append(f'Field {{ name: "{name}", id: FieldId::{name}, start: {start}, width: {width} }},')
         lines.append("], requirements: &[" + ", ".join(conditions) + "] },")
     lines.append("];\n")
+    # Keep dispatch and records in the same order, generated from one source.
+    # Rust lowers this match into a decision tree rather than scanning names.
+    lines.append("pub(super) fn encoding(name: &str) -> Option<&'static Encoding> {\nSome(match name {")
+    for index, instruction in enumerate(data["instructions"]):
+        lines.append(f'"{instruction["name"]}" => &ENCODINGS[{index}],')
+    lines.append("_ => return None,\n})\n}\n")
     return subprocess.run(["rustfmt", "--edition", "2024"], input="\n".join(lines),
                           text=True, capture_output=True, check=True).stdout
 

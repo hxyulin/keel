@@ -1,11 +1,18 @@
 use super::control::condition;
+use super::storage::{Operands, encode_named, lower, upper};
+use super::text::Trim;
 use super::{
     Kind, Reg, count, instruction as base_instruction, is_integer, reg, same_width, shift, unsigned,
 };
+use crate::FieldId;
 use crate::encode;
 
 pub(super) fn bits_immediate(text: &str, bits: u32) -> Result<u64, String> {
-    let text = text.trim().strip_prefix('#').unwrap_or(text.trim()).trim();
+    let text = text
+        .trim_fast()
+        .strip_prefix('#')
+        .unwrap_or(text.trim_fast())
+        .trim_fast();
     let (negative, digits) = if let Some(s) = text.strip_prefix('-') {
         (true, s)
     } else {
@@ -77,12 +84,12 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
         for (op, pattern) in [("MOVZ", value), ("MOVN", !value & mask)] {
             for lane in (0..d.bits).step_by(16) {
                 if pattern & !(0xffffu64 << lane) == 0 {
-                    return encode(
-                        &format!("{op}_{}_movewide", d.bits),
+                    return encode_named(
+                        format_args!("{op}_{}_movewide", d.bits),
                         &[
-                            ("Rd", d.number),
-                            ("hw", lane / 16),
-                            ("imm16", (pattern >> lane) as u32),
+                            (FieldId::Rd, d.number),
+                            (FieldId::hw, lane / 16),
+                            (FieldId::imm16, (pattern >> lane) as u32),
                         ],
                     );
                 }
@@ -100,16 +107,13 @@ pub(super) fn extended(op: &str, args: &[&str]) -> Result<u32, String> {
     let n = reg(args[1], true, false)?;
     same_width(d, n)?;
     let m = reg(args[2], false, true)?;
-    let words: Vec<_> = args
-        .get(3)
-        .map(|s| s.split_whitespace().collect())
-        .unwrap_or_default();
+    let words = Operands::collect(args.get(3).copied().unwrap_or("").split_whitespace());
     let (option, amount) = if words.is_empty() {
         (if m.bits == 64 { 3 } else { 2 }, 0)
     } else {
         count(&words, 1, 2)?;
-        let kind = words[0].to_ascii_lowercase();
-        let option = match kind.as_str() {
+        let kind = lower(words[0]);
+        let option = match kind.as_ref() {
             "uxtb" => 0,
             "uxth" => 1,
             "uxtw" => 2,
@@ -145,19 +149,19 @@ pub(super) fn extended(op: &str, args: &[&str]) -> Result<u32, String> {
     if m.bits != expected {
         return Err("source width does not match the register extension".into());
     }
-    encode(
-        &format!(
+    encode_named(
+        format_args!(
             "{}_{}{}_addsub_ext",
-            op.to_ascii_uppercase(),
+            upper(op),
             d.bits,
             if flags { "S" } else { "" }
         ),
         &[
-            ("Rd", d.number),
-            ("Rn", n.number),
-            ("Rm", m.number),
-            ("option", option),
-            ("imm3", amount),
+            (FieldId::Rd, d.number),
+            (FieldId::Rn, n.number),
+            (FieldId::Rm, m.number),
+            (FieldId::option, option),
+            (FieldId::imm3, amount),
         ],
     )
 }
@@ -192,18 +196,18 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 }
                 let (bit, immr, imms) = bitmask(bits_immediate(args[2], d.bits)?, d.bits)?;
                 let mut fields = vec![
-                    ("Rd", d.number),
-                    ("Rn", n.number),
-                    ("immr", immr),
-                    ("imms", imms),
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n.number),
+                    (FieldId::immr, immr),
+                    (FieldId::imms, imms),
                 ];
                 if d.bits == 64 {
-                    fields.push(("N", bit));
+                    fields.push((FieldId::N, bit));
                 }
-                encode(
-                    &format!(
+                encode_named(
+                    format_args!(
                         "{}_{}{}_log_imm",
-                        op.to_ascii_uppercase(),
+                        upper(op),
                         d.bits,
                         if op == "ands" { "S" } else { "" }
                     ),
@@ -227,14 +231,14 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 if amount >= d.bits {
                     return Err("shift exceeds register width".into());
                 }
-                encode(
-                    &format!("{}_{}_log_shift", op.to_ascii_uppercase(), d.bits),
+                encode_named(
+                    format_args!("{}_{}_log_shift", upper(op), d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("Rm", m.number),
-                        ("shift", shift),
-                        ("imm6", amount),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::Rm, m.number),
+                        (FieldId::shift, shift),
+                        (FieldId::imm6, amount),
                     ],
                 )
             }
@@ -272,12 +276,12 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 "addsub_carry"
             };
-            encode(
-                &format!("{}_{}_{form}", op.to_ascii_uppercase(), r[0].bits),
+            encode_named(
+                format_args!("{}_{}_{form}", upper(op), r[0].bits),
                 &[
-                    ("Rd", r[0].number),
-                    ("Rn", r[1].number),
-                    ("Rm", r[2].number),
+                    (FieldId::Rd, r[0].number),
+                    (FieldId::Rn, r[1].number),
+                    (FieldId::Rm, r[2].number),
                 ],
             )
         }
@@ -287,17 +291,17 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             if op == "rev32" && r[0].bits != 64 {
                 return Err("rev32 requires X registers".into());
             }
-            encode(
-                &format!("{}_{}_dp_1src", op.to_ascii_uppercase(), r[0].bits),
-                &[("Rd", r[0].number), ("Rn", r[1].number)],
+            encode_named(
+                format_args!("{}_{}_dp_1src", upper(op), r[0].bits),
+                &[(FieldId::Rd, r[0].number), (FieldId::Rn, r[1].number)],
             )
         }
         "mul" | "mneg" | "madd" | "msub" => {
             let alias = op == "mul" || op == "mneg";
             count(args, if alias { 3 } else { 4 }, if alias { 3 } else { 4 })?;
             let r = regs(args)?;
-            encode(
-                &format!(
+            encode_named(
+                format_args!(
                     "{}_{}A_dp_3src",
                     if op == "mneg" || op == "msub" {
                         "MSUB"
@@ -307,10 +311,10 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                     r[0].bits
                 ),
                 &[
-                    ("Rd", r[0].number),
-                    ("Rn", r[1].number),
-                    ("Rm", r[2].number),
-                    ("Ra", if alias { 31 } else { r[3].number }),
+                    (FieldId::Rd, r[0].number),
+                    (FieldId::Rn, r[1].number),
+                    (FieldId::Rm, r[2].number),
+                    (FieldId::Ra, if alias { 31 } else { r[3].number }),
                 ],
             )
         }
@@ -334,18 +338,18 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 return Err("invalid widening/high multiply register widths".into());
             }
             let mut fields = vec![
-                ("Rd", r[0].number),
-                ("Rn", r[1].number),
-                ("Rm", r[2].number),
+                (FieldId::Rd, r[0].number),
+                (FieldId::Rn, r[1].number),
+                (FieldId::Rm, r[2].number),
             ];
             let name = if long {
-                fields.push(("Ra", if accumulate { r[3].number } else { 31 }));
+                fields.push((FieldId::Ra, if accumulate { r[3].number } else { 31 }));
                 format!(
                     "{}MADDL_64WA_dp_3src",
                     if op.starts_with('s') { "S" } else { "U" }
                 )
             } else {
-                format!("{}_64_dp_3src", op.to_ascii_uppercase())
+                format!("{}_64_dp_3src", upper(op))
             };
             encode(&name, &fields)
         }
@@ -392,30 +396,35 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 "cneg" => "csneg",
                 _ => op,
             };
-            encode(
-                &format!("{}_{}_condsel", canonical.to_ascii_uppercase(), d.bits),
-                &[("Rd", d.number), ("Rn", n), ("Rm", m), ("cond", cc)],
+            encode_named(
+                format_args!("{}_{}_condsel", upper(canonical), d.bits),
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::Rn, n),
+                    (FieldId::Rm, m),
+                    (FieldId::cond, cc),
+                ],
             )
         }
         "ccmp" | "ccmn" => {
             count(args, 4, 4)?;
             let n = reg(args[0], false, true)?;
             let mut fields = vec![
-                ("Rn", n.number),
-                ("nzcv", unsigned(args[2], 15)?),
-                ("cond", condition(args[3])?),
+                (FieldId::Rn, n.number),
+                (FieldId::nzcv, unsigned(args[2], 15)?),
+                (FieldId::cond, condition(args[3])?),
             ];
             let form = if is_integer(args[1]) {
-                fields.push(("imm5", unsigned(args[1], 31)?));
+                fields.push((FieldId::imm5, unsigned(args[1], 31)?));
                 "imm"
             } else {
                 let m = reg(args[1], false, true)?;
                 same_width(n, m)?;
-                fields.push(("Rm", m.number));
+                fields.push((FieldId::Rm, m.number));
                 "reg"
             };
-            encode(
-                &format!("{}_{}_condcmp_{form}", op.to_ascii_uppercase(), n.bits),
+            encode_named(
+                format_args!("{}_{}_condcmp_{form}", upper(op), n.bits),
                 &fields,
             )
         }
@@ -457,7 +466,7 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
     } else {
         same_width(d, n)?;
     }
-    let mut fields = vec![("Rd", d.number), ("Rn", n.number)];
+    let mut fields = vec![(FieldId::Rd, d.number), (FieldId::Rn, n.number)];
     let (canonical, immr, imms) = if extension {
         (
             if op.starts_with('s') { "SBFM" } else { "UBFM" },
@@ -482,8 +491,8 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
             } else {
                 (n.number, first)
             };
-            fields.extend_from_slice(&[("Rm", m), ("imms", amount)]);
-            return encode(&format!("EXTR_{}_extract", d.bits), &fields);
+            fields.extend_from_slice(&[(FieldId::Rm, m), (FieldId::imms, amount)]);
+            return encode_named(format_args!("EXTR_{}_extract", d.bits), &fields);
         }
         if shift_op {
             match op {
@@ -516,6 +525,6 @@ fn bitfield(op: &str, args: &[&str]) -> Result<u32, String> {
             }
         }
     };
-    fields.extend_from_slice(&[("immr", immr), ("imms", imms)]);
-    encode(&format!("{canonical}_{}M_bitfield", d.bits), &fields)
+    fields.extend_from_slice(&[(FieldId::immr, immr), (FieldId::imms, imms)]);
+    encode_named(format_args!("{canonical}_{}M_bitfield", d.bits), &fields)
 }

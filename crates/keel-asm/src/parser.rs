@@ -1,3 +1,37 @@
+//! Phase-scoped assembler allocation experiment.
+//!
+//! One local `Bump` owns scratch for each layout pass, with no global allocator,
+//! thread-local state, unsafe lifetime extension, or storage shared across calls.
+//! Source names borrow the caller's UTF-8 source; synthesized names and rewritten
+//! GOT expressions live in the pass arena. Labels, globals, assignments, atom
+//! ownership and expressions share these references instead of cloning names.
+//! Branch/data/address fixup queues, label order, LEB checks, sorted/deduplicated
+//! symbol-name lists, debug rows/frames and CFI rules/events/bytes use bumpalo
+//! collections. Ordered maps retain their ordering and diagnostics.
+//!
+//! The arena is declared before its users. Collections stay ordinary stack-owned
+//! values: bumpalo Vec and its consuming iterator drop their elements, including
+//! nested collections or heap-owning modifier Strings, even on early returns.
+//! We never place a heap-owning value directly in `Bump::alloc`, whose reset/drop
+//! would not run that value's destructor. Scratch is destroyed at each pass end;
+//! the owned previous-layout map survives separately for symbolic LEB convergence.
+//!
+//! This is deliberately a substantial slice, not an all-arena allocator. Remaining
+//! transient system allocations include BTreeMap nodes (stable std BTreeMap has no
+//! stable custom-allocator interface), the previous-layout map and name copies,
+//! operand overflow/normalization scratch, parsed string and scalar-data byte
+//! buffers, modifier/addend formatting, debug file tables/directive operands,
+//! compact-unwind/CIE bookkeeping, and Mach-O writer scratch. Vector growth may
+//! retain superseded arena capacity until the pass ends, increasing peak memory.
+//!
+//! Assembly text/sections/relocations/symbols and Error messages remain normal
+//! owned public values. Names are promoted to Strings when they enter output;
+//! section buffers are built directly in their escaping Vecs to avoid copying
+//! an entire arena-backed assembly. Nonfinal LEB passes still build and discard
+//! owned Assemblies. `assemble_object` still writes via Assembly and returns an
+//! independently owned Vec, paying that existing intermediate-output cost.
+use self::text::Trim;
+use crate::FieldId;
 mod arithmetic;
 mod atomic;
 mod atoms;
@@ -8,10 +42,15 @@ mod debug;
 mod float;
 mod memory;
 mod relocate;
+mod scanning;
+mod storage;
+mod text;
 mod vector;
 
 use super::{Assembly, Error, InstructionLocation, Symbol, encode};
-use std::collections::{BTreeMap, BTreeSet};
+use bumpalo::{Bump, collections::Vec as BumpVec};
+use std::collections::BTreeMap;
+use storage::{Operands, encode_named, lower, upper};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -27,8 +66,8 @@ struct Reg {
 }
 
 fn reg(s: &str, sp: bool, zero: bool) -> Result<Reg, String> {
-    let s = s.to_ascii_lowercase();
-    let r = match s.as_str() {
+    let s = lower(s);
+    let r = match s.as_ref() {
         "sp" | "wsp" => Reg {
             number: 31,
             bits: if s == "sp" { 64 } else { 32 },
@@ -81,7 +120,7 @@ fn same_width(a: Reg, b: Reg) -> Result<(), String> {
     }
 }
 fn integer(s: &str) -> Result<i64, String> {
-    let s = s.trim().strip_prefix('#').unwrap_or(s.trim());
+    let s = s.trim_fast().strip_prefix('#').unwrap_or(s.trim_fast());
     let (negative, digits) = if let Some(s) = s.strip_prefix('-') {
         (true, s)
     } else {
@@ -160,9 +199,13 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                         .into(),
                 );
             }
-            encode(
-                &format!("{}_{}_movewide", op.to_ascii_uppercase(), d.bits),
-                &[("Rd", d.number), ("imm16", imm), ("hw", amount / 16)],
+            encode_named(
+                format_args!("{}_{}_movewide", upper(op), d.bits),
+                &[
+                    (FieldId::Rd, d.number),
+                    (FieldId::imm16, imm),
+                    (FieldId::hw, amount / 16),
+                ],
             )
         }
         "add" | "sub" | "adds" | "subs" => {
@@ -174,7 +217,7 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                     .iter()
                     .any(|s| s.eq_ignore_ascii_case("sp") || s.eq_ignore_ascii_case("wsp"))
                     || a.get(3).is_some_and(|s| {
-                        let s = s.to_ascii_lowercase();
+                        let s = lower(s);
                         s.starts_with("uxt") || s.starts_with("sxt")
                     }))
             {
@@ -193,18 +236,18 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 if kind != "lsl" || ![0, 12].contains(&amount) {
                     return Err("add/sub immediate shift must be lsl #0 or lsl #12".into());
                 }
-                encode(
-                    &format!(
+                encode_named(
+                    format_args!(
                         "{}_{}{}_addsub_imm",
-                        op.to_ascii_uppercase(),
+                        upper(op),
                         d.bits,
                         if flags { "S" } else { "" }
                     ),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("imm12", imm),
-                        ("sh", amount / 12),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::imm12, imm),
+                        (FieldId::sh, amount / 12),
                     ],
                 )
             } else {
@@ -224,14 +267,14 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
                 if amount >= d.bits {
                     return Err("shift exceeds register width".into());
                 }
-                encode(
-                    &format!("{}_{}_addsub_shift", op.to_ascii_uppercase(), d.bits),
+                encode_named(
+                    format_args!("{}_{}_addsub_shift", upper(op), d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", n.number),
-                        ("Rm", m.number),
-                        ("shift", shift),
-                        ("imm6", amount),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, n.number),
+                        (FieldId::Rm, m.number),
+                        (FieldId::shift, shift),
+                        (FieldId::imm6, amount),
                     ],
                 )
             }
@@ -239,8 +282,11 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
         "cmp" | "cmn" => {
             count(a, 2, 3)?;
             let n = reg(a[0], true, true)?;
-            let mut args = vec![if n.bits == 64 { "xzr" } else { "wzr" }];
-            args.extend_from_slice(a);
+            let mut args = Operands::new();
+            args.push(if n.bits == 64 { "xzr" } else { "wzr" });
+            for arg in a {
+                args.push(arg);
+            }
             instruction(if op == "cmp" { "subs" } else { "adds" }, &args)
         }
         "mov" => {
@@ -254,14 +300,14 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             if d.kind == Kind::Sp || n.kind == Kind::Sp {
                 instruction("add", &[a[0], a[1], "#0"])
             } else {
-                encode(
-                    &format!("ORR_{}_log_shift", d.bits),
+                encode_named(
+                    format_args!("ORR_{}_log_shift", d.bits),
                     &[
-                        ("Rd", d.number),
-                        ("Rn", 31),
-                        ("Rm", n.number),
-                        ("shift", 0),
-                        ("imm6", 0),
+                        (FieldId::Rd, d.number),
+                        (FieldId::Rn, 31),
+                        (FieldId::Rm, n.number),
+                        (FieldId::shift, 0),
+                        (FieldId::imm6, 0),
                     ],
                 )
             }
@@ -272,7 +318,7 @@ fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
             if n.bits != 64 {
                 return Err("ret requires a 64-bit register".into());
             }
-            encode("RET_64R_branch_reg", &[("Rn", n.number)])
+            encode("RET_64R_branch_reg", &[(FieldId::Rn, n.number)])
         }
         "nop" => {
             count(a, 0, 0)?;
@@ -301,17 +347,17 @@ fn symbol(s: &str) -> Result<(), String> {
     }
     Ok(())
 }
-struct Branch {
+struct Branch<'a> {
     line: usize,
     offset: usize,
-    spec: control::Branch,
+    spec: control::Branch<'a>,
 }
 
-struct DataFixup {
+struct DataFixup<'a> {
     line: usize,
     location: data::Location,
     width: u8,
-    expression: data::Expression,
+    expression: data::Expression<'a>,
     got: bool,
 }
 
@@ -355,9 +401,13 @@ fn assemble_pass(
     metrics: bool,
 ) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
     let mut locations = Vec::new();
+    // Declare scratch first so every collection (including nested owners) drops
+    // before its backing arena, on success and on every early error return.
+    // Each symbolic LEB pass gets a fresh arena; `previous` is independently owned.
+    let arena = Bump::new();
     let mut symbolic_leb = false;
-    let mut leb_differences = Vec::new();
-    let mut label_order = Vec::new();
+    let mut leb_differences = BumpVec::new_in(&arena);
+    let mut label_order = BumpVec::new_in(&arena);
     let mut result = Assembly {
         subsections_via_symbols: false,
         text: Vec::new(),
@@ -366,32 +416,32 @@ fn assemble_pass(
         relocations: Vec::new(),
         sections: Vec::new(),
     };
-    let mut debug = debug::Debug::default();
+    let mut debug = debug::Debug::new(&arena);
     let mut prefix = String::from("Lkeel_metadata_");
     while source.contains(&prefix) {
         prefix.push('_');
     }
     let mut aliases = BTreeMap::new();
     let mut current = 0;
-    let mut labels: BTreeMap<String, data::Location> = BTreeMap::new();
+    let mut labels: BTreeMap<&str, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
-    let mut branches = Vec::new();
-    let mut addresses = Vec::new();
-    let mut data_fixups = Vec::new();
+    let mut branches = BumpVec::new_in(&arena);
+    let mut addresses = BumpVec::new_in(&arena);
+    let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
-    for (index, raw) in source.lines().enumerate() {
+    for (index, raw) in scanning::Lines::new(source).enumerate() {
         let line = index + 1;
         let err = |message| Error::new(line, message);
-        let mut s = debug::uncomment(raw).trim();
+        let mut s = raw.trim_fast();
         while let Some((name, rest)) = s
             .split_once(':')
-            .filter(|(name, _)| !name.trim().contains(['"', ' ', '\t']))
+            .filter(|(name, _)| !name.trim_fast().contains(['"', ' ', '\t']))
         {
-            let name = name.trim();
+            let name = name.trim_fast();
             symbol(name).map_err(err)?;
             if labels
                 .insert(
-                    name.to_string(),
+                    name,
                     data::Location {
                         section: current,
                         offset: data::position(&result, current),
@@ -401,23 +451,20 @@ fn assemble_pass(
             {
                 return Err(err(format!("duplicate label `{name}`")));
             }
-            label_order.push((name.to_string(), labels[name]));
-            s = rest.trim();
+            label_order.push((name, labels[name]));
+            s = rest.trim_fast();
         }
         if s.is_empty() {
             continue;
         }
         if let Some((name, expression)) = s
             .split_once('=')
-            .filter(|(name, _)| symbol(name.trim()).is_ok())
+            .filter(|(name, _)| symbol(name.trim_fast()).is_ok())
         {
-            let name = name.trim();
+            let name = name.trim_fast();
             symbol(name).map_err(err)?;
             if aliases
-                .insert(
-                    name.to_string(),
-                    (line, data::expression(expression).map_err(err)?),
-                )
+                .insert(name, (line, data::expression(expression).map_err(err)?))
                 .is_some()
             {
                 return Err(err("duplicate symbol assignment".into()));
@@ -425,8 +472,8 @@ fn assemble_pass(
             continue;
         }
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
-        let operands = operands.trim();
-        let op = op.to_ascii_lowercase();
+        let operands = operands.trim_fast();
+        let op = lower(op);
         if debug
             .directive(
                 &op,
@@ -451,22 +498,22 @@ fn assemble_pass(
         if op == ".uleb128" || op == ".sleb128" {
             count(&args, 1, usize::MAX).map_err(err)?;
             let mut bytes = Vec::new();
-            for arg in args {
+            for arg in args.iter().copied() {
                 let expr = data::expression(arg).map_err(err)?;
                 let value = if let Some(add) = &expr.add {
                     symbolic_leb = true;
                     if let Some(sub) = &expr.subtract {
-                        leb_differences.push((line, add.clone(), sub.clone()));
+                        leb_differences.push((line, *add, *sub));
                     }
                     if let Some(previous) = previous {
                         let sub = expr.subtract.as_ref().ok_or_else(|| {
                             err("LEB128 requires a same-section symbol difference".into())
                         })?;
                         let a = previous
-                            .get(add)
+                            .get(*add)
                             .ok_or_else(|| err(format!("undefined LEB128 symbol `{add}`")))?;
                         let b = previous
-                            .get(sub)
+                            .get(*sub)
                             .ok_or_else(|| err(format!("undefined LEB128 symbol `{sub}`")))?;
                         if a.section != b.section {
                             return Err(err(
@@ -503,10 +550,7 @@ fn assemble_pass(
             count(&args, 2, 2).map_err(err)?;
             symbol(args[0]).map_err(err)?;
             if aliases
-                .insert(
-                    args[0].to_string(),
-                    (line, data::expression(args[1]).map_err(err)?),
-                )
+                .insert(args[0], (line, data::expression(args[1]).map_err(err)?))
                 .is_some()
             {
                 return Err(err("duplicate symbol assignment".into()));
@@ -515,7 +559,7 @@ fn assemble_pass(
         }
         if let Some(width) = data::width(&op) {
             count(&args, 1, usize::MAX).map_err(err)?;
-            for argument in args {
+            for argument in args.iter().copied() {
                 let got = argument.contains("@GOT");
                 if let Some((_, suffix)) = argument.split_once("@GOT")
                     && suffix
@@ -525,12 +569,19 @@ fn assemble_pass(
                 {
                     return Err(err("data GOT pointers require the @GOT modifier".into()));
                 }
-                let expression = if got {
-                    argument.replacen("@GOT", "", 1)
+                let expression: &str = if got {
+                    let (head, tail) = argument.split_once("@GOT").unwrap();
+                    let mut text = bumpalo::collections::String::with_capacity_in(
+                        head.len() + tail.len(),
+                        &arena,
+                    );
+                    text.push_str(head);
+                    text.push_str(tail);
+                    text.into_bump_str()
                 } else {
-                    argument.to_string()
+                    argument
                 };
-                let expr = data::expression(&expression).map_err(err)?;
+                let expr = data::expression(expression).map_err(err)?;
                 if expr.add.is_none() {
                     data::append(
                         &mut result,
@@ -556,7 +607,7 @@ fn assemble_pass(
             }
             continue;
         }
-        match op.as_str() {
+        match op.as_ref() {
             ".subsections_via_symbols" => {
                 count(&args, 0, 0).map_err(err)?;
                 result.subsections_via_symbols = true;
@@ -564,7 +615,7 @@ fn assemble_pass(
             }
             ".text" | ".data" | ".const" | ".const_data" | ".bss" => {
                 count(&args, 0, 0).map_err(err)?;
-                current = match op.as_str() {
+                current = match op.as_ref() {
                     ".text" => 0,
                     ".const" => {
                         data::select(&mut result, "__TEXT", "__const", crate::SectionKind::Data)
@@ -589,9 +640,9 @@ fn assemble_pass(
             }
             ".globl" | ".global" | ".extern" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
-                for name in args {
+                for name in args.iter().copied() {
                     symbol(name).map_err(err)?;
-                    globals.insert(name.to_string(), line);
+                    globals.insert(name, line);
                 }
                 continue;
             }
@@ -632,13 +683,13 @@ fn assemble_pass(
                 .map_err(err)?;
                 data::align(&mut result, section, alignment).map_err(err)?;
                 labels.insert(
-                    name.into(),
+                    name,
                     data::Location {
                         section,
                         offset: data::position(&result, section),
                     },
                 );
-                label_order.push((name.to_string(), labels[name]));
+                label_order.push((name, labels[name]));
                 data::reserve(&mut result, section, size, 0).map_err(err)?;
                 continue;
             }
@@ -656,9 +707,9 @@ fn assemble_pass(
                 offset: result.text.len(),
             });
         }
-        if let Some(spec) = control::branch(&op, &args).map_err(err)? {
-            if !is_integer(&spec.target) {
-                let expression = relocate::expression(&spec.target).map_err(err)?;
+        if let Some(spec) = control::branch(&op, &args, &arena).map_err(err)? {
+            if !is_integer(spec.target) {
+                let expression = relocate::expression(spec.target).map_err(err)?;
                 if expression.modifier.is_some() {
                     return Err(err("branch targets do not accept symbol modifiers".into()));
                 }
@@ -691,7 +742,7 @@ fn assemble_pass(
                 if expr.modifier.is_some() {
                     return Err(err("adr does not accept symbol modifiers".into()));
                 }
-                addresses.push((line, result.text.len(), args[0].to_string(), expr));
+                addresses.push((line, result.text.len(), args[0], expr));
                 relocate::address_word("adr", args[0], 0).map_err(err)?
             };
             result.text.extend_from_slice(&word.to_le_bytes());
@@ -702,6 +753,7 @@ fn assemble_pass(
             .extend_from_slice(&instruction(&op, &args).map_err(err)?.to_le_bytes());
     }
     let mut atoms = atoms::Atoms::new(
+        &arena,
         &label_order,
         &globals,
         &mut labels,
@@ -711,7 +763,7 @@ fn assemble_pass(
     if result.subsections_via_symbols {
         for (line, add, sub) in leb_differences {
             if let (Some(a), Some(b)) = (labels.get(&add), labels.get(&sub))
-                && !atoms.same((&add, *a), (&sub, *b))
+                && !atoms.same((add, *a), (sub, *b))
             {
                 return Err(Error::new(
                     line,
@@ -722,12 +774,12 @@ fn assemble_pass(
     }
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
-        let delta = if is_integer(&branch.spec.target) {
-            integer(&branch.spec.target).map_err(err)?
+        let delta = if is_integer(branch.spec.target) {
+            integer(branch.spec.target).map_err(err)?
         } else {
-            let expr = relocate::expression(&branch.spec.target).map_err(err)?;
-            let target = labels.get(&expr.name);
-            let local = expr.name.starts_with('L') && !globals.contains_key(&expr.name);
+            let expr = relocate::expression(branch.spec.target).map_err(err)?;
+            let target = labels.get(expr.name);
+            let local = expr.name.starts_with('L') && !globals.contains_key(expr.name);
             if branch.spec.width == 26
                 && (target.is_some_and(|t| {
                     t.section != 0
@@ -737,7 +789,7 @@ fn assemble_pass(
                                     section: 0,
                                     offset: branch.offset as u64,
                                 },
-                                (&expr.name, *t),
+                                (expr.name, *t),
                             ))
                 }) || (target.is_none() && !local))
             {
@@ -754,7 +806,7 @@ fn assemble_pass(
                     size: 4,
                     subtract_symbol: None,
                     offset,
-                    symbol: expr.name,
+                    symbol: expr.name.to_string(),
                     kind: crate::RelocationKind::Branch26,
                     addend: expr.addend,
                 });
@@ -771,7 +823,7 @@ fn assemble_pass(
                             section: 0,
                             offset: branch.offset as u64,
                         },
-                        (&expr.name, *target),
+                        (expr.name, *target),
                     )
                 {
                     return Err(err(
@@ -793,11 +845,11 @@ fn assemble_pass(
             branch.spec.field,
             ((delta / 4) as u32) & ((1 << branch.spec.width) - 1),
         ));
-        let word = encode(&branch.spec.encoding, &branch.spec.fields).map_err(err)?;
+        let word = encode(branch.spec.encoding, &branch.spec.fields).map_err(err)?;
         result.text[branch.offset..branch.offset + 4].copy_from_slice(&word.to_le_bytes());
     }
     for (line, offset, destination, expr) in addresses {
-        let target = labels.get(&expr.name).ok_or_else(|| {
+        let target = labels.get(expr.name).ok_or_else(|| {
             Error::new(
                 line,
                 format!("adr requires a defined text symbol `{}`", expr.name),
@@ -815,7 +867,7 @@ fn assemble_pass(
                     section: 0,
                     offset: offset as u64,
                 },
-                (&expr.name, *target),
+                (expr.name, *target),
             )
         {
             return Err(Error::new(
@@ -825,7 +877,7 @@ fn assemble_pass(
         }
         let word = relocate::address_word(
             "adr",
-            &destination,
+            destination,
             target.offset as i64 + expr.addend - offset as i64,
         )
         .map_err(|e| Error::new(line, e))?;
@@ -907,7 +959,7 @@ fn assemble_pass(
                 size: 4,
                 subtract_symbol: None,
                 offset,
-                symbol: target,
+                symbol: target.to_string(),
                 kind: crate::RelocationKind::PointerToGot,
                 addend: i64::from(addend),
             });
@@ -934,14 +986,14 @@ fn assemble_pass(
         let expr = &mut expr;
         let add = expr.add.take().unwrap();
         let mut constant = expr.constant;
-        let resolved = if expr.subtract.as_deref() == Some(add.as_str()) {
+        let resolved = if expr.subtract == Some(add) {
             true
         } else if let Some(subtract) = &expr.subtract {
             match (labels.get(&add), labels.get(subtract)) {
                 (Some(a), Some(b))
                     if a.section == b.section
                         && (!result.subsections_via_symbols
-                            || atoms.same((&add, *a), (subtract, *b))) =>
+                            || atoms.same((add, *a), (subtract, *b))) =>
                 {
                     constant = constant
                         .checked_add(i128::from(a.offset) - i128::from(b.offset))
@@ -976,9 +1028,9 @@ fn assemble_pass(
             result.relocations.push(crate::Relocation {
                 section: fixup.location.section,
                 size: fixup.width,
-                subtract_symbol: expr.subtract.take(),
+                subtract_symbol: expr.subtract.take().map(str::to_string),
                 offset,
-                symbol: add,
+                symbol: add.to_string(),
                 kind: crate::RelocationKind::Unsigned,
                 addend: constant as i64,
             });
@@ -987,10 +1039,13 @@ fn assemble_pass(
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
-    let mut names: BTreeSet<_> = labels.keys().chain(globals.keys()).cloned().collect();
+    let mut names = BumpVec::from_iter_in(labels.keys().chain(globals.keys()).copied(), &arena);
     for relocation in &result.relocations {
         for name in std::iter::once(&relocation.symbol).chain(relocation.subtract_symbol.iter()) {
-            if name.starts_with('L') && !labels.contains_key(name) && !globals.contains_key(name) {
+            if name.starts_with('L')
+                && !labels.contains_key(name.as_str())
+                && !globals.contains_key(name.as_str())
+            {
                 return Err(Error::new(
                     relocation_lines
                         .get(&(relocation.section, relocation.offset))
@@ -999,9 +1054,11 @@ fn assemble_pass(
                     format!("undefined local symbol `{name}`"),
                 ));
             }
-            names.insert(name.clone());
+            names.push(name.as_str());
         }
     }
+    names.sort_unstable();
+    names.dedup();
     result.symbols = names
         .into_iter()
         .map(|name| {
@@ -1010,7 +1067,7 @@ fn assemble_pass(
                 global: location.is_none() || globals.contains_key(&name),
                 offset: location.map(|l| l.offset),
                 section: location.map(|l| l.section),
-                name,
+                name: name.to_string(),
             }
         })
         .collect();

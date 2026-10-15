@@ -1,39 +1,42 @@
 //! Symbol expressions and Darwin instruction relocations. There is no
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
+use super::storage::{encode_named, upper};
+use super::text::Trim;
 use super::{count, integer, is_integer, reg, symbol};
-use crate::{Relocation, RelocationKind, encode};
+use crate::FieldId;
+use crate::{Relocation, RelocationKind};
 
-pub(super) struct Expression {
-    pub name: String,
+pub(super) struct Expression<'a> {
+    pub name: &'a str,
     pub modifier: Option<String>,
     pub addend: i64,
 }
 fn addend(text: &str) -> Result<i64, String> {
-    let text = text.trim();
+    let text = text.trim_fast();
     let sign = text.chars().next().ok_or("missing symbol addend")?;
     if !['+', '-'].contains(&sign) {
         return Err("symbol addend requires + or -".into());
     }
-    integer(&format!("{sign}{}", text[1..].trim()))
+    integer(&format!("{sign}{}", text[1..].trim_fast()))
 }
-fn plain(text: &str) -> Result<(String, i64), String> {
+fn plain(text: &str) -> Result<(&str, i64), String> {
     let (name, tail) = match text.find(['+', '-']) {
         Some(index) => (&text[..index], &text[index..]),
         None => (text, ""),
     };
-    let name = name.trim();
+    let name = name.trim_fast();
     symbol(name)?;
-    Ok((name.into(), if tail.is_empty() { 0 } else { addend(tail)? }))
+    Ok((name, if tail.is_empty() { 0 } else { addend(tail)? }))
 }
-pub(super) fn expression(text: &str) -> Result<Expression, String> {
+pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
     let (name, modifier, value) = if let Some((base, tail)) = text.split_once('@') {
         let (name, before) = plain(base)?;
         let (modifier, after) = match tail.find(['+', '-']) {
             Some(index) => (&tail[..index], addend(&tail[index..])?),
             None => (tail, 0),
         };
-        let modifier = modifier.trim().to_ascii_uppercase();
+        let modifier = modifier.trim_fast().to_ascii_uppercase();
         if ![
             "PAGE",
             "PAGEOFF",
@@ -64,7 +67,7 @@ pub(super) fn expression(text: &str) -> Result<Expression, String> {
         addend: value,
     })
 }
-fn relocation(expr: Expression, kind: RelocationKind) -> Result<Relocation, String> {
+fn relocation(expr: Expression<'_>, kind: RelocationKind) -> Result<Relocation, String> {
     if !kind.accepts_addend() && expr.addend != 0 {
         return Err("GOT/TLVP relocations do not support addends".into());
     }
@@ -73,7 +76,7 @@ fn relocation(expr: Expression, kind: RelocationKind) -> Result<Relocation, Stri
         size: 4,
         subtract_symbol: None,
         offset: 0,
-        symbol: expr.name,
+        symbol: expr.name.to_string(),
         kind,
         addend: expr.addend,
     })
@@ -96,9 +99,13 @@ pub(super) fn address_word(op: &str, destination: &str, delta: i64) -> Result<u3
         return Err(format!("{op} displacement is out of range"));
     }
     let bits = (immediate as u32) & 0x1f_ffff;
-    encode(
-        &format!("{}_only_pcreladdr", op.to_ascii_uppercase()),
-        &[("Rd", d.number), ("immlo", bits & 3), ("immhi", bits >> 2)],
+    encode_named(
+        format_args!("{}_only_pcreladdr", upper(op)),
+        &[
+            (FieldId::Rd, d.number),
+            (FieldId::immlo, bits & 3),
+            (FieldId::immhi, bits >> 2),
+        ],
     )
 }
 
