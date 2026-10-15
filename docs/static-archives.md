@@ -185,7 +185,9 @@ The raw-table boundary now additionally includes:
   [LLVM's ARM64 relocation attributes](https://github.com/llvm/llvm-project/blob/main/lld/MachO/Arch/ARM64.cpp).
 - ELF REL and RELA sites use checked `offset + field width <= target size` for
   known fixed-width x86-64 fields (1, 2, 4, 8 or 16 bytes), independently of Keel
-  executable-linker support. NONE has no site check. TLSDESC_CALL is an instruction
+  executable-linker support. Compressed targets use the logical size declared
+  by the ELF or GNU compression header; the stream is neither decompressed nor
+  validated. NONE has no site check. TLSDESC_CALL is an instruction
   marker and requires an in-section starting byte. Unknown and variable-width
   kinds, including COPY, also require only an in-section starting byte; their
   patch width is deliberately not inferred. Mach-O sites use the width encoded

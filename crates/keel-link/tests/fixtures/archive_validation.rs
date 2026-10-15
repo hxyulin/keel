@@ -270,6 +270,16 @@ fn round2_malformed_cases(elf: &[u8], macho: &[u8]) -> Vec<(&'static str, bool, 
     ] {
         cases.push((name, false, elf_site_object(elf, kind, offset, size)));
     }
+    cases.push((
+        "compressed-logical-cross-end",
+        false,
+        compressed_site_object(elf, false, 61),
+    ));
+    cases.push((
+        "gnu-compressed-logical-cross-end",
+        false,
+        compressed_site_object(elf, true, 61),
+    ));
     let mut bad_pair_site = valid.clone();
     put32(&mut bad_pair_site, at, 0xffffffff);
     put32(&mut bad_pair_site, at + 8, 0xffffffff);
@@ -294,9 +304,56 @@ fn make_elf_rel(b: &mut [u8]) {
     put64(b, rel + 32, 16);
     put64(b, rel + 56, 16);
 }
+fn compressed_site_object(elf: &[u8], gnu: bool, offset: usize) -> Vec<u8> {
+    // zlib stream for 64 zero bytes, with relocation in the logical tail.
+    let mut b = elf_site_object(elf, 4, offset, 64);
+    let (sh, _, rel, _) = elf_tables(&b);
+    let target = sh + u32_at(&b, rel + 44) * 64;
+    let start = b.len().next_multiple_of(8);
+    b.resize(start, 0);
+    if gnu {
+        let names = sh + u16::from_le_bytes(b[62..64].try_into().unwrap()) as usize * 64;
+        let old = u64_at(&b, names + 24);
+        let len = u64_at(&b, names + 32);
+        let mut strings = b[old..old + len].to_vec();
+        strings.extend_from_slice(b".zdebug_test\0");
+        let at = b.len();
+        b.extend_from_slice(&strings);
+        put64(&mut b, names + 24, at);
+        put64(&mut b, names + 32, strings.len());
+        put32(&mut b, target, len);
+        // Place the GNU compressed data after the new name table.
+        let data = b.len();
+        b.extend_from_slice(b"ZLIB");
+        b.extend_from_slice(&64u64.to_be_bytes());
+        put64(&mut b, target + 24, data);
+    } else {
+        b.extend_from_slice(&1u32.to_le_bytes()); // ELFCOMPRESS_ZLIB
+        b.extend_from_slice(&0u32.to_le_bytes());
+        b.extend_from_slice(&64u64.to_le_bytes());
+        b.extend_from_slice(&1u64.to_le_bytes());
+        put64(&mut b, target + 24, start);
+    }
+    b.extend_from_slice(&[
+        0x78, 0x9c, 0x63, 0x60, 0xa0, 0x0c, 0x00, 0x00, 0x00, 0x40, 0x00, 0x01,
+    ]);
+    put64(&mut b, target + 32, if gnu { 24 } else { 36 });
+    put64(&mut b, target + 8, if gnu { 0 } else { 0x800 });
+    b
+}
 fn round2_valid_cases(elf: &[u8], macho: &[u8]) -> Vec<(&'static str, bool, Vec<u8>)> {
     let (_, strsize) = macho_strings(macho);
     let mut cases = vec![
+        (
+            "compressed-logical-boundary",
+            false,
+            compressed_site_object(elf, false, 60),
+        ),
+        (
+            "gnu-compressed-logical-boundary",
+            false,
+            compressed_site_object(elf, true, 60),
+        ),
         ("alias-empty-target", true, alias_object(macho, 0)),
         ("alias-last-NUL", true, alias_object(macho, strsize - 1)),
         ("addend-branch", true, addend_object(macho, 2)),

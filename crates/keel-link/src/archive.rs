@@ -247,7 +247,7 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
     match file {
         object::File::Elf64(elf) => {
             use object::elf::*;
-            use object::read::elf::{SectionHeader, Sym};
+            use object::read::elf::{CompressionHeader, SectionHeader, Sym};
             let endian = elf.endian();
             let sections = elf.elf_section_table();
             for (index, section) in sections.enumerate() {
@@ -326,6 +326,27 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                     let target = sections
                         .section(object::SectionIndex(section.sh_info(endian) as usize))
                         .map_err(|e| e.to_string())?;
+                    // Relocations into compressed debug sections address the
+                    // logical (uncompressed) bytes. Read size metadata only;
+                    // packaging neither decompresses nor validates the stream.
+                    let target_size = if let Some((header, _, _)) = target
+                        .compression(endian, bytes)
+                        .map_err(|e| e.to_string())?
+                    {
+                        header.ch_size(endian)
+                    } else if sections
+                        .section_name(endian, target)
+                        .map_err(|e| e.to_string())?
+                        .starts_with(b".zdebug_")
+                    {
+                        let data = target.data(endian, bytes).map_err(|e| e.to_string())?;
+                        if data.len() < 12 || &data[..4] != b"ZLIB" {
+                            return Err("invalid GNU compressed section header".into());
+                        }
+                        u64::from_be_bytes(data[4..12].try_into().unwrap())
+                    } else {
+                        target.sh_size(endian)
+                    };
                     let data = section.data(endian, bytes).map_err(|e| e.to_string())?;
                     for relocation in data.chunks_exact(entry_size as usize) {
                         // Both Elf64_Rel and Elf64_Rela have r_info at byte 8.
@@ -335,7 +356,7 @@ fn validate_raw(file: &object::File<'_>, bytes: &[u8]) -> Result<()> {
                         }
                         if let Some(width) = elf_relocation_width(info as u32) {
                             let offset = u64::from_le_bytes(relocation[..8].try_into().unwrap());
-                            validate_site(offset, width, target.sh_size(endian))?;
+                            validate_site(offset, width, target_size)?;
                         }
                     }
                 }
