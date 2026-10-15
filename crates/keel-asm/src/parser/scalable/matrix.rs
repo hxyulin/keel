@@ -4,6 +4,8 @@ use super::{lane, number, predicate};
 use crate::parser::{count, integer, reg, unsigned};
 use crate::{TargetFeatures, encode_with_features};
 
+mod grouped;
+
 type Fields = Vec<(&'static str, u32)>;
 
 fn element(s: &str) -> Result<u32, String> {
@@ -97,10 +99,6 @@ pub(super) fn instruction(
     args: &[&str],
     features: TargetFeatures,
 ) -> Result<Option<u32>, String> {
-    let mentions_za = args.iter().any(|s| {
-        s.trim_start_matches(['{', ' ']).starts_with(['z', 'Z'])
-            && s.to_ascii_lowercase().contains("za")
-    });
     if !matches!(
         op,
         "addsvl"
@@ -119,30 +117,47 @@ pub(super) fn instruction(
             | "umops"
             | "addha"
             | "addva"
-    ) && !(mentions_za
-        && matches!(
-            op,
-            "mov"
-                | "mova"
-                | "ldr"
-                | "str"
-                | "ld1b"
-                | "ld1h"
-                | "ld1w"
-                | "ld1d"
-                | "ld1q"
-                | "st1b"
-                | "st1h"
-                | "st1w"
-                | "st1d"
-                | "st1q"
-                | "zero"
-        ))
+            | "mov"
+            | "mova"
+            | "ldr"
+            | "str"
+            | "ld1b"
+            | "ld1h"
+            | "ld1w"
+            | "ld1d"
+            | "ld1q"
+            | "st1b"
+            | "st1h"
+            | "st1w"
+            | "st1d"
+            | "st1q"
+            | "zero"
+            | "fmla"
+            | "fmls"
+            | "add"
+            | "sub"
+    ) {
+        return Ok(None);
+    }
+    let matrix_operand = |s: &&str| {
+        s.trim_start_matches(['{', ' '])
+            .as_bytes()
+            .get(..2)
+            .is_some_and(|prefix| {
+                prefix.eq_ignore_ascii_case(b"za") || prefix.eq_ignore_ascii_case(b"zt")
+            })
+    };
+    if !matches!(op, "addsvl" | "rdsvl" | "zero")
+        && !args.first().is_some_and(matrix_operand)
+        && !(matches!(op, "mov" | "mova") && args.iter().skip(1).any(matrix_operand))
     {
         return Ok(None);
     }
     let lower: Vec<_> = args.iter().map(|s| s.to_ascii_lowercase()).collect();
     let a: Vec<_> = lower.iter().map(String::as_str).collect();
+    if let Some(word) = grouped::instruction(op, &a, features)? {
+        return Ok(Some(word));
+    }
     let (name, fields) = match op {
         "rdsvl" | "addsvl" => {
             count(
@@ -178,9 +193,14 @@ pub(super) fn instruction(
             let mut mask = 0;
             if inner == "za" {
                 mask = 255;
-            } else {
+            } else if !inner.is_empty() {
+                let mut previous_size = None;
                 for s in inner.split(',').map(str::trim) {
                     let (n, size) = tile(s)?;
+                    if previous_size.is_some_and(|previous| previous != size) {
+                        return Err("zero tile list requires matching element sizes".into());
+                    }
+                    previous_size = Some(size);
                     if size > 3 {
                         return Err("zero tile list supports B/H/S/D".into());
                     }

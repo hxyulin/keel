@@ -7,6 +7,32 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def case(name):
     op = name.split('_')[0]
+    if name == 'zero_zt_i_': return 'zero {zt0}'
+    if name in ('ldr_zt_br_', 'str_zt_br_'): return f'{op} zt0, [sp]'
+    if name.startswith(('mova_za2_z_', 'mova_za4_z_', 'mova_mz2_za_', 'mova_mz4_za_')):
+        insert = name.startswith('mova_za')
+        count = int(name.split('_')[1][-1])
+        size = name[-2]; suffix = 's' if size == 'w' else size
+        tile = f'za0v.{suffix}[w15, 0:{count-1}]'
+        group = '{' + f'z{32-count}.{suffix} - z31.{suffix}' + '}'
+        return f'mova {tile}, {group}' if insert else f'mova {group}, {tile}'
+    if name.startswith(('mova_za_mz', 'mova_mz_za')):
+        insert = name.startswith('mova_za_')
+        count = int(name.split('_')[2][-1])
+        group = '{' + f'z{32-count}.d - z31.d' + '}'
+        array = f'za.d[w11, 7, vgx{count}]'
+        return f'mova {array}, {group}' if insert else f'mova {group}, {array}'
+    if name.startswith(('fmla_za_', 'fmls_za_', 'add_za_', 'sub_za_')):
+        parts = name.split('_'); kind = parts[2]; tag = parts[3]
+        count = int(tag[1] if kind == 'zzi' else tag[0])
+        suffix = tag[0] if kind == 'zzi' else 'h' if name.endswith('_16') else 's'
+        group = '{' + f'z{32-count}.{suffix} - z31.{suffix}' + '}'
+        source = f'{op} za.{suffix}[w11, 7, vgx{count}], {group}'
+        if kind == 'zzw': return source + ', {' + f'z0.{suffix} - z{count-1}.{suffix}' + '}'
+        if kind == 'zzv': return source + f', z15.{suffix}'
+        if kind == 'zw': return source
+        if kind == 'zzi': return source + f', z15.{suffix}[1]'
+        raise ValueError(name)
     if op == 'addsvl': return 'addsvl sp, x30, #-32'
     if op == 'rdsvl': return 'rdsvl x30, #31'
     if name in ('ldr_za_ri_', 'str_za_ri_'): return f'{op} za[w15, 15], [sp, #15, mul vl]'

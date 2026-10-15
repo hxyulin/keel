@@ -76,7 +76,6 @@ pub(super) fn instruction(
         op,
         "smstart"
             | "smstop"
-            | "zero"
             | "ptrue"
             | "pfalse"
             | "rdvl"
@@ -112,13 +111,6 @@ pub(super) fn instruction(
                     ("CRm", target | u32::from(op == "smstart")),
                 ],
             )
-        }
-        "zero" => {
-            count(&a, 1, 1)?;
-            if a[0] != "{za}" {
-                return Err("only zero {za} is supported".into());
-            }
-            ("zero_za_i_".into(), vec![("imm8", 255)])
         }
         "ptrue" => {
             count(&a, 1, 2)?;

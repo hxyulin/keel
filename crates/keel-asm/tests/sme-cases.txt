@@ -2,6 +2,12 @@
 # Encoding-name inventory derived from Arm AARCHMRS 2025-12.
 # Copyright (c) 2010-2025 Arm Limited or its affiliates. All rights reserved.
 # Arm-derived data: BSD-3-Clause; see ../isa/LICENSE-ARM.
+add_za_zw_2x2	add za.s[w11, 7, vgx2], {z30.s - z31.s}
+add_za_zw_4x4	add za.s[w11, 7, vgx4], {z28.s - z31.s}
+add_za_zzv_2x1	add za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s
+add_za_zzv_4x1	add za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s
+add_za_zzw_2x2	add za.s[w11, 7, vgx2], {z30.s - z31.s}, {z0.s - z1.s}
+add_za_zzw_4x4	add za.s[w11, 7, vgx4], {z28.s - z31.s}, {z0.s - z3.s}
 addha_za_pp_z_32	addha za0.s, p0/m, p7/m, z31.s
 addha_za_pp_z_64	addha za0.d, p0/m, p7/m, z31.d
 addsvl_r_ri_	addsvl sp, x30, #-32
@@ -11,6 +17,34 @@ bfmopa_za32_pp_zz_	bfmopa za0.s, p0/m, p7/m, z31.h, z0.h
 bfmopa_za_pp_zz_16	bfmopa za0.h, p0/m, p7/m, z31.h, z0.h
 bfmops_za32_pp_zz_	bfmops za0.s, p0/m, p7/m, z31.h, z0.h
 bfmops_za_pp_zz_16	bfmops za0.h, p0/m, p7/m, z31.h, z0.h
+fmla_za_zzi_d2xi	fmla za.d[w11, 7, vgx2], {z30.d - z31.d}, z15.d[1]
+fmla_za_zzi_d4xi	fmla za.d[w11, 7, vgx4], {z28.d - z31.d}, z15.d[1]
+fmla_za_zzi_h2xi	fmla za.h[w11, 7, vgx2], {z30.h - z31.h}, z15.h[1]
+fmla_za_zzi_h4xi	fmla za.h[w11, 7, vgx4], {z28.h - z31.h}, z15.h[1]
+fmla_za_zzi_s2xi	fmla za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s[1]
+fmla_za_zzi_s4xi	fmla za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s[1]
+fmla_za_zzv_2x1	fmla za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s
+fmla_za_zzv_2x1_16	fmla za.h[w11, 7, vgx2], {z30.h - z31.h}, z15.h
+fmla_za_zzv_4x1	fmla za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s
+fmla_za_zzv_4x1_16	fmla za.h[w11, 7, vgx4], {z28.h - z31.h}, z15.h
+fmla_za_zzw_2x2	fmla za.s[w11, 7, vgx2], {z30.s - z31.s}, {z0.s - z1.s}
+fmla_za_zzw_2x2_16	fmla za.h[w11, 7, vgx2], {z30.h - z31.h}, {z0.h - z1.h}
+fmla_za_zzw_4x4	fmla za.s[w11, 7, vgx4], {z28.s - z31.s}, {z0.s - z3.s}
+fmla_za_zzw_4x4_16	fmla za.h[w11, 7, vgx4], {z28.h - z31.h}, {z0.h - z3.h}
+fmls_za_zzi_d2xi	fmls za.d[w11, 7, vgx2], {z30.d - z31.d}, z15.d[1]
+fmls_za_zzi_d4xi	fmls za.d[w11, 7, vgx4], {z28.d - z31.d}, z15.d[1]
+fmls_za_zzi_h2xi	fmls za.h[w11, 7, vgx2], {z30.h - z31.h}, z15.h[1]
+fmls_za_zzi_h4xi	fmls za.h[w11, 7, vgx4], {z28.h - z31.h}, z15.h[1]
+fmls_za_zzi_s2xi	fmls za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s[1]
+fmls_za_zzi_s4xi	fmls za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s[1]
+fmls_za_zzv_2x1	fmls za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s
+fmls_za_zzv_2x1_16	fmls za.h[w11, 7, vgx2], {z30.h - z31.h}, z15.h
+fmls_za_zzv_4x1	fmls za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s
+fmls_za_zzv_4x1_16	fmls za.h[w11, 7, vgx4], {z28.h - z31.h}, z15.h
+fmls_za_zzw_2x2	fmls za.s[w11, 7, vgx2], {z30.s - z31.s}, {z0.s - z1.s}
+fmls_za_zzw_2x2_16	fmls za.h[w11, 7, vgx2], {z30.h - z31.h}, {z0.h - z1.h}
+fmls_za_zzw_4x4	fmls za.s[w11, 7, vgx4], {z28.s - z31.s}, {z0.s - z3.s}
+fmls_za_zzw_4x4_16	fmls za.h[w11, 7, vgx4], {z28.h - z31.h}, {z0.h - z3.h}
 fmopa_za32_pp_zz_16	fmopa za0.s, p0/m, p7/m, z31.h, z0.h
 fmopa_za_pp_zz_16	fmopa za0.h, p0/m, p7/m, z31.h, z0.h
 fmopa_za_pp_zz_32	fmopa za0.s, p0/m, p7/m, z31.s, z0.s
@@ -25,11 +59,32 @@ ld1h_za_p_rrr_	ld1h {za1v.h[w15, 0]}, p7/z, [sp, x30, lsl #1]
 ld1q_za_p_rrr_	ld1q {za15v.q[w15, 0]}, p7/z, [sp, x30, lsl #4]
 ld1w_za_p_rrr_	ld1w {za3v.s[w15, 0]}, p7/z, [sp, x30, lsl #2]
 ldr_za_ri_	ldr za[w15, 15], [sp, #15, mul vl]
+ldr_zt_br_	ldr zt0, [sp]
+mova_mz2_za_b1	mova {z30.b - z31.b}, za0v.b[w15, 0:1]
+mova_mz2_za_d1	mova {z30.d - z31.d}, za0v.d[w15, 0:1]
+mova_mz2_za_h1	mova {z30.h - z31.h}, za0v.h[w15, 0:1]
+mova_mz2_za_w1	mova {z30.s - z31.s}, za0v.s[w15, 0:1]
+mova_mz4_za_b1	mova {z28.b - z31.b}, za0v.b[w15, 0:3]
+mova_mz4_za_d1	mova {z28.d - z31.d}, za0v.d[w15, 0:3]
+mova_mz4_za_h1	mova {z28.h - z31.h}, za0v.h[w15, 0:3]
+mova_mz4_za_w1	mova {z28.s - z31.s}, za0v.s[w15, 0:3]
+mova_mz_za2_1	mova {z30.d - z31.d}, za.d[w11, 7, vgx2]
+mova_mz_za4_1	mova {z28.d - z31.d}, za.d[w11, 7, vgx4]
 mova_z_p_rza_b	mova z31.b, p7/m, za0v.b[w15, 0]
 mova_z_p_rza_d	mova z31.d, p7/m, za7v.d[w15, 0]
 mova_z_p_rza_h	mova z31.h, p7/m, za1v.h[w15, 0]
 mova_z_p_rza_q	mova z31.q, p7/m, za15v.q[w15, 0]
 mova_z_p_rza_w	mova z31.s, p7/m, za3v.s[w15, 0]
+mova_za2_z_b1	mova za0v.b[w15, 0:1], {z30.b - z31.b}
+mova_za2_z_d1	mova za0v.d[w15, 0:1], {z30.d - z31.d}
+mova_za2_z_h1	mova za0v.h[w15, 0:1], {z30.h - z31.h}
+mova_za2_z_w1	mova za0v.s[w15, 0:1], {z30.s - z31.s}
+mova_za4_z_b1	mova za0v.b[w15, 0:3], {z28.b - z31.b}
+mova_za4_z_d1	mova za0v.d[w15, 0:3], {z28.d - z31.d}
+mova_za4_z_h1	mova za0v.h[w15, 0:3], {z28.h - z31.h}
+mova_za4_z_w1	mova za0v.s[w15, 0:3], {z28.s - z31.s}
+mova_za_mz2_1	mova za.d[w11, 7, vgx2], {z30.d - z31.d}
+mova_za_mz4_1	mova za.d[w11, 7, vgx4], {z28.d - z31.d}
 mova_za_p_rz_b	mova za0v.b[w15, 0], p7/m, z31.b
 mova_za_p_rz_d	mova za7v.d[w15, 0], p7/m, z31.d
 mova_za_p_rz_h	mova za1v.h[w15, 0], p7/m, z31.h
@@ -48,6 +103,13 @@ st1h_za_p_rrr_	st1h {za1v.h[w15, 0]}, p7, [sp, x30, lsl #1]
 st1q_za_p_rrr_	st1q {za15v.q[w15, 0]}, p7, [sp, x30, lsl #4]
 st1w_za_p_rrr_	st1w {za3v.s[w15, 0]}, p7, [sp, x30, lsl #2]
 str_za_ri_	str za[w15, 15], [sp, #15, mul vl]
+str_zt_br_	str zt0, [sp]
+sub_za_zw_2x2	sub za.s[w11, 7, vgx2], {z30.s - z31.s}
+sub_za_zw_4x4	sub za.s[w11, 7, vgx4], {z28.s - z31.s}
+sub_za_zzv_2x1	sub za.s[w11, 7, vgx2], {z30.s - z31.s}, z15.s
+sub_za_zzv_4x1	sub za.s[w11, 7, vgx4], {z28.s - z31.s}, z15.s
+sub_za_zzw_2x2	sub za.s[w11, 7, vgx2], {z30.s - z31.s}, {z0.s - z1.s}
+sub_za_zzw_4x4	sub za.s[w11, 7, vgx4], {z28.s - z31.s}, {z0.s - z3.s}
 sumopa_za_pp_zz_32	sumopa za0.s, p0/m, p7/m, z31.b, z0.b
 sumopa_za_pp_zz_64	sumopa za0.d, p0/m, p7/m, z31.h, z0.h
 sumops_za_pp_zz_32	sumops za0.s, p0/m, p7/m, z31.b, z0.b
@@ -62,3 +124,4 @@ usmopa_za_pp_zz_32	usmopa za0.s, p0/m, p7/m, z31.b, z0.b
 usmopa_za_pp_zz_64	usmopa za0.d, p0/m, p7/m, z31.h, z0.h
 usmops_za_pp_zz_32	usmops za0.s, p0/m, p7/m, z31.b, z0.b
 usmops_za_pp_zz_64	usmops za0.d, p0/m, p7/m, z31.h, z0.h
+zero_zt_i_	zero {zt0}

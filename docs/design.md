@@ -1162,7 +1162,7 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 1377 instruction/alias forms. Generated requirements retain
+subset currently has 1440 instruction/alias forms. Generated requirements retain
 Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
 availability checks, plus the numeric feature predicates described below;
 the fixed Apple arm64 target enables only FP, AdvSIMD,
@@ -1434,7 +1434,7 @@ transitions and preserved D8–D15. On this session's Apple M5 Max / Darwin
 27.0.0, SME and SME2 flags were 1; NEON and streaming SME tests passed.
 Non-streaming SVE was not executed.
 
-The matrix increment adds 60 selected Arm records (two overlap the initial
+The matrix increments cover 123 selected Arm records (two overlap the initial
 FP32 forms), inventoried in `isa/sme.txt` with one named encoding case per
 record in `tests/sme-cases.txt`. `tools/sme_cases.py --check` reproduces the
 cases; the regular Arm generator imports the records from the same pinned,
@@ -1444,28 +1444,56 @@ It supports:
 - FP32/FP64, widening FP16/BF16, non-widening FP16/BF16 outer products;
   signed/unsigned/mixed 8-bit-to-32-bit and 16-bit-to-64-bit products;
   SME2 signed/unsigned 16-bit-to-32-bit products, each with add/subtract forms.
-- `addha/addva` for S/D tiles; partial `zero` lists of B/H/S/D tiles.
+- `addha/addva` for S/D tiles; partial `zero` lists of matching B/H/S/D tiles
+  (including the empty list).
 - Predicated horizontal/vertical `mov/mova` between Z vectors and ZA slices
   for B/H/S/D/Q, using W12–W15 selectors and element-dependent offsets.
 - Predicated `ld1b/h/w/d/q` and `st1b/h/w/d/q` ZA slice transfers, with base
   or scaled X-register offsets; whole-ZA vector `ldr/str` with matching ZA
   and `mul vl` offsets; `rdsvl/addsvl` with signed 6-bit multipliers.
+- SME2 unpredicated `mov/mova` between aligned groups of two/four Z registers
+  and horizontal/vertical B/H/S/D slice ranges, or `.d` ZA arrays. Slice
+  selectors are W12–W15; array selectors are W8–W11 with offsets 0..7.
+  Optional `vgx2/vgx4` must match the register group length.
+- SME2 ZA-array `add/sub` on S/D elements, using one group, two groups, or a
+  group plus Z0–Z15. `fmla/fmls` on H/S/D arrays use a group plus a vector,
+  indexed element, or matching group. Indexed lanes cover a 128-bit segment;
+  indexed and two-group sources are aligned; scalar-vector groups can wrap.
+  D arithmetic also requires the optional SME FP64 type; H requires SME FP16.
+- SME2 `ldr/str zt0, [base]` and `zero {zt0}` for the 512-bit lookup table.
 
 `with_sme2()` implies SME. The independent `with_sme_f64f64()` and
 `with_sme_i16i64()` builders enable SME and their named matrix extension.
 `with_sme_f16f16()` and `with_sme_b16b16()` also enable SME2. SME2 alone
 permits none of these four optional types. No builder enables ordinary SVE.
+For example, `assemble_with_features(source, TargetFeatures::apple_m5())`
+or `keel asm --cpu apple-m5 input.s -o output.o` selects these implemented
+M5 encodings. `TargetFeatures::default().with_sme2()` selects just the
+SME/SME2 families without the four optional matrix types.
+
+```sh
+python3 crates/keel-asm/tools/sme_cases.py --check
+python3 crates/keel-asm/tools/generate.py --archive /tmp/aarchmrs.tar.gz --check
+cargo test -p keel-asm --test sme --test scalable
+```
 
 Clang comparisons use `-mcpu=apple-m5` only for the reference assembler.
 Native tests check each relevant `hw.optional.arm.FEAT_*` flag before entering
 streaming mode. They verify FP32, FP64, FP16, signed I8-to-I32,
 I16-to-I32, and I16-to-I64 matrix results after a store/clear/reload round trip.
+Separate tests verify widening/non-widening BF16 results, two/four-register
+horizontal/vertical and array transfers with different register values,
+FP32 multiply-accumulate/subtract and integer accumulation in ZA arrays,
+and all 64 bytes of a ZT0 load/store/zero round trip.
 Leaves preserve D8–D15, make no calls while streaming, enter with inactive
 ZA, and exit with both state bits clear. They exercise only advertised ISA.
 
 Remaining scalable coverage includes predicated Z arithmetic and memory,
-vector shifts/conversions, grouped SME2 arithmetic/transfers, SME2.1, and
-SVE2 instructions. Remaining ordinary M5 coverage includes crypto, pointer
+vector shifts/conversions, SME2 grouped Z arithmetic, integer/BF16 ZA dot
+products and multiply-accumulates, widening ZA multiply-accumulates, lookup
+operations, and SME2.1 (including `movaz`). These instruction forms remain
+unimplemented. SME2.1 is not enabled by the current M5 profile; ordinary SVE2
+remains unmodeled. Remaining ordinary M5 coverage includes crypto, pointer
 authentication, and newer scalar ISA. These are explicit coverage boundaries,
 not complete A64/SVE/SME support.
 

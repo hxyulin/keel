@@ -557,8 +557,13 @@ mod tests {
             let encoding = generated::encoding(name).unwrap();
             assert_eq!(word & encoding.mask, encoding.base, "{name}: {source}");
             assert!(assemble(source).is_err(), "SME leaked into default: {name}");
+            assert!(
+                assemble_with_features(source, TargetFeatures::default().with_sve()).is_err(),
+                "SME leaked into SVE: {name}"
+            );
         }
         assert_eq!(covered, expected);
+        assert_eq!(covered.len(), 123);
     }
 
     #[test]
