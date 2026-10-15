@@ -95,7 +95,9 @@ The aarch64 backend lowers the memory ones to libc calls for now.
 `trap` is a terminator instruction, not an intrinsic: nothing after it runs,
 and as an ordinary instruction every block using it would need a dummy
 terminator (LLVM's `call @llvm.trap()` + `unreachable`). `debugtrap` can be
-resumed by a debugger, so it is an intrinsic.
+resumed by a debugger, so it is an intrinsic. General assume and a distinct
+nontrapping unreachable instruction remain unimplemented/deferred;
+`__builtin_unreachable` still lowers to `trap`.
 
 ## Float operations
 
@@ -785,9 +787,14 @@ runtime in these applications, so both remain opt-in.
 `inline` uses frozen templates of same-module `local` definitions and expands
 only direct calls present at pass entry. Newly cloned calls wait for another
 explicit invocation, so function order cannot cause recursive expansion.
-Templates contain at most 64 instructions, 8 blocks and 512 bytes of fixed
-stack storage. Each caller accepts at most 128 sites and 2,048 added IR
-instructions (including a conservative allowance for by-value snapshots).
+Ordinary profitability limits are 64 instructions, 8 blocks and 512 bytes of
+fixed stack storage. `inlinehint` doubles these limits; `alwaysinline` bypasses
+only these soft limits and `noinline` prohibits expansion. Each caller accepts
+at most 128 sites and 2,048 added IR instructions, with a module limit of 16,384
+added instructions and hard stack budgets (including by-value snapshots).
+See [function attributes](function-attributes.md#inliner-policy-and-hard-boundaries)
+for exact limits and skip reports through `inline_with_report`. Normal CLI
+passes discard those reports. `alwaysinline` acts only when the pass runs.
 There is no profile-guided profitability model yet. Non-local definitions,
 variadics, direct recursive cycles, `returns_twice` calls, exception handling,
 guaranteed tail calls, inline assembly, and frame/variadic/dynamic-stack
@@ -1019,7 +1026,8 @@ CPU/vector feature macros are not copied from the host. Standard capability
 macros declare the lack of complex arithmetic, VLAs, and a supplied C threads
 implementation. Native feature queries use a conservative registry of supported
 builtins, features, and semantic attributes; unknown capabilities return zero.
-The fixed overflow-builtin registry shares the parser's family recognition.
+The fixed-type and generic overflow-builtin registry shares the parser's
+family recognition.
 Ignored attributes such as `cleanup` are not reported as implemented.
 
 The local Apple Clang 21 audit produced 482 Darwin arm64 and 407 Linux x86-64
@@ -1131,8 +1139,11 @@ inputs across compiler configurations for comparable compiler measurements.
 - **Only what is used is emitted.** Headers declare hundreds of functions
   and define `inline` ones a file may never call; external definitions are
   always emitted and everything else only when something emitted refers to
-  it. A C99 `inline` definition with no `extern` declaration becomes a
-  local copy.
+  it. An inline-only definition becomes a local copy; any file-scope
+  `extern` or plain non-inline declaration, before or after it, requests public
+  emission unless explicitly `static`. Block declarations merge contracts but
+  do not request public emission. See
+  [function attributes](function-attributes.md#c-declarations-and-contracts).
 - **Target facts** come from `Options::target`. Both targets are LP64 with
   signed `char`.
   - Apple arm64: `long double` is `double`. `va_list` is a `char *`, so
@@ -1203,12 +1214,17 @@ Some accepted extensions have deliberately limited behavior:
   `_Noreturn` and GNU `noreturn` terminate direct calls with a trap if the
   callee unexpectedly returns, exposing the absent continuation to CFG
   simplification. These contracts are merged across function redeclarations.
+  `inlinehint`, `alwaysinline`, `noinline`, `noreturn` and `nounwind` are
+  transported on direct functions; GNU `nothrow` supplies `nounwind` promise
+  metadata without C++ `noexcept` termination or call/invoke EH rewrites.
+  [Attribute ownership, merging and emission](function-attributes.md) distinguish
+  named declarations from returned-function types and indirect calls.
   GNU function-pointer `noreturn` attributes are not represented.
   Other attributes are ignored, including `cleanup`, `weak`, `alias`,
   `visibility`, `constructor` and `vector_size`; their runtime, linkage or
   type behavior is not supported.
-- `inline` affects which definitions are emitted, but there is no
-  function-inlining optimization. Block-pointer declarators (`^`) are
+- `inline` affects emission and supplies `inlinehint` to the bounded
+  private-only [inliner](#bounded-function-inlining). Block-pointer declarators (`^`) are
   parsed as pointers; block literals and the Blocks runtime are not
   implemented.
 - `__has_builtin`, `__has_feature` and `__has_attribute` describe Keel.
@@ -1234,9 +1250,9 @@ separate language frontend. An audit of the pinned Lua 5.4.7, QuickJS
 Lowering preserves signed comparison/division/shift and integer extension
 semantics, ABI extension and aggregate layouts, immutable global data,
 volatile memory operations, atomic orderings, object layouts/alignment,
-`returns_twice`, and direct `noreturn` control flow. Access alignment is
-computed from actual stack slots, global declarations, explicitly rounded
-local addresses, `__builtin_assume_aligned`, and pointer offsets. It is
+`returns_twice`, direct function attributes, and direct `noreturn` control flow.
+Access alignment is computed from actual stack slots, global declarations,
+explicitly rounded local addresses, `__builtin_assume_aligned`, and pointer offsets. It is
 written into `MemoryFlags`, so IR printing/parsing and downstream passes
 retain it. Copy and initializer chunks get alignment at their actual byte
 offsets, not the alignment of the aggregate base. Alignment never implies
@@ -1253,14 +1269,15 @@ mapping source annotations onto unrelated flags:
   hint builtins. Preserving these on CFG edges and using them in block layout
   is a concrete next step for Lua and QuickJS. Probabilities are advisory;
   probability zero or one must not make an edge unreachable.
-- `always_inline`/`noinline`, `hot`/`cold` and visibility are not represented.
-  Inlining needs a call-graph pass and a cost model; retaining these attributes
-  alone would not inline the helpers the suites request.
+- `hot`/`cold` and visibility remain unrepresented. Inline policies now
+  reach the private-only inliner under the
+  [function attribute contract](function-attributes.md); public/interposable
+  definitions retain calls.
 - `restrict` and C effective-type alias information are discarded. Scoped
   alias contracts and alias analysis are needed before memory optimizations
   can use them. A pointer to `const` does not establish immutable storage.
 - GNU `pure`/`const`, `malloc`, `alloc_size`, `alloc_align`, `nonnull`,
-  `returns_nonnull` and `nothrow` function contracts are ignored. Calls remain
+  `returns_nonnull` function contracts are ignored. Calls remain
   conservative memory/lifetime barriers. Declaration attributes must be
   distinguished from Clang's nullability spellings, which are not equivalent
   optimizer promises. Allocation contracts also need object/lifetime modeling.
@@ -1296,7 +1313,12 @@ compared against Clang.
   as for the builtin's prototype; the wrapped result is stored through
   the third argument and the overflow flag is returned as `_Bool`. Every
   operand is evaluated once, and the store remains even when the flag is
-  unused. Generic mixed-type and `_overflow_p` forms are not implemented.
+  unused. Generic `__builtin_add_overflow`, `__builtin_sub_overflow` and
+  `__builtin_mul_overflow` support mixed operand/destination integer types
+  through 128 bits; `_overflow_p` remains deferred. See
+  [generic overflow](generic-overflow-builtins.md) for conversions, side effects
+  and validation. The largest 128-bit multiply fixture has a measured assembly
+  size cost; no runtime speedup was measured.
 - **Computed goto** without an indirect branch in the IR: `&&label` is
   the label's number in its function (from 1), and every `goto *p` jumps
   to one shared dispatch block, passing that number as a block argument.
@@ -1346,10 +1368,6 @@ not pass it through, and the x86-64 backend does not support it yet.
 
 Useful candidates for small follow-up patches, rather than current support:
 
-- **Generic overflow-checking builtins:** the generic forms permit mixed
-  operand and destination types and need more than casting the operands
-  to the destination type. The fixed-type forms are implemented above.
-  See [GCC's overflow builtin semantics](https://gcc.gnu.org/onlinedocs/gcc/Integer-Overflow-Builtins.html).
 - **Hint optimization:** the alignment and branch builtins preserve their
   value and argument-evaluation behavior, but optimization from their
   metadata would require additional IR and optimizer support. See
@@ -1389,6 +1407,15 @@ and without `-O`. These configured workloads found bugs the small
 programs missed (an array of pointers to `const` placed in read-only
 memory, a variable used in its own initializer, `#pragma pack`, the
 `__int128` constant, a function too big for conditional branches).
+
+Deterministic indexed GNU and Darwin/BSD static archives are available through
+`keel archive` and the library writer; see [static archives](static-archives.md)
+for usage and validation. Static packaging is distinct from DSO creation.
+The Darwin consuming linker's common-only extraction limitation remains.
+
+The [frontend cloning investigation](c-frontend-cloning.md) rejected the scoped
+expression change and implemented no performance gain. Initializer clone
+incidence motivates a separate future session.
 
 ## Assembler
 
@@ -1448,6 +1475,9 @@ intermediate assembly files. Existing assembly output remains the default;
 `--emit-ir` is incompatible with `--emit-object`. The x86 Linux path also emits
 typed instructions and metadata directly, with no intermediate assembly text.
 Its standalone syntax remains Intel, and its compiler rejects inline assembly.
+[Packed AVX arithmetic](x86-avx-subset.md#packed-arithmetic-extension) is opt-in
+with the existing `--target-features avx`, supporting 128-bit `f32x4`/`f64x2`
+arithmetic. It adds no AVX2, AVX-512 or wider-vector support.
 The owned program retains its items through assembly;
 a future streaming sink could avoid retaining that intermediate representation.
 

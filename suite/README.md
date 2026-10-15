@@ -1262,7 +1262,9 @@ Results and ranked patterns are in
 Forty-eight native captures cover MacHost and the NUC; LinuxHost additionally runs both
 probes and machine-code parity checks. The helper probe reduces QuickJS benchmark
 time by 12–19% on MacHost, 20–48% on LinuxHost, and 4–13% on the NUC. A bounded inliner
-with aggregate-copy cleanup is therefore the strongest measured next feature.
+with aggregate-copy cleanup was therefore the strongest measured next feature
+at that time. It is now implemented as described below; those probe timings
+remain historical and do not measure the later attribute integration.
 SQLite constant-division results are smaller (roughly 1–3%, with MacHost's interval
 including no change). The vectorizer-specific candidates are bounded byte scans
 with early exits and short pointer/aggregate copies. Their application benefit
@@ -1323,13 +1325,24 @@ python3 suite/compare_app_clang.py \
 Full optimization now runs a bounded module-level `inline` pass and
 `stack-forward` cleanup. The inliner clones small private direct-call functions,
 preserving SSA, control flow, stack objects, aggregate argument snapshots,
-return values, and lexical debug scopes. It limits each callee to 64 instructions,
-eight blocks, and 512 bytes of fixed stack storage, and each caller to 128
-expanded sites and 2,048 added IR instructions. Newly cloned calls wait until a
-later explicit inlining invocation. Recursion, variadic definitions, dynamic
-frame operations, exception handling and returns-twice semantics are excluded.
-Public definitions remain calls. `always_inline`/`noinline` attributes are still
-not represented. Basic and unoptimized tiers remain unchanged.
+return values, and lexical debug scopes. Its original ordinary limits were
+64 instructions, eight blocks and 512 bytes of fixed stack storage, with
+128 expanded sites and
+2,048 added IR instructions per caller. The current
+[function attribute contract](../docs/function-attributes.md#inliner-policy-and-hard-boundaries)
+adds hint/always/noinline policies and module/stack safeguards. Newly cloned
+calls wait until a later explicit inlining invocation. Recursion, variadic
+definitions, dynamic frame operations, exception handling and returns-twice
+semantics are excluded.
+Public definitions remain calls. At the time of these measurements,
+`always_inline`/`noinline` were not represented; they are now transported with
+`inlinehint`, `noreturn` and `nounwind`, including C `nothrow`, under the
+[ownership, merging and emission rules](../docs/function-attributes.md#c-declarations-and-contracts).
+`alwaysinline` acts only when the pass runs, with legality and hard limits intact;
+`inline_with_report` exposes skipped requests, without normal CLI warnings.
+Basic and unoptimized tiers retain their existing pipelines. `nounwind` remains
+promise metadata without C++ termination or EH rewriting. General assume and
+distinct unreachable remain deferred; `__builtin_unreachable` still traps.
 
 `stack-forward` reconstructs ordinary integer loads from prior writes to
 nonescaping fixed stack objects within a block, including overlapping writes
@@ -1380,3 +1393,16 @@ Validation also caught and fixed both a protected-page early-exit case and
 debugger edits to forwarded stack homes. The final debugger fix changes debug
 slots only; all 44 native application objects per host were recompiled with
 the final compiler and matched the measured combined objects byte-for-byte.
+
+Current feature scope and evidence are recorded separately from these timings:
+[deterministic indexed GNU/Darwin static archives](../docs/static-archives.md)
+(`keel archive`, with the Darwin common-only consuming-linker limitation;
+static archives do not create DSOs),
+[generic mixed-type overflow through 128 bits](../docs/generic-overflow-builtins.md)
+(`_overflow_p` deferred; largest 128-bit multiply assembly-size caveat, no runtime
+speedup claim), and [packed AVX arithmetic](../docs/x86-avx-subset.md#packed-arithmetic-extension)
+(existing opt-in `--target-features avx`, 128-bit only, no AVX2/AVX-512).
+The [frontend cloning investigation](../docs/c-frontend-cloning.md) rejected the
+scoped expression change and implemented no gain; initializer incidence motivates
+a separate future session. The [final portability validation](../docs/final-portability-validation.md)
+records the focused ownership reruns and inherited round-four workspace evidence.

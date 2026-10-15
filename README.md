@@ -160,6 +160,12 @@ outside the supported scope. The target defaults to Linux on Linux and can be
 selected explicitly on macOS. See
 [ELF linker scope and validation](docs/elf-linker.md).
 
+`keel archive --target x86_64-unknown-linux-gnu -o libhelpers.a helpers.o`
+creates a deterministic indexed GNU static archive; the Darwin target writes
+indexed Darwin/BSD archives. See [static archives](docs/static-archives.md) for
+usage, validation and the Darwin consuming linker's common-only extraction
+limitation. Packaging a static archive does not create a shared library (DSO).
+
 ## Compiler tiers and profiling
 
 The stages can be tuned independently:
@@ -215,6 +221,9 @@ compilation. The driver starts and retains the client for the invocation.
 Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
 crates and manage the Tracy client themselves. Benchmark uninstrumented
 release builds for final timings; use instrumented builds to locate costs.
+The [frontend cloning investigation](docs/c-frontend-cloning.md) rejected the
+scoped expression change; initializer clone incidence motivates a separate
+future investigation. No performance gain was implemented.
 The [compilation-speed investigation](suite/reports/compilation-speed-analysis-20261015.html)
 compares complete object workflows with assembly-only output on macOS and Linux,
 and separates frontend, verification, optimization, codegen and object costs.
@@ -224,21 +233,36 @@ and separates frontend, verification, optimization, codegen and object costs.
 
 - SSA IR with integer and floating-point operations, globals, thread-local
   storage, atomics, calls, C ABIs and debug information.
-- Eight optimization passes: constant folding, CFG simplification, global
-  value numbering, dead-code elimination, global code motion and opt-in
-  sparse conditional constant propagation (`sccp`), plus instruction combining
+- Optimization passes include bounded private direct-call inlining and
+  stack forwarding, plus constant folding, CFG simplification, global
+  value numbering, dead-code elimination, global code motion, opt-in
+  sparse conditional constant propagation (`sccp`), instruction combining
   and integer strength reduction (`instcombine`) and trivial block-parameter
   elimination (`phi-simplify`).
 - A C11-oriented frontend with GNU extensions including `typeof`,
   `__auto_type`, statement expressions, computed goto and case ranges.
-  Atomic pointer prefix/postfix `++` and `--`, fixed-type overflow
-  builtins, alignment/branch hints and resumable `__builtin_debugtrap`
+  Atomic pointer prefix/postfix `++` and `--`, fixed-type and
+  [generic mixed-type overflow builtins through 128 bits](docs/generic-overflow-builtins.md),
+  alignment/branch hints and resumable `__builtin_debugtrap`
   are supported, along with GNU member packing and GNU/C11 object
   alignment. Hints preserve values and side effects but do not
   currently guide optimization.
 - C variable-length arrays, complex arithmetic, nested functions and
   inline assembly statements are not supported. The ARM64 IR backend
   supports inline assembly and exceptions; the x86-64 backend does not.
+- [Function attributes](docs/function-attributes.md) transport `inlinehint`,
+  `alwaysinline`, `noinline`, `noreturn` and `nounwind`, including C `nothrow`,
+  with declaration ownership, merging and emission rules. Inlining remains
+  private-only; `alwaysinline` acts only when the pass runs and retains legality
+  and hard limits. Skip reports use `inline_with_report`, with no normal CLI warnings.
+  `nounwind` is promise metadata, without C++ termination or EH rewrites.
+- General assume and distinct unreachable remain deferred;
+  `__builtin_unreachable` still traps. `_overflow_p` remains deferred; the
+  largest 128-bit multiply fixtures have a measured code-size cost, without a
+  runtime speedup claim (see the overflow contract above).
+- [Packed AVX arithmetic](docs/x86-avx-subset.md#packed-arithmetic-extension)
+  uses the existing opt-in `--target-features avx` for 128-bit `f32x4`/`f64x2`;
+  AVX2, AVX-512 and wider vectors remain outside this feature.
 - Attribute parsing is broader than attribute semantics: many attributes
   are ignored. Keel does not claim full GCC or Clang compatibility.
 
