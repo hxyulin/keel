@@ -78,3 +78,7 @@ Linux x86-64 with AVX available.
 `crates/keel-asm/tests/fixtures/x86_avx_arithmetic.keel` is a reusable arithmetic
 chain in both widths for baseline/AVX output inspection or a caller-driven
 microbenchmark. No speedup claim is made without measurements on the target CPU.
+
+The guarded runtime tests passed on the i7-1360P Linux NUC. See the
+[integration report](../suite/reports/native-x86-features-20261015.json) for
+combined AVX/BMI application and baseline compatibility validation.

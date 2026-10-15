@@ -91,6 +91,6 @@ selection remains unchanged when features are absent.
   constant rotates, and register pressure/spills across all pipeline tiers.
   Harnesses and assembler runtime objects are checked even on non-x86 hosts.
 
-Execution of the guarded Linux tests is intentionally left to the parent on
-its BMI-capable x86 Linux host. Local cross-target checks cannot establish
-hardware execution semantics.
+The guarded assembler and codegen runtime tests passed on the i7-1360P Linux
+NUC. Combined AVX/BMI application and baseline compatibility results are recorded
+in [the integration report](../suite/reports/native-x86-features-20261015.json).
