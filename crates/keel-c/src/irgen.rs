@@ -33,8 +33,8 @@ use std::collections::HashMap;
 type R<T> = Result<T, Error>;
 
 pub struct Gen<'p> {
-    p: &'p Parser,
-    files: &'p [String],
+    p: &'p Parser<'p>,
+    files: &'p [&'p str],
     module: Module,
     debug: bool,
     /// Module source files, by the lexer's file index.
@@ -51,7 +51,7 @@ pub struct Gen<'p> {
 }
 
 impl<'p> Gen<'p> {
-    pub fn new(p: &'p Parser, files: &'p [String], debug: bool) -> Self {
+    pub fn new(p: &'p Parser<'p>, files: &'p [&'p str], debug: bool) -> Self {
         Self {
             p,
             files,
@@ -88,7 +88,7 @@ impl<'p> Gen<'p> {
                         None => self.signature(fty, g, &[])?,
                     };
                     self.module.decls.push(FuncDecl {
-                        name: global.symbol.clone(),
+                        name: global.symbol.to_owned(),
                         sig,
                     });
                 }
@@ -101,14 +101,14 @@ impl<'p> Gen<'p> {
                             .debug_type(&global.ty, &global.sugar)
                             .expect("a void object");
                         self.module.debug_globals.push(DebugGlobal {
-                            name: global.name.clone(),
+                            name: global.name.to_owned(),
                             ty,
-                            symbol: global.symbol.clone(),
+                            symbol: global.symbol.to_owned(),
                         });
                     }
                 }
                 _ => self.module.data.push(DataObject {
-                    name: global.symbol.clone(),
+                    name: global.symbol.to_owned(),
                     thread_local: global.thread_local,
                     local: false,
                     init: None,
@@ -140,7 +140,7 @@ impl<'p> Gen<'p> {
                 init: Some(DataInit {
                     constant: true,
                     align: if s.wide { 4 } else { 1 },
-                    items: vec![DataItem::Bytes(s.bytes.clone())],
+                    items: vec![DataItem::Bytes(s.bytes.to_vec())],
                 }),
             });
         }
@@ -174,7 +174,7 @@ impl<'p> Gen<'p> {
         let file = match self.srcfiles.get(&loc.file) {
             Some(f) => *f,
             None => {
-                let f = self.module.add_file(self.files[loc.file as usize].clone());
+                let f = self.module.add_file(self.files[loc.file as usize]);
                 self.srcfiles.insert(loc.file, f);
                 f
             }
@@ -355,10 +355,10 @@ impl<'p> Gen<'p> {
         }
     }
 
-    fn function(&mut self, def: &'p FuncDef) -> R<Function> {
+    fn function(&mut self, def: &'p FuncDef<'p>) -> R<Function> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
-        let mut func = Function::new(global.symbol.clone(), sig.clone());
+        let mut func = Function::new(global.symbol.to_owned(), sig.clone());
         func.local = global.internal;
         let mut b = FunctionBuilder::new(&mut func);
         let entry = b.create_block();
@@ -457,7 +457,7 @@ impl<'p> Gen<'p> {
                         fg.g.debug_type(&local.ty, &local.sugar)
                             .expect("a void local");
                     fg.b.func.debug_vars.push(DebugVar {
-                        name: local.name.clone(),
+                        name: local.name.to_owned(),
                         ty,
                         slot,
                         indirect,
@@ -574,7 +574,7 @@ impl<'p> Gen<'p> {
                             let symbol = match base {
                                 Base::Global(target) => {
                                     self.use_global(target);
-                                    self.p.globals[target].symbol.clone()
+                                    self.p.globals[target].symbol.to_owned()
                                 }
                                 Base::Str(s) => self.string_symbol(s),
                             };
@@ -609,7 +609,7 @@ impl<'p> Gen<'p> {
             items.push(DataItem::Zero(1));
         }
         Ok(DataObject {
-            name: global.symbol.clone(),
+            name: global.symbol.to_owned(),
             thread_local: global.thread_local,
             local: global.internal,
             init: Some(DataInit {
@@ -693,14 +693,14 @@ enum Place {
 struct FnGen<'g, 'p, 'f> {
     g: &'g mut Gen<'p>,
     b: FunctionBuilder<'f>,
-    def: &'p FuncDef,
+    def: &'p FuncDef<'p>,
     locals: Vec<Storage>,
     /// Facts attached to distinct SSA definitions, never to a mutable C variable.
     alignments: HashMap<Value, u32>,
     sret: Option<Value>,
     breaks: Vec<Block>,
     continues: Vec<Block>,
-    labels: HashMap<String, Block>,
+    labels: HashMap<&'p str, Block>,
     /// All computed gotos share one switch, with the label number as its
     /// first parameter. Leave it unsealed until every dispatch edge exists.
     dispatch: Option<Block>,
@@ -717,7 +717,7 @@ struct FnGen<'g, 'p, 'f> {
     scope: Option<DebugScope>,
 }
 
-impl FnGen<'_, '_, '_> {
+impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     fn new_block(&mut self) -> Block {
         self.b.create_block()
     }
@@ -761,12 +761,12 @@ impl FnGen<'_, '_, '_> {
         self.g.types().size(ty)
     }
 
-    fn label_block(&mut self, name: &str) -> Block {
+    fn label_block(&mut self, name: &'p str) -> Block {
         if let Some(&b) = self.labels.get(name) {
             return b;
         }
         let b = self.new_block();
-        self.labels.insert(name.to_string(), b);
+        self.labels.insert(name, b);
         b
     }
 
@@ -797,7 +797,7 @@ impl FnGen<'_, '_, '_> {
 
     // ---- statements ----
 
-    fn stmt(&mut self, s: &Stmt) -> R<()> {
+    fn stmt(&mut self, s: &Stmt<'p>) -> R<()> {
         match s {
             Stmt::Expr(e) => {
                 self.ensure_block();
@@ -1056,7 +1056,7 @@ impl FnGen<'_, '_, '_> {
         self.terminated = true;
     }
 
-    fn loop_body(&mut self, body: &Stmt, block: Block, exit: Block, cont: Block) -> R<()> {
+    fn loop_body(&mut self, body: &Stmt<'p>, block: Block, exit: Block, cont: Block) -> R<()> {
         self.switch_to(block);
         self.breaks.push(exit);
         self.continues.push(cont);
@@ -1068,7 +1068,7 @@ impl FnGen<'_, '_, '_> {
 
     /// Branches to `t` if `cond` is true (non-zero), else to `f`, without
     /// materializing `&&`, `||` and `!` as values.
-    fn branch(&mut self, cond: &Expr, t: Block, f: Block) -> R<()> {
+    fn branch(&mut self, cond: &Expr<'p>, t: Block, f: Block) -> R<()> {
         match &cond.kind {
             ExprKind::LogAnd(a, b) | ExprKind::LogOr(a, b) => {
                 let mid = self.new_block();
@@ -1093,7 +1093,7 @@ impl FnGen<'_, '_, '_> {
 
     /// A value that is non-zero exactly when `e` is true. Comparisons give
     /// their `i8` directly; integers are their own truth value.
-    fn truth(&mut self, e: &Expr) -> R<Value> {
+    fn truth(&mut self, e: &Expr<'p>) -> R<Value> {
         if let ExprKind::Binary(op, a, b) = &e.kind
             && op.is_comparison()
         {
@@ -1119,7 +1119,7 @@ impl FnGen<'_, '_, '_> {
     // ---- expressions ----
 
     /// The value of a non-void expression; for aggregates, their address.
-    fn val(&mut self, e: &Expr) -> R<Value> {
+    fn val(&mut self, e: &Expr<'p>) -> R<Value> {
         match self.emit(e)? {
             Some(v) => Ok(v),
             None => Err(Error::new(e.loc, "a void expression has no value")),
@@ -1130,7 +1130,7 @@ impl FnGen<'_, '_, '_> {
         matches!(ty, Ty::Struct(_) | Ty::Array(..) | Ty::Func(_))
     }
 
-    fn emit(&mut self, e: &Expr) -> R<Option<Value>> {
+    fn emit(&mut self, e: &Expr<'p>) -> R<Option<Value>> {
         let v = match &e.kind {
             ExprKind::LabelAddr(n) => {
                 let n = self.b.ins().iconst(Type::I64, *n as i64);
@@ -1388,7 +1388,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// `n * size` as an `i64`, for pointer arithmetic.
-    fn scaled(&mut self, n: &Expr, size: u64) -> R<Value> {
+    fn scaled(&mut self, n: &Expr<'p>, size: u64) -> R<Value> {
         if let ExprKind::Int(k) = n.kind {
             return Ok(self.b.ins().iconst(Type::I64, k.wrapping_mul(size as i64)));
         }
@@ -1400,7 +1400,7 @@ impl FnGen<'_, '_, '_> {
         Ok(self.b.ins().imul(v, s))
     }
 
-    fn compare(&mut self, op: BinOp, a: &Expr, b: &Expr) -> R<Value> {
+    fn compare(&mut self, op: BinOp, a: &Expr<'p>, b: &Expr<'p>) -> R<Value> {
         let (x, y) = (self.val(a)?, self.val(b)?);
         let ty = &a.ty;
         if ty.is_float() {
@@ -1578,7 +1578,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// Where an lvalue lives. `None` for a void-typed dereference.
-    fn place(&mut self, e: &Expr) -> R<Option<Place>> {
+    fn place(&mut self, e: &Expr<'p>) -> R<Option<Place>> {
         if e.ty == Ty::Void {
             return Ok(None);
         }
@@ -1706,7 +1706,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// The address of an lvalue (or of an aggregate rvalue's bytes).
-    fn addr(&mut self, e: &Expr) -> R<Value> {
+    fn addr(&mut self, e: &Expr<'p>) -> R<Value> {
         Ok(match &e.kind {
             ExprKind::Local(id) => match self.locals[*id] {
                 Storage::Slot(slot) => self.b.ins().stack_addr(slot),
@@ -1767,7 +1767,7 @@ impl FnGen<'_, '_, '_> {
 
     /// Proof used only to defer ordinary aggregate argument copying. Any
     /// unknown effect, volatile access, call or initialization is a barrier.
-    fn may_change_memory(&self, e: &Expr) -> bool {
+    fn may_change_memory(&self, e: &Expr<'p>) -> bool {
         if self.object_flags(&e.ty, &e.sugar).volatile {
             return true;
         }
@@ -1796,7 +1796,7 @@ impl FnGen<'_, '_, '_> {
         }
     }
 
-    fn call(&mut self, f: &Expr, args: &[Expr], e: &Expr) -> R<Option<Value>> {
+    fn call(&mut self, f: &Expr<'p>, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let fty = f.ty.pointee().and_then(Ty::func).unwrap().clone();
         self.set_loc(e.loc);
         let mut vals = Vec::new();
@@ -1862,7 +1862,7 @@ impl FnGen<'_, '_, '_> {
             Some(g) => {
                 self.g.use_global(g);
                 let sig = self.callee_signature(g, &fty, &extra)?;
-                let name = self.g.p.globals[g].symbol.clone();
+                let name = self.g.p.globals[g].symbol;
                 let fref = self.b.func.import_function(&name, sig);
                 self.b.ins().call(fref, &vals)
             }
@@ -1896,7 +1896,7 @@ impl FnGen<'_, '_, '_> {
         Ok(self.b.func.inst_results(inst).first().copied())
     }
 
-    fn builtin(&mut self, op: Builtin, args: &[Expr], e: &Expr) -> R<Option<Value>> {
+    fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let mut vals = Vec::new();
         for a in args {
             vals.push(self.val(a)?);
@@ -2128,7 +2128,7 @@ impl FnGen<'_, '_, '_> {
     }
 
     /// Runs a local's initializer.
-    fn init_local(&mut self, id: LocalId, init: &Init) -> R<()> {
+    fn init_local(&mut self, id: LocalId, init: &Init<'p>) -> R<()> {
         let ty = self.def.locals[id].ty.clone();
         let flags = self.object_flags(&ty, &self.def.locals[id].sugar);
         if let Storage::Var(var) = self.locals[id] {

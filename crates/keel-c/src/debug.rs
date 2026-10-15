@@ -30,7 +30,7 @@ impl DebugTypes {
     pub fn get(
         &mut self,
         module: &mut Module,
-        p: &Parser,
+        p: &Parser<'_>,
         ty: &Ty,
         sugar: &Sugar,
     ) -> Option<DebugType> {
@@ -46,7 +46,7 @@ impl DebugTypes {
                 let dt = push(
                     module,
                     DebugTypeData::Typedef {
-                        name: def.name.clone(),
+                        name: def.name.to_owned(),
                         ty: target,
                     },
                 );
@@ -62,9 +62,9 @@ impl DebugTypes {
                 let dt = push(
                     module,
                     DebugTypeData::Enum {
-                        name: def.tag.clone(),
+                        name: def.tag.map(str::to_owned),
                         ty: base,
-                        values: def.values.clone(),
+                        values: def.values.iter().map(|&(n, v)| (n.to_owned(), v)).collect(),
                     },
                 );
                 self.enums.insert(*i, dt);
@@ -109,7 +109,7 @@ impl DebugTypes {
     }
 
     /// `ty` with nothing more known.
-    fn plain(&mut self, module: &mut Module, p: &Parser, ty: &Ty) -> Option<DebugType> {
+    fn plain(&mut self, module: &mut Module, p: &Parser<'_>, ty: &Ty) -> Option<DebugType> {
         Some(match ty {
             Ty::Void => return None,
             Ty::Int(_) | Ty::Float | Ty::Double | Ty::Half => {
@@ -157,7 +157,7 @@ impl DebugTypes {
                 let dt = push(
                     module,
                     DebugTypeData::Struct {
-                        name: def.tag.clone(),
+                        name: def.tag.map(str::to_owned),
                         union: def.is_union,
                         size: None,
                         members: Vec::new(),
@@ -169,7 +169,7 @@ impl DebugTypes {
                         .members
                         .iter()
                         .map(|m| DebugMember {
-                            name: m.name.clone(),
+                            name: m.name.map(str::to_owned),
                             ty: self.get(module, p, &m.ty, &m.sugar).expect("a void member"),
                             location: match m.bits {
                                 None => MemberLocation::Byte(m.offset),

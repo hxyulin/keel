@@ -17,22 +17,25 @@ pub fn compile(
     path: &str,
     opts: Options,
 ) -> Result<(keel_ir::Module, Timings), Diagnostic> {
+    let arena = bumpalo::Bump::new();
+    let mut text = crate::strings::Strings::new(&arena);
     let mut files = Vec::new();
-    let diagnostic = |files: &[String], e: crate::Error| Diagnostic {
+    let diagnostic = |files: &[&str], e: crate::Error| Diagnostic {
         file: files
             .get(e.loc.file as usize)
-            .cloned()
+            .map(|name| name.to_string())
             .unwrap_or_else(|| path.into()),
         line: e.loc.line,
         col: e.loc.col,
         message: e.message,
     };
     let start = Instant::now();
-    let toks = lex::tokenize(src, path, &mut files).map_err(|e| diagnostic(&files, e))?;
+    let toks =
+        lex::tokenize(src, path, &mut files, &mut text).map_err(|e| diagnostic(&files, e))?;
     let tokens = toks.len();
     let lex_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
-    let mut parser = parse::Parser::new(toks, opts.target);
+    let mut parser = parse::Parser::new(toks, opts.target, text);
     parser
         .translation_unit()
         .map_err(|e| diagnostic(&files, e))?;
@@ -45,6 +48,7 @@ pub fn compile(
     let start = Instant::now();
     drop(parser);
     drop(files);
+    drop(arena);
     let cleanup_ms = start.elapsed().as_secs_f64() * 1000.;
     Ok((
         module,

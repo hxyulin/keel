@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("usage: profile staged|baseline|sample ROUNDS INPUT.i... [--debug]".into());
     }
     let mode = &args[1];
-    if !["staged", "baseline", "sample"].contains(&mode.as_str()) {
+    if !["staged", "baseline", "sample", "prepare"].contains(&mode.as_str()) {
         return Err("unknown mode".into());
     }
     let rounds: usize = args[2].parse()?;
@@ -18,11 +18,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         debug_info: args.iter().any(|a| a == "--debug"),
         ..Default::default()
     };
-    let inputs: Vec<_> = args[3..]
+    let first_input = if mode == "prepare" { 4 } else { 3 };
+    if args.len() <= first_input {
+        return Err("prepare requires OUTPUT_DIR followed by input files".into());
+    }
+    let inputs: Vec<_> = args[first_input..]
         .iter()
         .filter(|a| a.as_str() != "--debug")
         .map(|p| Ok((p.clone(), std::fs::read_to_string(p)?)))
         .collect::<Result<_, std::io::Error>>()?;
+    if mode == "prepare" {
+        std::fs::create_dir_all(&args[3])?;
+    }
     // Validate each translation unit before timing. Warm both paths and verify IR.
     for (path, src) in &inputs {
         let ordinary = keel_c::compile(src, path, opts)?;
@@ -34,8 +41,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("{staged:?}"),
             "stage helper changed IR: {path}"
         );
+        if mode == "prepare" {
+            let output = std::path::Path::new(&args[3])
+                .join(std::path::Path::new(path).file_name().unwrap())
+                .with_extension("ir");
+            std::fs::write(output, format!("{ordinary:?}"))?;
+        }
     }
     eprintln!("ready: {} inputs, {rounds} rounds, {mode}", inputs.len());
+    if mode == "prepare" {
+        return Ok(());
+    }
     for round in 0..rounds {
         for offset in 0..inputs.len() {
             let (path, src) = &inputs[(offset + round) % inputs.len()];

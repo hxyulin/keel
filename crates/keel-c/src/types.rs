@@ -132,7 +132,7 @@ pub enum Sugar {
 
 impl Sugar {
     /// The outer type constructor, resolving typedefs and qualifiers.
-    pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef]) -> &'a Sugar {
+    pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef<'_>]) -> &'a Sugar {
         match self {
             Self::Typedef(i) => defs[*i].sugar.unqualified(defs),
             Self::Const(inner) | Self::Volatile(inner) => inner.unqualified(defs),
@@ -141,7 +141,7 @@ impl Sugar {
     }
 
     /// Alignment attached to an alias, inherited through qualifiers and arrays.
-    pub fn alignment(&self, defs: &[TypedefDef]) -> Option<u64> {
+    pub fn alignment(&self, defs: &[TypedefDef<'_>]) -> Option<u64> {
         match self {
             Self::Typedef(i) => defs[*i].align.or_else(|| defs[*i].sugar.alignment(defs)),
             Self::Const(s) | Self::Volatile(s) | Self::Array(s) => s.alignment(defs),
@@ -149,7 +149,7 @@ impl Sugar {
         }
     }
 
-    pub fn is_volatile(&self, defs: &[TypedefDef]) -> bool {
+    pub fn is_volatile(&self, defs: &[TypedefDef<'_>]) -> bool {
         match self {
             Self::Volatile(_) => true,
             Self::Const(inner) | Self::Array(inner) => inner.is_volatile(defs),
@@ -158,7 +158,7 @@ impl Sugar {
         }
     }
 
-    pub fn pointee(&self, defs: &[TypedefDef]) -> Sugar {
+    pub fn pointee(&self, defs: &[TypedefDef<'_>]) -> Sugar {
         match self.unqualified(defs) {
             Self::Ptr(inner) => inner.as_ref().clone(),
             Self::Array(inner) if self.is_volatile(defs) => Self::Volatile(inner.clone()),
@@ -167,7 +167,7 @@ impl Sugar {
         }
     }
 
-    pub fn function_return(&self, defs: &[TypedefDef]) -> Sugar {
+    pub fn function_return(&self, defs: &[TypedefDef<'_>]) -> Sugar {
         let target = self.pointee(defs);
         match target.unqualified(defs) {
             Self::Func(ret) => ret.as_ref().clone(),
@@ -177,7 +177,7 @@ impl Sugar {
 
     /// Conditional pointers carry qualifiers from both operands. Expand
     /// aliases here so nested pointer/array qualifications merge by depth.
-    pub fn merge(&self, other: &Sugar, defs: &[TypedefDef]) -> Sugar {
+    pub fn merge(&self, other: &Sugar, defs: &[TypedefDef<'_>]) -> Sugar {
         let volatile = self.is_volatile(defs) || other.is_volatile(defs);
         let merged = match (self.unqualified(defs), other.unqualified(defs)) {
             (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(Rc::new(a.merge(b, defs))),
@@ -203,8 +203,8 @@ impl Sugar {
 }
 
 #[derive(Clone, Debug)]
-pub struct TypedefDef {
-    pub name: String,
+pub struct TypedefDef<'a> {
+    pub name: &'a str,
     pub ty: Ty,
     pub sugar: Sugar,
     /// GNU typedef alignment does not change size or type compatibility.
@@ -212,28 +212,28 @@ pub struct TypedefDef {
 }
 
 #[derive(Clone, Debug)]
-pub struct EnumDef {
-    pub tag: Option<String>,
+pub struct EnumDef<'a> {
+    pub tag: Option<&'a str>,
     /// The type of its values.
     pub ty: Ty,
-    pub values: Vec<(String, i64)>,
+    pub values: Vec<(&'a str, i64)>,
 }
 
 #[derive(Clone, Debug)]
-pub struct StructDef {
-    pub tag: Option<String>,
+pub struct StructDef<'a> {
+    pub tag: Option<&'a str>,
     pub is_union: bool,
-    pub members: Vec<Member>,
+    pub members: Vec<Member<'a>>,
     pub size: u64,
     pub align: u64,
     pub complete: bool,
 }
 
 #[derive(Clone, Debug)]
-pub struct Member {
+pub struct Member<'a> {
     /// `None` for an anonymous struct or union, whose members are found
     /// as if they were this struct's, and for unnamed bit-fields.
-    pub name: Option<String>,
+    pub name: Option<&'a str>,
     pub ty: Ty,
     pub sugar: Sugar,
     pub offset: u64,
@@ -346,18 +346,18 @@ impl Ty {
     }
 }
 
-impl StructDef {
+impl<'a> StructDef<'a> {
     /// The member called `name`, looking inside anonymous members; gives
     /// the path of members to it, and its offset.
     pub fn find(
         &self,
         name: &str,
-        structs: &[StructDef],
-        defs: &[TypedefDef],
-    ) -> Option<(u64, Member)> {
+        structs: &[StructDef<'a>],
+        defs: &[TypedefDef<'_>],
+    ) -> Option<(u64, Member<'a>)> {
         for m in &self.members {
             match &m.name {
-                Some(n) if n == name => return Some((m.offset, m.clone())),
+                Some(n) if *n == name => return Some((m.offset, m.clone())),
                 None if m.bits.is_none() => {
                     if let Ty::Struct(id) = m.ty
                         && let Some((off, mut found)) = structs[id].find(name, structs, defs)
@@ -376,7 +376,7 @@ impl StructDef {
 }
 
 /// Sizes, alignments and ABI layouts need the struct table.
-pub struct Types<'a>(pub &'a [StructDef]);
+pub struct Types<'a>(pub &'a [StructDef<'a>]);
 
 impl Types<'_> {
     pub fn size(&self, ty: &Ty) -> u64 {
@@ -485,7 +485,7 @@ impl Types<'_> {
     }
 }
 
-pub type StructField = (Option<String>, Ty, Sugar, Option<u32>, Option<u64>, bool);
+pub type StructField<'a> = (Option<&'a str>, Ty, Sugar, Option<u32>, Option<u64>, bool);
 
 /// Lays out a struct or union's members, including alignment and packing,
 /// returning the members with their offsets, the size and the alignment.
@@ -493,13 +493,13 @@ pub type StructField = (Option<String>, Ty, Sugar, Option<u32>, Option<u64>, boo
 /// Bit-fields follow AAPCS64: a bit-field goes in the next bits that do not
 /// cross a boundary of its declared type's size, and a zero-width one
 /// aligns the next to its type.
-pub fn layout_struct(
+pub fn layout_struct<'a>(
     types: &Types,
-    typedefs: &[TypedefDef],
+    typedefs: &[TypedefDef<'_>],
     is_union: bool,
-    fields: Vec<StructField>,
+    fields: Vec<StructField<'a>>,
     max_align: Option<u64>,
-) -> Result<(Vec<Member>, u64, u64), &'static str> {
+) -> Result<(Vec<Member<'a>>, u64, u64), &'static str> {
     let mut members = Vec::new();
     let mut bit: u64 = 0;
     let mut size: u64 = 0;

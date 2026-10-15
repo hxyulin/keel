@@ -22,7 +22,7 @@ pub enum Const {
 }
 
 /// The value of an integer constant expression.
-pub fn eval_int(e: &Expr) -> Option<i64> {
+pub fn eval_int(e: &Expr<'_>) -> Option<i64> {
     if !e.ty.is_integer() {
         return None;
     }
@@ -75,7 +75,7 @@ fn truthy(c: Const) -> bool {
 /// not turn an expression with runtime side effects into a constant.
 /// Integer alignment expressions exclude commas, while GNU constant
 /// floating expressions for probabilities may include constant commas.
-pub fn eval_constant(e: &Expr, allow_comma: bool) -> Option<Const> {
+pub fn eval_constant(e: &Expr<'_>, allow_comma: bool) -> Option<Const> {
     match &e.kind {
         ExprKind::Cast(a) | ExprKind::Unary(_, a) => {
             eval_constant(a, allow_comma)?;
@@ -110,7 +110,7 @@ pub fn eval_constant(e: &Expr, allow_comma: bool) -> Option<Const> {
     eval(e)
 }
 
-pub fn eval(e: &Expr) -> Option<Const> {
+pub fn eval(e: &Expr<'_>) -> Option<Const> {
     Some(match &e.kind {
         ExprKind::Int(v) => Const::Int(*v),
         ExprKind::Float(f) => Const::Float(*f),
@@ -166,7 +166,7 @@ pub fn eval(e: &Expr) -> Option<Const> {
 }
 
 /// The address of an lvalue with static storage.
-fn eval_addr(e: &Expr) -> Option<Const> {
+fn eval_addr(e: &Expr<'_>) -> Option<Const> {
     match &e.kind {
         ExprKind::Global(g) => Some(Const::Addr(Base::Global(*g), 0)),
         ExprKind::Str(s) => Some(Const::Addr(Base::Str(*s), 0)),

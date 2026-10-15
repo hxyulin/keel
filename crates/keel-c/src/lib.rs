@@ -32,6 +32,7 @@ mod lex;
 mod parse;
 mod predefined;
 mod preprocess;
+mod strings;
 mod types;
 
 pub use predefined::predefined_macros;
@@ -102,18 +103,21 @@ pub struct Options {
 
 /// Compiles preprocessed C source, read from `path`, to a keel module.
 pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, Diagnostic> {
+    let arena = bumpalo::Bump::new();
+    let mut text = crate::strings::Strings::new(&arena);
     let mut files = Vec::new();
-    let diagnostic = |files: &[String], e: Error| Diagnostic {
+    let diagnostic = |files: &[&str], e: Error| Diagnostic {
         file: files
             .get(e.loc.file as usize)
-            .cloned()
+            .map(|name| name.to_string())
             .unwrap_or_else(|| path.to_string()),
         line: e.loc.line,
         col: e.loc.col,
         message: e.message,
     };
-    let toks = lex::tokenize(src, path, &mut files).map_err(|e| diagnostic(&files, e))?;
-    let mut parser = parse::Parser::new(toks, opts.target);
+    let toks =
+        lex::tokenize(src, path, &mut files, &mut text).map_err(|e| diagnostic(&files, e))?;
+    let mut parser = parse::Parser::new(toks, opts.target, text);
     parser
         .translation_unit()
         .map_err(|e| diagnostic(&files, e))?;

@@ -782,3 +782,98 @@ python3 suite/measure_preprocessor.py \
   --rounds 15 --work-dir target/frontend-profile/scanner-paths/final-paired \
   --output suite/reports/c-preprocessor-scanner-paths-20261015.json
 ```
+
+
+### Lexer rewrite, arena/interner, cleanup, and SSA investigation (2026-10-15)
+
+[Interactive report](reports/c-frontend-optimized-20261015.html),
+[paired measurements](reports/c-frontend-optimized-20261015.json),
+[storage measurements](reports/c-frontend-optimized-storage-20261015.json),
+[production and outlined stacks](reports/c-frontend-optimized-stacks-20261015.json),
+[SSA visit counters](reports/c-frontend-ssa-investigation-20261015.json), and
+[build provenance / validation](reports/c-frontend-optimized-details-20261015.json)
+compare the frontend after commit `24ca853` with the rewrite. These are resident
+preprocessed-C-to-IR measurements, excluding preprocessing and the backend.
+
+The lexer dispatches punctuation by bounded leading bytes instead of searching
+48 strings, scans identifiers with byte classification, borrows line-marker
+text, and caches filename indices. Narrow literals copy SIMD-searched spans;
+wide literals validate/decode only the next scalar. Numeric decoding folds at
+most three suffix bytes on the stack rather than allocating a lowercase copy.
+Longest match, source locations, escapes, signed/multichar constants, wide
+literals, number classification, and pack state remain compatible.
+
+The frontend now has a compilation-scoped Bump byte arena and separate intern
+sets for UTF-8 names and arbitrary literal bytes. Lexer tokens are Copy values.
+Names in scopes, declarators, typed trees, type definitions, enum values, labels,
+and filenames borrow stable arena storage. Literal-ID lookup includes width;
+string initializer bytes borrow slices rather than cloning owned vectors.
+The typed tree and tables drop before the arena; output IR and debug metadata
+own the strings/bytes they need after compile returns. No unsafe storage or
+lifetime conversion was added. AST Box/Rc/Vec ownership remains ordinary.
+
+Nine paired rounds across all three applications show 30.2% less normal frontend
+time (1.434x speedup; 95% paired bootstrap reduction interval 28.9–31.1%). Debug
+mode shows 31.3% less time (1.455x). Normal public compile medians are Lua
+75.80 → 47.82 ms, QuickJS 165.81 → 115.82 ms, and SQLite 224.09 → 174.80 ms.
+Full-variant lexing is 2.2–2.8x faster, parsing takes about 26–34% less time,
+and cleanup takes 31–49% less time. Stage reductions compare stage medians;
+headline ratios use equal-application geometric means of paired public calls.
+The lexer-only variant shows the byte-path contribution separately. Interning
+adds some lexer work on Lua/SQLite, repaid by parser/cleanup savings.
+
+Normal allocation/reallocation calls fall 45–65%, and requested allocation bytes
+fall 7–10%. Single counting-process RSS observations are Lua 29.70 → 28.50 MiB,
+QuickJS 154.09 → 147.36 MiB, and SQLite 221.31 → 219.25 MiB. These observations
+include resident inputs and warmups, not isolated-call peaks. Allocation
+instrumentation is separate from latency measurement.
+
+The SSA investigation adds diagnostic-only counters and a separate outlined
+`find_preds` build; neither modification is present in production source.
+Lua builds 9,958 blocks but visits 716,104 block entries while finding incoming
+edges; QuickJS builds 36,898 and visits 2,778,251; SQLite builds 56,352 and visits
+8,134,177. SQLite's largest functions account for 2.59M (`sqlite3VdbeExec`) and
+2.24M (`do_meta_command`) visits. The outlined scan accounts for about 7.4% of
+QuickJS and 14.2% of SQLite total samples after the frontend improvements.
+The next targeted design is to maintain incoming edges as branches are emitted,
+with correct handling of the builder's exposed mutable IR. A blind cache would
+be invalid while control flow is still growing; SSA semantics remain unchanged
+in this pass. Remaining cleanup is mainly typed-tree/type ownership.
+
+All 77 frontend, driver, and SSA-builder tests pass, including executable C
+fixtures. New coverage checks longest match over punctuation combinations and
+buffer boundaries, literal Unicode/width/escape behavior, numeric compatibility
+with the previous decoder, and interned reference stability through arena/table
+growth. All 44 normal and 44 debug-mode IR snapshots are byte-identical across
+baseline, lexer-only, and full variants (264 snapshots); all generated IR verifies.
+The 324 timing batches retain 4,752 individual measured file calls.
+
+Build all variants before timing; the builder temporarily switches source and
+restores it in finally. The source-only check verifies the replay transformations.
+The recorded lexer-base patch reconstructs the first lexer step from `24ca853`.
+
+```sh
+python3 suite/build_frontend_variants.py --base 24ca853 --check-sources
+python3 suite/build_frontend_variants.py --base 24ca853
+python3 suite/measure_c_frontend.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --variant baseline=target/frontend-profile/frontend-opt/profile-baseline \
+  --variant lexer=target/frontend-profile/frontend-opt/profile-lexer \
+  --variant arena=target/frontend-profile/frontend-opt/profile-arena \
+  --rounds 9 --work-dir target/frontend-profile/frontend-opt/paired \
+  --output suite/reports/c-frontend-optimized-20261015.json
+python3 suite/measure_frontend_storage.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --baseline target/frontend-profile/frontend-opt/allocations-baseline \
+  --candidate target/frontend-profile/frontend-opt/allocations-arena \
+  --output suite/reports/c-frontend-optimized-storage-20261015.json
+python3 suite/investigate_frontend_ssa.py
+# Restore the normal example after the diagnostic build; sources are already restored.
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile --example profile_allocations
+python3 suite/capture_frontend_stacks.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --binary target/frontend-profile/frontend-opt/profile-arena \
+  --outlined target/frontend-profile/frontend-opt/profile-ssa-outline \
+  --output suite/reports/c-frontend-optimized-stacks-20261015.json
+python3 suite/render_frontend_optimization.py
+```

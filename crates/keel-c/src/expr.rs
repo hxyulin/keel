@@ -11,7 +11,7 @@ use keel_ir::Target;
 use keel_ir::{OverflowOp, RmwOp};
 use std::rc::Rc;
 
-pub(crate) fn mk(kind: ExprKind, ty: Ty, loc: Loc) -> Expr {
+pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty, loc: Loc) -> Expr<'a> {
     Expr {
         kind,
         ty,
@@ -40,9 +40,9 @@ const ASSIGN_OPS: [&str; 11] = [
     "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
 ];
 
-impl Parser {
+impl<'a> Parser<'a> {
     /// A full expression, commas included.
-    pub(crate) fn expr(&mut self) -> R<Expr> {
+    pub(crate) fn expr(&mut self) -> R<Expr<'a>> {
         let mut e = self.assign()?;
         while self.is(",") {
             let loc = self.loc();
@@ -56,9 +56,9 @@ impl Parser {
         Ok(e)
     }
 
-    pub(crate) fn assign(&mut self) -> R<Expr> {
+    pub(crate) fn assign(&mut self) -> R<Expr<'a>> {
         let lhs = self.conditional()?;
-        let Tok::Punct(p) = *self.peek() else {
+        let Tok::Punct(p) = self.peek() else {
             return Ok(lhs);
         };
         if !ASSIGN_OPS.contains(&p) {
@@ -70,7 +70,7 @@ impl Parser {
         self.assignment(p, lhs, rhs, loc)
     }
 
-    fn assignment(&mut self, op: &str, lhs: Expr, rhs: Expr, loc: Loc) -> R<Expr> {
+    fn assignment(&mut self, op: &str, lhs: Expr<'a>, rhs: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         self.check_lvalue(&lhs)?;
         if let Ty::Atomic(ty) = &lhs.ty {
             let ty = ty.as_ref().clone();
@@ -170,7 +170,7 @@ impl Parser {
         ))
     }
 
-    fn check_lvalue(&self, e: &Expr) -> R<()> {
+    fn check_lvalue(&self, e: &Expr<'a>) -> R<()> {
         let ok = match &e.kind {
             ExprKind::Local(_)
             | ExprKind::Deref(_)
@@ -187,7 +187,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn conditional(&mut self) -> R<Expr> {
+    pub(crate) fn conditional(&mut self) -> R<Expr<'a>> {
         let cond = self.binary(1)?;
         if !self.is("?") {
             return Ok(cond);
@@ -225,7 +225,13 @@ impl Parser {
     }
 
     /// `cond ? a : b`, typed.
-    fn conditional_of(&mut self, cond: Expr, a: Expr, b: Expr, loc: Loc) -> R<Expr> {
+    fn conditional_of(
+        &mut self,
+        cond: Expr<'a>,
+        a: Expr<'a>,
+        b: Expr<'a>,
+        loc: Loc,
+    ) -> R<Expr<'a>> {
         let (a, b) = (self.rvalue(a), self.rvalue(b));
         let ty = if a.ty.is_arith() && b.ty.is_arith() {
             usual(&a.ty, &b.ty)
@@ -268,10 +274,10 @@ impl Parser {
         .with_sugar(sugar))
     }
 
-    fn binary(&mut self, min_prec: u8) -> R<Expr> {
+    fn binary(&mut self, min_prec: u8) -> R<Expr<'a>> {
         let mut lhs = self.cast_expr()?;
         loop {
-            let Tok::Punct(p) = *self.peek() else {
+            let Tok::Punct(p) = self.peek() else {
                 return Ok(lhs);
             };
             let Some(prec) = binary_prec(p) else {
@@ -287,7 +293,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn binop(&mut self, p: &str, l: Expr, r: Expr, loc: Loc) -> R<Expr> {
+    pub(crate) fn binop(&mut self, p: &str, l: Expr<'a>, r: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         let (l, r) = (self.rvalue(l), self.rvalue(r));
         match p {
             "&&" | "||" => {
@@ -362,7 +368,7 @@ impl Parser {
         }
     }
 
-    fn ptr_add(&mut self, ptr: Expr, n: Expr, negate: bool, loc: Loc) -> R<Expr> {
+    fn ptr_add(&mut self, ptr: Expr<'a>, n: Expr<'a>, negate: bool, loc: Loc) -> R<Expr<'a>> {
         let size = self.elem_size(&ptr.ty, loc)?;
         let mut n = self.cast(n, LONG);
         if negate {
@@ -388,7 +394,7 @@ impl Parser {
         }
     }
 
-    fn cast_expr(&mut self) -> R<Expr> {
+    fn cast_expr(&mut self) -> R<Expr<'a>> {
         if self.is("(") && self.type_follows(1) {
             let loc = self.loc();
             self.advance();
@@ -440,16 +446,16 @@ impl Parser {
         yes
     }
 
-    fn unary(&mut self) -> R<Expr> {
+    fn unary(&mut self) -> R<Expr<'a>> {
         let loc = self.loc();
         let Some(word) = (match self.peek() {
-            Tok::Punct(p) => Some(p.to_string()),
-            Tok::Ident(s) => Some(s.clone()),
+            Tok::Punct(p) => Some(p),
+            Tok::Ident(s) => Some(s),
             _ => None,
         }) else {
             return self.postfix();
         };
-        match word.as_str() {
+        match word {
             "sizeof" | "_Alignof" | "__alignof__" | "__alignof" => {
                 self.advance();
                 let (ty, alignment) = if self.is("(") && self.type_follows(1) {
@@ -551,7 +557,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn address_of(&mut self, e: Expr, loc: Loc) -> R<Expr> {
+    pub(crate) fn address_of(&mut self, e: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         if let ExprKind::Member { bits: Some(_), .. } = e.kind {
             return Err(Error::new(loc, "address of a bit-field"));
         }
@@ -571,7 +577,7 @@ impl Parser {
     }
 
     /// A local whose address is taken must live in memory.
-    fn mark_address_taken(&mut self, e: &Expr) {
+    fn mark_address_taken(&mut self, e: &Expr<'a>) {
         match &e.kind {
             ExprKind::Local(id) => self.mark_in_memory(*id),
             ExprKind::Member { base, .. } => self.mark_address_taken(base),
@@ -579,7 +585,7 @@ impl Parser {
         }
     }
 
-    fn incdec(&mut self, e: Expr, inc: bool, prefix: bool, loc: Loc) -> R<Expr> {
+    fn incdec(&mut self, e: Expr<'a>, inc: bool, prefix: bool, loc: Loc) -> R<Expr<'a>> {
         self.check_lvalue(&e)?;
         if let Ty::Atomic(ty) = &e.ty {
             let ty = ty.as_ref().clone();
@@ -624,12 +630,12 @@ impl Parser {
         .with_sugar(sugar))
     }
 
-    fn postfix(&mut self) -> R<Expr> {
+    fn postfix(&mut self) -> R<Expr<'a>> {
         let e = self.primary()?;
         self.postfix_ops(e)
     }
 
-    fn postfix_ops(&mut self, mut e: Expr) -> R<Expr> {
+    fn postfix_ops(&mut self, mut e: Expr<'a>) -> R<Expr<'a>> {
         loop {
             let loc = self.loc();
             if self.eat("[") {
@@ -663,7 +669,7 @@ impl Parser {
         }
     }
 
-    fn member(&mut self, base: Expr, loc: Loc) -> R<Expr> {
+    fn member(&mut self, base: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         let name = self.ident()?;
         let Ty::Struct(id) = base.ty else {
             return Err(Error::new(loc, format!("`.{name}` on a non-struct")));
@@ -692,7 +698,7 @@ impl Parser {
         .with_sugar(sugar))
     }
 
-    fn call(&mut self, callee: Expr, loc: Loc) -> R<Expr> {
+    fn call(&mut self, callee: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
         let mut args = Vec::new();
         while !self.eat(")") {
             if !args.is_empty() {
@@ -703,7 +709,7 @@ impl Parser {
         self.make_call(callee, args, loc)
     }
 
-    fn make_call(&mut self, callee: Expr, raw_args: Vec<Expr>, loc: Loc) -> R<Expr> {
+    fn make_call(&mut self, callee: Expr<'a>, raw_args: Vec<Expr<'a>>, loc: Loc) -> R<Expr<'a>> {
         let f = self.rvalue(callee);
         let Some(fty) = f.ty.pointee().and_then(Ty::func).cloned() else {
             return Err(Error::new(loc, "call of a non-function"));
@@ -733,7 +739,7 @@ impl Parser {
     }
 
     /// Promotions for arguments without a parameter type.
-    fn default_promote(&mut self, e: Expr) -> Expr {
+    fn default_promote(&mut self, e: Expr<'a>) -> Expr<'a> {
         let e = self.rvalue(e);
         if e.ty == Ty::Float {
             return self.cast(e, Ty::Double);
@@ -741,7 +747,7 @@ impl Parser {
         self.promote(e)
     }
 
-    fn primary(&mut self) -> R<Expr> {
+    fn primary(&mut self) -> R<Expr<'a>> {
         let loc = self.loc();
         if matches!(self.peek(), Tok::Eof | Tok::Punct(_)) && !self.is("(") {
             return Err(self.unexpected("an expression"));
@@ -763,12 +769,13 @@ impl Parser {
                 loc,
             )),
             Tok::Char(v) => Ok(mk(ExprKind::Int(v), INT, loc)),
-            Tok::Str { mut bytes, wide } => {
+            Tok::Str { bytes, wide } => {
+                let mut bytes = bytes.to_vec();
                 let mut wide = wide;
                 while let Tok::Str {
                     bytes: more,
                     wide: w,
-                } = self.peek().clone()
+                } = self.peek()
                 {
                     if w && !wide {
                         // Widen what came before.
@@ -827,7 +834,7 @@ impl Parser {
             }
             Tok::Ident(name) => {
                 if name == "__func__" || name == "__FUNCTION__" || name == "__PRETTY_FUNCTION__" {
-                    let func = self.fs.as_ref().map_or("", |f| f.name.as_str());
+                    let func = self.fs.as_ref().map_or("", |f| f.name);
                     let bytes = func.as_bytes().to_vec();
                     return Ok(self.string_expr(bytes, false, loc));
                 }
@@ -851,7 +858,7 @@ impl Parser {
 
     /// C11's `_Generic(e, type: a, ..., default: b)`: the association
     /// whose type is that of `e`'s value, unqualified.
-    fn generic(&mut self, loc: Loc) -> R<Expr> {
+    fn generic(&mut self, loc: Loc) -> R<Expr<'a>> {
         self.expect("(")?;
         let e = self.assign()?;
         let ty = self.rvalue(e).ty.unatomic().clone();
@@ -877,7 +884,7 @@ impl Parser {
             .ok_or_else(|| Error::new(loc, "no `_Generic` association matches"))
     }
 
-    pub(crate) fn string_expr(&mut self, mut bytes: Vec<u8>, wide: bool, loc: Loc) -> Expr {
+    pub(crate) fn string_expr(&mut self, mut bytes: Vec<u8>, wide: bool, loc: Loc) -> Expr<'a> {
         let unit = if wide { 4 } else { 1 };
         bytes.extend(std::iter::repeat_n(0, unit));
         let len = (bytes.len() / unit) as u64;
@@ -886,7 +893,7 @@ impl Parser {
         mk(ExprKind::Str(i), Ty::Array(Rc::new(elem), Some(len)), loc)
     }
 
-    fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr> {
+    fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let base = &name["__builtin_".len()..];
         if let Some((op, ty)) = typed_overflow(base) {
             let args = self.builtin_args(3, loc)?;
@@ -1193,7 +1200,7 @@ impl Parser {
     /// `__sync_*` (seq_cst), and clang's `__c11_atomic_*`, which
     /// `<stdatomic.h>` expands to. See [`Builtin::AtomicLoad`] for the
     /// shape their arguments are put in.
-    fn atomic(&mut self, name: &str, loc: Loc) -> R<Expr> {
+    fn atomic(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         let (op, sync) = match name.strip_prefix("__sync_") {
             Some(op) => (op, true),
             None => (
@@ -1217,7 +1224,7 @@ impl Parser {
                 _ => args.push(order(5)),
             }
         }
-        let want = |args: &[Expr], n: usize| {
+        let want = |args: &[Expr<'a>], n: usize| {
             if args.len() == n {
                 Ok(())
             } else {
@@ -1393,7 +1400,7 @@ impl Parser {
     /// evaluated once, into a made-up local, and tested with compares,
     /// which are false for NaN except `!=`. `isfinite(x)` is
     /// `fabs(x) < INFINITY`, `isnan(x)` is `x != x`.
-    fn float_class(&mut self, base: &str, loc: Loc) -> R<Expr> {
+    fn float_class(&mut self, base: &str, loc: Loc) -> R<Expr<'a>> {
         let mut args = self.builtin_args_any()?;
         let (n, first) = match base {
             "fpclassify" => (6, 5),
@@ -1445,7 +1452,7 @@ impl Parser {
         } else {
             f64::MIN_POSITIVE
         };
-        let cmp = |this: &mut Self, p: &str, a: Expr, b: Expr| this.binop(p, a, b, loc);
+        let cmp = |this: &mut Self, p: &str, a: Expr<'a>, b: Expr<'a>| this.binop(p, a, b, loc);
         let result = match base {
             "isnan" => cmp(self, "!=", x.clone(), x)?,
             "isinf" => cmp(self, "==", fabs, float(f64::INFINITY))?,
@@ -1503,7 +1510,7 @@ impl Parser {
         }))
     }
 
-    fn builtin_args_any(&mut self) -> R<Vec<Expr>> {
+    fn builtin_args_any(&mut self) -> R<Vec<Expr<'a>>> {
         self.expect("(")?;
         let mut args = Vec::new();
         while !self.eat(")") {
@@ -1516,7 +1523,7 @@ impl Parser {
         Ok(args)
     }
 
-    fn builtin_args(&mut self, n: usize, loc: Loc) -> R<Vec<Expr>> {
+    fn builtin_args(&mut self, n: usize, loc: Loc) -> R<Vec<Expr<'a>>> {
         self.expect("(")?;
         let mut args = Vec::new();
         while !self.eat(")") {
@@ -1532,7 +1539,7 @@ impl Parser {
         Ok(args)
     }
 
-    fn builtin_call(&mut self, op: Builtin, params: &[Ty], ret: Ty, loc: Loc) -> R<Expr> {
+    fn builtin_call(&mut self, op: Builtin, params: &[Ty], ret: Ty, loc: Loc) -> R<Expr<'a>> {
         let args = self.builtin_args(params.len(), loc)?;
         let mut converted = Vec::new();
         for (arg, ty) in args.into_iter().zip(params) {
@@ -1543,7 +1550,7 @@ impl Parser {
 
     /// `(type){...}`: an unnamed object, local in a function and static
     /// at file scope.
-    fn compound_literal(&mut self, ty: Ty, sugar: Sugar, loc: Loc) -> R<Expr> {
+    fn compound_literal(&mut self, ty: Ty, sugar: Sugar, loc: Loc) -> R<Expr<'a>> {
         let (init, ty) = self.initializer(&ty)?;
         if self.fs.is_none() {
             let name = self.unique_name("__compound_literal");
@@ -1562,7 +1569,7 @@ impl Parser {
 
     /// Array-to-pointer and function-to-pointer decay.
     /// The address of an `_Atomic` lvalue, for an atomic access.
-    fn address_of_atomic(&mut self, e: Expr) -> Expr {
+    fn address_of_atomic(&mut self, e: Expr<'a>) -> Expr<'a> {
         self.mark_address_taken(&e);
         let ty = Ty::ptr_to(e.ty.clone());
         let loc = e.loc;
@@ -1573,7 +1580,7 @@ impl Parser {
     /// and `va_arg` work on. Apple's `va_list` is a pointer variable, whose
     /// address it is; SysV's is an array, which decays to its own address,
     /// and a `va_list` parameter already holds that.
-    fn va_list_addr(&mut self, ap: Expr) -> Expr {
+    fn va_list_addr(&mut self, ap: Expr<'a>) -> Expr<'a> {
         match self.target {
             Target::Aarch64AppleDarwin => {
                 self.mark_address_taken(&ap);
@@ -1585,7 +1592,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn rvalue(&mut self, e: Expr) -> Expr {
+    pub(crate) fn rvalue(&mut self, e: Expr<'a>) -> Expr<'a> {
         match &e.ty {
             Ty::Atomic(ty) => {
                 let ty = ty.as_ref().clone();
@@ -1612,7 +1619,7 @@ impl Parser {
     }
 
     /// Converts `e` to `ty`; integer constants are converted right away.
-    pub(crate) fn cast(&mut self, e: Expr, ty: Ty) -> Expr {
+    pub(crate) fn cast(&mut self, e: Expr<'a>, ty: Ty) -> Expr<'a> {
         if e.ty == ty {
             return e;
         }
@@ -1633,14 +1640,14 @@ impl Parser {
     }
 
     /// The integer promotions.
-    pub(crate) fn promote(&mut self, e: Expr) -> Expr {
+    pub(crate) fn promote(&mut self, e: Expr<'a>) -> Expr<'a> {
         let e = self.rvalue(e);
         let ty = promoted(&e.ty);
         self.cast(e, ty)
     }
 
     /// Conversion as if by assignment, to parameters and returns too.
-    pub(crate) fn convert_for_assign(&mut self, e: Expr, ty: &Ty) -> R<Expr> {
+    pub(crate) fn convert_for_assign(&mut self, e: Expr<'a>, ty: &Ty) -> R<Expr<'a>> {
         let e = self.rvalue(e);
         if ty.is_struct() {
             if e.ty != *ty {
@@ -1692,7 +1699,7 @@ fn offset_member_follows(p: &mut Parser, first: bool) -> bool {
     p.eat(".")
 }
 
-fn is_null(e: &Expr) -> bool {
+fn is_null(e: &Expr<'_>) -> bool {
     matches!(e.kind, ExprKind::Int(0)) && e.ty.is_integer()
         || matches!(&e.kind, ExprKind::Cast(inner) if is_null(inner) && e.ty.pointee() == Some(&Ty::Void))
 }

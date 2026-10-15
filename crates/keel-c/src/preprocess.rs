@@ -1834,9 +1834,11 @@ impl Expression<'_, '_> {
 }
 fn integer(t: &Token<'_>) -> Result<Integer, Diagnostic> {
     if t.text.contains('\'') {
+        let arena = Bump::new();
+        let mut strings = crate::strings::Strings::new(&arena);
         let mut files = Vec::new();
-        let tokens =
-            crate::lex::tokenize(&t.text, &t.file, &mut files).map_err(|e| t.error(e.message))?;
+        let tokens = crate::lex::tokenize(&t.text, &t.file, &mut files, &mut strings)
+            .map_err(|e| t.error(e.message))?;
         if let crate::lex::Tok::Char(value) = tokens[0].tok {
             return Ok(Integer {
                 bits: value as u64,
