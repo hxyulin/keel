@@ -1656,7 +1656,7 @@ impl Parser {
 
 /// Fixed-type GCC overflow families: int, long and long long, signed or
 /// unsigned. Generic mixed-type overflow builtins have different semantics.
-fn typed_overflow(name: &str) -> Option<(OverflowOp, Ty)> {
+pub(crate) fn typed_overflow(name: &str) -> Option<(OverflowOp, Ty)> {
     let stem = name.strip_suffix("_overflow")?;
     let (op, suffix) = [
         ("sadd", OverflowOp::Sadd),

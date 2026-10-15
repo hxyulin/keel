@@ -1,22 +1,24 @@
-//! Token-based C preprocessing. Clang compatibility is an optional environment
-//! probe; source files and their includes are processed by Keel.
+//! Token-based C preprocessing using Keel's target environment and headers.
 
 use crate::Diagnostic;
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 #[derive(Clone, Default)]
 pub struct PreprocessOptions {
     /// Searched after the including file's directory, in order.
     pub include_dirs: Vec<PathBuf>,
+    /// Explicit system search directories, after -I and before compiler headers.
+    pub system_include_dirs: Vec<PathBuf>,
+    /// Root of the target's SDK/filesystem. User -I/-isystem paths are not rebased.
+    pub sysroot: Option<PathBuf>,
+    /// macOS minimum deployment version, independent of SDK version (native default 11.0).
+    pub darwin_deployment: Option<String>,
     /// Definitions/undefinitions applied in order, after predefined macros.
     pub defines: Vec<(String, Option<String>)>,
-    /// Optional Clang executable used to discover builtins and system headers.
-    /// Its feature-query answers describe Clang, not Keel's parser/backend.
-    pub clang: Option<PathBuf>,
     pub target: keel_ir::Target,
+    /// Return the final macro definitions instead of preprocessed source (-dM).
+    pub dump_macros: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -70,19 +72,14 @@ pub fn preprocess(
         include_stack: Vec::new(),
         once: HashSet::new(),
         counter: 0,
-        queries: HashMap::new(),
         output: String::new(),
     };
-    for def in [
-        "__STDC__ 1",
-        "__STDC_HOSTED__ 1",
-        "__STDC_VERSION__ 201112L",
-    ] {
-        pp.define(&scan(def, "<built-in>")?)?;
+    let predefined = crate::predefined_macros(options.target, options.darwin_deployment.as_deref())
+        .map_err(|e| pp.error(e))?;
+    for line in predefined.lines() {
+        pp.define(&scan(line.strip_prefix("#define ").unwrap(), "<built-in>")?)?;
     }
-    if options.clang.is_some() {
-        pp.clang_environment()?;
-    }
+    pp.native_paths();
     for (name, value) in &options.defines {
         if let Some(value) = value {
             let definition = format!("{name} {value}");
@@ -96,7 +93,11 @@ pub fn preprocess(
         }
     }
     pp.file(src, path, 0, None)?;
-    Ok(pp.output)
+    if options.dump_macros {
+        Ok(pp.macro_dump())
+    } else {
+        Ok(pp.output)
+    }
 }
 
 struct Preprocessor<'a> {
@@ -109,7 +110,6 @@ struct Preprocessor<'a> {
     include_stack: Vec<(String, Option<usize>)>,
     once: HashSet<PathBuf>,
     counter: u64,
-    queries: HashMap<String, String>,
     output: String,
 }
 
@@ -275,54 +275,53 @@ fn scan(src: &str, file: &str) -> Result<Vec<Token>, Diagnostic> {
 }
 
 impl Preprocessor<'_> {
-    fn clang_command(&self) -> Command {
-        let mut cmd = Command::new(self.options.clang.as_ref().unwrap());
-        cmd.args([
-            "-E",
-            "-std=c11",
-            "-x",
-            "c",
-            "-target",
-            self.options.target.triple(),
-        ]);
-        cmd
-    }
-    fn clang_environment(&mut self) -> Result<(), Diagnostic> {
-        let out = self
-            .clang_command()
-            .args(["-dM", "-v", "-"])
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| self.error(format!("cannot probe Clang: {e}")))?;
-        if !out.status.success() {
-            return Err(self.error(format!(
-                "Clang environment probe failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            )));
-        }
-        let mut search = false;
-        for line in String::from_utf8_lossy(&out.stderr).lines() {
-            if line == "#include <...> search starts here:" {
-                search = true;
-                continue;
-            }
-            if line == "End of search list." {
-                search = false;
-            }
-            if search {
-                if let Some(path) = line.trim().strip_suffix(" (framework directory)") {
-                    self.framework_dirs.push(path.into());
-                } else {
-                    self.system_dirs.push(line.trim().into());
+    fn macro_dump(&self) -> String {
+        let mut names: Vec<_> = self.macros.keys().collect();
+        names.sort();
+        let mut out = String::new();
+        for name in names {
+            let m = &self.macros[name];
+            out.push_str("#define ");
+            out.push_str(name);
+            if let Some(params) = &m.params {
+                let mut params = params.clone();
+                if m.variadic {
+                    let last = params.last_mut().unwrap();
+                    if last == "__VA_ARGS__" {
+                        *last = "...".into();
+                    } else {
+                        last.push_str("...");
+                    }
                 }
+                out.push('(');
+                out.push_str(&params.join(","));
+                out.push(')');
             }
+            out.push(' ');
+            out.push_str(&spelling(&m.body));
+            out.push('\n');
         }
-        for line in String::from_utf8_lossy(&out.stdout).lines() {
-            if let Some(def) = line.strip_prefix("#define ") {
-                self.define(&scan(def, "<built-in>")?)?;
-            }
+        out
+    }
+    fn native_paths(&mut self) {
+        // With an explicit root, never consult host system include directories.
+        let root = self.options.sysroot.clone().or_else(|| {
+            (self.options.target == keel_ir::Target::X86_64LinuxGnu
+                && keel_ir::Target::host() == Some(self.options.target))
+            .then(|| PathBuf::from("/"))
+        });
+        let Some(root) = root else {
+            return;
+        };
+        if self.options.target == keel_ir::Target::X86_64LinuxGnu {
+            self.system_dirs
+                .push(root.join("usr/include/x86_64-linux-gnu"));
         }
-        Ok(())
+        self.system_dirs.push(root.join("usr/include"));
+        if self.options.target == keel_ir::Target::Aarch64AppleDarwin {
+            self.framework_dirs
+                .push(root.join("System/Library/Frameworks"));
+        }
     }
     fn error(&self, message: impl Into<String>) -> Diagnostic {
         Diagnostic {
@@ -535,12 +534,21 @@ impl Preprocessor<'_> {
                     };
                     let (name, quoted) =
                         header(&expanded).ok_or_else(|| directive.error("expected header name"))?;
-                    let (include, origin) = self
+                    let include = self
                         .find_header(&name, quoted, directive.text == "include_next")
                         .ok_or_else(|| directive.error(format!("header not found: {name}")))?;
-                    let contents = std::fs::read_to_string(&include)
-                        .map_err(|e| directive.error(format!("{}: {e}", include.display())))?;
-                    self.file(&contents, &include.to_string_lossy(), depth + 1, origin)?;
+                    let contents = match include.contents {
+                        Some(contents) => contents.to_string(),
+                        None => std::fs::read_to_string(&include.path).map_err(|e| {
+                            directive.error(format!("{}: {e}", include.path.display()))
+                        })?,
+                    };
+                    self.file(
+                        &contents,
+                        &include.path.to_string_lossy(),
+                        depth + 1,
+                        include.origin,
+                    )?;
                 }
                 "pragma" => {
                     if args.first().is_some_and(|t| t.text == "once") {
@@ -582,42 +590,54 @@ impl Preprocessor<'_> {
         self.include_stack.pop();
         Ok(())
     }
-    fn find_header(
-        &self,
-        name: &str,
-        quoted: bool,
-        next: bool,
-    ) -> Option<(PathBuf, Option<usize>)> {
+    fn find_header(&self, name: &str, quoted: bool, next: bool) -> Option<Include> {
         let (path, origin) = self.include_stack.last()?;
         let mut candidates = Vec::new();
         if quoted && !next {
-            candidates.push((
-                Path::new(path)
+            candidates.push(Include {
+                path: Path::new(path)
                     .parent()
                     .unwrap_or(Path::new("."))
                     .join(name),
-                None,
-            ));
+                origin: None,
+                contents: None,
+            });
         }
-        let dirs = self.options.include_dirs.iter().chain(&self.system_dirs);
-        let count = self.options.include_dirs.len() + self.system_dirs.len();
-        for (i, dir) in dirs.enumerate() {
-            if !next || origin.is_none_or(|origin| i > origin) {
-                candidates.push((dir.join(name), Some(i)));
+        let mut dirs = self.options.include_dirs.clone();
+        dirs.extend(self.options.system_include_dirs.iter().cloned());
+        let builtin_index = dirs.len();
+        dirs.push(crate::headers::ROOT.into());
+        dirs.extend(self.system_dirs.iter().cloned());
+        for (i, dir) in dirs.iter().enumerate() {
+            if next && origin.is_some_and(|origin| i <= origin) {
+                continue;
             }
+            let contents = if i == builtin_index {
+                crate::headers::get(Path::new(name))
+            } else {
+                None
+            };
+            candidates.push(Include {
+                path: dir.join(name),
+                origin: Some(i),
+                contents,
+            });
         }
         if let Some((framework, rest)) = name.split_once('/') {
             for (i, dir) in self.framework_dirs.iter().enumerate() {
-                let i = i + count;
+                let i = i + dirs.len();
                 if !next || origin.is_none_or(|origin| i > origin) {
-                    candidates.push((
-                        dir.join(format!("{framework}.framework/Headers/{rest}")),
-                        Some(i),
-                    ));
+                    candidates.push(Include {
+                        path: dir.join(format!("{framework}.framework/Headers/{rest}")),
+                        origin: Some(i),
+                        contents: None,
+                    });
                 }
             }
         }
-        candidates.into_iter().find(|(p, _)| p.is_file())
+        candidates
+            .into_iter()
+            .find(|include| include.contents.is_some() || include.path.is_file())
     }
     fn is_defined(&self, name: &str) -> bool {
         self.macros.contains_key(name)
@@ -633,8 +653,13 @@ impl Preprocessor<'_> {
                         | "_Pragma"
                         | "__has_include"
                         | "__has_include_next"
-                ) || (self.options.clang.is_some() && query_builtin(name))))
+                ) || query_builtin(name)))
     }
+}
+struct Include {
+    path: PathBuf,
+    origin: Option<usize>,
+    contents: Option<&'static str>,
 }
 struct Conditional {
     parent: bool,
@@ -786,8 +811,7 @@ impl Preprocessor<'_> {
                 i += 1;
                 continue;
             }
-            if (matches!(name, "__has_include" | "__has_include_next")
-                || (query_builtin(name) && self.options.clang.is_some()))
+            if (matches!(name, "__has_include" | "__has_include_next") || query_builtin(name))
                 && builtin_enabled
             {
                 if !ts.get(i + 1).is_some_and(|t| t.text == "(") {
@@ -806,7 +830,10 @@ impl Preprocessor<'_> {
                         .is_some() as u8)
                         .to_string()
                 } else {
-                    self.clang_query(name, &args[0], &t)?
+                    if args[0].len() != 1 || !ident(&args[0][0].text) {
+                        return Err(t.error("expected identifier in feature query"));
+                    }
+                    crate::features::query(name, &args[0][0].text, self.options.target).to_string()
                 };
                 ts.splice(i..end, [t.with_text(value)]);
                 i += 1;
@@ -986,47 +1013,6 @@ impl Preprocessor<'_> {
         }
         out.retain(|t| !t.text.is_empty());
         Ok(out)
-    }
-    fn clang_query(
-        &mut self,
-        name: &str,
-        args: &[Token],
-        at: &Token,
-    ) -> Result<String, Diagnostic> {
-        let key = format!("{name}({})", spelling(args));
-        if let Some(value) = self.queries.get(&key) {
-            return Ok(value.clone());
-        }
-        let mut child = self
-            .clang_command()
-            .args(["-P", "-"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| at.error(format!("cannot query Clang: {e}")))?;
-        // No source definitions or user code are sent through this probe.
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(format!("{key}\n").as_bytes())
-            .map_err(|e| at.error(e.to_string()))?;
-        let output = child
-            .wait_with_output()
-            .map_err(|e| at.error(e.to_string()))?;
-        if !output.status.success() {
-            return Err(at.error(format!(
-                "Clang query failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if value.parse::<u64>().is_err() {
-            return Err(at.error(format!("unsupported Clang query: {key}")));
-        }
-        self.queries.insert(key, value.clone());
-        Ok(value)
     }
     fn condition(&mut self, ts: &[Token]) -> Result<bool, Diagnostic> {
         if ts.is_empty() {

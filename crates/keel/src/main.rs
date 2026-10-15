@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
-//! keel cc [-O] [-g] [-E|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--clang path|--no-clang] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
+//! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm [--cpu <baseline|apple-m5>] <input.s>... --out-dir <directory>      batch A64 assembly
@@ -33,7 +33,7 @@ mod input;
 
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
-  keel cc [-O] [-g] [-E|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--clang path|--no-clang] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
+  keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O)
   keel asm [--cpu <baseline|apple-m5>] <input.s> -o <output.o>
@@ -69,8 +69,10 @@ struct Options {
     emit_ir: bool,
     emit_object: bool,
     preprocess_only: bool,
-    no_clang: bool,
-    clang: Option<String>,
+    dump_macros: bool,
+    sysroot: Option<std::path::PathBuf>,
+    system_include_dirs: Vec<std::path::PathBuf>,
+    darwin_deployment: Option<String>,
     include_dirs: Vec<std::path::PathBuf>,
     defines: Vec<(String, Option<String>)>,
     passes: Option<Vec<String>>,
@@ -98,6 +100,38 @@ impl Options {
             .map_err(str::to_string)?;
         Ok(target)
     }
+
+    fn preprocessing_sysroot(&self, target: Target) -> Result<Option<std::path::PathBuf>, String> {
+        if let Some(root) = &self.sysroot {
+            if !root.is_dir() {
+                return Err(format!("sysroot is not a directory: {}", root.display()));
+            }
+            return Ok(Some(root.clone()));
+        }
+        if target != Target::Aarch64AppleDarwin {
+            return Ok(None);
+        }
+        if let Some(root) = std::env::var_os("SDKROOT").filter(|s| !s.is_empty()) {
+            let root = std::path::PathBuf::from(root);
+            if !root.is_dir() {
+                return Err(format!("SDKROOT is not a directory: {}", root.display()));
+            }
+            return Ok(Some(root));
+        }
+        if cfg!(target_os = "macos")
+            && let Ok(out) = std::process::Command::new("xcrun")
+                .args(["--sdk", "macosx", "--show-sdk-path"])
+                .output()
+            && out.status.success()
+        {
+            let root = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+            if root.is_dir() {
+                return Ok(Some(root));
+            }
+        }
+        // Sources using only compiler headers can still compile without an SDK.
+        Ok(None)
+    }
 }
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
@@ -105,7 +139,11 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let raw = arg.as_str();
-        let flag = if raw.starts_with("-I") {
+        let flag = if raw.starts_with("--sysroot=") {
+            "--sysroot"
+        } else if raw.starts_with("-mmacosx-version-min=") {
+            "-mmacosx-version-min"
+        } else if raw.starts_with("-I") {
             "-I"
         } else if raw.starts_with("-D") {
             "-D"
@@ -135,11 +173,33 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     _ => opts.defines.push((value, None)),
                 }
             }
-            "-E" => opts.preprocess_only = true,
-            "--no-clang" => opts.no_clang = true,
-            "--clang" => {
-                opts.clang = Some(args.next().ok_or("`--clang` needs an executable")?.clone())
+            "--sysroot" | "-isysroot" => {
+                let value = raw
+                    .strip_prefix("--sysroot=")
+                    .map(str::to_string)
+                    .or_else(|| args.next().cloned())
+                    .ok_or("`--sysroot` needs a directory")?;
+                if value.is_empty() {
+                    return Err("`--sysroot` needs a nonempty directory".into());
+                }
+                opts.sysroot = Some(value.into());
             }
+            "-isystem" => opts
+                .system_include_dirs
+                .push(args.next().ok_or("`-isystem` needs a directory")?.into()),
+            "-mmacosx-version-min" => {
+                opts.darwin_deployment = Some(
+                    raw.split_once('=')
+                        .map(|(_, v)| v.to_string())
+                        .or_else(|| args.next().cloned())
+                        .ok_or("`-mmacosx-version-min` needs a version")?,
+                )
+            }
+            "-dM" => {
+                opts.dump_macros = true;
+                opts.preprocess_only = true;
+            }
+            "-E" => opts.preprocess_only = true,
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
@@ -281,11 +341,14 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "-g",
                     "--emit-ir",
                     "-E",
+                    "-dM",
                     "-I",
                     "-D",
                     "-U",
-                    "--clang",
-                    "--no-clang",
+                    "--sysroot",
+                    "-isysroot",
+                    "-isystem",
+                    "-mmacosx-version-min",
                     "--target",
                     "--emit-object",
                     "--isel",
@@ -299,27 +362,36 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
-            if opts.preprocess_only && opts.emit_ir {
-                return Err("`-E` and `--emit-ir` cannot be used together".into());
+            if opts.preprocess_only && (opts.emit_ir || opts.emit_object) {
+                return Err("preprocessing (`-E`/`-dM`) and `--emit-ir`/`--emit-object` cannot be used together".into());
             }
-            let src = if opts.preprocess_only || !input.ends_with(".i") {
-                keel_c::preprocess(
-                    &src,
-                    &input,
-                    &keel_c::PreprocessOptions {
-                        include_dirs: opts.include_dirs.clone(),
-                        defines: opts.defines.clone(),
-                        clang: (!opts.no_clang)
-                            .then(|| opts.clang.as_deref().unwrap_or("clang").into()),
-                        target,
-                    },
+            let preprocessed = if opts.preprocess_only || !input.ends_with(".i") {
+                Some(
+                    keel_c::preprocess(
+                        text,
+                        &input,
+                        &keel_c::PreprocessOptions {
+                            include_dirs: opts.include_dirs.clone(),
+                            system_include_dirs: opts.system_include_dirs.clone(),
+                            sysroot: opts.preprocessing_sysroot(target)?,
+                            darwin_deployment: opts.darwin_deployment.clone().or_else(|| {
+                                (target == Target::Aarch64AppleDarwin)
+                                    .then(|| std::env::var("MACOSX_DEPLOYMENT_TARGET").ok())
+                                    .flatten()
+                            }),
+                            defines: opts.defines.clone(),
+                            target,
+                            dump_macros: opts.dump_macros,
+                        },
+                    )
+                    .map_err(|e| e.to_string())?,
                 )
-                .map_err(|e| e.to_string())?
             } else {
-                src
+                None
             };
             if opts.preprocess_only {
-                return write_output(&opts, &src);
+                drop(src);
+                return write_output(&opts, &preprocessed.unwrap());
             }
             let c_opts = keel_c::Options {
                 debug_info: opts.ir_lines,
@@ -327,7 +399,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
             };
             let mut module = {
                 profiling::scope!("c-frontend");
-                keel_c::compile(text, &input, c_opts).map_err(|e| e.to_string())?
+                keel_c::compile(preprocessed.as_deref().unwrap_or(text), &input, c_opts)
+                    .map_err(|e| e.to_string())?
             };
             drop(src);
             if let Err(errors) = keel_ir::verify_module(&module) {

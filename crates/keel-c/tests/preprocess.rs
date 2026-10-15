@@ -269,10 +269,9 @@ fn rejects_invalid_input_with_source_location() {
 }
 
 #[test]
-fn clang_environment_matches_target_and_queries() {
+fn target_environment_matches_abi_and_queries() {
     for target in keel_ir::Target::ALL {
         let opts = PreprocessOptions {
-            clang: Some("clang".into()),
             target,
             ..Default::default()
         };
@@ -301,42 +300,6 @@ fn raw_c_compiles_and_preserves_diagnostics_and_pack() {
     assert_eq!((error.file.as_str(), error.line), ("original.c", 30));
     let pp = preprocess("#define PACK _Pragma(\"pack(push, 1)\")\nPACK\nstruct S { char c; int n; };\n#pragma pack(pop)\n_Static_assert(sizeof(struct S) == 5, \"packed\");\n", "pack.c", &PreprocessOptions::default()).unwrap();
     keel_c::compile(&pp, "pack.c", Default::default()).unwrap();
-}
-
-#[test]
-fn existing_programs_preprocess_like_clang() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
-    let opts = PreprocessOptions {
-        clang: Some("clang".into()),
-        ..Default::default()
-    };
-    let mut paths: Vec<_> = std::fs::read_dir(dir)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().is_some_and(|e| e == "c"))
-        .collect();
-    paths.sort();
-    for path in paths {
-        let src = std::fs::read_to_string(&path).unwrap();
-        let got = preprocess(&src, path.to_str().unwrap(), &opts)
-            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-        let actual = tokens(&got);
-        let expected = tokens(&clang(&src));
-        assert!(!expected.is_empty(), "Clang should produce tokens");
-        let mismatch = actual.iter().zip(&expected).position(|(a, b)| a != b);
-        assert!(
-            mismatch.is_none() && actual.len() == expected.len(),
-            "{}: mismatch at {:?}, lengths {} vs {}; got {:?}, want {:?}",
-            path.display(),
-            mismatch,
-            actual.len(),
-            expected.len(),
-            mismatch.map(|i| &actual[i]),
-            mismatch.map(|i| &expected[i])
-        );
-        let module = keel_c::compile(&got, path.to_str().unwrap(), Default::default()).unwrap();
-        keel_ir::verify_module(&module).unwrap();
-    }
 }
 
 #[test]

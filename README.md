@@ -3,8 +3,8 @@
 An educational compiler written in Rust: a low-level SSA IR, optimizer,
 assembly generators for aarch64 macOS and x86-64 Linux, and a C frontend.
 Keel preprocesses and compiles one C translation unit or compiles textual IR
-to assembly. Clang supplies the initial preprocessor compatibility environment,
-assembly and linking.
+to assembly without invoking Clang. The examples use Clang for assembly and
+linking, and the tests use it as an independent reference compiler.
 
 See [docs/design.md](docs/design.md) for the design decisions.
 
@@ -19,9 +19,10 @@ cargo run -p keel -- opt -p gvn,dce input.keel        # run passes, print the IR
 cargo run -p keel -- passes                           # list the passes
 ```
 
-C source goes through Keel's native preprocessor. By default it borrows the
-installed Clang's predefined macros, system header search paths, and answers
-to feature queries, including `__clang__` and its version macros:
+C source goes through Keel's native preprocessor. Keel derives predefined
+macros from its target ABI, answers feature queries itself, and embeds its
+compiler headers. It defines `__KEEL__` plus pinned GCC/Clang compatibility
+identity macros, including `__GNUC__` and `__clang__`:
 
 ```sh
 cargo run -p keel -- cc -O hello.c -o hello.s         # -g for debug info
@@ -29,22 +30,39 @@ clang -o hello hello.s && ./hello
 cargo run -p keel -- cc --emit-ir hello.c            # print the keel IR
 cargo run -p keel -- cc -E -Iinclude -DDEBUG=1 hello.c -o hello.i
 cargo run -p keel -- cc hello.i -o hello.s           # .i bypasses preprocessing
+cargo run -p keel -- cc -E -dM hello.c               # inspect the final macro set
+cargo run -p keel -- cc --sysroot /path/to/sdk hello.c -o hello.s
 ```
 
-`-I`, `-D` and `-U` accept joined or separate arguments. `--clang path`
-selects the compatibility compiler. `--no-clang` disables environment and
-feature-query probes; supply header paths and target macros explicitly in
-that mode. The library's `keel_c::preprocess` API uses this standalone mode
-by default; `keel_c::compile` continues to accept preprocessed text.
-Clang compatibility currently describes Clang's capabilities, so feature
-queries can select code that Keel's parser or backend does not support.
+`-I`, `-D` and `-U` accept joined or separate arguments. `--sysroot dir`
+(or `--sysroot=dir`, `-isysroot dir`) selects the target SDK. `-isystem dir`
+adds an explicit system header directory. On macOS, the driver uses `SDKROOT`
+or discovers the SDK with `xcrun --sdk macosx --show-sdk-path` when no root is
+specified. An explicit root needs no discovery command. On native Linux it
+searches `/usr/include/x86_64-linux-gnu` and `/usr/include` by default.
+
+macOS deployment macros default to 11.0, the first arm64 macOS release.
+`-mmacosx-version-min=14.0` or `MACOSX_DEPLOYMENT_TARGET` overrides this; the
+SDK version and the minimum deployment version are separate settings.
+
+Preprocessing always uses Keel's target-derived macros, embedded compiler
+headers, and native feature queries. The same headers serve both supported
+targets, with target differences expressed through ABI macros and conditional
+definitions. `keel_c::preprocess` exposes this pipeline to library callers;
+`keel_c::compile` continues to accept preprocessed text.
 
 Both commands take `--target aarch64-apple-darwin` or
-`--target x86_64-unknown-linux-gnu`; the default is the host. For raw C,
-this target is also used for the compatibility probes. Cross compilation
-needs matching headers available through that Clang installation or explicit
-include paths. Passing `--target` cannot change an already preprocessed file.
-You can still use `clang -E -std=c11` externally and feed its `.i` output to Keel.
+`--target x86_64-unknown-linux-gnu`; the default is the host. Cross compilation
+needs a matching sysroot. An explicit root does not inherit host system header
+paths; `-I` and `-isystem` remain paths supplied by the caller. Passing
+`--target` cannot change an already preprocessed file. You can still use
+`clang -E -std=c11` externally and feed its `.i` output to Keel.
+
+Keel supplies `stddef.h`, `stdarg.h`, `stdint.h`, `limits.h`, `float.h`,
+`stdbool.h`, `stdalign.h`, `stdnoreturn.h`, `stdatomic.h`, and Darwin's
+`ptrcheck.h` annotation fallback. Hosted `stdint.h` and `limits.h` also consult
+the sysroot for libc-specific definitions. Headers such as `stdio.h`,
+`stdlib.h`, `string.h`, and `math.h` still come from the target libc/SDK.
 
 The preprocessor supports object/function macros, variadics, stringification,
 token pasting, conditionals, includes and `include_next`, `#pragma once`,
@@ -412,9 +430,10 @@ inputs, not complete applications; the measurements use a warm filesystem cache.
 - Pass tests live in `crates/keel-opt/tests/golden/`: each starts with a
   `; passes: a, b` line.
 - C tests live in `crates/keel-c/tests/programs/`: each `.c` program is
-  built by Clang and by Keel with both Clang and native preprocessing
-  (as is and with `-O`); all builds must print and exit the same. Native
-  preprocessing is also compared with Clang at the token level. Separate
+  built by Clang and by Keel with external Clang preprocessing and native
+  preprocessing (as is and with `-O`); all builds must print and exit the same.
+  Focused preprocessing cases compare tokens with Clang, and target ABI
+  macros are checked against Clang for both targets. Separate
   frontend tests cover GNU inference rules where Clang differs and compile
   selected features for both targets.
 - `cargo suite test` builds Lua, SQLite and QuickJS with keel and runs

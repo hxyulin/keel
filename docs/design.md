@@ -2,8 +2,7 @@
 
 Keel is an educational compiler: a low-level SSA IR, optimizer, assembly
 generators for aarch64 macOS and x86-64 Linux, and a C frontend. Clang
-supplies the native preprocessor's compatibility environment, assembly and
-linking. This file records the implemented design, its limitations and
+serves as a test oracle and supplies assembly and linking in the examples. This file records the implemented design, its limitations and
 explicitly marked future work.
 
 ## Program shape
@@ -938,33 +937,99 @@ operator precedence, short-circuit evaluation and conditional-operator type
 conversion. `defined` produced by macro expansion is accepted as Clang does.
 
 Quoted includes search the physical including file's directory first, then
-`-I` directories and discovered system directories. Angle includes omit the
-first step. Include origins implement `include_next` and `__has_include_next`;
+`-I` directories, explicit `-isystem` directories, embedded compiler headers,
+and system directories. Angle includes omit the first step. Include origins
+implement `include_next` and `__has_include_next`;
 include guards and canonical-path `#pragma once` suppress repeated inclusion.
 `#line`, `#error`, pragma forwarding, `_Pragma`, `__FILE__`, `__LINE__`,
 `__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, and `__COUNTER__` are supported.
 Includes and macro argument nesting are limited to 200 levels, and each
 expansion has a token/work limit to bound runaway expansion.
 
-**Clang compatibility environment.** The driver probes the selected Clang with
-`-E -dM -v -std=c11` and the compilation target to import predefined macros and
-header paths, including Darwin framework directories. Recognized Clang feature
-and target queries are delegated individually and cached within a translation
-unit. Keel processes source and header text itself. `-D` and `-U` apply in
-command-line order after the imported definitions. `--no-clang` skips all these
-probes, leaving the minimal C11 predefined macros and native location/include
-builtins. Library preprocessing defaults to this mode; set
-`PreprocessOptions::clang` to opt into compatibility.
+**Target environment.** `predefined_macros` generates
+integer types, ranges, literal suffixes, printf formats, endian markers, atomic
+constants, floating-point limits and data-layout macros for the two supported
+LP64 targets. Integer macro families come from shared type descriptions. The
+important platform differences include Darwin's `long long` `int64_t` versus
+Linux's `long` `int64_t`, a `long` `intmax_t` on both targets, signed Darwin
+`wint_t` versus unsigned Linux `wint_t`, and double-compatible Darwin versus
+80-bit Linux `long double`. Linux long-double layout/limit macros do not add
+support for evaluating long-double values in the frontend.
+
+Compiler identity is deliberately separate: `__KEEL__` and `__KEEL_VERSION__`
+identify Keel, with pinned Clang 18.0.0 and GCC 4.2.1 compatibility identities.
+These are source-selection profiles, not promises of full compiler parity.
+CPU/vector feature macros are not copied from the host. Standard capability
+macros declare the lack of complex arithmetic, VLAs, and a supplied C threads
+implementation. Native feature queries use a conservative registry of supported
+builtins, features, and semantic attributes; unknown capabilities return zero.
+The fixed overflow-builtin registry shares the parser's family recognition.
+Ignored attributes such as `cleanup` are not reported as implemented.
+
+The local Apple Clang 21 audit produced 482 Darwin arm64 and 407 Linux x86-64
+predefined macros. Differential tests compare over 300 generated ABI/standard
+macros against Clang for each target, explicitly selecting macOS 11.0 so the
+deployment macros are independent of the host release. Architecture feature,
+compiler identity, and capability macros are audited separately, rather than
+requiring a byte-for-byte copy of that toolchain's complete macro dump.
+`keel cc -E -dM` dumps final definitions, including source and command-line
+changes; it also permits inspecting the environment for either target.
+
+**Sysroots and deployment settings.** `--sysroot` (also `-isysroot`) selects
+the target filesystem/SDK. Native lookup uses `<root>/usr/include`, preceded
+by `<root>/usr/include/x86_64-linux-gnu` on Linux, and Darwin framework lookup
+uses `<root>/System/Library/Frameworks`. An explicit root adds no host system
+include directories. Explicit `-I`/`-isystem` paths are not rebased. Native Linux
+uses `/` when no root is specified and the compilation target matches the
+host. The macOS driver consults `SDKROOT`, then `xcrun --sdk macosx
+--show-sdk-path`; the library API leaves SDK selection to its caller. An
+explicit root avoids external discovery commands entirely.
+
+The macOS deployment version defaults to 11.0, the first arm64 macOS release.
+`-mmacosx-version-min` and `MACOSX_DEPLOYMENT_TARGET` select the deployment
+macros; SDK selection does not silently change them. This currently controls
+preprocessing; Keel still emits assembly and does not drive the linker, whose
+deployment flags must be selected consistently by the caller.
+
+**Compiler-owned headers.** `include_str!` embeds ten original C11 headers in
+the compiler, so installation needs neither the source checkout nor a Clang
+resource directory. The same files serve both targets; conditional ABI macros
+select target differences. Supporting another target requires its ABI description,
+frontend/backend support, and a matching platform sysroot, rather than a full
+copy of these headers. `stddef.h` supplies target types, `offsetof`, `max_align_t`
+and libc's partial `__need_*` inclusions. `stdarg.h` exposes the frontend's ABI
+implementation of `__builtin_va_list` and variadic builtins. `stdint.h` and
+`limits.h` wrap sysroot headers with `include_next` in hosted environments,
+with standalone integer definitions otherwise. `float.h` uses the generated
+format limits; `FLT_ROUNDS` currently describes the default rounding mode.
+`stdbool.h`, `stdalign.h` and `stdnoreturn.h` provide the C11 spelling macros.
+`stdatomic.h` maps the C11 atomic API to Keel's existing atomic builtins.
+`ptrcheck.h` supplies Darwin's optional pointer-annotation fallback with bounds
+checking reported unavailable. Headers that require a different pointer ABI
+or vector intrinsics are not fabricated.
+
+Libc headers (`stdio.h`, `stdlib.h`, `string.h`, `math.h`, `inttypes.h`, platform
+`sys/*` headers, and so on), libraries, startup objects, and runtime helpers
+remain the target SDK/toolchain's responsibility. Keel is not implementing a
+libc. Removing Clang from C-to-assembly does not remove assembly/linking tools
+from the complete executable build.
+
+Preprocessing always uses Keel's generated target environment and embedded
+compiler headers. `-D` and `-U` apply in command-line order after predefined
+macros. The preprocessor library runs no external commands; the driver may
+use `xcrun` only for SDK discovery when no explicit root or `SDKROOT` is given.
+Clang is a development/test oracle and can still produce `.i` inputs outside
+Keel. There is no runtime Clang probing option or fallback.
 
 This deliberately impersonates Clang while compatibility grows. It does not
 establish full Clang preprocessor parity or imply that Keel supports every
 feature Clang advertises. Current gaps include trigraphs, universal character
 names in identifiers, C23 `__VA_OPT__` and newer directives, date/time/timestamp
-builtins, dependency/macro dumps, complete framework/subframework lookup,
+builtins, dependency output, complete framework/subframework lookup,
 Clang-specific pragma semantics, and exact diagnostic compatibility. `#warning`
 is currently accepted without a warning sink; most pragmas are forwarded to
 the existing lexer, whose implemented semantic pragma is `pack`. The CLI uses
-C11 mode; language-mode, sysroot, and wider compiler-driver flag support remain
+C11 mode; language-mode and wider compiler-driver flag support remain
 future work. The application suite still shares externally Clang-preprocessed
 inputs across compiler configurations for comparable compiler measurements.
 
@@ -1090,10 +1155,9 @@ Some accepted extensions have deliberately limited behavior:
   function-inlining optimization. Block-pointer declarators (`^`) are
   parsed as pointers; block literals and the Blocks runtime are not
   implemented.
-- Clang's `__has_builtin`, `__has_feature` and `__has_attribute` checks
-  use Clang probes in native compatibility mode, or Clang itself when
-  externally preprocessing. Their answers describe
-  Clang, not keel, and can enable code that keel does not support.
+- `__has_builtin`, `__has_feature` and `__has_attribute` describe Keel.
+  Externally Clang-preprocessed files instead reflect Clang's feature answers
+  and can enable unsupported code.
 
 ### Optimization information at the C/IR boundary
 
@@ -1240,10 +1304,16 @@ and C inline assembly are useful larger additions. Attributes whose
 semantics are required by a program must be implemented or diagnosed;
 silently parsing them does not establish compatibility.
 
-**Testing.** Test programs use both Clang and native preprocessing, then
-compile with Keel before and after optimization and must behave like Clang.
-Differential raw-token comparisons check native preprocessing against Clang
-for every existing C fixture, including system headers. Focused cases cover
+**Testing.** Test programs use external Clang preprocessing and Keel's native
+preprocessing. Each compiles with Keel before and after optimization and must
+behave like Clang. Native
+fixtures execute on the host SDK; empty/synthetic sysroots cover headers and
+ABI macros for both targets, without claiming Linux SDK runtime validation
+when running on macOS.
+Differential raw-token comparisons check focused preprocessing cases against
+Clang; compiler-header/feature differences are checked through ABI assertions
+and program execution rather than identical system-header token streams.
+Focused cases cover
 macro rescanning, variadics, pasting, stringification, conditional expressions,
 include search order and error locations. Programs print what they compute
 instead of hard-coding answers.

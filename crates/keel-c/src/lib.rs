@@ -24,13 +24,17 @@ mod ast;
 mod debug;
 mod eval;
 mod expr;
+mod features;
+mod headers;
 mod init;
 mod irgen;
 mod lex;
 mod parse;
+mod predefined;
 mod preprocess;
 mod types;
 
+pub use predefined::predefined_macros;
 pub use preprocess::{PreprocessOptions, preprocess};
 
 use std::fmt;

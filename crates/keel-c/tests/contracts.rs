@@ -84,7 +84,6 @@ fn builtin_va_list_has_the_target_layout_and_pointer_member_alignment() {
             keel_c::Options {
                 target,
                 debug_info: true,
-                ..Default::default()
             },
         )
         .unwrap();

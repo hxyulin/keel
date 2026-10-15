@@ -63,6 +63,14 @@ fn programs() {
     paths.sort();
     assert!(!paths.is_empty());
     let mut failures = Vec::new();
+    let sysroot = if cfg!(target_os = "macos") {
+        let out = run(Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]));
+        Some(std::path::PathBuf::from(
+            String::from_utf8(out.stdout).unwrap().trim(),
+        ))
+    } else {
+        None
+    };
     for path in &paths {
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         let reference = out_dir.join(format!("{stem}-clang"));
@@ -77,19 +85,19 @@ fn programs() {
             .args(["-E", "-std=c11", "-o"])
             .arg(&i_path)
             .arg(path));
-        let native_path = out_dir.join(format!("{stem}-native.i"));
         let raw = std::fs::read_to_string(path).unwrap();
-        let native = keel_c::preprocess(
+        let standalone_path = out_dir.join(format!("{stem}-standalone.i"));
+        let standalone = keel_c::preprocess(
             &raw,
             path.to_str().unwrap(),
             &keel_c::PreprocessOptions {
-                clang: Some("clang".into()),
+                sysroot: sysroot.clone(),
                 ..Default::default()
             },
         )
         .unwrap();
-        std::fs::write(&native_path, native).unwrap();
-        for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &native_path)] {
+        std::fs::write(&standalone_path, standalone).unwrap();
+        for (preprocessor, preprocessed) in [("clang", &i_path), ("native", &standalone_path)] {
             for optimize in [false, true] {
                 let name = format!(
                     "{stem} ({preprocessor} pp){}",
