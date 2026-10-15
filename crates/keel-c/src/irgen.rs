@@ -367,7 +367,7 @@ impl<'p> Gen<'p> {
         let params: Vec<Value> = sig
             .params
             .iter()
-            .map(|p| b.func.append_block_param(entry, p.ty))
+            .map(|p| b.append_block_param(entry, p.ty))
             .collect();
         let mut fg = FnGen {
             g: self,
@@ -397,7 +397,7 @@ impl<'p> Gen<'p> {
                     .checked_add(if align > 16 { align - 1 } else { 0 })
                     .and_then(|n| u32::try_from(n).ok())
                     .ok_or_else(|| Error::new(def.loc, "local object exceeds the IR stack-slot size limit (including alignment padding)"))?;
-                let slot = fg.b.func.create_stack_slot(reserve, align.min(16) as u32);
+                let slot = fg.b.create_stack_slot(reserve, align.min(16) as u32);
                 if align <= 16 {
                     Storage::Slot(slot)
                 } else {
@@ -410,7 +410,7 @@ impl<'p> Gen<'p> {
                     let addr = fg.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, rounded);
                     fg.alignments.insert(addr, align as u32);
                     let debug_slot = fg.g.debug.then(|| {
-                        let pointer = fg.b.func.create_stack_slot(8, 8);
+                        let pointer = fg.b.create_stack_slot(8, 8);
                         let at = fg.b.ins().stack_addr(pointer);
                         fg.b.ins().store(addr, at);
                         pointer
@@ -421,12 +421,12 @@ impl<'p> Gen<'p> {
             fg.locals.push(storage);
         }
         if fg.g.debug {
-            fg.b.func.debug_loc = fg.g.srcloc(def.loc);
+            fg.b.function_mut().debug_loc = fg.g.srcloc(def.loc);
             let ret = match &fg.g.p.globals[def.global].sugar {
                 Sugar::Func(ret) => ret.as_ref().clone(),
                 _ => Sugar::Plain,
             };
-            fg.b.func.debug_return = fg.g.debug_type(&def.ty.ret, &ret);
+            fg.b.function_mut().debug_return = fg.g.debug_type(&def.ty.ret, &ret);
             // Only scopes with variables need to be told apart.
             let named = |local: &&Local| !local.name.contains('.');
             let mut has_vars = vec![false; def.scopes.len()];
@@ -436,8 +436,8 @@ impl<'p> Gen<'p> {
             for (scope, parent) in def.scopes.iter().enumerate() {
                 let parent = parent.and_then(|p| fg.scopes[p]);
                 let own = has_vars[scope].then(|| {
-                    fg.b.func.debug_scopes.push(parent);
-                    DebugScope::new(fg.b.func.debug_scopes.len() - 1)
+                    fg.b.function_mut().debug_scopes.push(parent);
+                    DebugScope::new(fg.b.function().debug_scopes.len() - 1)
                 });
                 fg.scopes.push(own.or(parent));
             }
@@ -456,7 +456,7 @@ impl<'p> Gen<'p> {
                     let ty =
                         fg.g.debug_type(&local.ty, &local.sugar)
                             .expect("a void local");
-                    fg.b.func.debug_vars.push(DebugVar {
+                    fg.b.function_mut().debug_vars.push(DebugVar {
                         name: local.name.to_owned(),
                         ty,
                         slot,
@@ -1012,7 +1012,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     Some(block) => block,
                     None => {
                         let block = self.new_block();
-                        self.b.func.append_block_param(block, Type::I64);
+                        self.b.append_block_param(block, Type::I64);
                         self.dispatch = Some(block);
                         block
                     }
@@ -1035,7 +1035,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         };
         self.switch_to(dispatch);
         self.b.set_srcloc(None);
-        let n = self.b.func.block_params(dispatch)[0];
+        let n = self.b.function().block_params(dispatch)[0];
         let call = |block| keel_ir::BlockCall {
             block,
             args: Vec::new(),
@@ -1632,7 +1632,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // Materialize a volatile aggregate read now, before an
                 // assignment, return or by-value ABI copy loses the lvalue.
                 // This private byte snapshot is never exposed as an aligned C object.
-                let slot = self.b.func.create_stack_slot(size, align.min(16));
+                let slot = self.b.create_stack_slot(size, align.min(16));
                 let copy = self.b.ins().stack_addr(slot);
                 self.copy_bytes_with_flags(
                     copy,
@@ -1720,15 +1720,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let global = &self.g.p.globals[*g];
                 let symbol = if let Ty::Func(fty) = &global.ty {
                     let sig = self.callee_signature(*g, fty, &[])?;
-                    Symbol::Func(self.b.func.import_function(&global.symbol, sig))
+                    Symbol::Func(self.b.import_function(&global.symbol, sig))
                 } else {
-                    Symbol::Data(self.b.func.import_data(&global.symbol))
+                    Symbol::Data(self.b.import_data(&global.symbol))
                 };
                 self.b.ins().symbol_addr(symbol)
             }
             ExprKind::Str(i) => {
                 let name = self.g.string_symbol(*i);
-                let data = self.b.func.import_data(&name);
+                let data = self.b.import_data(&name);
                 self.b.ins().symbol_addr(Symbol::Data(data))
             }
             ExprKind::Deref(p) => self.val(p)?,
@@ -1802,10 +1802,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let mut vals = Vec::new();
         let ret_slot = if fty.ret.is_struct() {
             let (size, align) = (self.size(&fty.ret), self.g.types().align(&fty.ret));
-            let slot = self
-                .b
-                .func
-                .create_stack_slot(size.max(1) as u32, align as u32);
+            let slot = self.b.create_stack_slot(size.max(1) as u32, align as u32);
             vals.push(self.b.ins().stack_addr(slot));
             Some(slot)
         } else {
@@ -1842,7 +1839,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let Place::Aggregate { size, align, .. } = layout else {
                     unreachable!()
                 };
-                let slot = self.b.func.create_stack_slot(size.max(1), align);
+                let slot = self.b.create_stack_slot(size.max(1), align);
                 let copy = self.b.ins().stack_addr(slot);
                 self.copy(copy, value, &arg.ty);
                 value = copy;
@@ -1863,14 +1860,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.g.use_global(g);
                 let sig = self.callee_signature(g, &fty, &extra)?;
                 let name = self.g.p.globals[g].symbol;
-                let fref = self.b.func.import_function(&name, sig);
+                let fref = self.b.import_function(&name, sig);
                 self.b.ins().call(fref, &vals)
             }
             None => {
                 let callee = self.val(f)?;
                 let extra = if fty.prototyped { &[][..] } else { &extra[..] };
                 let sig = self.g.signature(&fty, usize::MAX, extra)?;
-                let sig = self.b.func.import_signature(sig);
+                let sig = self.b.import_signature(sig);
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
         };
@@ -1893,7 +1890,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         if let Some(slot) = ret_slot {
             return Ok(Some(self.b.ins().stack_addr(slot)));
         }
-        Ok(self.b.func.inst_results(inst).first().copied())
+        Ok(self.b.function().inst_results(inst).first().copied())
     }
 
     fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
@@ -1952,7 +1949,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     Builtin::Ctz => ins.ctz(vals[0]),
                     _ => ins.popcnt(vals[0]),
                 };
-                if self.b.func.value_type(r) == Type::I64 {
+                if self.b.function().value_type(r) == Type::I64 {
                     self.b.ins().trunc(Type::I32, r)
                 } else {
                     r
@@ -1960,11 +1957,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             Builtin::Alloca => {
                 let inst = ins.intrinsic(Intrinsic::StackAlloc, &vals);
-                self.b.func.inst_results(inst)[0]
+                self.b.function().inst_results(inst)[0]
             }
             Builtin::FrameAddress => {
                 let inst = ins.intrinsic(Intrinsic::FrameAddress, &[]);
-                self.b.func.inst_results(inst)[0]
+                self.b.function().inst_results(inst)[0]
             }
             Builtin::AtomicLoad
             | Builtin::AtomicStore
@@ -2172,7 +2169,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 InitItem::Bytes { offset, bytes } => {
                     let size = (self.size(&ty) - offset).min(bytes.len() as u64);
                     let name = self.g.anon_data(&bytes[..size as usize]);
-                    let data = self.b.func.import_data(&name);
+                    let data = self.b.import_data(&name);
                     let src = self.b.ins().symbol_addr(Symbol::Data(data));
                     let dst = self.offset(base, *offset);
                     self.copy_bytes_with_flags(dst, src, size, flags, MemoryFlags::default());

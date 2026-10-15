@@ -29,7 +29,7 @@ fn while_loop() {
 
     b.switch_to_block(entry);
     b.seal_block(entry);
-    let arg = b.func.append_block_param(entry, Type::I64);
+    let arg = b.append_block_param(entry, Type::I64);
     b.def_var(n, arg);
     let zero = b.ins().iconst(Type::I64, 0);
     b.def_var(i, zero);
@@ -102,7 +102,7 @@ fn if_else_merges_both_variables() {
 
     b.switch_to_block(entry);
     b.seal_block(entry);
-    let arg = b.func.append_block_param(entry, Type::I64);
+    let arg = b.append_block_param(entry, Type::I64);
     b.def_var(x, arg);
     let one = b.ins().iconst(Type::I64, 1);
     b.def_var(y, one);
@@ -190,7 +190,7 @@ fn nested_loops(seal_at_end: bool) {
 
     b.switch_to_block(entry);
     seal(&mut b, entry);
-    let arg = b.func.append_block_param(entry, Type::I64);
+    let arg = b.append_block_param(entry, Type::I64);
     b.def_var(n, arg);
     let zero = b.ins().iconst(Type::I64, 0);
     b.def_var(i, zero);
@@ -256,7 +256,7 @@ fn use_before_definition_reads_zero() {
 
     b.switch_to_block(entry);
     b.seal_block(entry);
-    let c = b.func.append_block_param(entry, Type::I8);
+    let c = b.append_block_param(entry, Type::I8);
     b.ins().brif(c, then, &[], join, &[]);
     b.seal_block(then);
 
@@ -275,4 +275,78 @@ fn use_before_definition_reads_zero() {
     let text = func.to_string();
     assert!(text.contains("iconst.i64 0"), "{text}");
     assert!(text.contains("block2(v"), "{text}");
+}
+
+/// A conditional can have two edges to the same block. Each destination
+/// needs an argument, including when removing a trivial SSA parameter.
+#[test]
+fn duplicate_destinations_preserve_explicit_arguments() {
+    let mut func = Function::new("duplicate", sig(&[Type::I8], &[Type::I64]));
+    let mut b = FunctionBuilder::new(&mut func);
+    let entry = b.create_block();
+    let join = b.create_block();
+    let x = b.declare_var(Type::I64);
+    let cond = b.append_block_param(entry, Type::I8);
+    let explicit = b.append_block_param(join, Type::I64);
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    let one = b.ins().iconst(Type::I64, 1);
+    let two = b.ins().iconst(Type::I64, 2);
+    b.def_var(x, one);
+    b.ins().brif(cond, join, &[one], join, &[two]);
+    b.switch_to_block(join);
+    let local = b.use_var(x);
+    b.seal_block(join);
+    let sum = b.ins().iadd(explicit, local);
+    b.ins().return_(&[sum]);
+    b.finalize();
+    verify(&func).unwrap();
+    assert_eq!(func.block_params(join), &[explicit]);
+    let branch = *func.block_insts(entry).last().unwrap();
+    let dests = func.inst_data(branch).branch_dests();
+    assert_eq!(dests[0].args, [one]);
+    assert_eq!(dests[1].args, [two]);
+    assert_eq!(func.resolve(local), one);
+}
+
+/// A destination rewritten through raw Function access must invalidate an
+/// edge that was indexed earlier, before either destination is sealed.
+#[test]
+fn raw_destination_rewrite_before_sealing() {
+    let mut func = Function::new("redirect", sig(&[Type::I8], &[Type::I64]));
+    let mut b = FunctionBuilder::new(&mut func);
+    let entry = b.create_block();
+    let left = b.create_block();
+    let right = b.create_block();
+    let join = b.create_block();
+    let unreachable = b.create_block();
+    let x = b.declare_var(Type::I64);
+    let cond = b.append_block_param(entry, Type::I8);
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    b.ins().brif(cond, left, &[], right, &[]);
+    b.switch_to_block(left);
+    b.seal_block(left);
+    let one = b.ins().iconst(Type::I64, 1);
+    b.def_var(x, one);
+    let branch = b.ins().jump(unreachable, &[]);
+    b.switch_to_block(right);
+    b.seal_block(right); // indexes left's original destination
+    let two = b.ins().iconst(Type::I64, 2);
+    b.def_var(x, two);
+    b.ins().jump(join, &[]);
+    b.function_mut().inst_data_mut(branch).branch_dests_mut()[0].block = join;
+    b.switch_to_block(join);
+    let result = b.use_var(x);
+    b.seal_block(join);
+    b.ins().return_(&[result]);
+    b.switch_to_block(unreachable);
+    b.seal_block(unreachable);
+    let zero = b.use_var(x);
+    b.ins().return_(&[zero]);
+    b.finalize();
+    verify(&func).unwrap();
+    assert_eq!(func.block_params(join), &[result]);
+    assert_eq!(func.inst_data(branch).branch_dests()[0].args, [one]);
+    assert!(func.to_string().contains("iconst.i64 0"));
 }

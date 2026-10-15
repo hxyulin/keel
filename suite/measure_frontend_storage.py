@@ -17,11 +17,12 @@ def main():
     p.add_argument('--baseline', type=pathlib.Path, required=True)
     p.add_argument('--candidate', type=pathlib.Path, required=True)
     p.add_argument('--output', type=pathlib.Path, required=True)
+    p.add_argument('--candidate-name', default='arena')
     args = p.parse_args()
     source = json.loads(args.profile.read_text())
     report = {'method': 'Identical TLS counting allocators, enabled only inside public compile; returned module destruction and verification excluded. One untimed whole-application warmup. RSS is a single full counting-process high-water mark, including warmup and resident raw preprocessed inputs; not isolated-call memory. Counters are never used for latency.',
               'script_sha256': sha(pathlib.Path(__file__)), 'binaries': {}, 'applications': {}}
-    for name, binary in [('baseline', args.baseline.resolve()), ('arena', args.candidate.resolve())]:
+    for name, binary in [('baseline', args.baseline.resolve()), (args.candidate_name, args.candidate.resolve())]:
         report['binaries'][name] = {'path': str(binary), 'sha256': sha(binary)}
         for app, inputs in source['inputs'].items():
             for debug in [False, True]:
@@ -35,7 +36,7 @@ def main():
                 report['applications'].setdefault(f'{app}:{debug}', {})[name] = item
                 print(app, debug, name, 'alloc calls', item['totals']['alloc']+item['totals']['realloc'], 'RSS MiB', item['peak_rss_bytes']/2**20, flush=True)
     for data in report['applications'].values():
-        a,b = data['baseline'],data['arena']
+        a,b = data['baseline'],data[args.candidate_name]
         assert a['totals']['functions'] == b['totals']['functions']
         data['allocation_call_reduction'] = 1-(b['totals']['alloc']+b['totals']['realloc'])/(a['totals']['alloc']+a['totals']['realloc'])
         data['requested_bytes_reduction'] = 1-b['totals']['requested_bytes']/a['totals']['requested_bytes']

@@ -877,3 +877,77 @@ python3 suite/capture_frontend_stacks.py \
   --output suite/reports/c-frontend-optimized-stacks-20261015.json
 python3 suite/render_frontend_optimization.py
 ```
+
+### Incremental SSA predecessor index (2026-10-15)
+
+The next comparison uses `7528fb6` (the lexer and arena/interner commit) as
+baseline. `FunctionBuilder` now records incoming edges as source blocks finish
+construction. Sealing takes a destination's bucket and sorts by source layout
+and destination index, preserving the old SSA/IR order. Normal construction
+avoids a full CFG scan for each sealed block. Appending after an already indexed
+branch falls back to rebuilding so the original last-instruction behavior is
+preserved even during temporarily invalid construction.
+
+The public `FunctionBuilder::func` field is replaced by `function()` for shared
+access and `function_mut()` for raw edits. Mutable access invalidates the index,
+which rebuilds before the next seal. As before, a sealed block's predecessor set
+must remain fixed. Use builder helpers for block parameters, stack slots, and
+imports; these do not change CFG destinations and do not invalidate the index.
+The C frontend and SSA tests use the new API. No `keel-ir` representation or
+SSA variable/parameter semantics change.
+
+All 81 C frontend, driver, and SSA tests pass. New regression coverage compares
+the index to the previous full-scan algorithm through raw destination rewrites,
+removal, movement, block removal, duplicate edges, out-of-order source visits,
+and function replacement. SSA-level tests check duplicate destinations with
+explicit arguments and raw destination redirection before sealing.
+
+Build/freeze `profile` and `profile_allocations` at `7528fb6` in a separate
+checkout for the baseline, then build/freeze the same examples from the new
+sources. Both builds use `CARGO_PROFILE_RELEASE_DEBUG=1` and
+`cargo build --release -p keel-c --features profile --example profile --example profile_allocations`.
+The details report records the source and binary hashes. The historical lexer
+variant builder and scan-counter investigation above describe the sources at
+`7528fb6`; run those reproductions at that commit.
+
+```sh
+python3 suite/measure_c_frontend.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --variant baseline=target/frontend-profile/ssa-index/profile-baseline \
+  --variant indexed=target/frontend-profile/ssa-index/profile-indexed \
+  --rounds 9 --work-dir target/frontend-profile/ssa-index/final-paired \
+  --output suite/reports/c-frontend-ssa-index-20261015.json
+python3 suite/measure_frontend_storage.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --baseline target/frontend-profile/frontend-opt/allocations-arena \
+  --candidate target/frontend-profile/ssa-index/allocations-indexed \
+  --candidate-name indexed \
+  --output suite/reports/c-frontend-ssa-index-storage-20261015.json
+python3 suite/capture_frontend_stacks.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --binary target/frontend-profile/ssa-index/profile-indexed \
+  --output suite/reports/c-frontend-ssa-index-stacks-20261015.json
+python3 suite/render_ssa_index.py \
+  --profile suite/reports/c-frontend-ssa-index-20261015.json \
+  --storage suite/reports/c-frontend-ssa-index-storage-20261015.json \
+  --output suite/reports/c-frontend-ssa-index-20261015.html
+```
+
+The nine-round paired result is **8.4% less normal-mode frontend time**
+(equal-application geometric mean; 95% paired bootstrap interval 7.8–8.7%)
+and **8.6% less time with debug info** (8.4–9.0%). Normal compile medians are
+Lua 47.38 → 45.66 ms, QuickJS 114.24 → 106.47 ms, and SQLite 173.99 → 148.66 ms.
+Normal IR-generation medians are 12.52 → 10.68 ms, 50.26 → 42.77 ms, and
+97.27 → 72.83 ms, respectively: 18.4% less IR-generation time across applications
+and 25.1% less for SQLite. These are comparisons to the already optimized
+frontend, not the original pre-lexer baseline. Per-application headline ratios
+use medians of paired ratios; they need not equal the ratio of marginal medians.
+The report retains 216 batches / 3,168 measured file calls. All 176 normal/debug
+IR snapshots match byte-for-byte across the two variants.
+
+The incoming-edge index adds around 1% allocation calls. Allocation counters
+and single full-process RSS observations are recorded separately in the storage
+report; they are excluded from latency measurement. Four new six-second stack
+captures cover all three applications plus SQLite with debug info. Raw profiles,
+summary data, source/binary hashes, and a standalone interactive HTML report
+are retained under `suite/reports/c-frontend-ssa-index-*`.
