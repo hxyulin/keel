@@ -8,6 +8,7 @@ All new artifacts go under --out; the cached build tree is read-only.
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -37,6 +38,8 @@ def main():
     ]:
         out = a.out / suite
         out.mkdir(exist_ok=True)
+        fixtures = out / 'fixtures'
+        shutil.copytree(a.cached_root / suite / source, fixtures, dirs_exist_ok=True)
         if a.compile:
             sources = sorted((a.cached_root / suite / 'pre').glob('*.i'))
             if not sources:
@@ -59,15 +62,15 @@ def main():
                 with (out / (exe.name + '.' + tool + '.txt')).open('w') as f:
                     run([tool, *flags, exe], stdout=f)
         if suite == 'lua':
-            tests = [(['-e', '_U=true', 'all.lua'], a.cached_root / suite / source)]
+            tests = [(['-e', '_U=true', 'all.lua'], fixtures)]
         elif suite == 'quickjs':
-            tests = [(args + ['tests/' + name + '.js'], a.cached_root / suite / source)
+            tests = [(args + ['tests/' + name + '.js'], fixtures)
                      for args, name in [([], 'test_closure'), ([], 'test_language'),
                      ([], 'test_builtin'), ([], 'test_loop'), ([], 'test_std'),
                      ([], 'test_worker'), (['--bignum'], 'test_op_overloading'),
                      (['--bignum'], 'test_bignum'), (['--qjscalc'], 'test_qjscalc')]]
         else:
-            tests = [([':memory:'], a.cached_root / suite / source)]
+            tests = [([':memory:'], fixtures)]
         results = []
         for index, (args, cwd) in enumerate(tests):
             captures = []

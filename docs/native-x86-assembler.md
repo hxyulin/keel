@@ -2,8 +2,9 @@
 
 `keel compile --target x86_64-unknown-linux-gnu --emit-object input.keel -o output.o`
 and `keel cc --emit-object input.i -o output.o` assemble in process. Linking still
-uses the system linker. C input may still use the existing external preprocessor;
-preprocessed `.i` input isolates compilation and assembly from that dependency.
+uses the system linker. Raw C uses Keel's native preprocessor and target-owned compiler headers, plus
+the selected target's system headers. Preprocessed `.i` input isolates compilation
+and assembly from preprocessing.
 
 Standalone Intel syntax:
 
@@ -78,7 +79,8 @@ Unsupported directives and operands return errors; they are not silently dropped
 
 Layout and fixups require memory proportional to the input/object. Symbol lookup
 uses ordered maps; local temporary symbols are retained in the ELF symbol table.
-Alignment currently fills with zeros, not tuned multi-byte NOP sequences. No
+Executable alignment uses single-byte NOPs unless a zero fill is explicit;
+data alignment uses zeros. Tuned multi-byte NOP sequences are not generated. No
 compile-time speedup is claimed without a separate controlled measurement.
 Native suite configurations are opt-in (`keel-native`, `keel-O-native`,
 `keel-g-native`, `keel-O-select-native`); existing suite baselines are unchanged.

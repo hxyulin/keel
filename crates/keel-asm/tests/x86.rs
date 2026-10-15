@@ -279,7 +279,13 @@ fn instruction_bytes_match_reference_assemblers() {
 fn relocation_semantics_match_reference_assemblers() {
     use std::process::Command;
     let source = r#".intel_syntax noprefix
+.set absolute,0x1234
 .text
+lea rdx,[rip+absolute]
+mov rcx,[rip+absolute@GOTPCREL]
+lea rsi,[rip+forward_absolute]
+jmp forward_absolute
+.set forward_absolute,0x5678
 call external@PLT
 jmp external@PLT
 mov r9,[rip+external@GOTPCREL+8]
@@ -327,8 +333,12 @@ tls: .zero 8
             .unwrap()
             .relocations()
             .map(|(at, r)| {
-                let object::RelocationTarget::Symbol(id) = r.target() else {
-                    panic!("unexpected relocation target")
+                let id = match r.target() {
+                    object::RelocationTarget::Symbol(id) => id,
+                    object::RelocationTarget::Absolute => {
+                        return (at, r.flags(), "*ABS*".into(), r.addend());
+                    }
+                    target => panic!("unexpected relocation target: {target:?}"),
                 };
                 let symbol = file.symbol_by_index(id).unwrap();
                 let (target, addend) = if let Some(sec) = symbol.section_index() {
@@ -340,6 +350,8 @@ tls: .zero 8
                             .to_string(),
                         r.addend() + symbol.address() as i64,
                     )
+                } else if symbol.section() == object::SymbolSection::Absolute {
+                    ("*ABS*".into(), r.addend() + symbol.address() as i64)
                 } else {
                     (symbol.name().unwrap().to_string(), r.addend())
                 };
@@ -393,6 +405,124 @@ tls: .zero 8
                 "GNU as {section} relocations"
             );
         }
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+}
+
+#[test]
+fn executable_alignment_uses_nops_and_explicit_zero_fill_is_preserved() {
+    let bytes = assemble_object(
+        ".text\nnop\n.p2align 4\nret\n.p2align 5,0\n.data\n.byte 1\n.p2align 4\n.byte 2\n",
+    )
+    .unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let code = file.section_by_name(".text").unwrap().data().unwrap();
+    assert_eq!(
+        &code[..16],
+        &[0x90; 16],
+        "fall-through padding must be executable NOPs"
+    );
+    assert_eq!(code[16], 0xc3);
+    assert!(
+        code[17..].iter().all(|b| *b == 0),
+        "explicit fill remains literal"
+    );
+    let data = file.section_by_name(".data").unwrap().data().unwrap();
+    assert_eq!(data[0], 1);
+    assert!(data[1..16].iter().all(|b| *b == 0));
+    assert_eq!(data[16], 2);
+    let skipped = assemble_object(".text\n.byte 1\n.p2align 4,,7\n").unwrap();
+    let skipped = object::File::parse(&*skipped).unwrap();
+    assert_eq!(skipped.section_by_name(".text").unwrap().align(), 16);
+    assert_eq!(skipped.section_by_name(".text").unwrap().size(), 1);
+}
+
+#[test]
+fn absolute_symbols_fold_rip_displacements_but_keep_got_relocations() {
+    let bytes = assemble_object(".set absolute,0x1234\n.text\nlea rax,[rip+absolute]\nmov rax,[rip+absolute@GOTPCREL]\n.quad absolute\n").unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let absolute = file.symbols().find(|s| s.name() == Ok("absolute")).unwrap();
+    assert_eq!(absolute.section(), object::SymbolSection::Absolute);
+    let code = file.section_by_name(".text").unwrap();
+    let rel: Vec<_> = code.relocations().collect();
+    assert_eq!(rel.len(), 1, "GOT references must reach the linker");
+    assert_eq!(rel[0].0, 10);
+    assert_eq!(
+        rel[0].1.target(),
+        object::RelocationTarget::Symbol(absolute.index())
+    );
+    assert_eq!(rel[0].1.addend(), -4);
+    assert_eq!(&code.data().unwrap()[3..7], &0x1234u32.to_le_bytes());
+    assert_eq!(&code.data().unwrap()[14..], &0x1234u64.to_le_bytes());
+    for op in ["jmp", "call", "je"] {
+        assert!(assemble_object(&format!(".set absolute,42\n{op} absolute")).is_err());
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn alignment_and_absolute_operands_execute_like_clang() {
+    use std::process::Command;
+    let temp = std::env::temp_dir().join(format!(
+        "keel-x86-executable-alignment-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&temp).unwrap();
+    let source = r#".intel_syntax noprefix
+.set displacement,16
+.text
+.globl main
+.type main,@function
+main:
+lea rax,[rip+displacement]
+.Lnext:
+lea rcx,[rip+.Lnext+16]
+cmp rax,rcx
+setne al
+mov rdx,[rip+displacement@GOTPCREL]
+cmp rdx,16
+setne dl
+or al,dl
+movzx eax,al
+.p2align 6
+ret
+.section .note.GNU-stack,"",@progbits
+"#;
+    let asm = temp.join("input.s");
+    std::fs::write(&asm, source).unwrap();
+    let ours = temp.join("ours.o");
+    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
+    let reference = temp.join("reference.o");
+    let output = Command::new("clang")
+        .args(["-Wa,-mrelax-relocations=no", "-c"])
+        .arg(&asm)
+        .arg("-o")
+        .arg(&reference)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for (name, object) in [("ours", ours), ("reference", reference)] {
+        let exe = temp.join(name);
+        let result = Command::new("clang")
+            .arg(object)
+            .arg("-o")
+            .arg(&exe)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            Command::new(&exe).status().unwrap().code(),
+            Some(0),
+            "{name}"
+        );
     }
     std::fs::remove_dir_all(temp).unwrap();
 }

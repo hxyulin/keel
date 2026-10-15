@@ -202,7 +202,36 @@ impl Assembler {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
         }
-        let e = encode::encode(i)?;
+        // Intel operands known to be absolute at this point are constants.
+        // Forward references remain symbolic, including later absolute aliases.
+        let mut folded: Option<x86::Instruction> = None;
+        for (index, operand) in i.operands.iter().enumerate() {
+            let address = match operand {
+                x86::Operand::Immediate(address) => address,
+                x86::Operand::Memory(memory) => &memory.displacement,
+                _ => continue,
+            };
+            if address.modifier == Modifier::None
+                && address.expression.add.is_some()
+                && let Ok((None, value)) = self.eval(&address.expression, 0)
+            {
+                if matches!(
+                    i.opcode,
+                    x86::Opcode::Call | x86::Opcode::Jmp | x86::Opcode::Jcc(_)
+                ) && matches!(operand, x86::Operand::Immediate(_))
+                {
+                    return Err("direct branch target cannot be absolute".into());
+                }
+                let operand = &mut folded.get_or_insert_with(|| i.clone()).operands[index];
+                let address = match operand {
+                    x86::Operand::Immediate(address) => address,
+                    x86::Operand::Memory(memory) => &mut memory.displacement,
+                    _ => unreachable!(),
+                };
+                address.expression = Expression::constant(value);
+            }
+        }
+        let e = encode::encode(folded.as_ref().unwrap_or(i))?;
         let at = self.offset();
         for f in e.fixups {
             self.fixes.push(Fix {
@@ -377,14 +406,23 @@ impl Assembler {
         }
     }
     fn align(&mut self, power: u32, max: Option<u64>) -> Result<(), String> {
+        self.align_fill(power, max, None)
+    }
+    fn align_fill(&mut self, power: u32, max: Option<u64>, fill: Option<u8>) -> Result<(), String> {
         if power > 30 {
             return Err("alignment exceeds 2^30".into());
         }
         let align = 1u64 << power;
         let n = self.offset().wrapping_neg() & (align - 1);
+        let section = &mut self.sections[self.current];
+        section.align = section.align.max(align);
+        let fill = fill.unwrap_or(if !section.nobits && section.flags & 4 != 0 {
+            0x90
+        } else {
+            0
+        });
         if max.is_none_or(|m| n <= m) {
-            self.sections[self.current].align = self.sections[self.current].align.max(align);
-            self.zero(n, 0)?
+            self.zero(n, fill)?
         }
         Ok(())
     }
@@ -551,7 +589,8 @@ impl Assembler {
                     n.trailing_zeros()
                 };
                 let max = parts.get(2).map(|s| num(s)).transpose()?;
-                self.align(power, max)
+                let fill = parts.get(1).filter(|s| !s.is_empty()).map(|_| 0);
+                self.align_fill(power, max, fill)
             }
             ".byte" | ".short" | ".word" | ".long" | ".int" | ".quad" => {
                 let width = match op {
@@ -786,7 +825,9 @@ impl Assembler {
                     .ok()
                     .filter(|(s, _)| s.is_none())
                     .map(|(_, n)| n)
-            } else if defined.is_some_and(|(s, _)| s.is_none()) {
+            } else if matches!(kind, 1 | 10 | 11 | 12 | 14)
+                && defined.is_some_and(|(s, _)| s.is_none())
+            {
                 defined.map(|(_, n)| n + addend)
             } else if matches!(kind, 2 | 4)
                 && defined.is_some_and(|(s, _)| s == Some(f.section))
@@ -828,9 +869,14 @@ impl Assembler {
             // Relocations against section-relative aliases use their underlying section symbol.
             let symbol = if self.symbols[&name].alias.is_some() {
                 let (sec, value) = defined.ok_or_else(|| Error::new(f.line, "unresolved alias"))?;
-                let sec = sec.ok_or_else(|| Error::new(f.line, "invalid absolute relocation"))?;
-                addend += value;
-                object.section_symbol(sections[sec])
+                if let Some(sec) = sec {
+                    addend += value;
+                    object.section_symbol(sections[sec])
+                } else {
+                    // GOT/TLS modifiers still require a linker relocation
+                    // even when the referenced symbol is absolute.
+                    symbols[&name]
+                }
             } else {
                 symbols[&name]
             };
