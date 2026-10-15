@@ -132,6 +132,8 @@ pub struct DebugVar {
     pub name: String,
     pub ty: DebugType,
     pub slot: StackSlot,
+    /// The slot holds a pointer to the object, rather than the object.
+    pub indirect: bool,
     pub param: bool,
     /// Where it is visible; `None` for the whole function.
     pub scope: Option<DebugScope>,
@@ -307,6 +309,9 @@ impl fmt::Display for DebugVar {
         write!(f, "{kw} ")?;
         quoted(f, &self.name)?;
         write!(f, " {} {}", self.ty, self.slot)?;
+        if self.indirect {
+            f.write_str(" indirect")?;
+        }
         if let Some(scope) = self.scope {
             write!(f, " in {scope}")?;
         }

@@ -552,6 +552,141 @@ fn debugtrap_preserves_continuation_on_both_targets() {
     }
 }
 
+/// Aligned debug locations survive optimization and textual IR round trips.
+#[test]
+fn alignment_and_indirect_debug_locations_round_trip() {
+    let src = "_Alignas(64) long global;\n\
+               struct S { char c; int x __attribute__((aligned(16))); };\n\
+               int f(int value) { _Alignas(32) int x = value; struct S s = { 0 };\n\
+               s.x = x; return ((unsigned long)&x & 31) + __alignof__(x) + s.x; }";
+    for target in keel_ir::Target::ALL {
+        let mut module = keel_c::compile(
+            src,
+            "alignment.c",
+            keel_c::Options {
+                target,
+                debug_info: true,
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            assert!(
+                module.functions[0]
+                    .debug_vars
+                    .iter()
+                    .any(|v| v.name == "x" && v.indirect)
+            );
+            let text = module.to_string();
+            assert!(text.contains("align 64"), "{text}");
+            let reparsed = keel_ir::parse(&text).unwrap();
+            keel_ir::verify_module(&reparsed).unwrap();
+            let canonical = reparsed.to_string();
+            assert_eq!(keel_ir::parse(&canonical).unwrap().to_string(), canonical);
+            keel_codegen::compile(&reparsed, target).unwrap();
+        }
+        // A location that dereferences a partial pointer must be rejected.
+        let func = &mut module.functions[0];
+        let too_small = func.create_stack_slot(4, 4);
+        func.debug_vars
+            .iter_mut()
+            .find(|v| v.indirect)
+            .unwrap()
+            .slot = too_small;
+        let errors = keel_ir::verify_module(&module).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("pointer-sized stack slot")),
+            "{errors:?}"
+        );
+    }
+}
+
+/// Debug metadata must not change the actual addresses or values of
+/// over-aligned objects. Linking also checks that dsymutil accepts it.
+#[test]
+fn aligned_objects_with_debug_info() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/alignment.c");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("alignment-debug");
+    std::fs::create_dir_all(&dir).unwrap();
+    let reference = dir.join("clang");
+    run(Command::new("clang")
+        .args(["-std=c11", "-w", "-o"])
+        .arg(&reference)
+        .arg(&source));
+    let expected = Command::new(reference).output().unwrap();
+    let input = dir.join("alignment.i");
+    run(Command::new("clang")
+        .args(["-E", "-std=c11", "-o"])
+        .arg(&input)
+        .arg(&source));
+    for optimize in [false, true] {
+        let exe = dir.join(if optimize { "keel-opt-g" } else { "keel-g" });
+        build(
+            &input,
+            &exe,
+            optimize,
+            keel_c::Options {
+                debug_info: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let actual = Command::new(exe).output().unwrap();
+        assert_eq!(actual.status.code(), expected.status.code());
+        assert_eq!(actual.stdout, expected.stdout);
+    }
+}
+
+/// Unsupported by-value layouts must fail rather than lose their size or
+/// SysV MEMORY classification when translated into the IR layout.
+#[test]
+fn alignment_abi_limits_are_diagnosed() {
+    for target in keel_ir::Target::ALL {
+        for src in [
+            "struct __attribute__((aligned(32))) S { int x; }; int f(struct S s) { return s.x; }",
+            "struct __attribute__((aligned(32))) S { int x; }; struct S f(void) { return (struct S){ 1 }; }",
+        ] {
+            let error = keel_c::compile(
+                src,
+                "test.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .message
+                    .contains("aligned above 16 bytes passed by value"),
+                "{error}"
+            );
+        }
+    }
+    let src =
+        "struct S { char c; int x __attribute__((packed)); }; int f(struct S s) { return s.x; }";
+    let error = keel_c::compile(
+        src,
+        "test.c",
+        keel_c::Options {
+            target: keel_ir::Target::X86_64LinuxGnu,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("unaligned fields passed by value on x86-64"),
+        "{error}"
+    );
+}
+
 /// Programs keel-c does not compile get an error at the right place.
 #[test]
 fn rejected() {
@@ -723,6 +858,62 @@ fn rejected() {
         (
             "void f(void) { __builtin_debugtrap(1); }",
             "error: builtin takes 0 argument(s)",
+        ),
+        (
+            "struct __attribute__((packed)) S { unsigned x:3; };",
+            "error: packed bit-fields requiring partial-container accesses are not supported",
+        ),
+        (
+            "struct __attribute__((packed)) S { unsigned x:31; unsigned y:2; };",
+            "error: packed bit-fields requiring cross-container accesses are not supported",
+        ),
+        (
+            "struct __attribute__((packed)) S { char c; _Atomic int x; };",
+            "error: unaligned atomic members are not supported",
+        ),
+        (
+            "int x; struct __attribute__((packed)) S { char c; int *p; } s = { 0, &x };",
+            "unaligned pointer relocations are not supported",
+        ),
+        (
+            "_Alignas(0) int f(void);",
+            "error: function alignment attributes are not supported",
+        ),
+        (
+            "_Alignas(1) int x;",
+            "error: `_Alignas` cannot weaken natural alignment",
+        ),
+        (
+            "int x __attribute__((aligned(3)));",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "int x __attribute__((aligned(0)));",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "_Alignas(-16) int x;",
+            "error: alignment must be a power of two",
+        ),
+        (
+            "_Alignas(8192) int x;",
+            "error: alignment above 4096 is not supported",
+        ),
+        (
+            "int n; _Alignas(n) int x;",
+            "error: alignment must be an integer constant",
+        ),
+        (
+            "typedef int I __attribute__((aligned(16)));",
+            "error: alignment-changing typedef attributes are not supported",
+        ),
+        (
+            "int f(void) __attribute__((aligned(32)));",
+            "error: function alignment attributes are not supported",
+        ),
+        (
+            "struct S { _Alignas(16) unsigned x:3; };",
+            "error: `_Alignas` cannot apply to a bit-field",
         ),
     ];
     let mut failures = Vec::new();

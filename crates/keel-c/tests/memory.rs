@@ -278,3 +278,22 @@ fn byval_arguments_are_snapshotted_before_later_effects() {
         }
     }
 }
+
+#[test]
+fn over_aligned_volatile_locals_preserve_access_flags() {
+    for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
+        let module = compile(
+            "int f(void) { volatile int x __attribute__((aligned(64))) = 3; return x; }",
+            target,
+        );
+        assert!(flags(&module, false).iter().any(|f| f.volatile));
+        assert!(flags(&module, true).iter().any(|f| f.volatile));
+        keel_codegen::compile(&module, target).unwrap();
+        let module = compile(
+            "struct __attribute__((aligned(64))) S { int x; }; int f(void) { volatile struct S a = {3}; struct S b; b = a; return b.x; }",
+            target,
+        );
+        assert!(flags(&module, true).iter().any(|f| f.volatile));
+        keel_codegen::compile(&module, target).unwrap();
+    }
+}
