@@ -175,7 +175,7 @@ impl Assembly {
 
 /// Assemble A64 syntax, resolving local branches/ADR and retaining linker relocations.
 pub fn assemble(source: &str) -> Result<Assembly, Error> {
-    parser::assemble(source, false).map(|(assembly, _)| assembly)
+    parser::assemble(source, false, TargetFeatures::default()).map(|(assembly, _)| assembly)
 }
 
 /// A source instruction's location in the assembled text (excluding padding/data).
@@ -188,7 +188,8 @@ pub struct InstructionLocation {
 /// Assemble while retaining instruction locations for metrics and CPU modeling.
 /// Words must be read from the final text after branch/address fixups.
 pub fn assemble_with_metrics(source: &str) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
-    parser::assemble(source, true)
+    parser::assemble(source, true, TargetFeatures::default())
+
 }
 
 /// Assemble source directly into an Apple arm64 `.o` file.
@@ -198,15 +199,117 @@ pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
 
 use generated::FieldId;
 
+/// Optional ISA features added to the fixed Apple FP/NEON/LSE baseline.
+///
+/// Selection permits encoding; it does not detect hardware, enable OS support,
+/// or manage streaming mode/ZA state. In particular, SME does not imply SVE
+/// outside streaming mode on Apple CPUs. Callers must arrange execution safely.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TargetFeatures {
+    sve: bool,
+    sme: bool,
+}
+impl TargetFeatures {
+    /// Permit SVE encodings. This does not imply SME.
+    pub const fn with_sve(mut self) -> Self {
+        self.sve = true;
+        self
+    }
+    /// Permit SME and instructions available in streaming SVE mode through SME.
+    /// This does not enable non-streaming SVE or SME2.
+    pub const fn with_sme(mut self) -> Self {
+        self.sme = true;
+        self
+    }
+    fn supports(self, feature: &str) -> bool {
+        TARGET_FEATURES.contains(&feature)
+            || (feature == "FEAT_SVE" && self.sve)
+            || (feature == "FEAT_SME" && self.sme)
+    }
+}
+
+/// Assemble with explicit optional ISA features; default APIs retain the baseline.
+///
+/// ```
+/// use keel_asm::{TargetFeatures, assemble, assemble_with_features};
+/// let source = "smstart\nsmstop";
+/// assert!(assemble(source).is_err());
+/// let features = TargetFeatures::default().with_sme();
+/// assert!(assemble_with_features(source, features).is_ok());
+/// ```
+pub fn assemble_with_features(source: &str, features: TargetFeatures) -> Result<Assembly, Error> {
+    parser::assemble(source, false, features).map(|(assembly, _)| assembly)
+}
+
+/// Assemble an Apple arm64 object with explicit optional ISA features.
+pub fn assemble_object_with_features(
+    source: &str,
+    features: TargetFeatures,
+) -> Result<Vec<u8>, Error> {
+    assemble_with_features(source, features)?.to_macho()
+}
+
+
 struct Field {
     id: FieldId,
     name: &'static str,
     start: u8,
     width: u8,
 }
+#[derive(Debug)]
 enum Requirement {
     Feature(&'static str),
     NotEqual(FieldId, u32),
+    MaskedEqual(FieldId, u32, u32),
+    All(&'static [Requirement]),
+    Any(&'static [Requirement]),
+    Not(&'static Requirement),
+}
+
+impl fmt::Display for Requirement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Feature(feature) => f.write_str(feature),
+            Self::NotEqual(field, value) => write!(f, "{field} != {value}"),
+            Self::MaskedEqual(field, value, mask) => {
+                write!(f, "({field} & {mask:#b}) == {value:#b}")
+            }
+            Self::Not(term) => write!(f, "not ({term})"),
+            Self::All(terms) | Self::Any(terms) => {
+                let separator = if matches!(self, Self::All(_)) {
+                    " and "
+                } else {
+                    " or "
+                };
+                f.write_str("(")?;
+                for (index, term) in terms.iter().enumerate() {
+                    if index != 0 {
+                        f.write_str(separator)?;
+                    }
+                    write!(f, "{term}")?;
+                }
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+impl Requirement {
+    fn satisfied(&self, values: &[(FieldId, u32)], features: TargetFeatures) -> bool {
+        match self {
+            Self::Feature(feature) => features.supports(feature),
+            Self::NotEqual(field, excluded) => {
+                values.iter().any(|(n, v)| n == field && v != excluded)
+            }
+            Self::MaskedEqual(field, value, mask) => {
+                values.iter().any(|(n, v)| n == field && v & mask == *value)
+            }
+            Self::All(terms) => terms.iter().all(|r| r.satisfied(values, features)),
+            Self::Any(terms) => terms.iter().any(|r| r.satisfied(values, features)),
+            Self::Not(term) => !term.satisfied(values, features),
+        }
+    }
+
 }
 
 // Fixed Apple Silicon target: scalar FP, Advanced SIMD, and LSE atomics.
@@ -223,6 +326,15 @@ struct Encoding {
 /// Every variable field must be supplied once. Fixed bits within partially
 /// variable fields (e.g. MOVZ wN's `hw`) remain constrained by the ISA mask.
 fn encode(name: &str, values: &[(FieldId, u32)]) -> Result<u32, String> {
+    encode_with_features(name, values, TargetFeatures::default())
+}
+
+fn encode_with_features(
+    name: &str,
+    values: &[(FieldId, u32)],
+    features: TargetFeatures,
+) -> Result<u32, String> {
+
     let encoding =
         generated::encoding(name).ok_or_else(|| format!("unsupported encoding `{name}`"))?;
     let name = encoding.name;
@@ -248,16 +360,8 @@ fn encode(name: &str, values: &[(FieldId, u32)]) -> Result<u32, String> {
         return Err(format!("reserved field value for `{name}`"));
     }
     for requirement in encoding.requirements {
-        match *requirement {
-            Requirement::Feature(feature) if !TARGET_FEATURES.contains(&feature) => {
-                return Err(format!("`{name}` requires {feature}"));
-            }
-            Requirement::NotEqual(field, excluded)
-                if values.iter().any(|(n, v)| *n == field && *v == excluded) =>
-            {
-                return Err(format!("reserved field `{field}` for `{name}`"));
-            }
-            _ => {}
+        if !requirement.satisfied(values, features) {
+            return Err(format!("`{name}` requires {requirement}"));
         }
     }
     Ok(word)
@@ -299,6 +403,35 @@ mod tests {
                 .unwrap_err()
                 .contains("reserved field value")
         );
+    }
+
+    #[test]
+    fn imported_alias_conditions_preserve_masks_negation_and_feature_checks() {
+        let features = TargetFeatures::default().with_sme();
+        for (name, bit) in [("SMSTART", 1), ("SMSTOP", 0)] {
+            for op1 in 0..8 {
+                for op2 in 0..8 {
+                    let fields = [("op1", op1), ("op2", op2), ("CRm", 6 | bit)];
+                    // The first alias requirement is the parent's exclusion
+                    // of MSR encodings belonging to other instruction classes.
+                    let parent = &generated::encoding(name).unwrap().requirements[0];
+                    assert_eq!(parent.satisfied(&fields, features), !(op1 == 0 && op2 <= 2));
+                    assert_eq!(
+                        encode_with_features(name, &fields, features).is_ok(),
+                        op1 == 3 && op2 == 3
+                    );
+                    assert!(encode(name, &fields).is_err());
+                }
+            }
+            for crm in 0..16 {
+                let fields = [("op1", 3), ("op2", 3), ("CRm", crm)];
+                assert_eq!(
+                    encode_with_features(name, &fields, features).is_ok(),
+                    crm < 8 && crm & 1 == bit
+                );
+            }
+        }
+
     }
 
     #[test]

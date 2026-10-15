@@ -1,4 +1,3 @@
-use keel_asm::assemble;
 use object::{Object, ObjectSection};
 use std::{
     path::PathBuf,
@@ -35,19 +34,30 @@ pub fn run(command: &mut Command) {
     );
 }
 pub fn compare_clang(source: &str) {
+    compare_clang_with_features(source, keel_asm::TargetFeatures::default(), &[]);
+}
+
+/// Optional ISA flags apply only to the reference assembly in this comparison.
+/// They do not change the default target or enable host execution.
+pub fn compare_clang_with_features(
+    source: &str,
+    features: keel_asm::TargetFeatures,
+    flags: &[&str],
+) {
     let temp = Temp::new();
     let input = temp.0.join("input.s");
     let output = temp.0.join("clang.o");
     std::fs::write(&input, source).unwrap();
     run(Command::new("clang")
         .args(["-target", "arm64-apple-macos11", "-c"])
+        .args(flags)
         .arg(input)
         .arg("-o")
         .arg(&output));
     let bytes = std::fs::read(output).unwrap();
     let reference = object::File::parse(bytes.as_slice()).unwrap();
     let reference = reference.section_by_name("__text").unwrap();
-    let assembly = assemble(source).unwrap();
+    let assembly = keel_asm::assemble_with_features(source, features).unwrap();
     assert_eq!(
         assembly.text,
         reference.data().unwrap(),

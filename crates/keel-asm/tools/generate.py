@@ -72,21 +72,30 @@ SIMD_NAMES = [f"{op}_asimdsame_only" for op in (
     "BIC", "BSL", "BIT", "BIF", "FADD", "FSUB", "FMUL", "FDIV", "FMLA",
     "FMLS", "FMIN", "FMAX", "FMINNM", "FMAXNM")]
 SIMD_NAMES += [f"{op}_asimdmisc_R" for op in ("ABS", "NEG", "NOT", "FABS", "FNEG", "FSQRT")]
+SCALABLE_NAMES = ["SMSTART", "SMSTOP", "zero_za_i_", "ptrue_p_s_", "pfalse_p_", "rdvl_r_i_", "dup_z_i_", "lastb_r_p_z_"]
+SCALABLE_NAMES += [f"{op}_z_zz_" for op in ("add", "sub", "and", "orr", "eor", "fadd", "fsub", "fmul")]
+SCALABLE_NAMES += [f"{op}_r_s_" for op in ("cntb", "cnth", "cntw", "cntd")]
+SCALABLE_NAMES += [f"{op}_za_pp_zz_32" for op in ("fmopa", "fmops")]
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 
-def walk(node):
+def walk(node, parent=None):
     if node.get("_type") == "Instruction.Instruction":
         yield node
+        parent = node
+    elif node.get("_type") == "Instruction.InstructionAlias" and node["name"] in ("SMSTART", "SMSTOP"):
+        # Preserve the alias condition, including FEAT_SME, with the exact
+        # parent encoding. Record where that encoding came from for auditing.
+        yield dict(node, encoding=parent["encoding"], encoding_source=parent["name"])
     for child in node.get("children", []):
-        yield from walk(child)
+        yield from walk(child, parent)
 
 
 def import_archive(path):
@@ -98,28 +107,58 @@ def import_archive(path):
     records = {x["name"]: x for x in walk(a64)}
     subset = {
         "source_url": URL, "archive_sha256": SHA256, "_meta": data["_meta"],
-        "instructions": [{k: records[name][k] for k in ("name", "condition", "encoding")} for name in NAMES],
+        "instructions": [{k: records[name][k] for k in ("name", "condition", "encoding", "encoding_source") if k in records[name]} for name in NAMES],
     }
     (ROOT / "isa/a64.json").write_text(json.dumps(subset, indent=2) + "\n")
 
 
 def requirements(node):
-    """Translate only understood conditions; unknown features/expressions fail."""
+    """Translate understood predicates, retaining AND/OR/NOT and masked sets.
+
+    Unknown AST forms, features, and predicate fields still fail closed.
+    """
     if node == {"_type": "AST.Bool", "value": True}:
         return []
     if node.get("_type") == "AST.Function":
         assert node["name"] == "IsFeatureImplemented" and node["parameters"] == []
         assert len(node["arguments"]) == 1 and node["arguments"][0]["_type"] == "AST.Identifier"
         feature = node["arguments"][0]["value"]
-        assert feature in ("FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE")
+        assert feature in ("FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE", "FEAT_SVE", "FEAT_SME")
         return [f'Requirement::Feature("{feature}")']
+    if node.get("_type") == "AST.UnaryOp" and node["op"] == "!":
+        return [f'Requirement::Not(&Requirement::All(&[{", ".join(requirements(node["expr"]))}]))']
     if node.get("_type") == "AST.BinaryOp":
         if node["op"] == "&&":
             return requirements(node["left"]) + requirements(node["right"])
-        if node["op"] == "!=":
-            assert node["left"] == {"_type": "AST.Identifier", "value": "option"}
-            assert node["right"] == {"_type": "Values.Value", "meaning": None, "value": "'011'"}
-            return ['Requirement::NotEqual(FieldId::option, 3)']
+        if node["op"] == "||":
+            sides = [f'Requirement::All(&[{", ".join(requirements(node[side]))}])' for side in ("left", "right")]
+            return [f'Requirement::Any(&[{", ".join(sides)}])']
+        if node["op"] in ("==", "!=", "IN"):
+            assert node["left"]["_type"] == "AST.Identifier"
+            field = node["left"]["value"]
+            assert field in ("option", "size", "op1", "op2", "CRm")
+            right = node["right"]
+            if node["op"] == "IN":
+                assert right["_type"] == "AST.Set" and right["values"]
+                values = right["values"]
+            else:
+                values = [right]
+            matches = []
+            for value in values:
+                assert value["_type"] == "Values.Value" and value["meaning"] is None
+                bits = value["value"]
+                assert bits.startswith("'") and bits.endswith("'")
+                bits = bits[1:-1]
+                assert bits and set(bits) <= set("01x")
+                number = int(bits.replace("x", "0"), 2)
+                mask = int("".join("0" if b == "x" else "1" for b in bits), 2)
+                if node["op"] == "!=":
+                    assert "x" not in bits
+                    matches.append(f'Requirement::NotEqual(FieldId::{field}, {number})')
+                else:
+                    matches.append(f'Requirement::MaskedEqual(FieldId::{field}, {number}, {mask})')
+            return [f'Requirement::Any(&[{", ".join(matches)}])'] if node["op"] == "IN" else matches
+
     raise AssertionError(f"unsupported ISA condition: {node}")
 
 

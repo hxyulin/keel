@@ -45,6 +45,8 @@ mod relocate;
 mod scanning;
 mod storage;
 mod text;
+mod scalable;
+
 mod vector;
 
 use super::{Assembly, Error, InstructionLocation, Symbol, encode};
@@ -367,11 +369,13 @@ struct DataFixup<'a> {
 pub(super) fn assemble(
     source: &str,
     metrics: bool,
+    features: crate::TargetFeatures,
 ) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
     let mut previous = None;
     for _ in 0..32 {
         let (assembly, symbolic_leb, locations) =
-            assemble_pass(source, previous.as_ref(), metrics)?;
+            assemble_pass(source, previous.as_ref(), metrics, features)?;
+
         if !symbolic_leb {
             return Ok((assembly, locations));
         }
@@ -402,8 +406,10 @@ fn assemble_pass(
     source: &str,
     previous: Option<&BTreeMap<String, data::Location>>,
     metrics: bool,
+    features: crate::TargetFeatures,
 ) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
     let mut locations = Vec::new();
+
     // Declare scratch first so every collection (including nested owners) drops
     // before its backing arena, on success and on every early error return.
     // Each symbolic LEB pass gets a fresh arena; `previous` is independently owned.
@@ -751,9 +757,11 @@ fn assemble_pass(
             result.text.extend_from_slice(&word.to_le_bytes());
             continue;
         }
-        result
-            .text
-            .extend_from_slice(&instruction(&op, &args).map_err(err)?.to_le_bytes());
+        let word = match scalable::instruction(&op, &args, features).map_err(err)? {
+            Some(word) => word,
+            None => instruction(&op, &args).map_err(err)?,
+        };
+        result.text.extend_from_slice(&word.to_le_bytes());
     }
     let mut atoms = atoms::Atoms::new(
         &arena,

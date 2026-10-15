@@ -1162,13 +1162,18 @@ linker for now.
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
 archive SHA-256, upstream metadata, and license notice are retained. The
-subset currently has 603 instruction forms. Generated requirements retain
-Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, and `FEAT_LSE` availability checks; the fixed
-Apple arm64 target enables those features. Encoding conditions are distinct
-from feature requirements: for example, byte register-offset forms exclude
+subset currently has 625 instruction/alias forms. Generated requirements retain
+Arm’s `FEAT_FP`, `FEAT_AdvSIMD`, `FEAT_LSE`, `FEAT_SVE`, and `FEAT_SME`
+availability checks; the fixed Apple arm64 target enables only FP, AdvSIMD,
+and LSE. Optional features require an explicit library opt-in described below.
+Encoding conditions are distinct from feature requirements: for example, byte register-offset forms exclude
 `option == 0b011`, which has a separate instruction form. The generator
-handles these predicates and conjunctions explicitly and rejects unknown
-features or conditions instead of discarding them.
+handles conjunctions, disjunctions, negation, equality/inequality, and masked
+set membership explicitly and rejects unknown features, fields, or AST forms
+instead of discarding them. `SMSTART`/`SMSTOP` records retain the upstream
+alias conditions with the parent `MSR_SI_pstate` encoding; `encoding_source`
+records that provenance. Their feature and operand predicates are checked
+at encoding time, including the parent instruction's exclusion predicate.
 
 The generator extracts fixed bits, masks, and variable field layouts from
 these records; the assembler does not duplicate opcode constants. Partially
@@ -1288,6 +1293,60 @@ widening/narrowing, saturating, and shift forms remain unsupported. The
 parser rejects reserved arrangements and mismatched operands before encoding.
 Differential tests cover every supported arrangement and native tests exercise
 integer selection and FP multiply-accumulate/square-root kernels.
+
+**Optional SVE/SME coverage and Apple availability (2026-10-15).** NEON
+(Advanced SIMD) uses fixed-width V registers; SVE uses scalable Z/P registers;
+SME adds streaming execution mode and ZA matrix state. They are distinct
+capabilities. LLVM's [Apple processor definitions](https://github.com/llvm/llvm-project/blob/main/llvm/lib/Target/AArch64/AArch64Processors.td)
+include NEON for M1–M5, SME/SME2 for M4/M5, and explicitly note that M4 lacks
+ordinary SVE. Do not infer optional features merely from an Armv9 label.
+
+Apple's [XNU SME documentation](https://github.com/apple-oss-distributions/xnu/blob/main/doc/arm/sme.md)
+says current Apple implementations expose SVE registers/instructions only in
+streaming mode. XNU preserves that state across kernel entry and context
+switches. SM/ZA are separate state bits; mode transitions clobber vector and
+predicate registers, and many NEON instructions are illegal while streaming.
+SME therefore does not imply non-streaming SVE availability. CPU/OS support
+must be checked at runtime; [Arm's macOS validation guide](https://learn.arm.com/learning-paths/laptops-and-desktops/kleidicv-on-mac/run-test-2/)
+uses `sysctl hw.optional.arm.FEAT_SME` for this purpose.
+
+`assemble`/`assemble_object` and the CLI keep the fixed baseline. Library
+callers may use `assemble_with_features`/`assemble_object_with_features`
+with `TargetFeatures::default().with_sme()` or `.with_sve()` (or both).
+These flags permit encodings only; they neither probe hardware nor insert
+state transitions, change Mach-O CPU subtypes, or promise execution support.
+SME does not set the SVE flag; Arm's shared `SVE || SME` requirements accept
+either independently. There is no global mutable feature selection. Callers
+manage mode, calling convention, and ZA lifetime, including preserving any
+live state around transitions.
+
+The first scalable increment supports:
+
+- Unpredicated `add/sub` on Z B/H/S/D elements; `and/orr/eor` on Z D elements;
+  `fadd/fsub/fmul` on Z H/S/D elements.
+- `ptrue` on P0–P15 B/H/S/D with named or raw 5-bit patterns; `pfalse` with
+  `.b`; signed 8-bit `dup`, optionally shifted by 8 for H/S/D; `lastb` from
+  Z to W/X with P0–P7; `rdvl` with signed 6-bit multiplier;
+  `cntb/cnth/cntw/cntd` with patterns and multipliers 1..16.
+- SME `smstart/smstop` (both state bits by default, or `sm`/`za`), `zero {za}`,
+  and FP32 `fmopa/fmops` with ZA0–ZA3.S and P0–P7/m.
+
+Clang 21 differential tests use local reference flags `-march=armv8-a+sve`
+and `-march=armv8-a+sme`; no default target features are broadened. Native
+SME testing first checks the OS flag, then runs a leaf with balanced mode
+transitions and preserved D8–D15. On this session's Apple M5 Max / Darwin
+27.0.0, SME and SME2 flags were 1; NEON and streaming SME tests passed.
+Non-streaming SVE was not executed. The native SME test verifies vector
+arithmetic and length results; matrix outer products have byte comparisons
+and an execution smoke test, without matrix-result verification yet.
+
+Remaining scalable coverage includes predicated arithmetic, scalable memory,
+vector shifts/conversions, ZA tile transfers and partial clearing, additional
+matrix types, and SME2/SVE2 instructions. Remaining ordinary coverage includes
+NEON widening/narrowing, saturating, indexed-lane, shuffle, and FP16 forms;
+optional Apple crypto, pointer-authentication, and newer scalar ISA are also
+outside this increment. These are explicit coverage boundaries, not complete
+A64/SVE/SME support.
 
 `x31`/`w31` are rejected: SP and ZR must be named explicitly and are checked
 against their operand roles. `fp` and `lr` name x29 and x30.
