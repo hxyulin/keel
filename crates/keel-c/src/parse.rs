@@ -251,7 +251,7 @@ impl Parser {
         }
         let id = *self.va_list_tag.get_or_insert_with(|| {
             let member = |name: &str, ty: Ty, offset| Member {
-                align: ty.ir().bytes().unwrap() as u64,
+                align: Types(&self.structs).align(&ty),
                 name: Some(name.into()),
                 ty,
                 sugar: Sugar::Plain,

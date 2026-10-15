@@ -69,6 +69,7 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
+use crate::data::asm_string;
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
 use crate::parallel_copy::sequentialize;
@@ -555,13 +556,14 @@ impl<'a> FunctionCompiler<'a> {
         profiling::scope!("instruction-lowering");
         let func = self.func;
         let name = &func.name;
+        let symbol = asm_string(name);
         out.push_str("\t.text\n");
         if !func.local {
-            writeln!(out, "\t.globl\t{name}").unwrap();
+            writeln!(out, "\t.globl\t{symbol}").unwrap();
         }
         writeln!(
             out,
-            "\t.p2align\t4\n\t.type\t{name},@function\n{name}:\n.L{name}_begin:"
+            "\t.p2align\t4\n\t.type\t{symbol},@function\n{symbol}:\n.L{name}_begin:"
         )
         .unwrap();
         // The prologue takes the function's location, or else that of its
@@ -615,7 +617,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         writeln!(self.out, ".L{name}_end:").unwrap();
         self.emit(".cfi_endproc");
-        writeln!(self.out, "\t.size\t{name}, .-{name}").unwrap();
+        writeln!(self.out, "\t.size\t{symbol}, .-{symbol}").unwrap();
         out.push_str(&self.out);
         self.scope_marks
     }
@@ -838,7 +840,11 @@ impl<'a> FunctionCompiler<'a> {
                 // first word points to itself. An executable knows the
                 // offsets of its own at link time (local-exec); others come
                 // from the GOT (initial-exec).
-                if thread_local && self.module.defines(name) {
+                let defined = self.module.defines(name);
+                // Intel operand syntax reserves names such as `offset`, `ptr`
+                // and register names. Quoting keeps C symbols unambiguous.
+                let name = asm_string(name);
+                if thread_local && defined {
                     self.emit(format!("mov\t{}, qword ptr fs:0", r64(d)));
                     self.emit(format!("lea\t{0}, [{0} + {name}@tpoff]", r64(d)));
                 } else if thread_local {
@@ -847,7 +853,7 @@ impl<'a> FunctionCompiler<'a> {
                         r64(d)
                     ));
                     self.emit(format!("add\t{}, qword ptr fs:0", r64(d)));
-                } else if self.module.defines(name) {
+                } else if defined {
                     self.emit(format!("lea\t{}, [rip + {name}]", r64(d)));
                 } else {
                     self.emit(format!(
@@ -1609,10 +1615,11 @@ impl<'a> FunctionCompiler<'a> {
     /// The operand of a `call` or `jmp` to function `name`: through the
     /// PLT if it is in another module.
     fn call_target(&self, name: &str) -> String {
+        let symbol = asm_string(name);
         if self.module.defines(name) {
-            name.to_string()
+            symbol
         } else {
-            format!("{name}@PLT")
+            format!("{symbol}@PLT")
         }
     }
 

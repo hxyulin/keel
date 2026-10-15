@@ -58,3 +58,42 @@ fn ordinary_calls_and_indirect_calls_keep_their_continuations() {
         assert!(f.layout_insts().any(|(_, i)| matches!(f.inst_data(i), InstData::Call { func, .. } if f.callee(*func).name == "effect")));
     }
 }
+
+#[test]
+fn builtin_va_list_has_the_target_layout_and_pointer_member_alignment() {
+    for (target, size) in [
+        (Target::Aarch64AppleDarwin, 8),
+        (Target::X86_64LinuxGnu, 24),
+    ] {
+        let source = format!(
+            r#"
+            _Static_assert(sizeof(__builtin_va_list) == {size}, "va_list size");
+            _Static_assert(_Alignof(__builtin_va_list) == 8, "va_list alignment");
+            long first(int count, ...) {{
+                __builtin_va_list ap;
+                __builtin_va_start(ap, count);
+                long value = __builtin_va_arg(ap, long);
+                __builtin_va_end(ap);
+                return value;
+            }}
+        "#
+        );
+        let mut module = keel_c::compile(
+            &source,
+            "va-list.c",
+            keel_c::Options {
+                target,
+                debug_info: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for optimize in [false, true] {
+            if optimize {
+                keel_opt::optimize(&mut module).unwrap();
+            }
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}

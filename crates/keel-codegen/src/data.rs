@@ -114,7 +114,7 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
 /// pointer. Each symbol gets its type and size, which debuggers and
 /// `nm` show.
 fn emit_elf(out: &mut String, data: &DataObject, init: &DataInit) {
-    let name = &data.name;
+    let name = asm_string(&data.name);
     let section = match (data.thread_local, init.constant, init.is_zero()) {
         (true, _, true) => ".tbss,\"awT\",@nobits",
         (true, _, false) => ".tdata,\"awT\",@progbits",

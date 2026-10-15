@@ -221,11 +221,11 @@ impl Format {
     }
 
     /// The assembler name of symbol `name`: Mach-O prefixes C names with
-    /// an underscore, ELF does not.
+    /// an underscore; ELF quotes names to disambiguate Intel syntax keywords.
     pub(crate) fn symbol(self, name: &str) -> String {
         match self {
             Format::MachO => format!("_{name}"),
-            Format::Elf => name.to_string(),
+            Format::Elf => data::asm_string(name),
         }
     }
 

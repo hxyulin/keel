@@ -286,7 +286,7 @@ pub(crate) fn emit_debug_info<T: Sink>(
             writeln!(
                 out,
                 "\t.byte\t10, 0x0e\n\t.quad\t{}@dtpoff\n\t.byte\t0xe0",
-                global.symbol
+                format.symbol(&global.symbol)
             )
             .unwrap();
         } else if data.thread_local {

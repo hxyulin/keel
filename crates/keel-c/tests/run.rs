@@ -544,7 +544,7 @@ fn debugtrap_preserves_continuation_on_both_targets() {
             assert!(text.contains("return "), "{text}");
             let asm = keel_codegen::compile(&module, target).unwrap();
             let breakpoint = match target {
-                keel_ir::Target::Aarch64AppleDarwin => "brk\t#0xf000",
+                keel_ir::Target::Aarch64AppleDarwin => "brk\t#61440",
                 keel_ir::Target::X86_64LinuxGnu => "int3",
             };
             assert!(asm.contains(breakpoint), "{asm}");
@@ -925,4 +925,41 @@ fn rejected() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Reserved Intel names must survive both assembler implementations, including
+/// TLS references in debug info and symbol differences in function sizes.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn intel_symbol_names_with_debug_info_and_gnu_assembler() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/asm_symbol_names.c");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("intel-symbol-names");
+    std::fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("names.i");
+    run(Command::new("clang")
+        .args(["-E", "-std=c11", "-o"])
+        .arg(&input)
+        .arg(&source));
+    for optimize in [false, true] {
+        let exe = dir.join(if optimize { "keel-O" } else { "keel" });
+        build(
+            &input,
+            &exe,
+            optimize,
+            keel_c::Options {
+                debug_info: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let gas = exe.with_extension("gas");
+        run(Command::new("clang")
+            .args(["-g", "-fno-integrated-as", "-o"])
+            .arg(&gas)
+            .arg(exe.with_extension("s")));
+        for path in [&exe, &gas] {
+            let result = run(&mut Command::new(path));
+            assert_eq!(result.stdout, b"10 14 19\n");
+        }
+    }
 }
