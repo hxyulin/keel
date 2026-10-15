@@ -731,13 +731,16 @@ existing flag lowering.
 
 ## Optimizer
 
-`keel-opt` runs passes, each `fn(&mut Function) -> bool`, one function at a
-time, and **verifies after every pass**: the IR is valid between passes,
+`keel-opt` runs function passes (`fn(&mut Function) -> bool`) and module
+passes through the `Pass::run_module` hook. The manager runs each pass over
+the module before moving to the next and **verifies after every pass**: the IR is valid between passes,
 always, so a broken pass is caught where it broke things. Passes compute the
 analyses they need; there is no analysis cache yet.
 
 | Pass | What it does |
 |---|---|
+| `inline` | module-level bounded private direct-call expansion, including fresh by-value snapshots and remapped CFG/SSA/stack slots |
+| `stack-forward` | block-local byte forwarding for nonescaping fixed stack objects, including partial integer writes; remove private stores only after every load from the object disappears |
 | `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
@@ -755,23 +758,71 @@ analyses they need; there is no analysis cache yet.
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
-The default pipeline (`-O`) is `simplify-cfg, canonicalize, instcombine,
-simplify-cfg, gvn, dce, gcm, loop-vectorize`. Basic uses `simplify-cfg, canonicalize, instcombine,
+The default pipeline (`-O`) is `inline, simplify-cfg, canonicalize, instcombine,
+simplify-cfg, gvn, stack-forward, canonicalize, instcombine, dce, gcm,
+loop-vectorize`. Basic uses `simplify-cfg, canonicalize, instcombine,
 simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
 to avoid invalidating it immediately. The scalar cleanup order was chosen for
 lower compile cost while preserving assembly on the earlier measured corpus.
+Inlining precedes cleanup so constants and aggregate temporaries become visible;
+private stack forwarding and a second combining pass simplify the exposed copies.
 Vectorization then adds guarded vector loops where the supported pattern matches. A pass can request canonical form on entry; the manager
 restores it after intervening changes, including lazy aliases. This applies to
 explicit and custom pipelines too. The contract and its limits are documented
 in the [canonicalization section](simplification.md#canonicalization-contract).
 `const-fold` stays available for isolated numeric folding and historical
-comparisons; the defaults use the broader combining pass once. The paired
+comparisons; the defaults use the broader combining pass before and after
+private stack forwarding. The paired
 [pass ablation matrix](../suite/reports/pass-ablations-aarch64-2026-10-15.json)
 supports retaining CFG cleanup, GVN, DCE and GCM. Removing GCM regresses runtime
 by 4.2% overall; removing GVN grows aggregate text by 5.1%, with mixed runtime
 effects. Late phi cleanup avoids the early regression but adds compiler cost
 without an established runtime gain. SCCP also adds compiler cost for neutral
 runtime in these applications, so both remain opt-in.
+
+### Bounded function inlining
+
+`inline` uses frozen templates of same-module `local` definitions and expands
+only direct calls present at pass entry. Newly cloned calls wait for another
+explicit invocation, so function order cannot cause recursive expansion.
+Templates contain at most 64 instructions, 8 blocks and 512 bytes of fixed
+stack storage. Each caller accepts at most 128 sites and 2,048 added IR
+instructions (including a conservative allowance for by-value snapshots).
+There is no profile-guided profitability model yet. Non-local definitions,
+variadics, direct recursive cycles, `returns_twice` calls, exception handling,
+guaranteed tail calls, inline assembly, and frame/variadic/dynamic-stack
+intrinsics are excluded. Ordinary indirect calls can be cloned but are not
+inlined. Function definitions remain available for address-taking and other
+callers.
+
+The signature must match exactly. Each site gets fresh blocks, values and
+fixed stack slots, remapped symbol/signature tables, and a continuation with
+block parameters carrying all return values. Existing argument evaluation
+stays in its original order. `byval` arguments up to 128 bytes are copied,
+including padding, into private snapshots before callee effects; aliasing a
+by-value argument with an ordinary pointer therefore preserves call semantics.
+`sret` uses the original caller-provided destination. Callee source lines,
+lexical scopes and stack variable homes are remapped into a fresh scope below
+the call site; the IR currently has no DWARF inline-subroutine representation.
+
+`stack-forward` recognizes constant-offset addresses of fixed stack objects.
+An address passed to a call, returned, converted to an integer, stored as a
+value, or otherwise used outside ordinary loads/stores and recognized address
+construction marks the object as escaping. Volatile or atomic access also
+excludes the object. Inline assembly, frame inspection and stack-state barriers
+exclude the function. For private objects, exact typed stores can satisfy later
+loads in the same block. Integer loads through 64 bits can also be reconstructed
+from earlier stored bytes, using the supported targets' little-endian layout.
+Unknown or uninitialized bytes remain memory loads. No facts cross block
+boundaries, and no general pointer-alias assumption is used. Stores are removed
+only when no load from the object remains anywhere in the function; debug-visible
+homes retain both reads and writes so debugger edits remain observable. This is limited aggregate cleanup rather than full scalar
+replacement of aggregates.
+
+For compiler-only ablation, keep the same cleanup pipeline and omit `inline`;
+omit `stack-forward` too when measuring the combined inlining/aggregate-cleanup
+change. None and Basic tiers retain their prior pipelines. The `inline` and
+`stack-forward` names are also available through explicit `-p` pipelines.
 
 Instruction combining uses a consumer worklist, so substitutions expose
 further folds even when block layout differs from definition order. Integer

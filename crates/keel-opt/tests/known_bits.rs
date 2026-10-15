@@ -187,7 +187,22 @@ block2:
  v6 = iconst.i64 9
  return v6
 }";
-    let (original, old) = apply(source, keel_opt::DEFAULT_PIPELINE);
+    // Historical pipeline, before inlining's late aggregate cleanup.
+    let (original, old) = apply(
+        source,
+        &[
+            "simplify-cfg",
+            "canonicalize",
+            "instcombine",
+            "simplify-cfg",
+            "gvn",
+            "dce",
+            "gcm",
+            "loop-vectorize",
+        ],
+    );
+    let (_, current) = apply(source, keel_opt::DEFAULT_PIPELINE);
+    assert!(!current.to_string().contains("icmp.eq"));
     assert!(old.to_string().contains("icmp.eq"));
     let (_, improved) = apply(
         source,

@@ -1,8 +1,8 @@
 //! Optimization passes over keel IR.
 //!
-//! A [`Pass`] returns whether it changed anything. Passes work on one
-//! function at a time, so functions
-//! could be optimized in parallel, and compute the analyses they need
+//! A [`Pass`] returns whether it changed anything. Most passes work on one
+//! function at a time; module passes such as inlining use `run_module`.
+//! Function passes compute the analyses they need
 //! (CFG, dominators) themselves; there is no analysis cache until one is
 //! needed.
 //!
@@ -19,6 +19,7 @@ mod const_fold;
 mod dce;
 mod gcm;
 mod gvn;
+mod inline;
 mod instcombine;
 mod known_bits;
 mod loop_vectorize;
@@ -27,6 +28,7 @@ mod memory_forward;
 mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
+mod stack_forward;
 
 /// A replaceable optimization pass over one function.
 /// `run` must report true whenever it mutates the function, including aliases.
@@ -34,6 +36,11 @@ pub trait Pass: Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn run(&self, func: &mut Function) -> bool;
+
+    /// Module passes return Some after running; function passes use the default.
+    fn run_module(&self, _module: &mut Module) -> Option<bool> {
+        None
+    }
 
     /// Target-aware passes may override this; ordinary passes ignore it.
     fn run_for_target(&self, func: &mut Function, _target: VectorTarget) -> bool {
@@ -115,6 +122,11 @@ const BUILTINS: &[BuiltinPass] = &[
         run: canonicalize::run,
     },
     BuiltinPass {
+        name: "stack-forward",
+        description: "forward bytes in private fixed stack objects exposed by inlining",
+        run: stack_forward::run,
+    },
+    BuiltinPass {
         name: "branch-ranges",
         description: "fold integer comparisons using ranges from dominating conditional edges",
         run: branch_ranges::run,
@@ -152,11 +164,13 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[9],
     &BUILTINS[10],
     &BUILTINS[11],
+    &BUILTINS[12],
     &loop_vectorize::LoopVectorize,
+    &inline::Inline,
 ];
 
 /// Independent optimizer effort; Full adds value numbering, code motion, and
-/// guarded loop vectorization.
+/// bounded direct-call inlining, private stack forwarding, and guarded loop vectorization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
@@ -186,11 +200,15 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 
 /// The passes `keel compile -O` runs, in order.
 pub const DEFAULT_PIPELINE: &[&str] = &[
+    "inline",
     "simplify-cfg",
     "canonicalize",
     "instcombine",
     "simplify-cfg",
     "gvn",
+    "stack-forward",
+    "canonicalize",
+    "instcombine",
     "dce",
     "gcm",
     "loop-vectorize",
@@ -260,24 +278,33 @@ pub fn run_pipeline_for_target(
     target: VectorTarget,
 ) -> Result<(), OptError> {
     profiling::scope!("optimization");
-    for func in &mut module.functions {
-        let mut canonical = false;
-        for pass in passes {
-            profiling::scope!("pass", pass.name());
-            if pass.requires_canonical_form() && !canonical {
-                profiling::scope!("canonicalize prerequisite");
+    let mut canonical = vec![false; module.functions.len()];
+    for pass in passes {
+        profiling::scope!("pass", pass.name());
+        if pass.run_module(module).is_some() {
+            canonical.resize(module.functions.len(), false);
+            canonical.fill(false);
+            for func in &module.functions {
+                verify(func).map_err(|errors| OptError::Verifier {
+                    pass: pass.name(),
+                    func: func.name.clone(),
+                    errors,
+                })?;
+            }
+            continue;
+        }
+        for (index, func) in module.functions.iter_mut().enumerate() {
+            if pass.requires_canonical_form() && !canonical[index] {
                 canonicalize::run(func);
                 verify(func).map_err(|errors| OptError::Verifier {
                     pass: "canonicalize",
                     func: func.name.clone(),
                     errors,
                 })?;
-                canonical = true;
+                canonical[index] = true;
             }
             let changed = pass.run_for_target(func, target);
-            // Alias-producing rewrites can invalidate even untouched users.
-            // Conservatively invalidate after any change unless promised otherwise.
-            canonical = pass.produces_canonical_form() || (canonical && !changed);
+            canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             verify(func).map_err(|errors| OptError::Verifier {
                 pass: pass.name(),
                 func: func.name.clone(),
