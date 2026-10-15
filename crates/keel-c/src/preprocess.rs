@@ -123,6 +123,7 @@ fn preprocess_inner<const TRACK: bool>(
         include_stack: Vec::new(),
         once: HashSet::new(),
         canonical_paths: HashMap::new(),
+        canonical_dirs: HashMap::new(),
         header_cache: HashMap::new(),
         file_sources: HashMap::new(),
         scanned: HashMap::new(),
@@ -180,6 +181,7 @@ struct Preprocessor<'a, const TRACK: bool> {
     include_stack: Vec<(&'a str, Option<usize>)>,
     once: HashSet<PathBuf>,
     canonical_paths: HashMap<PathBuf, PathBuf>,
+    canonical_dirs: HashMap<PathBuf, PathBuf>,
     header_cache: HashMap<HeaderContext<'a>, HashMap<String, Option<Include>>>,
     file_sources: HashMap<(PathBuf, bool), &'a str>,
     scanned: HashMap<(PathBuf, bool), CachedTokens<'a>>,
@@ -360,6 +362,29 @@ fn ident(s: &str) -> bool {
     c.next().is_some_and(|c| c == '_' || c.is_alphabetic())
         && c.all(|c| c == '_' || c.is_alphanumeric())
 }
+
+// Keep non-ASCII bytes in the same token, as before; semantic identifier
+// validation remains Unicode-aware. The table combines the common byte tests
+// in the identifier and preprocessing-number loops into one indexed load.
+const IDENT_START: u8 = 1;
+const IDENT_CONTINUE: u8 = 2;
+const NUMBER_CONTINUE: u8 = 4;
+const BYTE_CLASS: [u8; 256] = {
+    let mut table = [0; 256];
+    let mut i = 0;
+    while i < table.len() {
+        let b = i as u8;
+        if b.is_ascii_alphabetic() || b == b'_' || b >= 128 {
+            table[i] = IDENT_START | IDENT_CONTINUE | NUMBER_CONTINUE;
+        } else if b.is_ascii_digit() {
+            table[i] = IDENT_CONTINUE | NUMBER_CONTINUE;
+        } else if b == b'.' {
+            table[i] = NUMBER_CONTINUE;
+        }
+        i += 1;
+    }
+    table
+};
 
 /// Logical offsets where phase 2 removed bytes, and the cumulative removal.
 /// Most input can be scanned directly, without a byte-sized location table.
@@ -572,10 +597,7 @@ fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a
         {
             i += 1;
             while i < b.len() {
-                if b[i].is_ascii_alphanumeric()
-                    || b[i] == b'_'
-                    || b[i] == b'.'
-                    || b[i] >= 128
+                if BYTE_CLASS[b[i] as usize] & NUMBER_CONTINUE != 0
                     || (matches!(b[i], b'+' | b'-')
                         && matches!(b[i - 1], b'e' | b'E' | b'p' | b'P'))
                 {
@@ -584,9 +606,9 @@ fn scan<'a>(src: &'a str, file: &'a str, arena: &'a Bump) -> Result<Vec<Token<'a
                     break;
                 }
             }
-        } else if b[i].is_ascii_alphabetic() || b[i] == b'_' || b[i] >= 128 {
+        } else if BYTE_CLASS[b[i] as usize] & IDENT_START != 0 {
             i += 1;
-            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_' || b[i] >= 128) {
+            while i < b.len() && BYTE_CLASS[b[i] as usize] & IDENT_CONTINUE != 0 {
                 i += 1;
             }
         } else {
@@ -1003,7 +1025,30 @@ impl<'a, const TRACK: bool> Preprocessor<'a, TRACK> {
         if let Some(canonical) = self.canonical_paths.get(path) {
             return canonical.clone();
         }
-        let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // realpath walks every component. Most headers are ordinary files in
+        // a few shared directories: resolve each directory once, then append
+        // the final component only after verifying that it is not a symlink.
+        // Symlinks (including dangling ones), missing paths and special path
+        // components retain the full canonicalize/fallback behavior.
+        let canonical = path
+            .parent()
+            .zip(path.file_name())
+            .and_then(|(dir, name)| {
+                let metadata = std::fs::symlink_metadata(path).ok()?;
+                if !metadata.is_file() {
+                    return None;
+                }
+                let canonical_dir = if let Some(dir) = self.canonical_dirs.get(dir) {
+                    dir.clone()
+                } else {
+                    let canonical = std::fs::canonicalize(dir).ok()?;
+                    self.canonical_dirs
+                        .insert(dir.to_path_buf(), canonical.clone());
+                    canonical
+                };
+                Some(canonical_dir.join(name))
+            })
+            .unwrap_or_else(|| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()));
         self.canonical_paths
             .insert(path.to_path_buf(), canonical.clone());
         canonical

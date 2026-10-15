@@ -718,3 +718,67 @@ python3 suite/analyze_frontend_stages.py \
   --analysis suite/reports/c-frontend-stages-analysis-20261015.json
 python3 suite/render_frontend_stages.py
 ```
+
+
+### Scanner classification and directory canonicalization (2026-10-15)
+
+The next pass from `2808137` uses a 256-byte classification table in the
+identifier and preprocessing-number scanner loops, and caches canonical parent
+directories within each translation unit. The final component is checked with
+`symlink_metadata`: ordinary files can append their name to the resolved parent;
+symlinks, missing paths and non-regular files retain full canonicalization and
+its fallback. Parent paths are resolved by the filesystem, preserving symlink
+and `..` semantics. Include spelling and token locations remain unchanged.
+
+The [15-pair comparison](reports/c-preprocessor-scanner-paths-20261015.json)
+against the prior pass's frozen `deeper/profile-all` binary shows **10.9% less
+preprocessing time** (1.122x speedup; 95% paired bootstrap reduction interval
+10.5–11.3%). Median application times are Lua 170.95 → 145.57 ms, QuickJS
+84.48 → 75.01 ms and SQLite 73.98 → 69.09 ms. These are warm-cache, serial
+library measurements on the same 44 TUs and Apple M5 Max; the ratio uses paired
+samples rather than ratios of these independent medians. A local rebuild of
+the exact parent source is neutral against the frozen binary (aggregate ratio
+0.9999; 95% interval 0.9971–1.0042). All binaries use identical release flags
+with `CARGO_PROFILE_RELEASE_DEBUG=1` and the `profile` feature.
+
+The [seven-pair screen](reports/c-preprocessor-scanner-paths-screen-20261015.json)
+shows independent reductions of 7.1% for directory caching and 4.0% for byte
+classification. Specializing the scanner for spliced/unspliced location updates
+adds only a small incremental benefit: the final direct paired ratio versus
+the selected candidate is 0.9946 (95% interval 0.9846–0.9999), while growing the
+page-aligned Mach-O text segment by 16 KiB. That specialization was not retained;
+the existing location implementation stays intact. Exact variant patches,
+build logs, source/binary hashes, test logs and the incremental calculation are
+in the [investigation details](reports/c-preprocessor-scanner-paths-details-20261015.json).
+
+[Storage measurements](reports/c-preprocessor-scanner-paths-storage-20261015.json)
+show allocation/reallocation calls increasing 1.26%, 1.08% and 0.59% for Lua,
+QuickJS and SQLite, with requested bytes increasing 0.038%, 0.028% and 0.011%.
+The extra directory map lasts only for the current invocation. Single-process
+peak RSS observations are 59.77 → 42.17 MiB, 147.05 → 150.94 MiB and
+311.02 → 302.75 MiB; these include warmups and allocator history and do not
+establish an isolated-call memory reduction. All profile counters, including
+file opens, source/token bytes and cache hits, match the baseline exactly.
+Remaining opens are for unique headers within each TU; no cross-TU cache was
+introduced.
+
+All 61 frontend tests and 24 driver tests pass. The new regression combines
+parent-directory symlinks, final-component symlinks, `..`, pragma once and
+`__FILE__` spelling. Every screen/final variant produces byte-identical output
+for all 44 TUs and verifies the generated IR. Builds/tests started only after
+the parent's shared-host timing gate opened, and timing and storage runs were
+separate and serial.
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile \
+  --example profile_preprocess --example profile_preprocess_allocations
+# Freeze both examples before timing; use the exact variant patches in details.
+python3 suite/measure_preprocessor.py \
+  --profile suite/reports/c-frontend-profile-20261015.json \
+  --baseline /path/to/frozen/deeper/profile-all \
+  --variant rebuilt=target/frontend-profile/scanner-paths/profile-baseline \
+  --variant final=target/frontend-profile/scanner-paths/profile-final \
+  --variant location=target/frontend-profile/scanner-paths/profile-all \
+  --rounds 15 --work-dir target/frontend-profile/scanner-paths/final-paired \
+  --output suite/reports/c-preprocessor-scanner-paths-20261015.json
+```

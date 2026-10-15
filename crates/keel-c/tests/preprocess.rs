@@ -607,3 +607,44 @@ fn header_resolution_cache_keeps_quoted_callers_and_search_kinds_separate() {
     let fresh = preprocess(source, path.to_str().unwrap(), &opts).unwrap();
     assert_eq!(tokens(&fresh), tokens("10 30 1 20 30 1 10 30 1 20 30 1"));
 }
+
+#[cfg(unix)]
+#[test]
+fn directory_canonicalization_preserves_symlink_dotdot_and_spelling() {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("pp-directory-aliases");
+    std::fs::create_dir_all(dir.join("real/nested")).unwrap();
+    std::fs::write(dir.join("real/once.h"), "#pragma once\nint real;\n").unwrap();
+    std::fs::write(dir.join("once.h"), "#pragma once\nint other;\n").unwrap();
+    std::fs::write(dir.join("real/name.h"), "__FILE__ __LINE__\n").unwrap();
+    let alias = dir.join("alias");
+    let _ = std::fs::remove_file(&alias);
+    std::os::unix::fs::symlink("real/nested", &alias).unwrap();
+    let file_alias = dir.join("file-alias.h");
+    let _ = std::fs::remove_file(&file_alias);
+    std::os::unix::fs::symlink("real/once.h", &file_alias).unwrap();
+    let src = "#include \"alias/../once.h\"\n#include \"real/once.h\"\n#include \"file-alias.h\"\n#include \"once.h\"\n#include \"real/name.h\"\n#include \"alias/../name.h\"\n";
+    let got = preprocess(
+        src,
+        dir.join("main.c").to_str().unwrap(),
+        &PreprocessOptions::default(),
+    )
+    .unwrap();
+    let expected = format!(
+        "int real; int other; \"{}/real/name.h\" 1 \"{}/alias/../name.h\" 1",
+        dir.display(),
+        dir.display()
+    );
+    assert_eq!(tokens(&got), tokens(&expected));
+    #[cfg(feature = "profile")]
+    {
+        let (_, stats) = keel_c::preprocess_with_stats(
+            src,
+            dir.join("main.c").to_str().unwrap(),
+            &PreprocessOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(stats.file_opens, 3);
+        assert_eq!(stats.once_skips, 2);
+        assert_eq!(stats.token_cache_hits, 1);
+    }
+}
