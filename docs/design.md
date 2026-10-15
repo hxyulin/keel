@@ -1107,7 +1107,8 @@ section; cross-section addresses use page relocations.
 
 `.quad symbol [+/- integer]` emits an absolute pointer relocation.
 `.long`/`.quad A-B [+/- integer]` resolve directly when both labels belong
-to the same section, including forward references. Other differences use
+to the same section (or the same atom with subsection splitting), including
+forward references. Other differences use
 `ARM64_RELOC_SUBTRACTOR` for B followed immediately by `ARM64_RELOC_UNSIGNED`
 for A. Data addends are written into the 4-/8-byte word rather than into an
 ADDEND relocation. Repeated identical symbols cancel even when undefined.
@@ -1131,11 +1132,25 @@ alignment, duplicate names, overlapping relocations, missing targets,
 relocation widths, and addend constraints. Objects include the macOS 11.0
 build-version command; Apple’s linker still produces the executable.
 
-Subsection splitting remains rejected because resolved differences, local
-ADR, and conditional branches rely on each section staying intact. Other
-instructions, sections, and directives produce source diagnostics. Literal
-loads and subsection splitting remain to be added before this can assemble
-arbitrary Keel compiler output.
+`.subsections_via_symbols` sets `MH_SUBSECTIONS_VIA_SYMBOLS`, allowing the
+linker to reorder or discard symbol-defined atoms. Non-temporary labels and
+global temporary labels start atoms; aliases at one address share one atom.
+Temporary labels retain source-order ownership, so a function's end label
+belongs to it even if the next function starts at the same offset. Local
+references are rebased onto atom symbols with explicit addends. This avoids
+introducing temporary-symbol boundaries and preserves pointers to atom ends.
+Sections with no preceding atom symbol receive a synthetic local anchor.
+
+B/BL references across atoms use branch relocations. Fixed-displacement ADR
+and conditional branches require targets in their own atom; ADR across atoms
+must use ADRP/ADD instead. Data differences across atoms retain SUBTRACTOR /
+UNSIGNED pairs rather than freezing their original offsets. Symbolic LEB128
+differences must remain within one atom because their variable-width fields
+have no linker relocation. Explicit constant assignments continue to compute
+same-section differences using the original layout, matching compiler use of
+`.set` for DWARF compilation-unit sizes. Other instructions, sections, and
+directives produce source diagnostics. Literal loads and other missing forms
+still prevent assembling arbitrary Keel compiler output.
 
 Tests compare every supported encoding form and operand boundaries against
 clang’s arm64 Mach-O output, inspect our objects with an independent object
@@ -1143,10 +1158,9 @@ reader, check invalid operands and branch limits, and on Apple Silicon link
 and execute the examples and C drivers checking memory, arithmetic,
 conditions, indirect calls, and FP conversions. Logical-immediate tests cover
 all 1,302 W and 5,334 X bitmasks, and FP-immediate tests cover all 256 values.
-Instruction-only integration tests compile small integer, FP, and popcount
-functions with Keel, remove CFI/subsection directives to isolate instruction
-encoding in those tests, assemble, link, and run them. This is not a production
-workaround for missing directives. Native execution tests have a ten-second
+Integration tests compile small integer, FP, and popcount functions with Keel,
+assemble their unmodified output, link, and run them. Instruction relocation
+differential tests isolate instruction records from unwind metadata. Native execution tests have a ten-second
 timeout and reap a timed-out process. Symbol tests compare instruction bytes
 and normalized relocation records against clang and run cross-object calls,
 page-offset integer/SIMD accesses, imported libc functions, GOT and TLVP
@@ -1159,9 +1173,12 @@ Data tests compare section bytes, sizes, symbols, and normalized relocations
 against clang, including file-backed/zero-fill layout and TLS descriptors.
 Linked programs check absolute-pointer tables and cross-section differences.
 The existing Keel globals, TLS (including multiple threads), switch/jump-table,
-and local-linkage programs run through the assembler with only subsection
-splitting explicitly removed for the tests; CFI and source debug metadata are
-assembled and retained.
+and local-linkage programs run through the assembler with all directives
+retained, including CFI, source debug metadata, and subsection splitting.
+Native subsection tests reorder functions/data with an order file, enable
+`-dead_strip`, verify unused code is removed, and check pointers/differences
+after layout changes. C++ catches and cleanup also execute after reordering
+and dead stripping.
 
 
 **Unwind and debug metadata.** `.cfi_startproc`/`.cfi_endproc` collect
@@ -1221,4 +1238,5 @@ unwind tables. On macOS, the linker records an object-file debug map and
 `dsymutil` combines the referenced DWARF into a dSYM bundle. Tests compare
 line rows and data encodings against Clang, verify Keel’s types/scopes/variables
 with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
-assembled frame. Subsection splitting remains separately unsupported.
+assembled frame. Cross-atom conditional branches and ADR remain errors;
+compact unwind encoding remains a separate optimization.

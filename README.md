@@ -84,8 +84,9 @@ Data support includes initialized/zero-fill/TLS sections, integer directives,
 pointer tables, and symbol differences. It also supports ordinary CFI unwind
 records, DWARF 4 line tables, and debug sections for types and variables.
 Exception personalities, LSDA tables, and C++ exception propagation are
-supported. Literal loads and subsection splitting remain pending, so it cannot
-yet assemble arbitrary `keel compile` output.
+supported, along with subsection splitting for linker reordering and dead
+stripping. Literal loads and other unsupported forms still prevent assembling
+arbitrary `keel compile` output.
 Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
 

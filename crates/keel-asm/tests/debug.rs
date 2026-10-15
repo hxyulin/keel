@@ -92,7 +92,6 @@ fn malformed_metadata_is_diagnosed() {
         ".asciz \"bad\\q\"",
         ".uleb128 -1",
         ".sleb128 9223372036854775808",
-        ".subsections_via_symbols",
         ".cfi_startproc\n.cfi_personality 155, _personality",
         ".cfi_startproc\n.cfi_lsda 16, Llsda",
         ".section __TEXT,__eh_frame,coalesced\n.byte 0\n.text\n.cfi_startproc\nret\n.cfi_endproc",
@@ -140,12 +139,6 @@ fn keel_debug_info_verifies_and_builds_dsym() {
     let source = std::fs::read_to_string(repo.join("linkage.keel")).unwrap();
     let module = keel_ir::parse(&source).unwrap();
     let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-    // Atom splitting is a separate linker feature; keep each section intact.
-    let source = source
-        .lines()
-        .filter(|s| s.trim() != ".subsections_via_symbols")
-        .collect::<Vec<_>>()
-        .join("\n");
     let temp = Temp::new();
     let obj = temp.0.join("linkage.o");
     let exe = temp.0.join("run");
@@ -182,11 +175,6 @@ fn keel_types_scopes_and_variables_verify() {
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-    let source = source
-        .lines()
-        .filter(|s| s.trim() != ".subsections_via_symbols")
-        .collect::<Vec<_>>()
-        .join("\n");
     let temp = Temp::new();
     let obj = temp.0.join("types.o");
     std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();

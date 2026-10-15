@@ -1,4 +1,5 @@
 mod arithmetic;
+mod atoms;
 mod control;
 mod data;
 mod debug;
@@ -343,7 +344,10 @@ fn assemble_pass(
     previous: Option<&BTreeMap<String, data::Location>>,
 ) -> Result<(Assembly, bool), Error> {
     let mut symbolic_leb = false;
+    let mut leb_differences = Vec::new();
+    let mut label_order = Vec::new();
     let mut result = Assembly {
+        subsections_via_symbols: false,
         text: Vec::new(),
         text_alignment: 2,
         symbols: Vec::new(),
@@ -385,6 +389,7 @@ fn assemble_pass(
             {
                 return Err(err(format!("duplicate label `{name}`")));
             }
+            label_order.push((name.to_string(), labels[name]));
             s = rest.trim();
         }
         if s.is_empty() {
@@ -438,6 +443,9 @@ fn assemble_pass(
                 let expr = data::expression(arg).map_err(err)?;
                 let value = if let Some(add) = &expr.add {
                     symbolic_leb = true;
+                    if let Some(sub) = &expr.subtract {
+                        leb_differences.push((line, add.clone(), sub.clone()));
+                    }
                     if let Some(previous) = previous {
                         let sub = expr.subtract.as_ref().ok_or_else(|| {
                             err("LEB128 requires a same-section symbol difference".into())
@@ -537,6 +545,11 @@ fn assemble_pass(
             continue;
         }
         match op.as_str() {
+            ".subsections_via_symbols" => {
+                count(&args, 0, 0).map_err(err)?;
+                result.subsections_via_symbols = true;
+                continue;
+            }
             ".text" | ".data" | ".const" | ".const_data" | ".bss" => {
                 count(&args, 0, 0).map_err(err)?;
                 current = match op.as_str() {
@@ -613,6 +626,7 @@ fn assemble_pass(
                         offset: data::position(&result, section),
                     },
                 );
+                label_order.push((name.to_string(), labels[name]));
                 data::reserve(&mut result, section, size, 0).map_err(err)?;
                 continue;
             }
@@ -669,6 +683,25 @@ fn assemble_pass(
             .text
             .extend_from_slice(&instruction(&op, &args).map_err(err)?.to_le_bytes());
     }
+    let mut atoms = atoms::Atoms::new(
+        &label_order,
+        &globals,
+        &mut labels,
+        &prefix,
+        result.subsections_via_symbols,
+    );
+    if result.subsections_via_symbols {
+        for (line, add, sub) in leb_differences {
+            if let (Some(a), Some(b)) = (labels.get(&add), labels.get(&sub))
+                && !atoms.same((&add, *a), (&sub, *b))
+            {
+                return Err(Error::new(
+                    line,
+                    "LEB128 symbol differences must stay within one linker atom",
+                ));
+            }
+        }
+    }
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
         let delta = if is_integer(&branch.spec.target) {
@@ -678,7 +711,17 @@ fn assemble_pass(
             let target = labels.get(&expr.name);
             let local = expr.name.starts_with('L') && !globals.contains_key(&expr.name);
             if branch.spec.width == 26
-                && (target.is_some_and(|t| t.section != 0) || (target.is_none() && !local))
+                && (target.is_some_and(|t| {
+                    t.section != 0
+                        || (result.subsections_via_symbols
+                            && !atoms.contains(
+                                data::Location {
+                                    section: 0,
+                                    offset: branch.offset as u64,
+                                },
+                                (&expr.name, *t),
+                            ))
+                }) || (target.is_none() && !local))
             {
                 if expr.addend % 4 != 0 {
                     return Err(err("branch addend must be 4-byte aligned".into()));
@@ -703,6 +746,19 @@ fn assemble_pass(
                     .ok_or_else(|| err(format!("undefined local branch target `{}`", expr.name)))?;
                 if target.section != 0 {
                     return Err(err("conditional branches require targets in __text".into()));
+                }
+                if result.subsections_via_symbols
+                    && !atoms.contains(
+                        data::Location {
+                            section: 0,
+                            offset: branch.offset as u64,
+                        },
+                        (&expr.name, *target),
+                    )
+                {
+                    return Err(err(
+                        "conditional branches require a target in the same linker atom".into(),
+                    ));
                 }
                 target.offset as i64 + expr.addend - branch.offset as i64
             }
@@ -733,6 +789,20 @@ fn assemble_pass(
             return Err(Error::new(
                 line,
                 "adr requires a target in the same text section",
+            ));
+        }
+        if result.subsections_via_symbols
+            && !atoms.contains(
+                data::Location {
+                    section: 0,
+                    offset: offset as u64,
+                },
+                (&expr.name, *target),
+            )
+        {
+            return Err(Error::new(
+                line,
+                "adr requires a target in the same linker atom; use adrp/add across atoms",
             ));
         }
         let word = relocate::address_word(
@@ -850,7 +920,11 @@ fn assemble_pass(
             true
         } else if let Some(subtract) = &expr.subtract {
             match (labels.get(&add), labels.get(subtract)) {
-                (Some(a), Some(b)) if a.section == b.section => {
+                (Some(a), Some(b))
+                    if a.section == b.section
+                        && (!result.subsections_via_symbols
+                            || atoms.same((&add, *a), (subtract, *b))) =>
+                {
                     constant = constant
                         .checked_add(i128::from(a.offset) - i128::from(b.offset))
                         .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
@@ -891,6 +965,9 @@ fn assemble_pass(
                 addend: constant as i64,
             });
         }
+    }
+    if result.subsections_via_symbols {
+        atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
     let mut names: BTreeSet<_> = labels.keys().chain(globals.keys()).cloned().collect();
     for relocation in &result.relocations {

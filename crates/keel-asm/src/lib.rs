@@ -4,8 +4,8 @@
 //! Syntax, operand transformations, and object layout are implemented here.
 //! DWARF 4 line tables, debug data, and ordinary call-frame directives are
 //! supported, including Darwin exception personality/LSDA references.
-//! Unsupported instructions/directives are errors; subsection splitting
-//! is not yet supported.
+//! Symbol-defined subsections support linker reordering and dead stripping.
+//! Unsupported instructions/directives are errors.
 mod generated;
 mod macho;
 mod parser;
@@ -155,6 +155,8 @@ impl Section {
 /// Encoded text, extra data sections, and symbols before writing the object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assembly {
+    /// Permit the Mach-O linker to reorder/dead-strip symbol-defined atoms.
+    pub subsections_via_symbols: bool,
     pub text: Vec<u8>,
     /// Section alignment as a power of two (at least 2 for A64).
     pub text_alignment: u32,

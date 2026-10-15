@@ -8,12 +8,7 @@ fn generated() -> String {
     let source = include_str!("../../keel-codegen/tests/programs/exceptions.keel");
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
-    let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-    source
-        .lines()
-        .filter(|s| s.trim() != ".subsections_via_symbols")
-        .collect::<Vec<_>>()
-        .join("\n")
+    keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap()
 }
 #[test]
 fn generated_lsda_matches_clang() {
@@ -102,12 +97,22 @@ fn cpp_exceptions_catches_and_cleanup_execute() {
     std::fs::write(&obj, assemble_object(&generated()).unwrap()).unwrap();
     let driver = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../keel-codegen/tests/programs/exceptions.cpp");
-    run(Command::new("clang++")
-        .arg(driver)
-        .arg(obj)
-        .arg("-o")
-        .arg(&exe));
-    assert!(common::execute(&exe).success());
+    let order = temp.0.join("order");
+    std::fs::write(&order, "_k_two\n_k_cleanup\n_k_catch\n").unwrap();
+    for reorder in [false, true] {
+        let mut command = Command::new("clang++");
+        command.arg(&driver).arg(&obj);
+        if reorder {
+            command
+                .arg("-Wl,-dead_strip")
+                .arg("-Xlinker")
+                .arg("-order_file")
+                .arg("-Xlinker")
+                .arg(&order);
+        }
+        run(command.arg("-o").arg(&exe));
+        assert!(common::execute(&exe).success(), "reorder={reorder}");
+    }
 }
 #[test]
 fn symbolic_leb_layout_and_got_constraints() {

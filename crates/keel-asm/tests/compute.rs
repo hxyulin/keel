@@ -443,8 +443,7 @@ int main(void) {
     assert_eq!(execute(&executable).code(), Some(0));
 }
 
-/// Exercise actual Keel instruction emission without pretending that the
-/// assembler already implements the backend's CFI/subsection directives.
+/// Assemble unmodified Keel output, including its unwind and subsection directives.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
 fn keel_generated_integer_and_fp_functions_execute() {
@@ -460,19 +459,11 @@ fn keel_generated_integer_and_fp_functions_execute() {
         keel_ir::verify_module(&module).unwrap();
         let source =
             keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-        let supported: String = source
-            .lines()
-            .filter(|line| {
-                let line = line.trim_start();
-                !line.starts_with(".cfi_") && line != ".subsections_via_symbols"
-            })
-            .map(|line| format!("{line}\n"))
-            .collect();
-        compare_clang(&supported);
+        compare_clang(&source);
         let temp = Temp::new();
         let object = temp.0.join("keel.o");
         let executable = temp.0.join("keel");
-        std::fs::write(&object, keel_asm::assemble_object(&supported).unwrap()).unwrap();
+        std::fs::write(&object, keel_asm::assemble_object(&source).unwrap()).unwrap();
         run(Command::new("clang")
             .arg(&object)
             .arg("-o")

@@ -207,7 +207,6 @@ fn invalid_symbol_addressing_is_rejected() {
         "b.eq _external",
         "cbz x0, _external",
         "adrp x0, Lundefined@PAGE",
-        ".subsections_via_symbols",
     ] {
         assert!(assemble(source).is_err(), "{source}");
     }
@@ -414,12 +413,12 @@ fn keel_generated_calls_and_symbol_addresses_link_and_execute() {
     let module = keel_ir::parse(source).unwrap();
     keel_ir::verify_module(&module).unwrap();
     let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-    // CFI and subsection splitting remain explicitly unsupported in production.
+    // Isolate instruction relocations; unwind records have separate native tests.
     let source: String = source
         .lines()
         .filter(|line| {
             let line = line.trim_start();
-            !line.starts_with(".cfi_") && line != ".subsections_via_symbols"
+            !line.starts_with(".cfi_")
         })
         .map(|line| format!("{line}\n"))
         .collect();

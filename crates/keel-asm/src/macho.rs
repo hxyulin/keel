@@ -248,7 +248,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             },
             ordinal,
             0,
-            if symbol.section == Some(0) && !symbol.global && symbol.name.starts_with('L') {
+            if symbol.section.is_some() && !symbol.global && symbol.name.starts_with('L') {
                 2
             } else {
                 0
@@ -364,12 +364,16 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         return Err(Error::new(0, "Mach-O file exceeds 32 bits"));
     }
     let mut out = Vec::new();
-    let flags = if assembly
+    let flags = (if assembly
         .sections
         .iter()
         .any(|s| s.kind == SectionKind::ThreadVariables)
     {
         0x800000
+    } else {
+        0
+    }) | if assembly.subsections_via_symbols {
+        0x2000
     } else {
         0
     };

@@ -223,14 +223,6 @@ fn keel_generated_globals_and_tls_execute() {
         keel_ir::verify_module(&module).unwrap();
         let source =
             keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
-        let source: String = source
-            .lines()
-            .filter(|line| {
-                let line = line.trim_start();
-                line != ".subsections_via_symbols"
-            })
-            .map(|line| format!("{line}\n"))
-            .collect();
         let temp = Temp::new();
         let obj = temp.0.join("keel.o");
         let exe = temp.0.join("program");
