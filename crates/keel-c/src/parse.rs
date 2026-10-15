@@ -150,7 +150,8 @@ pub struct Parser<'a> {
     literal_ids: [HashMap<&'a [u8], usize>; 2],
     pub(crate) fs: Option<FuncState<'a>>,
     /// Functions declared at least once without `inline` (or with
-    /// `extern`), which therefore get an external definition.
+    /// `extern`), for which inline-only emission does not apply.
+    /// Explicit static linkage, recorded in `Global::internal`, still wins.
     external_def: HashSet<usize>,
     /// Parameters of the last parameter list parsed: those of a function
     /// definition's declarator, when its body follows.
@@ -691,6 +692,14 @@ impl<'a> Parser<'a> {
             }
             self.declaration(true)?;
         }
+        // Until now `internal` records explicit static linkage only. C99
+        // inline-only emission depends on *all* declarations in this unit,
+        // including declarations that follow the definition.
+        for f in &self.funcs {
+            if !self.external_def.contains(&f.global) {
+                self.globals[f.global].internal = true;
+            }
+        }
         Ok(())
     }
 
@@ -1066,12 +1075,6 @@ impl<'a> Parser<'a> {
                 loc,
                 format!("`{}` is defined twice", self.globals[g].name),
             ));
-        }
-        // A C99 inline definition, never declared otherwise, is only an
-        // inline definition; another file must provide the external one.
-        // Making it internal gives this file its own copy instead.
-        if !self.external_def.contains(&g) {
-            self.globals[g].internal = true;
         }
         let params = std::mem::take(&mut self.last_params);
         let name = self.globals[g].name;
@@ -1549,7 +1552,15 @@ impl<'a> Parser<'a> {
             ty = self.ptr_type(ty);
             sugar = sugar.wrap(Sugar::Ptr);
             let is_atomic;
-            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut attrs)?;
+            // Attributes in the pointer's qualifier list describe that
+            // pointer/pointee, even when the named declarator is a function
+            // returning it. We do not represent pointer-call contracts.
+            let mut pointer_attrs = Attrs::default();
+            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut pointer_attrs)?;
+            pointer_attrs.returns_twice = false;
+            pointer_attrs.noreturn = false;
+            pointer_attrs.function_attrs = keel_ir::FunctionAttrs::default();
+            attrs.merge(pointer_attrs);
             if is_atomic {
                 ty = self.atomic_type(ty, loc)?;
             }
