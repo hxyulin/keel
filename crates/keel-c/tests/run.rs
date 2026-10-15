@@ -25,6 +25,22 @@ fn build_with_keel(i_path: &Path, exe: &Path, optimize: bool) -> Result<(), Stri
 }
 
 fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Result<(), String> {
+    build_with_allocator(
+        i_path,
+        exe,
+        optimize,
+        opts,
+        keel_codegen::regalloc::AllocationTier::Full,
+    )
+}
+
+fn build_with_allocator(
+    i_path: &Path,
+    exe: &Path,
+    optimize: bool,
+    opts: keel_c::Options,
+    allocation: keel_codegen::regalloc::AllocationTier,
+) -> Result<(), String> {
     let src = std::fs::read_to_string(i_path).unwrap();
     let mut module =
         keel_c::compile(&src, i_path.to_str().unwrap(), opts).map_err(|e| e.to_string())?;
@@ -32,7 +48,15 @@ fn build(i_path: &Path, exe: &Path, optimize: bool, opts: keel_c::Options) -> Re
     if optimize {
         keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
     }
-    let asm = keel_codegen::compile(&module, opts.target).map_err(|e| e.to_string())?;
+    let asm = keel_codegen::compile_with_pipeline(
+        &module,
+        opts.target,
+        &keel_codegen::CodegenPipeline {
+            selector: &keel_codegen::SelectionTier::Baseline,
+            allocator: &allocation,
+        },
+    )
+    .map_err(|e| e.to_string())?;
     let asm_path = exe.with_extension("s");
     std::fs::write(&asm_path, asm).unwrap();
     let out = Command::new("clang")
@@ -142,7 +166,14 @@ fn debugger() {
         "continue",
     ];
     let mut sessions = Vec::new();
-    for build_ in ["clang", "keel", "keel-opt"] {
+    use keel_codegen::regalloc::AllocationTier::{Fast, Full};
+    for (build_, allocation, optimize) in [
+        ("clang", Full, false),
+        ("keel", Full, false),
+        ("keel-opt", Full, true),
+        ("keel-fast", Fast, false),
+        ("keel-fast-opt", Fast, true),
+    ] {
         let dir = out_dir.join(build_);
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("vars");
@@ -160,7 +191,7 @@ fn debugger() {
                 debug_info: true,
                 target: Default::default(),
             };
-            if let Err(e) = build(&i_path, &exe, build_ == "keel-opt", opts) {
+            if let Err(e) = build_with_allocator(&i_path, &exe, optimize, opts, allocation) {
                 panic!("building vars.c: {e}");
             }
         }

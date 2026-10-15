@@ -335,8 +335,16 @@ fn programs() {
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn debug_info() {
+    for allocation in [AllocationTier::Full, AllocationTier::Fast] {
+        debug_info_with_allocator(allocation);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn debug_info_with_allocator(allocation: AllocationTier) {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let lldb = debug_session(
+        allocation,
         &tests.join("debug/calc.keel"),
         &tests.join("debug/main.c"),
         false,
@@ -368,6 +376,7 @@ fn debug_info() {
 
     // The IR's own lines, as `keel compile -g` gives them.
     let lldb = debug_session(
+        allocation,
         &tests.join("programs/sum.keel"),
         &tests.join("programs/sum.c"),
         true,
@@ -395,7 +404,13 @@ fn debug_info() {
 /// Compiles `keel`, links it with `driver` built with `-g`, and runs
 /// `commands` in lldb. Returns lldb's output.
 #[cfg(target_arch = "aarch64")]
-fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) -> String {
+fn debug_session(
+    allocation: AllocationTier,
+    keel: &Path,
+    driver: &Path,
+    ir_lines: bool,
+    commands: &[&str],
+) -> String {
     let src = std::fs::read_to_string(keel).unwrap();
     let module = if ir_lines {
         keel_ir::parse_with_ir_lines(&src, keel.to_str().unwrap())
@@ -404,7 +419,15 @@ fn debug_session(keel: &Path, driver: &Path, ir_lines: bool, commands: &[&str]) 
     };
     let module = module.unwrap();
     keel_ir::verify_module(&module).unwrap();
-    let asm = keel_codegen::aarch64::compile(&module).unwrap();
+    let asm = keel_codegen::aarch64::compile_with_pipeline(
+        &module,
+        &REGISTERS,
+        &keel_codegen::CodegenPipeline {
+            selector: &keel_codegen::SelectionTier::Baseline,
+            allocator: &allocation,
+        },
+    )
+    .unwrap();
 
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("debug");
     std::fs::create_dir_all(&dir).unwrap();

@@ -273,3 +273,19 @@ typedef in glibc's `pthread.h`. The full ARM differential suite requires a
 reference Clang with the requested CPU/features; the NUC's Clang 18 rejects
 `-mcpu=apple-m5`, so that limitation is recorded separately from compiler
 correctness.
+
+The [allocator validation](reports/premerge-linux-debugger-2026-10-15/summary.json)
+adds native Fast/Full coverage, including optimized/unoptimized Lua with
+baseline/full selection, and retained GDB sessions against a Clang reference.
+The report includes the temporary Fast configuration definitions. To repeat
+the Linux debugger checks after building a native release compiler:
+
+```sh
+python3 suite/validate_linux_debugger.py --compiler target/release/keel \
+  --work-dir target/linux-debugger --output target/linux-debugger/report.json
+```
+
+This requires GDB, Clang and `llvm-dwarfdump`. It checks types, bitfields,
+pointer chains, TLS, scopes, live variable mutation, and resulting execution
+for both allocators with and without optimization. The existing macOS
+`debugger` and `debug_info` tests now cover both allocators as well.

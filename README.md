@@ -89,6 +89,14 @@ and Lua's portable tests in all four compiler/selection modes pass. QuickJS
 and SQLite currently stop at an alignment-changing typedef in glibc's
 `pthread.h`; that frontend feature remains unsupported.
 
+The [allocator premerge validation](suite/reports/premerge-linux-debugger-2026-10-15/summary.json)
+passes 214 compiler test functions and 27 portable assembler tests on that
+Linux NUC, plus Lua in all eight allocator × optimization × selection modes.
+Native Linux GDB and DWARF verification cover Fast/Full with and without
+optimization; macOS LLDB checks also exercise both allocators, including
+source stepping, variable inspection and state mutation. Compressed logs and
+the temporary Lua matrix definitions accompany the report.
+
 `--emit-object` and the structured compiler/assembler API currently target
 AArch64 Mach-O. Native x86 instruction encoding and an ELF writer remain to
 be implemented. The x86 backend also diagnoses exceptions, inline assembly
