@@ -193,6 +193,10 @@ compilation. The driver starts and retains the client for the invocation.
 Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
 crates and manage the Tracy client themselves. Benchmark uninstrumented
 release builds for final timings; use instrumented builds to locate costs.
+The [compilation-speed investigation](suite/reports/compilation-speed-analysis-20261015.html)
+compares complete object workflows with assembly-only output on macOS and Linux,
+and separates frontend, verification, optimization, codegen and object costs.
+
 
 ## Current scope
 

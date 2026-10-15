@@ -291,3 +291,51 @@ Build times are one observation, while runtime samples are sequential by
 configuration rather than paired/randomized. Cross-machine comparisons use
 ratios to each host's Clang baseline; absolute times also reflect the hardware
 and operating system.
+
+
+## Compilation-speed boundaries
+
+The [compilation-speed analysis](reports/compilation-speed-analysis-20261015.html)
+([aggregate data](reports/compilation-speed-analysis-20261015.json),
+[macOS CLI samples](reports/compile-boundaries-macos-20261015.json),
+[Linux CLI samples](reports/compile-boundaries-linux-20261015.json)) separates
+C-to-assembly, complete object generation, external assembly and library stages.
+It reuses the exact compiler binaries from the full platform benchmark.
+
+On macOS, the direct object API takes 1.135 s for all 44 inputs (1.568 s with
+full optimization), versus Clang -O0's 1.842 s integrated C-to-object batch.
+Keel text plus external Clang takes 10.165 s. On Linux, Keel emits assembly
+in 1.589 s versus Clang -O0's 2.851 s; external assembly raises the full Keel
+workflow to 5.672 s. These are different output boundaries, explicitly named.
+The ordinary suite workflow still uses external Clang assembly; this analysis
+does not change its default or claim equivalent optimized-code quality.
+
+The optimizer's repeated verifier calls account for 57% of measured pass time
+on macOS and 53% on Linux. The separate pass profiler checks its final IR against
+the ordinary optimizer. Compiler verification policy is unchanged. A short
+[SQLite CPU sample](reports/compilation-speed-keel-sqlite-sample-20261015.txt)
+provides additional, partially symbolicated allocation/tokenization/verifier
+leads; its percentages are not a whole-corpus profile.
+
+Build tools before timing, and keep both machines idle during each measurement:
+
+```sh
+cargo build --release -p keel --examples
+python3 suite/measure_compile_boundaries.py \
+  --work-dir target/compilation-profile/current \
+  --output /tmp/compile-boundaries.json
+python3 suite/measure_assembly_driver.py \
+  --input-dir target/compilation-profile/current/keel-S \
+  --work-dir target/compilation-profile/current-driver \
+  --compiler target/compilation-profile/current/keel-fixed \
+  --output /tmp/assembly-driver.json
+target/release/examples/profile_passes 5 target/suite/lua/pre/*.i
+```
+
+The command-line runner uses seven seeded randomized paired rounds after a
+preflight and warmup. Native objects match the text-assembler objects for all
+44 files both plain and optimized, and both resulting builds pass Lua, QuickJS
+and SQLite correctness checks. Preprocessing and linking are outside timings.
+Internal stage timings exclude input/output and startup, include destruction,
+and report five samples after two warmups. They are diagnostic measurements,
+not an exact decomposition of independently timed CLI medians.
