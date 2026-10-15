@@ -182,8 +182,21 @@ block0(v0: i64):
     .unwrap();
     let before = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
     assert!(before.contains("\tmovz\t"), "{before}");
-    keel_opt::run_passes(&mut module, &["instcombine"]).unwrap();
+    keel_opt::run_passes(&mut module, &["canonicalize"]).unwrap();
     let after = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
     assert!(after.contains("#37"), "{after}");
     assert!(!after.contains("\tmovz\t"), "{after}");
+}
+
+#[test]
+fn comparison_canonicalization_exposes_aarch64_immediates() {
+    for cond in [
+        "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge",
+    ] {
+        let mut module = keel_ir::parse(&format!("func @f(i64) -> i64 {{\nblock0(v0: i64):\n v1 = iconst.i64 37\n v2 = icmp.{cond} v1, v0\n v3 = uext.i64 v2\n return v3\n}}")).unwrap();
+        keel_opt::run_passes(&mut module, &["canonicalize"]).unwrap();
+        let after = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
+        assert!(after.contains("#37"), "{after}");
+        assert!(!after.contains("\tmovz\t"), "{after}");
+    }
 }

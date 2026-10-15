@@ -15,12 +15,87 @@ preconditions.
 | CFG | Constant branches/switches, unreachable removal, forwarding and block merging | Branch threading using path facts, richer switch simplification, additional merge/selection forms |
 | SSA parameters | Simple uniform/dominating and anchored self-loop parameters via opt-in `phi-simplify` | General mutually recursive redundant parameter components |
 | Memory | Exact-address local forwarding, explicit access/effect contracts | Escape-aware stack promotion, aggregate scalar replacement, alias-disambiguated forwarding and dead stores |
-| Normal forms | Integer commutative literals now canonicalize to the right; GVN normalizes commutative keys and reversed comparisons | Broader Boolean, cast and comparison normal forms; maintaining useful forms as later stages expose facts |
+| Normal forms | Explicit initial canonicalization, shared local normalization and declared consumer entry requirements; integer literals last, deterministic interchangeable operand order, reversed comparison predicates | Boolean/cast/associative expression forms, precise invalidation to reduce restoration scans |
 
 These are not all profitability transformations. Proving a comparison constant,
 removing a redundant mask, or replacing a trivial parameter simplifies the
 representation. Inlining/unrolling/code-motion choices need additional
 profitability policy. They should not prevent improving scalar reasoning first.
+
+## Canonicalization contract
+
+Basic and Full begin with `canonicalize`. It performs no constant evaluation,
+reassociation, instruction creation/removal, or motion. Its structural form is:
+
+- Every instruction operand directly names its resolved SSA value. Aliases in
+  value tables and block parameter definitions can still exist.
+- For commutative integer binary operations (`iadd`, `imul`, `and`, `or`, `xor`,
+  `umulhi`, `smulhi`) and checked add/multiply (signed and unsigned), operands
+  sort by `(is_integer_literal, value_id)`. A single integer literal therefore
+  appears on the right. Two nonliterals or two literals sort by SSA value ID;
+  separately defined equal literals need not share an ID.
+- Integer comparisons use the same ordering and reverse the predicate on a
+  swap: for example `icmp.slt 37, x` becomes `icmp.sgt x, 37`. Signedness and
+  equality semantics are preserved.
+- Floating-point operand order, noncommutative integer operand order, select
+  arms, edge order, memory effects and trapping behavior are preserved.
+
+This is a structural contract, not a promise that equivalent arithmetic trees
+are identical: `(a+b)+c`, `a+(b+c)`, and duplicated constants still need other
+passes. Raw frontend IR remains valid without canonicalization, and the None
+optimization tier runs no passes.
+
+A leading pass alone cannot establish a permanent invariant. CFG cleanup,
+SCCP, GVN and memory forwarding can record lazy aliases; folding can turn an
+existing value into a literal. Either can invalidate the ordering of users
+that the transforming pass did not touch.
+
+`Pass::requires_canonical_form()` declares an entry requirement. The manager
+tracks whether the form is established and restores it immediately before a
+requesting pass when necessary. Any pass reporting a change invalidates the
+form conservatively unless `produces_canonical_form()` promises it on exit.
+A pass reporting no change must not mutate the function. Restoration is
+profiled and verified as canonicalization, including in explicit/custom
+pipelines. `instcombine` is the first consumer and also uses the same payload
+normalizer within its worklist as new facts appear during its execution.
+Direct calls to `Pass::run` bypass manager prerequisites; callers needing the
+entry contract should use `run_pipeline` or `run_passes`.
+
+The guarantee is **on entry to a requesting pass**, not at every point during
+its rewrites or on exit from the entire optimizer. GVN retains independent
+key normalization, including its existing FP equivalence policy. GCM remains
+last and can rematerialize constants. Future consumers should declare their
+requirement rather than depend on a particular preceding pass name.
+
+Tests cover all integer widths, every signed/unsigned comparison predicate,
+both result identities of checked operations, literal precedence over value
+IDs, idempotence, preserved instruction counts, memory/FP ordering, and
+restoration after a custom pass exposes a literal through an alias. The native
+fixture covers signed and unsigned comparisons with literals initially on the
+left through both selectors and allocators under restricted registers.
+
+The [stage comparison](../suite/reports/canonical-stage-aarch64-2026-10-15.json)
+measures the previous Full compiler against this contract and initial stage on
+the same 44 preprocessed files with Keel assembly (7 paired runtime samples,
+5 paired compile samples). The candidate release binary after final formatting
+and lint cleanup is byte-identical to the measured binary.
+
+| Metric | Before → after / ratio |
+|---|---:|
+| Literal-left integer comparisons | 297 → 0 |
+| Static IR instructions / blocks | unchanged |
+| Aggregate text | −1,056 bytes |
+| Runtime geometric mean | 0.9923 (−0.77%) |
+| Compile-time geometric mean | 1.0768 (+7.68%) |
+
+Seven of eight workload confidence intervals include no runtime change; this
+is not an established aggregate application speedup. The stage is enabled as
+the requested structural foundation. Conservative whole-function restoration
+and verification have a measurable compile cost; attributing that cost to
+individual components needs profiling. More precise change information could
+avoid restoration when a pass changes unrelated instructions. The final
+SQLite IR has one literal-left commutative binary operation, consistent with
+the contract applying at consumer entry rather than optimizer exit.
 
 ## Known-bit reasoning
 
@@ -104,16 +179,16 @@ corpus, not a bound for arbitrary inputs. None of these recipes establishes an
 aggregate runtime gain. More simplified IR does not itself prove cheaper
 machine code: CFG/layout, placement and allocation still affect the output.
 The cause of the text growth has not been isolated. Known-bit reasoning and
-these recipes remain opt-in; the default pipeline is unchanged. The next
-canonical operand-placement change is measured separately.
+these recipes remain opt-in. This sweep predates the canonicalization changes,
+which are measured separately below.
 
 
 ## Integer operand canonicalization
 
-A separate change makes `instcombine` put integer literals on the right of
+The original isolated change made `instcombine` put integer literals on the right of
 commutative binary operations, sharing GVN's commutativity classification.
 Noncommutative operations and floating-point operand order are unchanged.
-The form is stable on repetition and needs no extra pipeline stage. It avoids
+That version normalized inside combining without an extra pipeline stage. It avoided
 requiring every consumer to handle both `constant + x` and `x + constant`.
 For example, the existing AArch64 emitter folds its right operand into an
 immediate: canonicalizing `37 + x` removes a materialized constant register.
@@ -124,9 +199,9 @@ Keel assembly. It reduces literal-left cases from 518 to zero across the corpus,
 with exactly the same static IR instruction and block counts. Generated text
 shrinks by 80 bytes in Lua, 448 in QuickJS and 728 in SQLite (1,256 total).
 The runtime ratio is 1.0019 and compile-time ratio 0.9989, both essentially
-neutral; no application speedup is claimed. This normal form is retained in
-Basic/Full's existing combining pass. Known-bit analysis and the extra cleanup
-recipes remain opt-in.
+neutral; no application speedup is claimed. The form now belongs to the shared
+normalizer and explicit stage described above. Known-bit analysis and the extra
+cleanup recipes remain opt-in.
 
 This illustrates two different needs: fact analysis discovers missing proofs,
 while canonicalization makes existing rules and lowering easier to apply.

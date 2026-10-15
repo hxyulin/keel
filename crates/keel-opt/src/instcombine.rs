@@ -34,23 +34,8 @@ fn zero(ty: Type) -> Fold {
 
 fn simplify(func: &mut Function, inst: Inst) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
-    data.for_each_operand_mut(|v| *v = func.resolve(*v));
-    // A stable normal form lets target lowering and later rules find integer
-    // immediates on the right. Do not reorder noncommutative or FP operations.
-    let canonicalized = if let InstData::Binary { op, args } = &mut data {
-        if !op.is_float()
-            && crate::gvn::is_commutative(*op)
-            && constant(func, args[0]).is_some()
-            && constant(func, args[1]).is_none()
-        {
-            args.swap(0, 1);
-            true
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    crate::canonicalize::normalize(func, &mut data);
+    let canonicalized = data != *func.inst_data(inst);
 
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
         return Some(Fold::Multi(constants));

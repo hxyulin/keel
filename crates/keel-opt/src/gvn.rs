@@ -92,7 +92,7 @@ fn canonical(func: &Function, data: &InstData) -> InstData {
 }
 
 /// Swap the operands without negating the predicate. Signedness is retained.
-fn reverse(cond: IntCC) -> IntCC {
+pub(crate) fn reverse(cond: IntCC) -> IntCC {
     match cond {
         IntCC::Eq | IntCC::Ne => cond,
         IntCC::Slt => IntCC::Sgt,
@@ -123,7 +123,7 @@ pub(crate) fn is_commutative(op: BinaryOp) -> bool {
     )
 }
 
-fn is_commutative_overflow(op: OverflowOp) -> bool {
+pub(crate) fn is_commutative_overflow(op: OverflowOp) -> bool {
     matches!(
         op,
         OverflowOp::Uadd | OverflowOp::Sadd | OverflowOp::Umul | OverflowOp::Smul

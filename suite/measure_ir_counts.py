@@ -32,10 +32,11 @@ def count(text):
             for instruction in function_lines:
                 expression = instruction.strip().split(" = ")[-1]
                 opcode = expression.split()[0]
-                if opcode in ["iadd", "imul", "and", "or", "xor", "umulhi", "smulhi"]:
+                if opcode.startswith("icmp.") or opcode in ["iadd", "imul", "and", "or", "xor", "umulhi", "smulhi"]:
                     operands = re.findall(r"\bv[0-9]+\b", expression)
                     if len(operands) == 2 and operands[0] in literals and operands[1] not in literals:
-                        counts["left_integer_literals"] += 1
+                        metric = "left_comparison_literals" if opcode.startswith("icmp.") else "left_integer_literals"
+                        counts[metric] += 1
             function_lines = []
             in_block = False
         elif in_block and line.startswith("    "):
@@ -90,7 +91,7 @@ def main():
                            "totals": totals, "files": files}
     args.report.write_text(json.dumps(report, indent=2) + "\n")
     for name, suites in totals.items():
-        print(name, {suite: {key: counts[key] for key in ["instructions", "blocks", "icmp", "and", "or", "trunc", "uext", "sext", "left_integer_literals"]} for suite, counts in suites.items()}, flush=True)
+        print(name, {suite: {key: counts[key] for key in ["instructions", "blocks", "icmp", "and", "or", "trunc", "uext", "sext", "left_integer_literals", "left_comparison_literals"]} for suite, counts in suites.items()}, flush=True)
 
 
 if __name__ == "__main__":

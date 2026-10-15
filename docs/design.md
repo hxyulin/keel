@@ -735,9 +735,10 @@ analyses they need; there is no analysis cache yet.
 
 | Pass | What it does |
 |---|---|
+| `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
 | `const-fold` | evaluate instructions on constants with the machine's semantics (wrapping, shift amounts mod width, IEEE floats rounded at their own width); trapping divisions are left to trap |
-| `instcombine` | canonicalize integer commutative literals to the right, fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
+| `instcombine` | consume canonical integer operands, fold constants, eliminate wrapping integer identities and redundant conversions, and replace power-of-two unsigned division/remainder and multiplication with shifts/masks |
 | `memory-forward` (opt-in) | block-local exact-address, same-type load reuse and store-to-load forwarding; every write invalidates all prior facts, and volatile accesses, calls, atomics and lifetime barriers clear them |
 | `known-bits` (opt-in) | propagate integer known-zero/known-one facts through SSA, remove proven redundant masks and fold comparisons from derived bounds |
 | `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
@@ -749,8 +750,12 @@ analyses they need; there is no analysis cache yet.
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
-The default pipeline (`-O`) is `simplify-cfg, instcombine, simplify-cfg, gvn,
-dce, gcm`. Basic uses `simplify-cfg, instcombine, simplify-cfg, dce`.
+The default pipeline (`-O`) is `canonicalize, simplify-cfg, instcombine,
+simplify-cfg, gvn, dce, gcm`. Basic uses `canonicalize, simplify-cfg, instcombine,
+simplify-cfg, dce`. A pass can request canonical form on entry; the manager
+restores it after intervening changes, including lazy aliases. This applies to
+explicit and custom pipelines too. The contract and its limits are documented
+in the [canonicalization section](simplification.md#canonicalization-contract).
 `const-fold` stays available for isolated numeric folding and historical
 comparisons; the defaults use the broader combining pass once. The paired
 [pass ablation matrix](../suite/reports/pass-ablations-aarch64-2026-10-15.json)

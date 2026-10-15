@@ -185,3 +185,11 @@ integer forms fall from 518 to zero; IR instruction counts are unchanged but
 text shrinks by 1,256 bytes, with neutral aggregate runtime and compile cost.
 `measure_ir_counts.py` accepts `--baseline-compiler` for version comparisons and
 verifies each binary and source hash against the report before adding counts.
+
+The [explicit canonicalization stage comparison](reports/canonical-stage-aarch64-2026-10-15.json)
+measures the initial stage and canonical entry requirements against that compiler:
+297 literal-left comparisons become zero, text shrinks another 1,056 bytes,
+runtime ratio is 0.9923 (mostly intervals spanning one), and compile-time ratio
+is 1.0768. The census also counts `left_comparison_literals`. Default Basic and
+Full now start with canonicalization; explicit historical recipes retain their
+listed stages, with prerequisites restored for consumers that request them.

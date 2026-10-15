@@ -13,6 +13,7 @@
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
+mod canonicalize;
 mod const_fold;
 mod dce;
 mod gcm;
@@ -25,10 +26,22 @@ mod sccp;
 mod simplify_cfg;
 
 /// A replaceable optimization pass over one function.
+/// `run` must report true whenever it mutates the function, including aliases.
 pub trait Pass: Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn run(&self, func: &mut Function) -> bool;
+
+    /// Request the structural form documented in `docs/simplification.md`.
+    /// The manager restores it on entry when an earlier pass changed the IR.
+    fn requires_canonical_form(&self) -> bool {
+        false
+    }
+
+    /// Only return true if every instruction is canonical on exit.
+    fn produces_canonical_form(&self) -> bool {
+        false
+    }
 }
 
 struct BuiltinPass {
@@ -88,6 +101,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "prove integer bits and ranges to remove redundant masks and fold comparisons",
         run: known_bits::run,
     },
+    BuiltinPass {
+        name: "canonicalize",
+        description: "resolve operand aliases and normalize integer operand order and comparisons",
+        run: canonicalize::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -99,6 +117,12 @@ impl Pass for BuiltinPass {
     }
     fn run(&self, func: &mut Function) -> bool {
         (self.run)(func)
+    }
+    fn requires_canonical_form(&self) -> bool {
+        self.name == "instcombine"
+    }
+    fn produces_canonical_form(&self) -> bool {
+        self.name == "canonicalize"
     }
 }
 
@@ -113,6 +137,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[7],
     &BUILTINS[8],
     &BUILTINS[9],
+    &BUILTINS[10],
 ];
 
 /// Independent optimizer effort; Full adds value numbering and code motion.
@@ -127,7 +152,13 @@ impl OptimizationTier {
     pub fn pipeline(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
-            Self::Basic => &["simplify-cfg", "instcombine", "simplify-cfg", "dce"],
+            Self::Basic => &[
+                "canonicalize",
+                "simplify-cfg",
+                "instcombine",
+                "simplify-cfg",
+                "dce",
+            ],
             Self::Full => DEFAULT_PIPELINE,
         }
     }
@@ -139,6 +170,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 
 /// The passes `keel compile -O` runs, in order.
 pub const DEFAULT_PIPELINE: &[&str] = &[
+    "canonicalize",
     "simplify-cfg",
     "instcombine",
     "simplify-cfg",
@@ -189,13 +221,28 @@ pub fn run_passes(module: &mut Module, names: &[&str]) -> Result<(), OptError> {
     run_pipeline(module, &passes)
 }
 
-/// Runs custom or built-in passes, verifying the IR after each pass.
+/// Runs custom or built-in passes, restoring declared canonical entry
+/// requirements and verifying the IR after each pass and restoration.
 pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), OptError> {
     profiling::scope!("optimization");
     for func in &mut module.functions {
+        let mut canonical = false;
         for pass in passes {
             profiling::scope!("pass", pass.name());
-            pass.run(func);
+            if pass.requires_canonical_form() && !canonical {
+                profiling::scope!("canonicalize prerequisite");
+                canonicalize::run(func);
+                verify(func).map_err(|errors| OptError::Verifier {
+                    pass: "canonicalize",
+                    func: func.name.clone(),
+                    errors,
+                })?;
+                canonical = true;
+            }
+            let changed = pass.run(func);
+            // Alias-producing rewrites can invalidate even untouched users.
+            // Conservatively invalidate after any change unless promised otherwise.
+            canonical = pass.produces_canonical_form() || (canonical && !changed);
             verify(func).map_err(|errors| OptError::Verifier {
                 pass: pass.name(),
                 func: func.name.clone(),

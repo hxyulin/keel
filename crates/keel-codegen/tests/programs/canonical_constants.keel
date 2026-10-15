@@ -1,5 +1,5 @@
 ; expect: exit 0
-; opt-passes: simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
+; opt-passes: canonicalize, simplify-cfg, instcombine, simplify-cfg, gvn, dce, gcm
 func @canonical_constants(i64) -> i64 {
 block0(v0: i64):
     v1 = iconst.i64 37
@@ -7,4 +7,17 @@ block0(v0: i64):
     v3 = iconst.i64 63
     v4 = xor v3, v2
     return v4
+}
+
+func @canonical_compare(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 37
+    v2 = icmp.slt v1, v0
+    v3 = icmp.uge v1, v0
+    v4 = uext.i64 v2
+    v5 = uext.i64 v3
+    v6 = iconst.i64 1
+    v7 = shl v5, v6
+    v8 = or v7, v4
+    return v8
 }
