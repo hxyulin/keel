@@ -239,13 +239,12 @@ fn malformed_section_diagnostics() {
 // default sections; compare actual ELF entry sizes, flags, data and groups.
 type SectionMetadata = (String, object::SectionFlags, u64, u64, Vec<u8>);
 type SymbolMetadata = (String, u8, u8, Option<String>, u64);
-fn normalized(
-    bytes: &[u8],
-) -> (
+type NormalizedMetadata = (
     Vec<SectionMetadata>,
     Vec<(String, Vec<String>)>,
     Vec<SymbolMetadata>,
-) {
+);
+fn normalized(bytes: &[u8]) -> NormalizedMetadata {
     let file = object::File::parse(bytes).unwrap();
     let sections = file
         .sections()
