@@ -64,11 +64,17 @@ x86 DWARF numbering. Source CFI accepts x86 register names too.
 
 ## Limits and performance boundaries
 
-All direct branches use rel32, including nearby conditional branches. There is
-no short-branch relaxation, so code can be larger than Clang/GAS output. This
-policy gives stable layout, handles jump-table differences without iteration,
-and diagnoses resolved displacements outside signed 32 bits. Calls outside that
-range require linker support; Keel does not synthesize large-code-model thunks.
+Resolved same-section local JMP/Jcc branches use rel8 when the final displacement
+fits -128 through +127. Layout starts optimistically short and only widens;
+each widening pass rechecks all short branches and recomputes alignments,
+max-skip decisions, symbols, aliases, sizes/differences, CFI and line addresses.
+This terminates even when alignment changes non-monotonically. It can retain a
+near branch that a different layout strategy could shorten; it does not promise
+a globally minimal layout. Calls and explicit PLT targets retain rel32.
+Binding-sensitive, unresolved/external and cross-section branches retain the
+necessary linker relocations.
+Resolved displacements outside signed 32 bits are diagnosed. Keel does not
+synthesize large-code-model thunks.
 
 This is a backend-oriented assembler, not a replacement for all GNU assembler
 syntax. AVX/AVX-512, x87, arbitrary vector instructions, AT&T syntax, macros,
@@ -78,10 +84,17 @@ exception personality/LSDA directives and general-dynamic TLS are not implemente
 Unsupported directives and operands return errors; they are not silently dropped.
 
 Layout and fixups require memory proportional to the input/object. Symbol lookup
-uses ordered maps; local temporary symbols are retained in the ELF symbol table.
-Executable alignment uses single-byte NOPs unless a zero fill is explicit;
-data alignment uses zeros. Tuned multi-byte NOP sequences are not generated. No
-compile-time speedup is claimed without a separate controlled measurement.
+uses ordered maps. Unneeded local `.L` symbols are omitted from ELF; ordinary
+relocations use section symbols plus the target's section offset. Explicit
+global/weak/hidden symbols, undefined symbols, TLS symbols, GOT/TLS references
+and absolute symbols requiring PC-relative linker relocations retain their
+identity. Absolute constants used only in resolved data are omitted too.
+Executable alignment uses single-byte NOPs unless a fill byte is explicit;
+data alignment uses zeros. Explicit fills preserve their low byte. Tuned
+multi-byte NOP sequences are not generated. Parsed instructions and raw encodings
+are reused across layout passes;
+layout-dependent absolute operands are reevaluated and encoded again. Layout
+iteration adds assembly cost, measured separately from compilation below.
 Native suite configurations are opt-in (`keel-native`, `keel-O-native`,
 `keel-g-native`, `keel-O-select-native`); existing suite baselines are unchanged.
 
@@ -124,3 +137,30 @@ and assembly times, excluding linking. The measured binary/input hashes and all
 samples are in the report. `suite/measure_native_x86.py` reproduces this comparison.
 This establishes an object-generation improvement on these inputs and this host;
 it does not measure application runtime or remove the text-to-IR conversion cost.
+
+## Layout follow-up
+
+`rel8_boundaries_and_binding_sensitive_targets`,
+`cascading_widening_rechecks_alignment_and_all_offsets`, and the Clang/GNU as
+branch matrix cover both signed rel8 boundaries, cascades, aliases, explicit
+alignment fill and max-skip changes. Temporary-symbol tests check section
+relocation addends and preserved GOT/TLS/global/weak/absolute identities.
+`layout_dependent_absolute_operands_are_reencoded` checks an immediate whose
+width changes after a branch widens. The metadata validator also injects a
+forward alias branch and alignment into a compiler-generated debug function,
+then checks source breakpoints, backtraces and libgcc unwinding for native and
+Clang objects.
+
+The fixed-source measurement script uses two prebuilt compilers, generates each
+`.s` once, and links before/after/Clang objects with the same system linker:
+
+```sh
+python3 suite/measure_x86_relaxation.py --before /path/to/keel-before \
+  --after /path/to/keel-after --prepared /path/to/prepared/target/suite \
+  --out /path/to/isolated/benchmark --cpu 2
+```
+
+Its output records binary/input hashes, every timing sample, object/text sizes,
+linked and stripped sizes, temporary-symbol counts, and alternating paired
+runtime measurements. Run it on an otherwise idle Linux host; it pins itself
+and its children to the requested CPU.

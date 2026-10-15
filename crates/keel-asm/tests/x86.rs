@@ -27,14 +27,9 @@ fn rex_sib_displacements_and_immediates() {
 }
 
 #[test]
-fn near_branches_and_symbol_differences() {
+fn short_branches_and_symbol_differences() {
     let bytes = text("start: jmp done\nje start\n.long done-start\ndone: ret");
-    assert_eq!(
-        bytes,
-        [
-            0xe9, 10, 0, 0, 0, 0x0f, 0x84, 0xf5, 0xff, 0xff, 0xff, 15, 0, 0, 0, 0xc3
-        ]
-    );
+    assert_eq!(bytes, [0xeb, 6, 0x74, 0xfc, 8, 0, 0, 0, 0xc3]);
 }
 
 #[test]
@@ -541,4 +536,217 @@ ret
         );
     }
     std::fs::remove_dir_all(temp).unwrap();
+}
+
+#[test]
+fn rel8_boundaries_and_binding_sensitive_targets() {
+    for op in ["jmp", "je", "jne", "jg"] {
+        for gap in [126, 127, 128, 129] {
+            let code = text(&format!("{op} target\n.zero {gap}\ntarget: ret"));
+            assert_eq!(
+                code[0] == 0xeb || (0x70..=0x7f).contains(&code[0]),
+                gap <= 127,
+                "{op} forward {gap}"
+            );
+            if gap <= 127 {
+                assert_eq!(code[1], gap as u8);
+            }
+        }
+        for gap in [125, 126, 127, 128] {
+            let code = text(&format!("target: .zero {gap}\n{op} target"));
+            let is_short = code[gap] == 0xeb || (0x70..=0x7f).contains(&code[gap]);
+            assert_eq!(is_short, gap <= 126, "{op} backward {gap}");
+            if is_short {
+                assert_eq!(code[gap + 1] as i8 as i32, -(gap as i32) - 2);
+            }
+        }
+    }
+    let bytes = assemble_object("jmp external\nje data\njmp public\nje weak\njmp alias\n.globl public\n.weak weak\npublic: ret\nweak: ret\n.set alias,public\n.data\ndata: .byte 0").unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let code = file.section_by_name(".text").unwrap();
+    assert_eq!(code.relocations().count(), 5);
+    assert_eq!(&code.data().unwrap()[..2], &[0xe9, 0]);
+    // Resolved same-section targets retain signed rel32 range diagnostics.
+    assert!(
+        assemble_object("jmp far\n.zero 0\n.set far,.Lstart+0x80000010\n.Lstart: ret").is_err()
+    );
+}
+
+#[test]
+fn cascading_widening_rechecks_alignment_and_all_offsets() {
+    // First branch widens, pushing the backward conditional beyond -128.
+    let code = text("start: jmp far\n.zero 124\nje start\n.zero 128\nfar: ret");
+    assert_eq!(code[0], 0xe9);
+    assert_eq!(&code[129..131], &[0x0f, 0x84]);
+    // Widening the far branch disables a max-skip alignment, taking the
+    // initially short target branch out of range on the following pass.
+    let bytes = assemble_object(".globl f\n.type f,@function\nf: jmp target\njmp far\n.zero 123\n.p2align 7,0xcc,4\ntarget: .long target-f\n.zero 128\nfar: ret\n.size f,.-f\n.set alias,target\n.data\n.quad alias\n.long far-f").unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let code = file.section_by_name(".text").unwrap().data().unwrap();
+    assert_eq!(code[0], 0xe9);
+    assert_eq!(code[5], 0xe9);
+    let target = file
+        .symbols()
+        .find(|s| s.name() == Ok("target"))
+        .unwrap()
+        .address() as usize;
+    assert_eq!(
+        i32::from_le_bytes(code[target..target + 4].try_into().unwrap()) as usize,
+        target
+    );
+    let f = file.symbols().find(|s| s.name() == Ok("f")).unwrap();
+    assert_eq!(f.size() as usize, code.len());
+    let alias = file.symbols().find(|s| s.name() == Ok("alias")).unwrap();
+    assert_eq!(alias.address() as usize, target);
+}
+
+#[test]
+fn temporary_symbols_use_section_relocations_but_preserve_identity() {
+    let bytes = assemble_object(
+        r#"
+.text
+.set .Lconstant,42
+.quad .Lconstant
+lea rax,[rip+.Lforward_absolute]
+.set .Lforward_absolute,123
+.zero 3
+.Lcode: ret
+.set .Lalias,.Lcode+1
+.globl .Lglobal
+.Lglobal: ret
+.weak .Lweak
+.Lweak: ret
+mov rax,[rip+.Lgot@GOTPCREL]
+mov rax,[rip+.Ltls@gottpoff]
+mov rax,[rip+.Lgot_alias@GOTPCREL]
+mov rax,[rip+.Ltls_alias@gottpoff]
+.set .Lgot_alias,.Lgot
+.set .Ltls_alias,.Ltls
+lea rax,[rax+.Ltls@tpoff]
+.data
+.zero 7
+.Ldata: .quad .Lcode+9
+.quad .Lalias+2
+.long .Ldata-.
+.Lgot: .quad 0
+.section .tbss,"awT",@nobits
+.Ltls: .zero 8
+"#,
+    )
+    .unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    for name in [".Lcode", ".Lalias", ".Ldata", ".Lconstant"] {
+        assert!(!file.symbols().any(|s| s.name() == Ok(name)), "{name}");
+    }
+    for name in [".Lglobal", ".Lweak", ".Lgot", ".Ltls", ".Lforward_absolute"] {
+        assert!(file.symbols().any(|s| s.name() == Ok(name)), "{name}");
+    }
+    let code = file.section_by_name(".text").unwrap();
+    let targets: Vec<_> = code
+        .relocations()
+        .map(|(_, r)| {
+            let object::RelocationTarget::Symbol(id) = r.target() else {
+                panic!()
+            };
+            file.symbol_by_index(id)
+                .unwrap()
+                .name()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    for name in [
+        ".Lgot",
+        ".Ltls",
+        ".Lgot_alias",
+        ".Ltls_alias",
+        ".Lforward_absolute",
+    ] {
+        assert!(
+            targets.iter().any(|target| target == name),
+            "{name}: {targets:?}"
+        );
+    }
+    let data = file.section_by_name(".data").unwrap();
+    let rel: Vec<_> = data.relocations().collect();
+    assert_eq!(rel.len(), 2);
+    for ((offset, r), addend) in rel.iter().zip([27, 21]) {
+        assert!([7, 15].contains(offset));
+        assert_eq!(r.addend(), addend);
+        let object::RelocationTarget::Symbol(id) = r.target() else {
+            panic!()
+        };
+        let symbol = file.symbol_by_index(id).unwrap();
+        assert_eq!(symbol.kind(), object::SymbolKind::Section);
+        assert_eq!(
+            symbol.section_index(),
+            file.section_by_name(".text").unwrap().index().into()
+        );
+    }
+    assert_eq!(&data.data().unwrap()[23..27], &(-16i32).to_le_bytes());
+}
+
+#[test]
+fn branch_layout_matches_clang_and_gnu_with_aliases_and_alignment() {
+    use std::process::Command;
+    let temp = std::env::temp_dir().join(format!("keel-x86-relax-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let mut cases = Vec::new();
+    for gap in [0, 125, 126, 127, 128, 129, 254] {
+        for op in ["jmp", "je", "jg"] {
+            cases.push(format!("start: {op} alias\n.zero {gap}\ntarget: {op} start\n.set alias,target\n.long target-start\n"));
+        }
+    }
+    for max in [3, 7, 15, 127] {
+        // LLVM and GAS may choose different valid fixed points for max-skip;
+        // these cases have unambiguous branch distances.
+        cases.push(format!("start: jmp target\n.zero 32\n.p2align 7,0xcc,{max}\ntarget: jne start\n.long target-start\n"));
+    }
+    for (index, case) in cases.iter().enumerate() {
+        let source = format!(".intel_syntax noprefix\n.text\n{case}");
+        let input = temp.join("input.s");
+        std::fs::write(&input, &source).unwrap();
+        let mut commands = vec![("clang", vec!["-target", "x86_64-unknown-linux-gnu", "-c"])];
+        if cfg!(target_os = "linux") {
+            commands.push(("as", vec!["--64"]));
+        }
+        for (tool, args) in commands {
+            let output = temp.join(format!("{tool}.o"));
+            let result = Command::new(tool)
+                .args(args)
+                .arg(&input)
+                .arg("-o")
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{tool}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let reference = std::fs::read(&output).unwrap();
+            let reference = object::File::parse(&*reference).unwrap();
+            assert_eq!(
+                text(&source),
+                reference.section_by_name(".text").unwrap().data().unwrap(),
+                "{tool} case {index}: {source}"
+            );
+        }
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+}
+
+#[test]
+fn layout_dependent_absolute_operands_are_reencoded() {
+    // The first branch widening changes an already-defined absolute alias from
+    // 127 to 130: PUSH must switch from imm8 to imm32 on the next pass.
+    let code = text(
+        "start: jmp far\n.zero 125\nend: .set distance,end-start\npush distance\n.zero 128\nfar: ret",
+    );
+    assert_eq!(code[0], 0xe9);
+    assert_eq!(&code[130..135], &[0x68, 130, 0, 0, 0]);
+    // A later alias remains a symbolic immediate, even when its final value
+    // fits an imm8. This is the before-definition versus forward-alias rule.
+    let code = text("push forward\n.set forward,1\n");
+    assert_eq!(code, [0x68, 1, 0, 0, 0]);
 }

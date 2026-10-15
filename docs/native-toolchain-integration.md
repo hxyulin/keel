@@ -28,9 +28,11 @@ inputs remain read only.
 ## Scope
 
 The x86 assembler covers current Keel output with integer instructions, scalar
-SSE, atomics, ELF relocations, DWARF line data, and CFI. It uses near branches
-without relaxation, accepts Intel syntax, and does not provide general AVX,
-x87, or AT&T compatibility. The code generator still formats and reparses its
+SSE, atomics, ELF relocations, DWARF line data, and CFI. It uses Intel syntax and
+does not provide general AVX, x87, or AT&T compatibility. A subsequent x86 layout
+follow-up adds safe same-section JMP/Jcc relaxation and omits unneeded temporary
+ELF symbols; see the assembler scope document for its
+binding and layout rules. The code generator still formats and reparses its
 x86 instruction stream internally before native encoding.
 
 The macOS linker is an explicit `keel link` command for arm64 Mach-O executable

@@ -85,21 +85,23 @@ impl Encoding {
         }
         Ok(())
     }
-    fn branch(&mut self, a: &Address, plt: bool) -> Result<(), String> {
+    fn branch(&mut self, a: &Address, plt: bool, width: u8) -> Result<(), String> {
         if !matches!(a.modifier, Modifier::None | Modifier::Plt) {
             return Err("invalid branch relocation modifier".into());
         }
         self.fixups.push(Fixup {
             offset: self.bytes.len(),
-            width: 4,
+            width,
             address: a.clone(),
-            kind: if plt || a.modifier == Modifier::Plt {
+            kind: if width == 1 {
+                15
+            } else if plt || a.modifier == Modifier::Plt {
                 4
             } else {
                 2
             },
         });
-        self.number(0, 4);
+        self.number(0, width);
         Ok(())
     }
     /// Emit legacy prefixes, REX, opcode and ModRM/SIB. `reg` is an opcode extension or register field.
@@ -211,7 +213,7 @@ impl Encoding {
     }
 }
 
-pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
+pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
     validate(i)?;
     let mut e = Encoding::default();
     let o = &i.operands;
@@ -286,12 +288,23 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
             None,
         )?,
         (Call | Jmp, [I(a)]) => {
-            e.bytes.push(if op == Call { 0xe8 } else { 0xe9 });
-            e.branch(a, true)?;
+            let short = short && op == Jmp;
+            e.bytes.push(if op == Call {
+                0xe8
+            } else if short {
+                0xeb
+            } else {
+                0xe9
+            });
+            e.branch(a, true, if short { 1 } else { 4 })?;
         }
         (Jcc(cc), [I(a)]) if cc < 16 => {
-            e.bytes.extend([0x0f, 0x80 + cc]);
-            e.branch(a, false)?;
+            if short {
+                e.bytes.push(0x70 + cc);
+            } else {
+                e.bytes.extend([0x0f, 0x80 + cc]);
+            }
+            e.branch(a, false, if short { 1 } else { 4 })?;
         }
         (Call | Jmp, [a])
             if (gpr(a) && width(a) == 64) || matches!(a,M(m) if matches!(m.width,0|64)) =>
@@ -641,7 +654,7 @@ pub(super) fn encode(i: &Instruction) -> Result<Encoding, String> {
     // but the CPU uses the end of the entire instruction (including immediates).
     let len = e.bytes.len();
     for fix in &mut e.fixups {
-        if matches!(fix.kind, 2 | 4 | 9 | 22) {
+        if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
             fix.address.expression.constant -= (len - fix.offset) as i128;
         }
     }
