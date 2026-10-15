@@ -1,5 +1,7 @@
-//! Host-independent, bounded static ELF64 linker for x86-64 Linux.
+//! Host-independent, bounded ELF64 executable linker for x86-64 Linux.
 //! See docs/elf-linker.md for the supported input and execution contract.
+mod dynamic;
+mod input;
 use crate::{Input, Result};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{
@@ -14,11 +16,15 @@ const LIMIT: u64 = 512 * 1024 * 1024;
 
 pub struct Options {
     pub entry: String,
+    pub interpreter: String,
+    pub runpath: Vec<String>,
 }
 impl Default for Options {
     fn default() -> Self {
         Self {
             entry: "_start".into(),
+            interpreter: "/lib64/ld-linux-x86-64.so.2".into(),
+            runpath: Vec::new(),
         }
     }
 }
@@ -116,17 +122,12 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     if options.entry.is_empty() || options.entry.contains('\0') {
         return Err("invalid entry symbol".into());
     }
+    let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
     let mut sections = Vec::new();
     let mut units = Vec::new();
     let mut warnings = Vec::new();
-    for input in inputs {
+    for input in &inputs {
         let mut parse = || -> Result<Unit> {
-            if input.bytes.starts_with(b"!<arch>\n") {
-                return Err(
-                    "archives are not supported by the initial ELF linker; pass extracted objects"
-                        .into(),
-                );
-            }
             let file =
                 ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
             if file.architecture() != object::Architecture::X86_64
@@ -144,7 +145,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 return Err("COMDAT groups are unsupported".into());
             }
             let mut unit = Unit {
-                name: input.name.into(),
+                name: input.name.clone(),
                 sections: BTreeMap::new(),
                 symbols: BTreeMap::new(),
                 relocs: Vec::new(),
@@ -337,17 +338,61 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         common.align = common.align.max(alignment);
     }
     sections.push(common);
+    let mut imports: BTreeMap<String, dynamic::Import> = BTreeMap::new();
     for u in &units {
         for s in u.symbols.values() {
-            if s.global()
-                && s.section == SymbolSection::Undefined
-                && !s.weak()
-                && !globals.contains_key(&s.name)
+            if !s.global() || s.section != SymbolSection::Undefined || globals.contains_key(&s.name)
             {
+                continue;
+            }
+            let export = libraries
+                .iter()
+                .enumerate()
+                .find_map(|(i, l)| l.exports.get(&s.name).map(|e| (i, e)));
+            if export.is_none() && !s.weak() {
                 return Err(format!("{}: undefined symbol `{}`", u.name, s.name));
             }
+            if libraries.is_empty() {
+                continue;
+            }
+            if s.other & 3 != 0 {
+                return Err(format!(
+                    "{}: non-default visibility undefined symbol `{}` cannot be imported",
+                    u.name, s.name
+                ));
+            }
+            let (library, kind, version) = match export {
+                Some((i, e)) => (Some(i), e.kind, e.version.clone()),
+                None => (None, s.info & 15, None),
+            };
+            if !matches!(kind, 0 | 1 | 2 | 10) {
+                return Err(format!(
+                    "unsupported shared-library symbol type {kind} for `{}`",
+                    s.name
+                ));
+            }
+            imports
+                .entry(s.name.clone())
+                .and_modify(|i| i.weak &= s.weak())
+                .or_insert(dynamic::Import {
+                    index: 0,
+                    kind,
+                    weak: s.weak(),
+                    library,
+                    version,
+                });
         }
     }
+    for (i, import) in imports.values_mut().enumerate() {
+        import.index = (i + 1) as u32;
+    }
+    let imported = |ui: usize, si: usize| -> Result<Option<&str>> {
+        let s = units[ui]
+            .symbols
+            .get(&si)
+            .ok_or("relocation references an invalid symbol index")?;
+        Ok((s.global() && imports.contains_key(&s.name)).then_some(s.name.as_str()))
+    };
     // GOT relocations retain their original instruction; no relaxation needed.
     // Keys use resolved definitions, so equal local names remain independent.
     let canonical = |u: usize, s: usize| -> Result<(usize, usize)> {
@@ -364,7 +409,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
-            if matches!(r.kind, 9 | 41 | 42) {
+            if matches!(r.kind, 9 | 41 | 42) && imported(ui, r.symbol)?.is_none() {
                 let key = canonical(ui, r.symbol)?;
                 let next = got.len() as u64 * 8;
                 got.entry(key).or_insert(next);
@@ -382,6 +427,54 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         data: vec![0; got_size as usize],
         offset: 0,
     });
+    let mut dynamic = if libraries.is_empty() {
+        None
+    } else {
+        let mut definitions = Vec::new();
+        for (name, &(ui, si)) in &globals {
+            let s = &units[ui].symbols[&si];
+            if s.other & 3 == 2 || s.other & 3 == 1 {
+                continue;
+            }
+            if matches!(s.section,SymbolSection::Section(i) if !units[ui].sections.contains_key(&i.0))
+            {
+                continue;
+            }
+            definitions.push(dynamic::Definition {
+                name: name.clone(),
+                info: s.info,
+                other: s.other,
+                size: common_sizes.get(name).copied().unwrap_or(s.size),
+            });
+        }
+        let mut absolute = 0;
+        for (ui, u) in units.iter().enumerate() {
+            for r in &u.relocs {
+                if let Some(name) = imported(ui, r.symbol)? {
+                    match r.kind {
+                        1 if sections[r.section].flags & 1 != 0 => absolute += 1,
+                        4 => {}
+                        9 | 41 | 42 => {}
+                        _ => {
+                            return Err(format!(
+                                "{}: relocation {} against import `{name}` requires writable 64-bit data, a PLT32 call, or GOT addressing; use PIC (copy/text relocations are unsupported)",
+                                u.name, r.kind
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        Some(dynamic::Dynamic::prepare(
+            &mut sections,
+            imports.clone(),
+            definitions,
+            &libraries,
+            &options.interpreter,
+            &options.runpath,
+            absolute,
+        )?)
+    };
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
     let mut cursor = PAGE;
@@ -473,10 +566,26 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     }
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
+            let import = imported(ui, r.symbol)?;
+            if let (Some(name), Some(d)) = (import, dynamic.as_mut())
+                && r.kind == 1
+            {
+                let offset = sections[r.section].offset + r.offset;
+                d.relocations
+                    .push((BASE + offset, d.imports[name].index, 1, r.addend));
+                bytes[offset as usize..offset as usize + 8].fill(0);
+                continue;
+            }
             let result = || -> Result<(usize, Vec<u8>)> {
                 let offset = sections[r.section].offset + r.offset;
                 let p = i128::from(BASE + offset);
-                let value = if matches!(r.kind, 9 | 41 | 42) {
+                let value = if let (Some(name), Some(d)) = (import, dynamic.as_ref()) {
+                    if matches!(r.kind, 9 | 41 | 42) {
+                        i128::from(d.slot(name, &sections))
+                    } else {
+                        i128::from(d.stub(name, &sections)?)
+                    }
+                } else if matches!(r.kind, 9 | 41 | 42) {
                     i128::from(BASE + sections[got_section].offset + got[&canonical(ui, r.symbol)?])
                 } else {
                     i128::from(address(ui, r.symbol)?)
@@ -506,23 +615,51 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             bytes[offset..offset + data.len()].copy_from_slice(&data);
         }
     }
+    if let Some(d) = dynamic.as_mut() {
+        let mut definitions = BTreeMap::new();
+        for (name, &(ui, si)) in &globals {
+            let s = &units[ui].symbols[&si];
+            let index = match s.section {
+                SymbolSection::Absolute => 0xfff1,
+                SymbolSection::Common => {
+                    common_locations.get(name).map(|(i, _)| i + 1).unwrap_or(0)
+                }
+                SymbolSection::Section(i) => {
+                    units[ui].sections.get(&i.0).map(|i| i + 1).unwrap_or(0)
+                }
+                _ => 0,
+            };
+            if index == 0 {
+                continue;
+            }
+            if index >= 0xff00 && index != 0xfff1 {
+                return Err("too many output sections".into());
+            }
+            definitions.insert(name.clone(), (address(ui, si)?, index as u16));
+        }
+        d.emit(&mut bytes, &sections, &definitions)?;
+    }
     // Section headers and a global symbol table make readelf/nm useful without
     // promising source debugging or retaining input debug sections.
     let mut names = vec![0];
     let mut headers = vec![[0u8; 64]];
-    for s in &sections {
+    for (index, s) in sections.iter().enumerate() {
         let name = string(&mut names, &s.name);
+        let (kind, link, info, entsize) = dynamic
+            .as_ref()
+            .and_then(|d| d.section_header(index))
+            .unwrap_or((if s.bss { 8 } else { 1 }, 0, 0, 0));
         headers.push(shdr(
             name,
-            if s.bss { 8 } else { 1 },
+            kind,
             s.flags,
             BASE + s.offset,
             s.offset,
             s.size,
-            0,
-            0,
+            link,
+            info,
             s.align,
-            0,
+            entsize,
         ));
     }
     let mut strings = vec![0];
@@ -617,25 +754,63 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     put64(&mut bytes, 40, shoff);
     put16(&mut bytes, 52, 64);
     put16(&mut bytes, 54, 56);
-    put16(&mut bytes, 56, (segments.len() + 1) as u16);
+    put16(
+        &mut bytes,
+        56,
+        (segments.len() + 1 + if dynamic.is_some() { 3 } else { 0 }) as u16,
+    );
     put16(&mut bytes, 58, 64);
     put16(&mut bytes, 60, headers.len() as u16);
     put16(&mut bytes, 62, (headers.len() - 1) as u16);
-    for (i, s) in segments.iter().enumerate() {
-        let at = 64 + i * 56;
-        put32(&mut bytes, at, 1);
-        put32(&mut bytes, at + 4, s.flags);
-        put64(&mut bytes, at + 8, s.offset);
-        put64(&mut bytes, at + 16, BASE + s.offset);
-        put64(&mut bytes, at + 24, BASE + s.offset);
-        put64(&mut bytes, at + 32, s.file_end - s.offset);
-        put64(&mut bytes, at + 40, s.memory_end - s.offset);
-        put64(&mut bytes, at + 48, PAGE);
+    let mut phdrs = Vec::new();
+    let phnum = segments.len() + 1 + if dynamic.is_some() { 3 } else { 0 };
+    if let Some(d) = &dynamic {
+        phdrs.push((6, 4, 64, (phnum * 56) as u64, (phnum * 56) as u64, 8));
+        let s = &sections[d.interp];
+        phdrs.push((3, 4, s.offset, s.size, s.size, 1));
     }
-    let at = 64 + segments.len() * 56;
-    put32(&mut bytes, at, 0x6474e551);
-    put32(&mut bytes, at + 4, 6);
-    put64(&mut bytes, at + 48, 16);
+    for s in &segments {
+        phdrs.push((
+            1,
+            s.flags,
+            s.offset,
+            s.file_end - s.offset,
+            s.memory_end - s.offset,
+            PAGE,
+        ));
+    }
+    if let Some(d) = &dynamic {
+        let s = &sections[d.table];
+        phdrs.push((2, 6, s.offset, s.size, s.size, 8));
+    }
+    phdrs.push((0x6474e551, 6, 0, 0, 0, 16));
+    for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {
+        let at = 64 + i * 56;
+        put32(&mut bytes, at, *kind);
+        put32(&mut bytes, at + 4, *flags);
+        put64(&mut bytes, at + 8, *offset);
+        put64(
+            &mut bytes,
+            at + 16,
+            if *kind == 0x6474e551 {
+                0
+            } else {
+                BASE + offset
+            },
+        );
+        put64(
+            &mut bytes,
+            at + 24,
+            if *kind == 0x6474e551 {
+                0
+            } else {
+                BASE + offset
+            },
+        );
+        put64(&mut bytes, at + 32, *filesz);
+        put64(&mut bytes, at + 40, *memsz);
+        put64(&mut bytes, at + 48, *alignment);
+    }
     Ok(Executable { bytes, warnings })
 }
 fn string(table: &mut Vec<u8>, name: &str) -> u32 {

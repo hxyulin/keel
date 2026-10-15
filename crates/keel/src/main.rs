@@ -40,7 +40,7 @@ const USAGE: &str = "usage:
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
-  keel link [--system] [--target <triple>] [-e entry] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a>... -o executable
+  keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel passes
 
   Input files must remain unchanged during parsing.";

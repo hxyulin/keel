@@ -222,9 +222,20 @@ fn sdk_version(root: &Path) -> u32 {
 }
 
 fn run_elf(args: &[String]) -> Result<(), String> {
-    let mut paths = Vec::new();
+    enum Request {
+        Path(PathBuf),
+        Library(String, bool),
+    }
+    let mut requests = Vec::new();
+    let mut directories = Vec::new();
+    let mut sysroot = None;
     let mut output = PathBuf::from("a.out");
     let mut options = keel_link::elf::Options::default();
+    let force_static = args
+        .iter()
+        .take_while(|a| *a != "--")
+        .any(|a| matches!(a.as_str(), "--static" | "-static"));
+    let mut static_libraries = force_static;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -232,20 +243,83 @@ fn run_elf(args: &[String]) -> Result<(), String> {
             "-e" | "--entry" => {
                 options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
             }
+            "--dynamic-linker" => {
+                options.interpreter = args
+                    .next()
+                    .ok_or("--dynamic-linker requires a path")?
+                    .clone()
+            }
+            "--rpath" | "-rpath" => options
+                .runpath
+                .push(args.next().ok_or("--rpath requires a path")?.clone()),
+            "--sysroot" => {
+                sysroot = Some(PathBuf::from(
+                    args.next().ok_or("--sysroot requires a directory")?,
+                ))
+            }
+            "-L" => directories.push(PathBuf::from(args.next().ok_or("-L requires a directory")?)),
+            "-l" => requests.push(Request::Library(
+                args.next().ok_or("-l requires a library")?.clone(),
+                static_libraries,
+            )),
             "--static" | "-static" => {}
+            "-Bstatic" => static_libraries = true,
+            "-Bdynamic" => static_libraries = force_static,
             "--" => {
-                paths.extend(args.map(PathBuf::from));
+                requests.extend(args.map(|a| Request::Path(a.into())));
                 break;
             }
+            a if a.starts_with("-L") => directories.push(PathBuf::from(&a[2..])),
+            a if a.starts_with("-l") => {
+                requests.push(Request::Library(a[2..].into(), static_libraries))
+            }
+            a if a.starts_with("--sysroot=") => sysroot = Some(a[10..].into()),
             a if a.starts_with('-') => {
                 return Err(format!("unsupported native ELF linker option `{a}`"));
             }
-            _ => paths.push(PathBuf::from(arg)),
+            _ => requests.push(Request::Path(PathBuf::from(arg))),
         }
     }
-    if paths.is_empty() {
-        return Err("usage: keel link --target x86_64-unknown-linux-gnu [-e _start] <input.o>... -o executable".into());
+    if requests.is_empty() {
+        return Err("usage: keel link --target x86_64-unknown-linux-gnu [-e _start] [-L dir] [-l name] <input.o|input.a|input.so>... -o executable".into());
     }
+    // Cross links consult only explicitly supplied paths or the target sysroot.
+    // Native Linux links also search conventional target-library directories.
+    if let Some(root) = sysroot.or_else(|| cfg!(target_os = "linux").then(|| PathBuf::from("/"))) {
+        for dir in [
+            "lib/x86_64-linux-gnu",
+            "usr/lib/x86_64-linux-gnu",
+            "lib64",
+            "usr/lib64",
+            "lib",
+            "usr/lib",
+        ] {
+            directories.push(root.join(dir));
+        }
+    }
+    let paths = requests
+        .into_iter()
+        .map(|r| match r {
+            Request::Path(path) => Ok(path),
+            Request::Library(name, static_only) => {
+                if name.is_empty() || name.contains('/') || name.contains('\0') {
+                    return Err("library names must be nonempty basenames".into());
+                }
+                let candidates = if let Some(exact) = name.strip_prefix(':') {
+                    vec![exact.to_owned()]
+                } else if static_only {
+                    vec![format!("lib{name}.a")]
+                } else {
+                    vec![format!("lib{name}.so"), format!("lib{name}.a")]
+                };
+                directories
+                    .iter()
+                    .flat_map(|d| candidates.iter().map(move |n| d.join(n)))
+                    .find(|p| p.is_file())
+                    .ok_or_else(|| format!("library `{name}` not found; pass -L or --sysroot"))
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let owned = paths
         .iter()
         .map(|p| {
@@ -254,6 +328,13 @@ fn run_elf(args: &[String]) -> Result<(), String> {
                 .map_err(|e| format!("{}: {e}", p.display()))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    if force_static
+        && owned
+            .iter()
+            .any(|(_, b)| b.len() >= 18 && &b[..4] == b"\x7fELF" && b[16..18] == [3, 0])
+    {
+        return Err("--static cannot link shared libraries".into());
+    }
     let inputs = owned
         .iter()
         .map(|(name, bytes)| keel_link::Input { name, bytes })
