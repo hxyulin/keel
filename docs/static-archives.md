@@ -122,3 +122,47 @@ and coordinator integration remain pending; historical validation of other
 packages is not evidence for this change. Suggested umbrella follow-up: link
 this document from `docs/design.md` and `suite/README.md` when the coordinator
 integrates the feature. Neither umbrella file was edited here.
+
+## Corrective implementation after review round 1, 2026-10-16
+
+Correction `1cad30cdfcdd6fbf21ecd71372094a7564afb2b6` is based on
+`2749c923819542fc794405256ce22ec38d144d9b`. Raw validation now rejects the
+reviewer's missing ELF extended symbol index, Mach-O `N_SECT` zero ordinal,
+and out-of-range ELF relocation symbol reference before output installation.
+The original reviewer evidence in `/tmp/keel-review-e1c03471` is preserved;
+its three original object files now fail with destination sentinels unchanged.
+
+ELF definitions distinguish undefined, absolute, common and AMD64 large-common
+(`0xff02`) special indices from ordinary section ordinals. Other reserved
+direct indices are rejected. `SHN_XINDEX` requires a uniquely linked, correctly
+sized `SHT_SYMTAB_SHNDX`, with zero unused entries and real extended section
+ordinals in range. A positive fixture uses section `0xff00` and extended
+`e_shnum`. Mach-O non-STABS `N_SECT` symbols require a nonzero ordinal within
+the actual section count; common, absolute and indirect symbols retain their
+format-specific meanings. A blanket rejection of generic `Unknown` sections
+would incorrectly reject valid large-common and indirect providers.
+
+ELF REL/RELA tables validate entry sizes, symbol-table links, target sections
+and raw symbol ordinals. Mach-O relocation tables validate bounds and external
+symbol/local section references. `ARM64_RELOC_ADDEND` contains a signed payload,
+not a symbol ordinal; local `R_ABS` zero remains valid. Packaging does not apply
+Keel's executable-linker relocation whitelist. Positive TLSGD and paired ADDEND
+fixtures protect that boundary.
+
+Sequential single-job focused tests passed on MacHost and isolated rm-nuc-01:
+eight library tests and two CLI tests per host. Shared fixtures exercise 21
+malformed cases through library build/write and CLI, preserving existing output
+on every failure. Both formats' metadata checks run on each host. Native Keel
+and system-linker probes exit 42 on each host, and compiler common/weak system
+consumption passes. Local scoped all-target Clippy and formatting passed.
+
+The [corrective validation record](static-archives-correction-validation-20261016.json)
+contains exact commands/results, source/toolchain/tool/executable hashes,
+original evidence hashes and reproducible native probe commands. Linux source
+hashes match local source hashes. The remote directory is
+`/tmp/keel-archive-correction-0b941bed.BGvZS2`; prior author artifacts and LinuxHost
+were not used. No benchmarks, full regression, 4GiB/allocation, disk-full or
+temporary-collision probes were run. Linux Clippy was not rerun. The documented
+Darwin Keel common-only extraction boundary remains unchanged and was not
+re-probed directly in this correction. Independent corrective review remains
+pending.
