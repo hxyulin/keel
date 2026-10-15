@@ -219,18 +219,6 @@ fn keel_generated_globals_and_tls_execute() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-codegen/tests/programs");
     for program in ["globals", "tls", "switch", "linkage"] {
         let source = std::fs::read_to_string(repo.join(format!("{program}.keel"))).unwrap();
-        // The linkage fixture also tests DWARF. Build a no-debug variant here;
-        // debug directives remain a separate, explicitly unsupported stage.
-        let source = if program == "linkage" {
-            source
-                .lines()
-                .filter(|line| !line.starts_with("file "))
-                .map(|line| line.split(" !f0:").next().unwrap())
-                .collect::<Vec<_>>()
-                .join("\n")
-        } else {
-            source
-        };
         let module = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&module).unwrap();
         let source =
@@ -239,7 +227,7 @@ fn keel_generated_globals_and_tls_execute() {
             .lines()
             .filter(|line| {
                 let line = line.trim_start();
-                !line.starts_with(".cfi_") && line != ".subsections_via_symbols"
+                line != ".subsections_via_symbols"
             })
             .map(|line| format!("{line}\n"))
             .collect();

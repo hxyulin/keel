@@ -3,7 +3,7 @@
 use super::{count, symbol, unsigned};
 use crate::{Assembly, Section, SectionContents, SectionKind};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct Location {
     pub section: usize,
     pub offset: u64,
@@ -58,20 +58,32 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
         {
             return Ok(0);
         }
-        ("__TEXT", "__const") | ("__DATA", "__data" | "__const") => SectionKind::Data,
+        ("__TEXT", "__const" | "__gcc_except_tab") | ("__DATA", "__data" | "__const") => {
+            SectionKind::Data
+        }
         ("__DATA", "__bss") => SectionKind::ZeroFill,
         ("__DATA", "__thread_data") => SectionKind::ThreadData,
         ("__DATA", "__thread_bss") => SectionKind::ThreadZeroFill,
         ("__DATA", "__thread_vars") => SectionKind::ThreadVariables,
+        (
+            "__DWARF",
+            "__debug_info" | "__debug_abbrev" | "__debug_line" | "__debug_ranges" | "__debug_str"
+            | "__debug_loc",
+        ) => SectionKind::Debug,
+        ("__TEXT", "__eh_frame") => SectionKind::EhFrame,
         _ => return Err("unsupported Mach-O section".into()),
     };
     let expected = match kind {
-        SectionKind::Data => "regular",
+        SectionKind::Data | SectionKind::Debug => "regular",
+        SectionKind::EhFrame => "coalesced",
         SectionKind::ZeroFill => "zerofill",
         SectionKind::ThreadData => "thread_local_regular",
         SectionKind::ThreadZeroFill => "thread_local_zerofill",
         SectionKind::ThreadVariables => "thread_local_variables",
     };
+    if kind == SectionKind::Debug && args == [args[0], args[1], "regular", "debug"] {
+        return select(a, args[0], args[1], kind);
+    }
     if args.len() > 3 || (args.len() == 3 && args[2] != expected) {
         return Err("unsupported section type or attributes".into());
     }

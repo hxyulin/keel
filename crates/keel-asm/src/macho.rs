@@ -126,7 +126,68 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     }
     let data_end = file;
     let first_file = first_file.unwrap_or(data_end);
-    let mut symbols: Vec<_> = assembly.symbols.iter().collect();
+    let mut all_names = BTreeSet::new();
+    for symbol in &assembly.symbols {
+        if symbol.name.is_empty()
+            || symbol.name.contains('\0')
+            || !all_names.insert(symbol.name.as_str())
+            || (symbol.offset.is_none() && !symbol.global)
+            || symbol.offset.is_some() != symbol.section.is_some()
+        {
+            return Err(Error::new(0, "invalid or duplicate symbol"));
+        }
+        if let Some(section) = symbol.section
+            && views
+                .get(section)
+                .is_none_or(|v| symbol.offset.unwrap() > v.size)
+        {
+            return Err(Error::new(0, "invalid symbol section or offset"));
+        }
+    }
+    let definitions: BTreeMap<_, _> = assembly
+        .symbols
+        .iter()
+        .filter_map(|s| Some((s.name.as_str(), (s.section?, s.offset?))))
+        .collect();
+    let temporary: BTreeSet<_> = assembly
+        .symbols
+        .iter()
+        .filter(|s| !s.global && s.name.starts_with('L'))
+        .map(|s| s.name.as_str())
+        .collect();
+    // Absolute local pointers can use a section ordinal and original address,
+    // so no interior temporary label has to become a linker function entry.
+    let section_target = |r: &super::Relocation| {
+        if r.kind != RelocationKind::Unsigned
+            || r.subtract_symbol.is_some()
+            || !(temporary.contains(r.symbol.as_str())
+                || views
+                    .get(r.section)
+                    .is_some_and(|v| v.flags & 0x0200_0000 != 0))
+        {
+            return None;
+        }
+        definitions.get(r.symbol.as_str()).copied()
+    };
+    // Darwin temporary labels are not independent function entries. Keeping
+    // interior L labels in nlist makes ld generate spurious no-unwind ranges.
+    let referenced: BTreeSet<_> = assembly
+        .relocations
+        .iter()
+        .flat_map(|r| {
+            let target = if section_target(r).is_some() {
+                None
+            } else {
+                Some(r.symbol.as_str())
+            };
+            target.into_iter().chain(r.subtract_symbol.as_deref())
+        })
+        .collect();
+    let mut symbols: Vec<_> = assembly
+        .symbols
+        .iter()
+        .filter(|s| s.global || !s.name.starts_with('L') || referenced.contains(s.name.as_str()))
+        .collect();
     let group = |s: &super::Symbol| {
         if s.offset.is_none() {
             2
@@ -187,7 +248,11 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             },
             ordinal,
             0,
-            0,
+            if symbol.section == Some(0) && !symbol.global && symbol.name.starts_with('L') {
+                2
+            } else {
+                0
+            },
         ]);
         u64le(&mut entries, value);
         strings.extend_from_slice(symbol.name.as_bytes());
@@ -203,7 +268,10 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         relocations.sort_by_key(|r| std::cmp::Reverse(r.offset));
         let mut previous_end = view.size;
         for r in relocations {
-            let instruction = r.kind != RelocationKind::Unsigned;
+            let instruction = !matches!(
+                r.kind,
+                RelocationKind::Unsigned | RelocationKind::PointerToGot
+            );
             let length = match r.size {
                 4 => 2,
                 8 if !instruction => 3,
@@ -214,7 +282,11 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                 || r.offset > i32::MAX as u32
                 || (instruction && (r.section != 0 || !r.offset.is_multiple_of(4)))
                 || (instruction && r.subtract_symbol.is_some())
-                || (!instruction && r.size == 4 && r.subtract_symbol.is_none())
+                || (r.kind == RelocationKind::Unsigned
+                    && r.size == 4
+                    && r.subtract_symbol.is_none())
+                || (r.kind == RelocationKind::PointerToGot
+                    && (r.size != 4 || r.subtract_symbol.is_some() || r.addend != 0))
             {
                 return Err(Error::new(0, "invalid or overlapping relocation location"));
             }
@@ -226,12 +298,17 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             {
                 return Err(Error::new(0, "invalid instruction relocation addend"));
             }
-            let index = *indices.get(r.symbol.as_str()).ok_or_else(|| {
-                Error::new(
-                    0,
-                    format!("relocation references missing symbol `{}`", r.symbol),
-                )
-            })?;
+            let local = section_target(r);
+            let index = if local.is_some() {
+                0
+            } else {
+                *indices.get(r.symbol.as_str()).ok_or_else(|| {
+                    Error::new(
+                        0,
+                        format!("relocation references missing symbol `{}`", r.symbol),
+                    )
+                })?
+            };
             if let Some(subtract) = &r.subtract_symbol {
                 let index = *indices
                     .get(subtract.as_str())
@@ -248,13 +325,15 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                     ((r.addend as u32) & 0x00ff_ffff) | (2 << 25) | (10 << 28),
                 );
             }
+            let (index, external) =
+                local.map_or((index, 1), |(section, _)| (u32::from(ordinals[section]), 0));
             u32le(&mut layout.records, r.offset);
             u32le(
                 &mut layout.records,
                 index
                     | (u32::from(r.kind.pc_relative()) << 24)
                     | (length << 25)
-                    | (1 << 27)
+                    | (external << 27)
                     | ((r.kind as u32) << 28),
             );
         }
@@ -384,10 +463,18 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     // Pointer/difference addends belong in their data words, unlike the
     // explicit ADDEND records paired with instruction relocations.
     for r in &assembly.relocations {
-        if r.kind == RelocationKind::Unsigned {
+        if matches!(
+            r.kind,
+            RelocationKind::Unsigned | RelocationKind::PointerToGot
+        ) {
             let start = section_offsets[r.section] as usize + r.offset as usize;
+            let value = section_target(r).map_or(r.addend as u64, |(section, offset)| {
+                (r.addend as u64)
+                    .wrapping_add(addresses[section])
+                    .wrapping_add(offset)
+            });
             out[start..start + usize::from(r.size)]
-                .copy_from_slice(&(r.addend as u64).to_le_bytes()[..usize::from(r.size)]);
+                .copy_from_slice(&value.to_le_bytes()[..usize::from(r.size)]);
         }
     }
     for layout in &layouts {

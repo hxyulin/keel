@@ -2,8 +2,10 @@
 //!
 //! Instruction bit layouts come from Arm's machine-readable specification.
 //! Syntax, operand transformations, and object layout are implemented here.
-//! Unsupported instructions and directives are errors, including unwind/debug
-//! directives: this is not yet sufficient to assemble arbitrary compiler output.
+//! DWARF 4 line tables, debug data, and ordinary call-frame directives are
+//! supported, including Darwin exception personality/LSDA references.
+//! Unsupported instructions/directives are errors; subsection splitting
+//! is not yet supported.
 mod generated;
 mod macho;
 mod parser;
@@ -57,6 +59,8 @@ pub enum RelocationKind {
     PageOff12 = 4,
     GotPage21 = 5,
     GotPageOff12 = 6,
+    /// PC-relative 32-bit data pointer to a linker-created GOT slot.
+    PointerToGot = 7,
     TlvpPage21 = 8,
     TlvpPageOff12 = 9,
 }
@@ -64,7 +68,7 @@ impl RelocationKind {
     fn pc_relative(self) -> bool {
         matches!(
             self,
-            Self::Branch26 | Self::Page21 | Self::GotPage21 | Self::TlvpPage21
+            Self::Branch26 | Self::Page21 | Self::GotPage21 | Self::TlvpPage21 | Self::PointerToGot
         )
     }
     fn accepts_addend(self) -> bool {
@@ -91,6 +95,10 @@ pub struct Relocation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionKind {
     Data,
+    /// DWARF metadata, excluded from the linked image.
+    Debug,
+    /// Runtime DWARF call-frame records.
+    EhFrame,
     ZeroFill,
     ThreadData,
     ThreadZeroFill,
@@ -103,6 +111,8 @@ impl SectionKind {
     fn flags(self) -> u32 {
         match self {
             Self::Data => 0,
+            Self::Debug => 0x0200_0000,
+            Self::EhFrame => 0x6800_000b,
             Self::ZeroFill => 1,
             Self::ThreadData => 0x11,
             Self::ThreadZeroFill => 0x12,

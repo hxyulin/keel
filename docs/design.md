@@ -473,8 +473,9 @@ from Apple arm64 that matter to a frontend:
   and lldb finds the line table through that map.
 - **Call frame information** is emitted for every function, with or without
   locations: C++ exceptions and debuggers unwind through keel frames with
-  it. The assembler turns it into compact unwind info when the saved
-  registers follow Apple's pairing, and into `__eh_frame` otherwise.
+  it. The system assembler can turn it into compact unwind info when
+  saved registers follow Apple's pairing, or `__eh_frame` otherwise. Keel's
+  assembler currently emits `__eh_frame` for its supported CFI rules.
 - **Variables and types.** The module has a table of source-level types
   (`dtype dt0 = base "int" signed 4`, pointers, structs and unions with
   byte or bit-field members, arrays, typedefs, `const` and `volatile`,
@@ -1133,8 +1134,8 @@ build-version command; Apple’s linker still produces the executable.
 Subsection splitting remains rejected because resolved differences, local
 ADR, and conditional branches rely on each section staying intact. Other
 instructions, sections, and directives produce source diagnostics. Literal
-loads, `.cfi_*`, and debug directives remain to be added before this can
-assemble arbitrary Keel compiler output.
+loads and subsection splitting remain to be added before this can assemble
+arbitrary Keel compiler output.
 
 Tests compare every supported encoding form and operand boundaries against
 clang’s arm64 Mach-O output, inspect our objects with an independent object
@@ -1143,8 +1144,8 @@ and execute the examples and C drivers checking memory, arithmetic,
 conditions, indirect calls, and FP conversions. Logical-immediate tests cover
 all 1,302 W and 5,334 X bitmasks, and FP-immediate tests cover all 256 values.
 Instruction-only integration tests compile small integer, FP, and popcount
-functions with Keel, explicitly remove the still-unsupported CFI/subsection
-directives in the test, assemble, link, and run them. This is not a production
+functions with Keel, remove CFI/subsection directives to isolate instruction
+encoding in those tests, assemble, link, and run them. This is not a production
 workaround for missing directives. Native execution tests have a ten-second
 timeout and reap a timed-out process. Symbol tests compare instruction bytes
 and normalized relocation records against clang and run cross-object calls,
@@ -1158,6 +1159,66 @@ Data tests compare section bytes, sizes, symbols, and normalized relocations
 against clang, including file-backed/zero-fill layout and TLS descriptors.
 Linked programs check absolute-pointer tables and cross-section differences.
 The existing Keel globals, TLS (including multiple threads), switch/jump-table,
-and local-linkage programs run through the assembler with CFI/subsection
-directives explicitly removed for the tests. The linkage fixture is also
-prepared without its source debug metadata, which remains unsupported.
+and local-linkage programs run through the assembler with only subsection
+splitting explicitly removed for the tests; CFI and source debug metadata are
+assembled and retained.
+
+
+**Unwind and debug metadata.** `.cfi_startproc`/`.cfi_endproc` collect
+address-indexed CFA and saved-register rules. Supported rules include
+`.cfi_def_cfa`, `.cfi_def_cfa_register`, `.cfi_def_cfa_offset`, `.cfi_offset`,
+`.cfi_restore`, `.cfi_same_value`, `.cfi_undefined`, and balanced
+`.cfi_remember_state`/`.cfi_restore_state`. AArch64 X registers have DWARF
+numbers 0–30, SP is 31, and D/V registers are 64–95. The assembler emits
+DWARF CIE/FDE records in `__TEXT,__eh_frame`, using PC-relative pointers and
+Mach-O symbol-difference relocations. Apple’s linker and libunwind consume
+these records. The assembler also emits `__LD,__compact_unwind` index entries
+in DWARF mode so the linker includes each FDE in its runtime unwind index.
+Replacing FDEs with compact encodings for common frame layouts remains a
+future optimization. `.cfi_personality 155, symbol` attaches an indirect,
+PC-relative signed-32-bit personality reference through the GOT;
+`.cfi_lsda 16, symbol` attaches a PC-relative native-width LSDA pointer.
+Unsupported encodings and duplicate personality/LSDA directives are errors.
+CIEs are shared only between procedures with the same personality and LSDA
+encoding. LSDA data lives in `__TEXT,__gcc_except_tab`. Its type-table entries
+use `.long typeinfo@GOT-label`, with the subtraction label at that word's
+address and no addend; the writer emits `ARM64_RELOC_POINTER_TO_GOT`.
+
+Darwin temporary `L…` labels stay in the in-memory assembly model. The object
+writer omits unreferenced temporary labels from nlist: treating interior
+labels as linker entries creates spurious ranges without unwind information.
+Absolute pointers to temporary labels use local section relocations, keeping
+them out of nlist too. Other required temporary text symbols are marked
+`N_ALT_ENTRY`. Native tests cover C++ typed catches, catch-all handlers,
+cleanup/rethrow, and propagation across a plain assembled frame containing
+an address-taken interior label. LSDA bytes and GOT relocation records are
+compared with Clang; unresolved GOT placeholder bytes are normalized.
+
+`.file number "path"` and `.loc file line column [prologue_end]` generate a
+DWARF 4 line-number program in `__DWARF,__debug_line`. File numbers are
+contiguous from 1. The line program covers the text section and terminates
+at its end. Explicit debug sections support `__debug_info`, `__debug_abbrev`,
+`__debug_line`, `__debug_ranges`, `__debug_str`, and `__debug_loc`, with
+`regular,debug` attributes. Their Mach-O `S_ATTR_DEBUG` flag excludes them
+from the loaded image. Local debug address relocations use section ordinals
+and preserve original addresses in the data, allowing tools to read unlinked
+objects. `.ascii`/`.asciz` preserve quoted punctuation and support standard
+newline/tab/carriage-return, quote/backslash, and octal escapes.
+`.uleb128`/`.sleb128` encode integer constants and same-section symbol
+differences, including forward labels. Symbolic LEB128 lengths affect label
+positions, so assembly repeats layout passes until positions stabilize, with
+a 32-pass limit that diagnoses cyclic layouts. Constant-only input takes one
+pass. Undefined/cross-section LEB128 expressions, additional `.loc` options,
+and arbitrary string concatenation remain errors.
+Constant assignments (`name = expression` or `.set name, expression`) accept
+constants and same-section differences, including forward labels; they can
+be used in fixed-width numeric directives.
+
+The compiler remains responsible for source-level types, variable locations,
+and lexical scopes. Its existing DWARF data directives now assemble without
+stripping metadata. The assembler supplies the address-dependent line and
+unwind tables. On macOS, the linker records an object-file debug map and
+`dsymutil` combines the referenced DWARF into a dSYM bundle. Tests compare
+line rows and data encodings against Clang, verify Keel’s types/scopes/variables
+with `dwarfdump`, verify a linked dSYM, and execute a backtrace crossing an
+assembled frame. Subsection splitting remains separately unsupported.

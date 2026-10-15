@@ -151,12 +151,17 @@ fn macho_is_readable_and_preserves_symbols_and_alignment() {
         .unwrap();
     assert!(main.is_global());
     assert_eq!(main.address(), 0);
-    let local = object
-        .symbols()
-        .find(|s| s.name().unwrap() == "Lreturn")
-        .unwrap();
-    assert!(local.is_local());
-    assert_eq!(local.address(), 32);
+    // Temporary labels remain available in the assembly model, but need no
+    // nlist entry unless a relocation refers to them.
+    assert_eq!(
+        a.symbols
+            .iter()
+            .find(|s| s.name == "Lreturn")
+            .unwrap()
+            .offset,
+        Some(32)
+    );
+    assert!(object.symbols().all(|s| s.name().unwrap() != "Lreturn"));
 }
 
 #[test]

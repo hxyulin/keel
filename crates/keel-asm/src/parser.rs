@@ -1,6 +1,7 @@
 mod arithmetic;
 mod control;
 mod data;
+mod debug;
 mod float;
 mod memory;
 mod relocate;
@@ -304,9 +305,44 @@ struct DataFixup {
     location: data::Location,
     width: u8,
     expression: data::Expression,
+    got: bool,
 }
 
 pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
+    let mut previous = None;
+    for _ in 0..32 {
+        let (assembly, symbolic_leb) = assemble_pass(source, previous.as_ref())?;
+        if !symbolic_leb {
+            return Ok(assembly);
+        }
+        let locations: BTreeMap<_, _> = assembly
+            .symbols
+            .iter()
+            .filter_map(|s| {
+                Some((
+                    s.name.clone(),
+                    data::Location {
+                        section: s.section?,
+                        offset: s.offset?,
+                    },
+                ))
+            })
+            .collect();
+        if previous.as_ref() == Some(&locations) {
+            return Ok(assembly);
+        }
+        previous = Some(locations);
+    }
+    Err(Error::new(
+        0,
+        "symbolic LEB128 layout did not converge after 32 passes",
+    ))
+}
+fn assemble_pass(
+    source: &str,
+    previous: Option<&BTreeMap<String, data::Location>>,
+) -> Result<(Assembly, bool), Error> {
+    let mut symbolic_leb = false;
     let mut result = Assembly {
         text: Vec::new(),
         text_alignment: 2,
@@ -314,6 +350,12 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
         relocations: Vec::new(),
         sections: Vec::new(),
     };
+    let mut debug = debug::Debug::default();
+    let mut prefix = String::from("Lkeel_metadata_");
+    while source.contains(&prefix) {
+        prefix.push('_');
+    }
+    let mut aliases = BTreeMap::new();
     let mut current = 0;
     let mut labels: BTreeMap<String, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
@@ -324,15 +366,11 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
     for (index, raw) in source.lines().enumerate() {
         let line = index + 1;
         let err = |message| Error::new(line, message);
-        let mut s = raw
-            .split(';')
-            .next()
-            .unwrap()
-            .split("//")
-            .next()
-            .unwrap()
-            .trim();
-        while let Some((name, rest)) = s.split_once(':') {
+        let mut s = debug::uncomment(raw).trim();
+        while let Some((name, rest)) = s
+            .split_once(':')
+            .filter(|(name, _)| !name.trim().contains(['"', ' ', '\t']))
+        {
             let name = name.trim();
             symbol(name).map_err(err)?;
             if labels
@@ -352,14 +390,127 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
         if s.is_empty() {
             continue;
         }
+        if let Some((name, expression)) = s
+            .split_once('=')
+            .filter(|(name, _)| symbol(name.trim()).is_ok())
+        {
+            let name = name.trim();
+            symbol(name).map_err(err)?;
+            if aliases
+                .insert(
+                    name.to_string(),
+                    (line, data::expression(expression).map_err(err)?),
+                )
+                .is_some()
+            {
+                return Err(err("duplicate symbol assignment".into()));
+            }
+            continue;
+        }
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
         let operands = operands.trim();
         let op = op.to_ascii_lowercase();
+        if debug
+            .directive(
+                &op,
+                operands,
+                current,
+                data::position(&result, current),
+                line,
+            )
+            .map_err(err)?
+        {
+            continue;
+        }
+        if op == ".ascii" || op == ".asciz" {
+            let mut bytes = debug::string(operands).map_err(err)?;
+            if op == ".asciz" {
+                bytes.push(0);
+            }
+            data::append(&mut result, current, &bytes).map_err(err)?;
+            continue;
+        }
         let args = memory::operands(operands).map_err(err)?;
+        if op == ".uleb128" || op == ".sleb128" {
+            count(&args, 1, usize::MAX).map_err(err)?;
+            let mut bytes = Vec::new();
+            for arg in args {
+                let expr = data::expression(arg).map_err(err)?;
+                let value = if let Some(add) = &expr.add {
+                    symbolic_leb = true;
+                    if let Some(previous) = previous {
+                        let sub = expr.subtract.as_ref().ok_or_else(|| {
+                            err("LEB128 requires a same-section symbol difference".into())
+                        })?;
+                        let a = previous
+                            .get(add)
+                            .ok_or_else(|| err(format!("undefined LEB128 symbol `{add}`")))?;
+                        let b = previous
+                            .get(sub)
+                            .ok_or_else(|| err(format!("undefined LEB128 symbol `{sub}`")))?;
+                        if a.section != b.section {
+                            return Err(err(
+                                "LEB128 requires a same-section symbol difference".into()
+                            ));
+                        }
+                        expr.constant
+                            .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                            .ok_or_else(|| err("LEB128 expression overflow".into()))?
+                    } else {
+                        0
+                    }
+                } else {
+                    expr.constant
+                };
+                if op == ".uleb128" {
+                    debug::uleb(
+                        u64::try_from(value)
+                            .map_err(|_| err("unsigned LEB128 value out of range".into()))?,
+                        &mut bytes,
+                    );
+                } else {
+                    debug::sleb(
+                        i64::try_from(value)
+                            .map_err(|_| err("signed LEB128 value out of range".into()))?,
+                        &mut bytes,
+                    );
+                }
+            }
+            data::append(&mut result, current, &bytes).map_err(err)?;
+            continue;
+        }
+        if op == ".set" {
+            count(&args, 2, 2).map_err(err)?;
+            symbol(args[0]).map_err(err)?;
+            if aliases
+                .insert(
+                    args[0].to_string(),
+                    (line, data::expression(args[1]).map_err(err)?),
+                )
+                .is_some()
+            {
+                return Err(err("duplicate symbol assignment".into()));
+            }
+            continue;
+        }
         if let Some(width) = data::width(&op) {
             count(&args, 1, usize::MAX).map_err(err)?;
             for argument in args {
-                let expr = data::expression(argument).map_err(err)?;
+                let got = argument.contains("@GOT");
+                if let Some((_, suffix)) = argument.split_once("@GOT")
+                    && suffix
+                        .chars()
+                        .next()
+                        .is_some_and(|c| !c.is_whitespace() && c != '+' && c != '-')
+                {
+                    return Err(err("data GOT pointers require the @GOT modifier".into()));
+                }
+                let expression = if got {
+                    argument.replacen("@GOT", "", 1)
+                } else {
+                    argument.to_string()
+                };
+                let expr = data::expression(&expression).map_err(err)?;
                 if expr.add.is_none() {
                     data::append(
                         &mut result,
@@ -368,12 +519,6 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
                     )
                     .map_err(err)?;
                 } else {
-                    if width < 4 || (width != 8 && expr.subtract.is_none()) {
-                        return Err(err(
-                            "symbolic data requires .quad pointers or .long/.quad differences"
-                                .into(),
-                        ));
-                    }
                     data::bytes_mut(&mut result, current).map_err(err)?;
                     let location = data::Location {
                         section: current,
@@ -384,6 +529,7 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
                         location,
                         width,
                         expression: expr,
+                        got,
                     });
                     data::reserve(&mut result, current, u64::from(width), 0).map_err(err)?;
                 }
@@ -597,9 +743,108 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
         .map_err(|e| Error::new(line, e))?;
         result.text[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
     }
+    debug.finish(&mut result, &mut labels, &prefix)?;
+    let mut constants = BTreeMap::new();
+    for (name, (line, expr)) in aliases {
+        if labels.contains_key(&name) {
+            return Err(Error::new(line, "assignment conflicts with label"));
+        }
+        let value = if let (Some(add), Some(sub)) = (&expr.add, &expr.subtract) {
+            let a = labels
+                .get(add)
+                .ok_or_else(|| Error::new(line, "undefined assignment symbol"))?;
+            let b = labels
+                .get(sub)
+                .ok_or_else(|| Error::new(line, "undefined assignment symbol"))?;
+            if a.section != b.section {
+                return Err(Error::new(
+                    line,
+                    "assignments require a same-section difference",
+                ));
+            }
+            expr.constant
+                .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                .ok_or_else(|| Error::new(line, "assignment overflow"))?
+        } else if expr.add.is_none() {
+            expr.constant
+        } else {
+            return Err(Error::new(
+                line,
+                "assignments require constants or same-section differences",
+            ));
+        };
+        constants.insert(name, value);
+    }
     for fixup in data_fixups {
-        let expr = fixup.expression;
-        let add = expr.add.unwrap();
+        let mut expr = fixup.expression;
+        if fixup.got {
+            let target = expr
+                .add
+                .take()
+                .ok_or_else(|| Error::new(fixup.line, "GOT pointer requires a symbol"))?;
+            let sub = expr
+                .subtract
+                .as_ref()
+                .and_then(|s| labels.get(s))
+                .ok_or_else(|| {
+                    Error::new(
+                        fixup.line,
+                        "GOT pointer requires a defined subtraction label",
+                    )
+                })?;
+            if fixup.width != 4 || sub.section != fixup.location.section {
+                return Err(Error::new(
+                    fixup.line,
+                    "GOT pointer requires .long symbol@GOT-label in the same section",
+                ));
+            }
+            let addend = expr
+                .constant
+                .checked_add(i128::from(fixup.location.offset) - i128::from(sub.offset))
+                .and_then(|n| i32::try_from(n).ok())
+                .ok_or_else(|| {
+                    Error::new(fixup.line, "GOT pointer addend exceeds signed 32 bits")
+                })?;
+            if addend != 0 {
+                return Err(Error::new(
+                    fixup.line,
+                    "GOT pointers require zero addend and subtraction of their own address",
+                ));
+            }
+            let offset = u32::try_from(fixup.location.offset)
+                .map_err(|_| Error::new(fixup.line, "GOT relocation offset exceeds 32 bits"))?;
+            relocation_lines.insert((fixup.location.section, offset), fixup.line);
+            result.relocations.push(crate::Relocation {
+                section: fixup.location.section,
+                size: 4,
+                subtract_symbol: None,
+                offset,
+                symbol: target,
+                kind: crate::RelocationKind::PointerToGot,
+                addend: i64::from(addend),
+            });
+            continue;
+        }
+        if let Some(value) = expr.add.as_ref().and_then(|s| constants.get(s)) {
+            if expr.subtract.is_some() {
+                return Err(Error::new(
+                    fixup.line,
+                    "constant assignment cannot be combined with a symbol difference",
+                ));
+            }
+            let value = expr
+                .constant
+                .checked_add(*value)
+                .ok_or_else(|| Error::new(fixup.line, "data expression overflow"))?;
+            let bytes = data::value(value, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
+            let out = data::bytes_mut(&mut result, fixup.location.section)
+                .map_err(|e| Error::new(fixup.line, e))?;
+            let offset = fixup.location.offset as usize;
+            out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
+            continue;
+        }
+        let expr = &mut expr;
+        let add = expr.add.take().unwrap();
         let mut constant = expr.constant;
         let resolved = if expr.subtract.as_deref() == Some(add.as_str()) {
             true
@@ -624,6 +869,12 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             let offset = fixup.location.offset as usize;
             out[offset..offset + usize::from(fixup.width)].copy_from_slice(&bytes);
         } else {
+            if fixup.width < 4 || (fixup.width != 8 && expr.subtract.is_none()) {
+                return Err(Error::new(
+                    fixup.line,
+                    "symbolic data requires .quad pointers or .long/.quad differences",
+                ));
+            }
             data::value(constant, fixup.width).map_err(|e| Error::new(fixup.line, e))?;
             let offset =
                 fixup.location.offset.try_into().map_err(|_| {
@@ -633,7 +884,7 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             result.relocations.push(crate::Relocation {
                 section: fixup.location.section,
                 size: fixup.width,
-                subtract_symbol: expr.subtract,
+                subtract_symbol: expr.subtract.take(),
                 offset,
                 symbol: add,
                 kind: crate::RelocationKind::Unsigned,
@@ -646,7 +897,10 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
         for name in std::iter::once(&relocation.symbol).chain(relocation.subtract_symbol.iter()) {
             if name.starts_with('L') && !labels.contains_key(name) && !globals.contains_key(name) {
                 return Err(Error::new(
-                    relocation_lines[&(relocation.section, relocation.offset)],
+                    relocation_lines
+                        .get(&(relocation.section, relocation.offset))
+                        .copied()
+                        .unwrap_or(0),
                     format!("undefined local symbol `{name}`"),
                 ));
             }
@@ -665,5 +919,5 @@ pub(super) fn assemble(source: &str) -> Result<Assembly, Error> {
             }
         })
         .collect();
-    Ok(result)
+    Ok((result, symbolic_leb))
 }

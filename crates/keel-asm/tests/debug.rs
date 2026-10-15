@@ -1,0 +1,213 @@
+use keel_asm::{assemble, assemble_object};
+use object::{Object, ObjectSection};
+use std::process::Command;
+mod common;
+use common::{Temp, run};
+
+fn dump(path: &std::path::Path, flag: &str) -> String {
+    let output = Command::new("dwarfdump")
+        .arg(flag)
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+#[test]
+fn dwarf_data_directives_match_clang() {
+    let source = r#"
+.text
+Lbegin: nop
+Lend: ret
+Lsize = Lend-Lbegin
+.section __DWARF,__debug_info,regular,debug
+.long Lsize
+.asciz "equals= colon: semicolon; slash// quote\" backslash\\"
+.ascii "\001\177\377\n\t"
+.uleb128 0, 127, 128, 18446744073709551615
+.sleb128 -9223372036854775808, -65, -64, 63, 64, 9223372036854775807
+"#;
+    let temp = Temp::new();
+    let input = temp.0.join("data.s");
+    let reference = temp.0.join("clang.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .arg("-c")
+        .arg(input)
+        .arg("-o")
+        .arg(&reference));
+    let bytes = std::fs::read(reference).unwrap();
+    let reference = object::File::parse(bytes.as_slice()).unwrap();
+    let bytes = assemble_object(source).unwrap();
+    let ours = object::File::parse(bytes.as_slice()).unwrap();
+    let got = ours.section_by_name("__debug_info").unwrap();
+    let expected = reference.section_by_name("__debug_info").unwrap();
+    assert_eq!(got.data().unwrap(), expected.data().unwrap());
+    assert_eq!(got.flags(), expected.flags());
+}
+#[test]
+fn line_rows_match_clang() {
+    let source = ".file 1 \"example.c\"\n.file 2 \"include/other.h\"\n.text\n.globl _example\n_example:\n.loc 1 4 2\nnop\n.loc 1 9 7 prologue_end\nnop\n.loc 2 3 1\nret\n";
+    common::compare_clang(source);
+    let temp = Temp::new();
+    let input = temp.0.join("lines.s");
+    let reference = temp.0.join("clang.o");
+    let ours = temp.0.join("ours.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .arg("-c")
+        .arg(input)
+        .arg("-o")
+        .arg(&reference));
+    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
+    let normalize = |dump: String| {
+        dump.lines()
+            .filter(|s| s.starts_with("0x"))
+            .map(|s| s.split_whitespace().skip(1).collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        normalize(dump(&ours, "--debug-line")),
+        normalize(dump(&reference, "--debug-line"))
+    );
+    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+}
+#[test]
+fn malformed_metadata_is_diagnosed() {
+    for source in [
+        ".cfi_endproc",
+        ".cfi_startproc",
+        ".cfi_def_cfa sp,0",
+        ".cfi_startproc\n.cfi_startproc",
+        ".cfi_startproc\n.cfi_restore_state",
+        ".cfi_startproc\n.cfi_offset x30,-7",
+        ".file 1 \"foo\"\n.file 1 \"bar\"",
+        ".loc 1 1 0",
+        ".data\n.cfi_startproc",
+        ".file 1 \"foo\"\n.loc 1 1 0 is_stmt 0",
+        ".asciz \"bad\\q\"",
+        ".uleb128 -1",
+        ".sleb128 9223372036854775808",
+        ".subsections_via_symbols",
+        ".cfi_startproc\n.cfi_personality 155, _personality",
+        ".cfi_startproc\n.cfi_lsda 16, Llsda",
+        ".section __TEXT,__eh_frame,coalesced\n.byte 0\n.text\n.cfi_startproc\nret\n.cfi_endproc",
+        ".file 1 \"foo\"\n.section __DWARF,__debug_line,regular,debug\n.byte 0\n.text\n.loc 1 1 0\nret",
+    ] {
+        assert!(assemble(source).is_err(), "accepted {source}");
+    }
+}
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn stack_unwinding_crosses_assembled_frame() {
+    let temp = Temp::new();
+    let obj = temp.0.join("frame.o");
+    let c = temp.0.join("main.c");
+    let exe = temp.0.join("run");
+    let source = ".globl _frame\n_frame:\n.cfi_startproc\nstp x29,x30,[sp,#-16]!\nmov x29,sp\n.cfi_def_cfa x29,16\n.cfi_offset x29,-16\n.cfi_offset x30,-8\nbl _capture\nldp x29,x30,[sp],#16\nret\n.cfi_endproc\n";
+    std::fs::write(&obj, assemble_object(source).unwrap()).unwrap();
+    std::fs::write(
+        &c,
+        r#"
+#include <unwind.h>
+#include <stdint.h>
+extern void frame(void);
+static int found;
+static _Unwind_Reason_Code cb(struct _Unwind_Context *ctx,void *arg) {
+ (void)arg; uintptr_t ip=_Unwind_GetIP(ctx), base=(uintptr_t)frame;
+ if (ip>base && ip<=base+24) found++;
+ return _URC_NO_REASON;
+}
+void capture(void) { _Unwind_Backtrace(cb,0); }
+int main(void) {frame();return found!=1;}
+"#,
+    )
+    .unwrap();
+    run(Command::new("clang").arg(c).arg(&obj).arg("-o").arg(&exe));
+    assert!(common::execute(&exe).success());
+    let decoded = dump(&obj, "--eh-frame");
+    assert!(decoded.contains("W29+16"));
+    assert!(decoded.contains("W30=[CFA-8]"));
+}
+#[test]
+fn keel_debug_info_verifies_and_builds_dsym() {
+    let repo =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../keel-codegen/tests/programs");
+    let source = std::fs::read_to_string(repo.join("linkage.keel")).unwrap();
+    let module = keel_ir::parse(&source).unwrap();
+    let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
+    // Atom splitting is a separate linker feature; keep each section intact.
+    let source = source
+        .lines()
+        .filter(|s| s.trim() != ".subsections_via_symbols")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let temp = Temp::new();
+    let obj = temp.0.join("linkage.o");
+    let exe = temp.0.join("run");
+    std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();
+    let verified = Command::new("dwarfdump")
+        .arg("--verify")
+        .arg(&obj)
+        .output()
+        .unwrap();
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stdout)
+    );
+    let info = dump(&obj, "--debug-info");
+    assert!(info.contains("DW_TAG_subprogram"));
+
+    run(Command::new("clang")
+        .arg(repo.join("linkage.c"))
+        .arg(&obj)
+        .arg("-o")
+        .arg(&exe));
+    run(Command::new("dsymutil").arg(&exe));
+    run(Command::new("dwarfdump")
+        .arg("--verify")
+        .arg(temp.0.join("run.dSYM")));
+    let info = dump(&temp.0.join("run.dSYM"), "--debug-info");
+    assert!(info.contains("DW_TAG_subprogram"));
+}
+
+#[test]
+fn keel_types_scopes_and_variables_verify() {
+    let source = include_str!("../../keel-ir/tests/golden/debug_info.keel");
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
+    let source = source
+        .lines()
+        .filter(|s| s.trim() != ".subsections_via_symbols")
+        .collect::<Vec<_>>()
+        .join("\n");
+    let temp = Temp::new();
+    let obj = temp.0.join("types.o");
+    std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();
+    let output = Command::new("dwarfdump")
+        .arg("--verify")
+        .arg(&obj)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let info = dump(&obj, "--debug-info");
+    for tag in [
+        "DW_TAG_variable",
+        "DW_TAG_formal_parameter",
+        "DW_TAG_structure_type",
+        "DW_TAG_enumeration_type",
+        "DW_TAG_lexical_block",
+    ] {
+        assert!(info.contains(tag), "missing {tag}");
+    }
+}

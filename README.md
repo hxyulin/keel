@@ -81,10 +81,12 @@ integer/FP/SIMD loads and stores (including pairs and acquire/release).
 Symbol addressing supports local `adr`, `adrp` with PAGE/GOT/TLVP modifiers,
 page-offset memory operands, and external calls through Mach-O relocations.
 Data support includes initialized/zero-fill/TLS sections, integer directives,
-pointer tables, and symbol differences. Literal loads and unwind/debug
-directives are still pending, so it cannot yet assemble arbitrary
-`keel compile` output. Unsupported
-syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
+pointer tables, and symbol differences. It also supports ordinary CFI unwind
+records, DWARF 4 line tables, and debug sections for types and variables.
+Exception personalities, LSDA tables, and C++ exception propagation are
+supported. Literal loads and subsection splitting remain pending, so it cannot
+yet assemble arbitrary `keel compile` output.
+Unsupported syntax is an error. See [the assembler design](docs/design.md#assembler) for syntax,
 source provenance, licensing, and regeneration instructions.
 
 ## Development
