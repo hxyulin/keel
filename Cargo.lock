@@ -421,6 +421,7 @@ name = "keel-link"
 version = "0.1.0"
 dependencies = [
  "keel-asm",
+ "object",
  "serde",
  "serde_yaml",
  "sha2",

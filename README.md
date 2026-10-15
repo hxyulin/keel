@@ -139,6 +139,16 @@ assembler core can be tested with
 suite additionally needs a reference Clang that recognizes its requested
 features, including `-mcpu=apple-m5` (Ubuntu Clang 18 does not).
 
+### Native static ELF linking
+
+`keel link --target x86_64-unknown-linux-gnu start.o helpers.o -o program`
+links x86-64 ELF objects in process. The initial Linux milestone produces static,
+fixed-address executables entered at `_start`, with symbol resolution, common/
+weak symbols, BSS and address/call/GOT relocations. Supply your own startup and
+syscall code; libc and dynamic linking are later milestones. The target defaults
+to Linux on Linux and can be selected explicitly on macOS. See
+[ELF linker scope and validation](docs/elf-linker.md).
+
 ## Compiler tiers and profiling
 
 The stages can be tuned independently:

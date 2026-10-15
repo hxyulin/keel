@@ -1,11 +1,12 @@
 [package]
 name = "keel-link"
-description = "Bounded native arm64 Mach-O executable linker"
+description = "Native arm64 Mach-O and static x86-64 ELF executable linkers"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+object = { version = "0.36", default-features = false, features = ["read", "std"] }
 sha2 = "0.11.1"
 serde = "1"
 serde_yaml = "0.9"

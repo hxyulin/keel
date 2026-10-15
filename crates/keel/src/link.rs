@@ -3,7 +3,11 @@ use std::path::{Path, PathBuf};
 pub fn run(args: &[String]) -> Result<(), String> {
     // An explicit fallback preserves the system driver's full argument surface.
     // It is selected before native parsing; native failures never trigger it.
-    if args.iter().any(|a| a == "--system") {
+    if args
+        .iter()
+        .take_while(|a| *a != "--")
+        .any(|a| a == "--system")
+    {
         let mut command = std::process::Command::new("clang");
         for arg in args.iter().filter(|a| *a != "--system") {
             command.arg(if matches!(arg.as_str(), "--sysroot" | "-syslibroot") {
@@ -21,6 +25,31 @@ pub fn run(args: &[String]) -> Result<(), String> {
             Err(format!("system linker exited with {status}"))
         };
     }
+
+    let mut native_args = Vec::new();
+    let mut target = if cfg!(target_os = "linux") {
+        "x86_64-unknown-linux-gnu"
+    } else {
+        "aarch64-apple-darwin"
+    };
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--" {
+            native_args.push(arg.clone());
+            native_args.extend(iter.cloned());
+            break;
+        } else if arg == "--target" {
+            target = iter.next().ok_or("--target requires a target triple")?;
+        } else {
+            native_args.push(arg.clone());
+        }
+    }
+    match target {
+        "x86_64-unknown-linux-gnu" => return run_elf(&native_args),
+        "aarch64-apple-darwin" => {}
+        _ => return Err(format!("unsupported linker target `{target}`")),
+    }
+    let args = &native_args;
 
     let mut inputs = Vec::new();
     let mut libraries = vec!["System".to_owned()];
@@ -190,4 +219,74 @@ fn sdk_version(root: &Path) -> u32 {
             }
         })
         .unwrap_or(0)
+}
+
+fn run_elf(args: &[String]) -> Result<(), String> {
+    let mut paths = Vec::new();
+    let mut output = PathBuf::from("a.out");
+    let mut options = keel_link::elf::Options::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "-o" => output = args.next().ok_or("-o requires a path")?.into(),
+            "-e" | "--entry" => {
+                options.entry = args.next().ok_or("--entry requires a symbol")?.clone()
+            }
+            "--static" | "-static" => {}
+            "--" => {
+                paths.extend(args.map(PathBuf::from));
+                break;
+            }
+            a if a.starts_with('-') => {
+                return Err(format!("unsupported native ELF linker option `{a}`"));
+            }
+            _ => paths.push(PathBuf::from(arg)),
+        }
+    }
+    if paths.is_empty() {
+        return Err("usage: keel link --target x86_64-unknown-linux-gnu [-e _start] <input.o>... -o executable".into());
+    }
+    let owned = paths
+        .iter()
+        .map(|p| {
+            std::fs::read(p)
+                .map(|b| (p.to_string_lossy().into_owned(), b))
+                .map_err(|e| format!("{}: {e}", p.display()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let inputs = owned
+        .iter()
+        .map(|(name, bytes)| keel_link::Input { name, bytes })
+        .collect::<Vec<_>>();
+    let executable = keel_link::elf::link(&inputs, options)?;
+    for warning in &executable.warnings {
+        eprintln!("keel link: warning: {warning}");
+    }
+    // Write beside the destination and install only after the complete image is
+    // written. create_new prevents collisions with concurrent linker processes.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let temporary = output.with_file_name(format!(".keel-elf-{}-{stamp}", std::process::id()));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| format!("{}: {e}", temporary.display()))?;
+    let result = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        file.write_all(&executable.bytes)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o755))?;
+        }
+        drop(file);
+        std::fs::rename(&temporary, &output)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result.map_err(|e| format!("{}: {e}", output.display()))
 }

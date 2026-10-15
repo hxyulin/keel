@@ -1,6 +1,8 @@
-//! A bounded native linker for Keel's macOS arm64 objects. See docs/macos-linker.md.
+//! Native executable linkers: arm64 Mach-O (`link`) and static x86-64 ELF (`elf::link`).
+//! See docs/macos-linker.md and docs/elf-linker.md.
 //! `link` is host-independent and returns an unsigned executable image. On macOS,
 //! `write_signed` installs it atomically after Apple's ad-hoc codesign succeeds.
+pub mod elf;
 mod read;
 mod tbd;
 mod unwind;
@@ -20,7 +22,7 @@ pub(crate) fn align(n: usize, a: usize) -> usize {
     (n + a - 1) & !(a - 1)
 }
 
-/// Named input bytes, either a thin arm64 MH_OBJECT or BSD ar archive.
+/// Named input bytes. Accepted formats depend on the selected linker API.
 pub struct Input<'a> {
     pub name: &'a str,
     pub bytes: &'a [u8],
