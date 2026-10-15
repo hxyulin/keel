@@ -343,8 +343,8 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 /// addresses directly, and a [`folded_imm`].
 fn folds(func: &Function, offsets: &[usize], data: &InstData) -> Vec<Value> {
     let addr = match *data {
-        InstData::Load { ty, addr } => Some((addr, ty)),
-        InstData::Store { value, addr } => Some((addr, func.value_type(func.resolve(value)))),
+        InstData::Load { ty, addr, .. } => Some((addr, ty)),
+        InstData::Store { value, addr, .. } => Some((addr, func.value_type(func.resolve(value)))),
         _ => None,
     }
     .filter(|&(addr, ty)| folded_offset(func, offsets, addr, ty).is_some())
@@ -1274,13 +1274,13 @@ impl<'a> FunctionCompiler<'a> {
                     self.def_done(result, d);
                 }
             }
-            InstData::Load { ty, addr } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
                 self.emit(format!("ldr\t{}, {a}", freg(d, ty)));
                 self.def_done(result, d);
             }
-            InstData::Load { ty, addr } => {
+            InstData::Load { ty, addr, .. } => {
                 let d = self.def_reg(result);
                 let a = self.mem(addr, S0, ty);
                 let op = match ty {
@@ -1291,13 +1291,13 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("{op}\t{}, {a}", reg(d, ty)));
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
                 self.emit(format!("str\t{}, {a}", freg(v, ty)));
             }
-            InstData::Store { value, addr } => {
+            InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
                     Some(_) if ty == Type::I64 => "xzr".to_string(),
@@ -1795,12 +1795,13 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Load {
                 ty: Type::I128,
                 addr,
+                ..
             } => {
                 let a = self.use_reg(addr, S0);
                 self.emit(format!("ldp\tx4, x5, [x{a}]"));
                 self.pair_out(result, 4, 5);
             }
-            InstData::Store { value, addr } if wide(self, value) => {
+            InstData::Store { value, addr, .. } if wide(self, value) => {
                 self.operands(&[value, addr]);
                 self.emit("stp\tx0, x1, [x2]");
             }

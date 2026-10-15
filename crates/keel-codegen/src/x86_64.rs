@@ -287,8 +287,8 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 fn folds(func: &Function, data: &InstData) -> Vec<Value> {
     let wide = |v: Value| func.value_type(func.resolve(v)) == Type::I128;
     let addr = match *data {
-        InstData::Load { ty, addr } if ty != Type::I128 => Some(addr),
-        InstData::Store { value, addr } if !wide(value) => Some(addr),
+        InstData::Load { ty, addr, .. } if ty != Type::I128 => Some(addr),
+        InstData::Store { value, addr, .. } if !wide(value) => Some(addr),
         _ => None,
     }
     .filter(|&addr| stack_slot(func, addr).is_some());
@@ -952,7 +952,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(format!("set{cc}\t{}", r8(d)));
                 self.def_done(result, d);
             }
-            InstData::Load { ty, addr } if ty.is_float() => {
+            InstData::Load { ty, addr, .. } if ty.is_float() => {
                 let d = self.def_freg(result);
                 let a = self.mem(addr, S0, ty);
                 self.emit(format!("{}\t{}, {a}", movs(ty), xmm(d)));
@@ -960,7 +960,7 @@ impl<'a> FunctionCompiler<'a> {
             }
             // A narrow load zero-extends to 32 bits, which avoids writing
             // part of a register (and depending on its old value).
-            InstData::Load { ty, addr } => {
+            InstData::Load { ty, addr, .. } => {
                 let d = self.def_reg(result);
                 let a = self.mem(addr, S0, ty);
                 match ty {
@@ -969,13 +969,13 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 self.def_done(result, d);
             }
-            InstData::Store { value, addr } if self.ty(value).is_float() => {
+            InstData::Store { value, addr, .. } if self.ty(value).is_float() => {
                 let ty = self.ty(value);
                 let v = self.use_freg(value, FS0);
                 let a = self.mem(addr, S1, ty);
                 self.emit(format!("{}\t{a}, {}", movs(ty), xmm(v)));
             }
-            InstData::Store { value, addr } => {
+            InstData::Store { value, addr, .. } => {
                 let ty = self.ty(value);
                 let v = match folded_imm(func, func.inst_data(inst)) {
                     Some((_, k)) => k.to_string(),
@@ -1331,13 +1331,14 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Load {
                 ty: Type::I128,
                 addr,
+                ..
             } => {
                 let a = r64(self.use_reg(addr, S1));
                 self.emit(format!("mov\trax, qword ptr [{a}]"));
                 self.emit(format!("mov\trdx, qword ptr [{a} + 8]"));
                 self.pair_out(result);
             }
-            InstData::Store { value, addr } if wide(self, value) => {
+            InstData::Store { value, addr, .. } if wide(self, value) => {
                 let [v0, v1] = self.halves(value);
                 let a = r64(self.use_reg(addr, S1));
                 self.emit(format!("mov\trax, {v0}"));

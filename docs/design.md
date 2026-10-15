@@ -159,13 +159,23 @@ resumed by a debugger, so it is an intrinsic.
   is no stack probing yet: an allocation larger than the guard page can
   skip past it.
 - Memory operations are ordered by CFG order.
-- There is no `volatile` flag: every load and store is pinned, and no pass
-  removes, merges or moves one, so C's `volatile` accesses are plain loads
-  and stores. The flag comes with the first pass that optimizes memory
-  (store-to-load forwarding, dead-store elimination), which must leave
-  volatile accesses alone.
-- Optional alias-class tags on loads and stores (`[stack]`, `[heap]`…)
-  promise disjointness between classes.
+- Non-atomic loads/stores have explicit access properties:
+  `load.i32 volatile align 4 notrap v0` and
+  `store volatile align 4 notrap v1, v0`. Each flag is optional; default
+  alignment is 1 and accesses may fault. `align` promises a nonzero power
+  of two. `notrap` promises only that this access cannot fault, not that
+  it can cross a write or an object-lifetime change. Volatile accesses
+  must execute as written; they are neither atomic nor hardware fences.
+- `memory_effects()` distinguishes reads, writes, read/write operations and
+  conservative barriers; `may_trap()` separately describes exceptional exits.
+  Unknown calls, inline assembly, atomic operations and stack-lifetime
+  changes invalidate memory facts. A compiler barrier here is conservative
+  analysis behavior, not a hardware-fence instruction.
+- All loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
+  Explicit properties enable later memory-aware passes without silently
+  changing current scheduling or fault behavior. Alias classes and call
+  read/write summaries are not implemented; the old alias-class design
+  note described future metadata, not fields present in the IR.
 - **Atomics** follow the C11/C++11 memory model, with the ordering written
   after the opcode: `atomic_load.i32 acquire v0`, `atomic_store release v1,
   v0`, `atomic_rmw.add seq_cst v0, v1` (also `sub and or xor xchg umin umax

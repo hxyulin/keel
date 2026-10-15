@@ -827,9 +827,11 @@ impl Function {
             InstData::Fcmp { cond, args } => {
                 write!(f, "fcmp.{cond} {}, {}", v(args[0]), v(args[1]))
             }
-            InstData::Load { ty, addr } => write!(f, "load.{ty} {}", v(*addr)),
+            InstData::Load { ty, addr, flags } => write!(f, "load.{ty} {flags}{}", v(*addr)),
             InstData::VaArg { ty, list } => write!(f, "va_arg.{ty} {}", v(*list)),
-            InstData::Store { value, addr } => write!(f, "store {}, {}", v(*value), v(*addr)),
+            InstData::Store { value, addr, flags } => {
+                write!(f, "store {flags}{}, {}", v(*value), v(*addr))
+            }
             InstData::AtomicLoad { ty, ordering, addr } => {
                 write!(f, "atomic_load.{ty} {ordering} {}", v(*addr))
             }

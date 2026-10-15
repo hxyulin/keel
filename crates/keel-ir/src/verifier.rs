@@ -549,6 +549,17 @@ impl Verifier<'_> {
     fn check_types(&mut self, inst: Inst) {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
+        if let InstData::Load { flags, .. } | InstData::Store { flags, .. } = func.inst_data(inst)
+            && !flags.align.is_power_of_two()
+        {
+            self.inst_error(
+                inst,
+                format!(
+                    "memory alignment must be a nonzero power of two, got {}",
+                    flags.align
+                ),
+            );
+        }
         match func.inst_data(inst) {
             InstData::Iconst { ty, .. } => {
                 if !ty.is_int() {

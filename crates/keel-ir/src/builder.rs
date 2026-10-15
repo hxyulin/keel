@@ -157,7 +157,15 @@ impl InstBuilder<'_> {
     }
 
     pub fn load(self, ty: Type, addr: Value) -> Value {
-        self.value(InstData::Load { ty, addr })
+        self.load_with_flags(ty, addr, crate::MemoryFlags::default())
+    }
+
+    pub fn load_with_flags(self, ty: Type, addr: Value, flags: crate::MemoryFlags) -> Value {
+        self.value(InstData::Load { ty, addr, flags })
+    }
+
+    pub fn store_with_flags(self, value: Value, addr: Value, flags: crate::MemoryFlags) -> Inst {
+        self.build(InstData::Store { value, addr, flags })
     }
 
     pub fn va_arg(self, ty: Type, list: Value) -> Value {
@@ -196,7 +204,7 @@ impl InstBuilder<'_> {
     }
 
     pub fn store(self, value: Value, addr: Value) -> Inst {
-        self.build(InstData::Store { value, addr })
+        self.store_with_flags(value, addr, crate::MemoryFlags::default())
     }
 
     pub fn stack_addr(self, slot: StackSlot) -> Value {
