@@ -9,11 +9,11 @@ def main():
     p.add_argument('--profile', type=pathlib.Path, required=True)
     p.add_argument('--storage', type=pathlib.Path, required=True)
     p.add_argument('--output', type=pathlib.Path, required=True)
-    p.add_argument('--kind', choices=['index', 'reads', 'parser'], default='index')
+    p.add_argument('--kind', choices=['index', 'reads', 'parser', 'alignment'], default='index')
     args = p.parse_args()
     profile = json.loads(args.profile.read_text())
     storage = json.loads(args.storage.read_text())
-    variant = {'index': 'indexed', 'reads': 'compact', 'parser': 'parser'}[args.kind]
+    variant = {'index': 'indexed', 'reads': 'compact', 'parser': 'parser', 'alignment': 'alignment'}[args.kind]
     # Normalize the display schema; the saved measurements retain variant names.
     data = dict(aggregate={k.replace(variant + ':', 'indexed:'): v for k, v in profile['aggregate'].items()},
                 summaries={}, memory={})
@@ -98,6 +98,22 @@ document.getElementById('memory').innerHTML=rows.map(r=>{const b=r.m.baseline,c=
                             'Baseline: b961ed0, which already includes the lexer, arena/interner, incoming-edge index, and compact SSA definition tables.')
         cleanup = [100 * (1 - row['variants'][variant]['stages_median_ms']['cleanup_ms'] / row['variants']['baseline']['stages_median_ms']['cleanup_ms']) for key, row in profile['summaries'].items() if key.endswith(':False')]
         html = html.replace('<h3>Allocation and memory checks</h3>', f'<p class="muted">Normal-mode cleanup also takes {min(cleanup):.0f}–{max(cleanup):.0f}% less time.</p><h3>Allocation and memory checks</h3>')
+    elif args.kind == 'alignment':
+        html = html.replace('SSA: index incoming edges as control flow grows', 'IR generation: indexed symbol alignment')
+        html = html.replace('Incoming-edge index', 'Alignment indexes').replace('>81</div>', '>89</div>')
+        start = html.index("<p>Each source block's outgoing edges")
+        end = html.index('<h3>Allocation and memory checks</h3>', start)
+        html = html[:start] + '''<p><strong>Index declaration alignments once.</strong> A lazy per-compilation index borrows symbol spellings and preserves the first matching declaration, including aliases. It replaces repeated scans of all globals for each function's data symbols.</p>
+<p><strong>Track generated data immediately.</strong> Literals and initializer byte objects update a separate alignment index when emitted. The first module object wins, and declarations keep precedence over generated symbols. Unknown symbols still use conservative alignment 1.</p>
+<p><strong>Use dense IR IDs.</strong> Per-function stack-slot and data-symbol alignment tables use vectors instead of hash maps. Offset arithmetic, recursion limits, packed accesses, and existing alignment guarantees keep their prior rules.</p>
+''' + html[end:]
+        html = html.replace('Regression coverage includes loops, duplicate destinations, raw destination rewrites, removal/movement, and source visitation order.',
+                            'Regression coverage includes aliased declarations, first-object precedence, late literals/initializer data, unknown symbols, dense IDs, conservative offsets, and existing packed/over-aligned accesses.')
+        html = html.replace('Baseline: 7528fb6, which already includes the lexer and arena/interner work.',
+                            'Baseline: 308d0be, which already includes the lexer, arena/interner, SSA, and parser optimizations.')
+        lua_intervals = [profile['summaries']['lua:' + mode]['comparisons'][variant]['ratio_ci95'] for mode in ['False', 'True']]
+        if all(low <= 1 <= high for low, high in lua_intervals):
+            html = html.replace('<h3>What changed</h3>', '<p class="muted">Lua is effectively unchanged within timing uncertainty. Gains are concentrated in QuickJS and SQLite.</p><h3>What changed</h3>')
     html = html.replace('Nine paired serial rounds', str(profile['rounds']) + ' paired serial rounds')
     if profile.get('extension_note'):
         html = html.replace('Inputs are preprocessed and resident.', 'The run was extended from 9 to 18 pairs after large latency spikes; every original sample is retained. Inputs are preprocessed and resident.')

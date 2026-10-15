@@ -48,6 +48,12 @@ pub struct Gen<'p> {
     /// Data made up for local initializers: bytes to symbol.
     anon: HashMap<Vec<u8>, String>,
     dtypes: DebugTypes,
+    /// Borrow immutable declaration spellings. Build once, on the first
+    /// alignment query; aliases retain the first declaration's alignment.
+    global_alignments: Option<HashMap<&'p str, u32>>,
+    /// Non-declaration objects emitted while functions are built. The
+    /// first module object wins, matching Module::data_object.
+    generated_alignments: HashMap<String, u32>,
 }
 
 impl<'p> Gen<'p> {
@@ -64,6 +70,8 @@ impl<'p> Gen<'p> {
             unprototyped: HashMap::new(),
             anon: HashMap::new(),
             dtypes: DebugTypes::default(),
+            global_alignments: None,
+            generated_alignments: HashMap::new(),
         }
     }
 
@@ -128,12 +136,39 @@ impl<'p> Gen<'p> {
         }
     }
 
+    fn symbol_alignment(&mut self, name: &str) -> u32 {
+        let globals = self.global_alignments.get_or_insert_with(|| {
+            let mut alignments = HashMap::with_capacity(self.p.globals.len());
+            for global in &self.p.globals {
+                alignments
+                    .entry(global.symbol)
+                    .or_insert(global.align as u32);
+            }
+            alignments
+        });
+        globals
+            .get(name)
+            .copied()
+            .or_else(|| self.generated_alignments.get(name).copied())
+            .unwrap_or(1)
+    }
+
+    /// All non-declaration module data goes through here so an alignment
+    /// query sees literals and initializer bytes emitted later in a function.
+    fn push_generated_data(&mut self, data: DataObject) {
+        let align = data.init.as_ref().map_or(1, |init| init.align);
+        self.generated_alignments
+            .entry(data.name.clone())
+            .or_insert(align);
+        self.module.data.push(data);
+    }
+
     fn string_symbol(&mut self, i: usize) -> String {
         let name = format!(".str.{i}");
         if !self.strings_used[i] {
             self.strings_used[i] = true;
             let s = &self.p.strings[i];
-            self.module.data.push(DataObject {
+            self.push_generated_data(DataObject {
                 name: name.clone(),
                 thread_local: false,
                 local: true,
@@ -153,7 +188,7 @@ impl<'p> Gen<'p> {
             return name.clone();
         }
         let name = format!(".init.{}", self.anon.len());
-        self.module.data.push(DataObject {
+        self.push_generated_data(DataObject {
             name: name.clone(),
             thread_local: false,
             local: true,
@@ -273,33 +308,19 @@ impl<'p> Gen<'p> {
     /// Preserve proven address alignment on every emitted access, including
     /// byte copies and initializer chunks. No pointee-type inference: packed
     /// members and pointers cast from byte buffers may be unaligned.
-    fn preserve_access_alignment(&self, func: &mut Function, mut known: HashMap<Value, u32>) {
-        let slots: HashMap<_, _> = func.stack_slots().map(|(s, d)| (s, d.align)).collect();
-        let symbols: HashMap<_, _> = func
+    fn preserve_access_alignment(&mut self, func: &mut Function, mut known: HashMap<Value, u32>) {
+        // StackSlot and DataRef are append-only dense arena indices.
+        let slots: Vec<_> = func.stack_slots().map(|(_, d)| d.align).collect();
+        let symbols: Vec<_> = func
             .data_symbols()
-            .map(|(r, name)| {
-                let align = self
-                    .p
-                    .globals
-                    .iter()
-                    .find(|g| g.symbol == name)
-                    .map(|g| g.align as u32)
-                    .or_else(|| {
-                        self.module
-                            .data_object(name)
-                            .and_then(|d| d.init.as_ref())
-                            .map(|d| d.align)
-                    })
-                    .unwrap_or(1);
-                (r, align)
-            })
+            .map(|(_, name)| self.symbol_alignment(name))
             .collect();
         fn alignment(
             func: &Function,
             value: Value,
             known: &mut HashMap<Value, u32>,
-            slots: &HashMap<StackSlot, u32>,
-            symbols: &HashMap<keel_ir::DataRef, u32>,
+            slots: &[u32],
+            symbols: &[u32],
             depth: usize,
         ) -> u32 {
             let value = func.resolve(value);
@@ -315,10 +336,10 @@ impl<'p> Gen<'p> {
                 return 1;
             };
             let result = match func.inst_data(inst) {
-                InstData::StackAddr { slot } => slots[slot],
+                InstData::StackAddr { slot } => slots[slot.index()],
                 InstData::SymbolAddr {
                     symbol: Symbol::Data(data),
-                } => symbols[data],
+                } => symbols[data.index()],
                 InstData::Iconst { imm, .. } => 1u32 << (*imm as u64).trailing_zeros().min(31),
                 InstData::Binary {
                     op: op @ (BinaryOp::Ptradd | BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::Imul),
@@ -2177,5 +2198,156 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod alignment_tests {
+    use super::*;
+    use crate::strings::Strings;
+
+    fn parser(arena: &bumpalo::Bump) -> Parser<'_> {
+        let mut text = Strings::new(arena);
+        let mut files = Vec::new();
+        let toks = crate::lex::tokenize(
+            "int first; int second; int collision;",
+            "align.c",
+            &mut files,
+            &mut text,
+        )
+        .unwrap();
+        let mut p = Parser::new(toks, crate::Options::default().target, text);
+        p.translation_unit().unwrap();
+        p.globals[0].symbol = "shared";
+        p.globals[0].align = 8;
+        p.globals[1].symbol = "shared";
+        p.globals[1].align = 64;
+        p.globals[2].symbol = ".str.0";
+        p.globals[2].align = 16;
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"a\0",
+            wide: false,
+        });
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"b\0\0\0\0\0\0\0",
+            wide: true,
+        });
+        p.strings.push(crate::parse::StrLit {
+            bytes: b"c\0",
+            wide: false,
+        });
+        p
+    }
+
+    fn old_alignment(g: &Gen<'_>, name: &str) -> u32 {
+        g.p.globals
+            .iter()
+            .find(|global| global.symbol == name)
+            .map(|global| global.align as u32)
+            .or_else(|| {
+                g.module
+                    .data_object(name)
+                    .and_then(|data| data.init.as_ref())
+                    .map(|init| init.align)
+            })
+            .unwrap_or(1)
+    }
+
+    fn data(name: &str, align: Option<u32>) -> DataObject {
+        DataObject {
+            name: name.into(),
+            local: true,
+            thread_local: false,
+            init: align.map(|align| DataInit {
+                align,
+                constant: true,
+                items: vec![],
+            }),
+        }
+    }
+
+    #[test]
+    fn symbol_index_preserves_first_matches_and_late_generated_data() {
+        let arena = bumpalo::Bump::new();
+        let p = parser(&arena);
+        let mut g = Gen::new(&p, &[], false);
+        assert!(g.global_alignments.is_none());
+        assert_eq!(g.symbol_alignment("unknown"), 1);
+        assert_eq!(g.symbol_alignment("shared"), 8);
+        // These objects are emitted after the declaration index is built.
+        for i in 0..3 {
+            g.string_symbol(i);
+        }
+        let init = g.anon_data(b"bytes");
+        assert_eq!(g.anon_data(b"bytes"), init);
+        g.push_generated_data(data("duplicate", Some(32)));
+        g.push_generated_data(data("duplicate", Some(64)));
+        g.push_generated_data(data("no_initializer", None));
+        g.push_generated_data(data("no_initializer", Some(64)));
+        for name in [
+            "shared",
+            ".str.0",
+            ".str.1",
+            ".str.2",
+            &init,
+            "duplicate",
+            "no_initializer",
+            "unknown",
+        ] {
+            assert_eq!(g.symbol_alignment(name), old_alignment(&g, name), "{name}");
+        }
+        assert_eq!(g.symbol_alignment(".str.0"), 16);
+        assert_eq!(g.symbol_alignment(".str.1"), 4);
+        assert_eq!(g.symbol_alignment("duplicate"), 32);
+        assert_eq!(g.symbol_alignment("no_initializer"), 1);
+    }
+
+    #[test]
+    fn dense_tables_keep_alignment_and_conservative_offsets() {
+        let arena = bumpalo::Bump::new();
+        let p = parser(&arena);
+        let mut g = Gen::new(&p, &[], false);
+        let init = g.anon_data(b"bytes");
+        let mut f = Function::new("f", Signature::new(&[], &[Type::I8]));
+        let entry = f.create_block();
+        f.create_stack_slot(32, 8);
+        let slot = f.create_stack_slot(64, 16);
+        for i in 0..12 {
+            f.import_data(&format!("unused{i}"));
+        }
+        let shared = f.import_data("shared");
+        let generated = f.import_data(&init);
+        let unknown = f.import_data("unknown");
+        let stack = f.ins(keel_ir::InsertPoint::End(entry)).stack_addr(slot);
+        let shared = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(shared));
+        let generated = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(generated));
+        let unknown = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .symbol_addr(Symbol::Data(unknown));
+        let offset = f.ins(keel_ir::InsertPoint::End(entry)).iconst(Type::I64, 2);
+        let unaligned = f
+            .ins(keel_ir::InsertPoint::End(entry))
+            .ptradd(shared, offset);
+        let mut result = None;
+        for addr in [stack, shared, generated, unknown, unaligned] {
+            let value = f.ins(keel_ir::InsertPoint::End(entry)).load(Type::I8, addr);
+            result.get_or_insert(value);
+        }
+        f.ins(keel_ir::InsertPoint::End(entry))
+            .return_(&[result.unwrap()]);
+        g.preserve_access_alignment(&mut f, HashMap::new());
+        keel_ir::verify(&f).unwrap();
+        let alignments: Vec<_> = f
+            .layout_insts()
+            .filter_map(|(_, inst)| match f.inst_data(inst) {
+                InstData::Load { flags, .. } => Some(flags.align),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(alignments, [16, 8, 8, 1, 2]);
     }
 }

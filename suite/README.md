@@ -1123,3 +1123,84 @@ data symbol, followed by a possible module-data search. Its iterator/global-scan
 frame accounts for about 1.7% of QuickJS and 3.6% of SQLite self samples. A symbol
 alignment index could remove repeated searches while retaining conservative
 alignment guarantees. This parser pass does not change alignment semantics.
+
+### Indexed IR access alignment (2026-10-15)
+
+This comparison starts at `308d0be`, after parser lookup/type-node reuse.
+`Gen::preserve_access_alignment` previously scanned all parsed globals for each
+function data symbol, followed by a possible linear module-data search.
+A lazy per-compilation index now borrows declaration symbol spellings and keeps
+the first matching declaration, including aliases. The index is built only
+when a symbol alignment is queried. Generated literal and initializer objects
+update a separate index as they are emitted; first-module-object precedence,
+declaration precedence, and unknown-symbol alignment 1 are preserved.
+
+Per-function stack-slot and data-symbol alignment tables now use vectors:
+`StackSlot` and `DataRef` are append-only dense arena IDs. The sparse cache of
+proven value alignments, address arithmetic, recursion bound, packed-access
+rules, and existing alignment guarantees keep their prior behavior. There are
+no API, dependency, or handwritten unsafe changes.
+
+All 89 C frontend, driver, and SSA tests pass. New regression coverage compares
+the index to the old lookup through aliased declarations, declaration/generated
+name collisions, late narrow/wide literals, deduplicated initializer bytes,
+first-object precedence (including no initializer), and unknown symbols. Dense
+ID tests verify multiple slots/imports and conservative offset alignment.
+Existing packed/over-aligned, volatile/atomic, debug, ABI, and executable C
+fixtures pass. The comparison checks exact normal/debug IR equivalence.
+
+Build/freeze the baseline examples at `308d0be` in a separate checkout, then
+build/freeze current examples with the same release/debug-symbol settings.
+The details report records source, manifest, lockfile, and binary hashes.
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile --example profile_allocations
+python3 suite/measure_c_frontend.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --variant baseline=target/frontend-profile/alignment/profile-baseline \
+  --variant alignment=target/frontend-profile/alignment/profile-alignment \
+  --rounds 13 --work-dir target/frontend-profile/alignment/paired \
+  --output suite/reports/c-frontend-alignment-20261015.json
+python3 suite/measure_frontend_storage.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --baseline target/frontend-profile/alignment/allocations-baseline \
+  --candidate target/frontend-profile/alignment/allocations-alignment \
+  --candidate-name alignment \
+  --output suite/reports/c-frontend-alignment-storage-20261015.json
+python3 suite/capture_frontend_stacks.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --binary target/frontend-profile/alignment/profile-alignment \
+  --output suite/reports/c-frontend-alignment-stacks-20261015.json
+python3 suite/render_ssa_index.py --kind alignment \
+  --profile suite/reports/c-frontend-alignment-20261015.json \
+  --storage suite/reports/c-frontend-alignment-storage-20261015.json \
+  --output suite/reports/c-frontend-alignment-20261015.html
+```
+
+The thirteen-pair result is **2.1% less normal-mode frontend time**
+(equal-application geometric mean; 95% paired bootstrap interval 1.8–2.5%)
+and **2.8% less time with debug info** (2.3–3.2%). Normal public compile medians
+are Lua 40.69 → 40.74 ms, QuickJS 94.58 → 92.76 ms, and SQLite 128.10 → 121.92 ms.
+Paired time reductions are -0.1%, 1.8%, and 4.5%, respectively; Lua's interval
+includes no change. Debug-mode reductions are 0.1%, 2.5%, and 5.5%, with Lua again
+within timing uncertainty. Per-application paired ratios need not equal the ratio
+of marginal medians.
+
+Normal IR-generation medians are Lua 8.70 → 8.73 ms, QuickJS 35.06 → 32.70 ms,
+and SQLite 57.96 → 52.74 ms: **5.2% less IR-generation time** across applications.
+Debug-mode IR-generation time falls 7.0%. Lua is effectively flat; declaration-index construction may offset lookup
+savings in its smaller translation units. The benefit is strongest where many
+functions repeatedly reference global data.
+
+All 176 normal/debug cross-variant IR snapshots match byte-for-byte and verify.
+The report retains all 312 timing batches / 4,576 measured file calls.
+Allocation counters and four six-second stack captures run separately from
+latency measurement. This comparison uses the already optimized frontend at
+`308d0be` as baseline, not the original pre-lexer implementation.
+
+Normal allocation/reallocation calls rise by 0.12–0.22%, and requested allocation
+bytes rise by 0.07–0.25%, paying for compilation-level lookup tables and generated
+symbol keys. Debug-mode changes are similarly small. Peak RSS observations are
+reported as single full counting-process measurements including resident inputs
+and warmup; they do not establish isolated-call peak memory. Source, binary, and
+sample hashes are rechecked before committing the reports.
