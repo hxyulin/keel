@@ -9,6 +9,41 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<Option<u32>, String
     if let Some(word) = exclusive(op, args)? {
         return Ok(Some(word));
     }
+    if let Some(order) = op.strip_prefix("casp") {
+        if !matches!(order, "" | "a" | "l" | "al") {
+            return Err("invalid CASP ordering".into());
+        }
+        count(args, 5, 5)?;
+        let s = reg(args[0], false, true)?;
+        let s2 = reg(args[1], false, true)?;
+        let t = reg(args[2], false, true)?;
+        let t2 = reg(args[3], false, true)?;
+        same_width(s, s2)?;
+        same_width(s, t)?;
+        same_width(s, t2)?;
+        if s.number % 2 != 0
+            || t.number % 2 != 0
+            || s2.number != s.number + 1
+            || t2.number != t.number + 1
+        {
+            return Err(
+                "CASP requires consecutive register pairs starting at even registers".into(),
+            );
+        }
+        if args[4].contains(',') {
+            return Err("CASP requires [base] without an offset".into());
+        }
+        let n = memory::atomic_base(args[4])?;
+        return encode_named(
+            format_args!("CASP{}_CP{}_comswappr", upper(order), s.bits),
+            &[
+                (FieldId::Rs, s.number),
+                (FieldId::Rt, t.number),
+                (FieldId::Rn, n.number),
+            ],
+        )
+        .map(Some);
+    }
     if op == "clrex" {
         count(args, 0, 1)?;
         let crm = args.first().map_or(Ok(15), |s| unsigned(s, 15))?;

@@ -45,6 +45,7 @@ mod relocate;
 mod scalable;
 mod scanning;
 mod storage;
+mod system;
 mod text;
 mod vector;
 
@@ -767,7 +768,10 @@ fn assemble_pass(
             Some(word) => word,
             None => match vector::numeric(&op, &args, features).map_err(err)? {
                 Some(word) => word,
-                None => instruction(&op, &args).map_err(err)?,
+                None => match system::instruction(&op, &args, features).map_err(err)? {
+                    Some(word) => word,
+                    None => instruction(&op, &args).map_err(err)?,
+                },
             },
         };
         result.text.extend_from_slice(&word.to_le_bytes());

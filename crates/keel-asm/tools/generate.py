@@ -95,13 +95,17 @@ NUMERIC_NAMES = [line for line in (ROOT / "isa/m5-numeric.txt").read_text().spli
 SME_FEATURES = {"FEAT_SME2", "FEAT_SME_F64F64", "FEAT_SME_I16I64", "FEAT_SME_F16F16", "FEAT_SME_B16B16"}
 SME_NAMES = [line for line in (ROOT / "isa/sme.txt").read_text().splitlines()
              if line and not line.startswith("#")]
+COMPAT_FEATURES = {"FEAT_PAuth", "FEAT_BTI", "FEAT_AES", "FEAT_SHA1", "FEAT_SHA256", "FEAT_CRC32", "FEAT_PMULL"}
+COMPAT_NAMES = [line for line in (ROOT / "isa/m5-compat.txt").read_text().splitlines()
+                if line and not line.startswith("#")]
+SYSTEM_NAMES = {"NZCV", "FPCR", "FPSR", "TPIDR_EL0", "TPIDRRO_EL0", "CNTVCT_EL0", "CNTPCT_EL0", "CNTFRQ_EL0", "CTR_EL0", "DCZID_EL0", "DC CVAU", "DC CVAC", "DC CIVAC", "DC ZVA", "IC IVAU", "IC IALLU", "IC IALLUIS"}
 NAMES = sorted(set(
     [f"{op}_{bits}_movewide" for op in ("MOVZ", "MOVK", "MOVN") for bits in (32, 64)]
     + [f"{op}_{bits}{'S' if op.endswith('S') and form == 'imm' else ''}_addsub_{form}"
        for op in ("ADD", "SUB", "ADDS", "SUBS") for bits in (32, 64) for form in ("imm", "shift")]
     + [f"ORR_{bits}_log_shift" for bits in (32, 64)]
     + ["B_only_branch_imm", "BL_only_branch_imm", "RET_64R_branch_reg", "NOP_HI_hints"]
-    + STREAMING_NAMES + SME_NAMES + NUMERIC_NAMES + NEON_NAMES + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
+    + COMPAT_NAMES + STREAMING_NAMES + SME_NAMES + NUMERIC_NAMES + NEON_NAMES + SCALABLE_NAMES + EXCLUSIVE_NAMES + LITERAL_NAMES + SIMD_NAMES + ATOMIC_NAMES + BARRIER_NAMES + MEMORY_NAMES + ARITHMETIC_NAMES + CONTROL_NAMES + FP_NAMES + ["CNT_asimdmisc_R", "ADDV_asimdall_only", "MOVI_asimdimm_L_sl", "MOVI_asimdimm_L_hl", "MOVI_asimdimm_M_sm", "MOVI_asimdimm_N_b", "MOVI_asimdimm_D_ds", "MOVI_asimdimm_D2_d", "ADR_only_pcreladdr", "ADRP_only_pcreladdr"]
 ))
 
 
@@ -121,6 +125,12 @@ def import_archive(path):
     assert hashlib.sha256(path.read_bytes()).hexdigest() == SHA256, "archive checksum mismatch"
     with tarfile.open(path) as archive:
         data = json.load(archive.extractfile("Instructions.json"))
+        registers = json.load(archive.extractfile("Registers.json"))
+    system = [{"name": r["name"], "condition": r["condition"],
+               "accessors": [{k: a[k] for k in ("name", "condition", "encoding")} for a in r["accessors"]]}
+              for r in registers if r["name"] in SYSTEM_NAMES and r["state"] == "AArch64"]
+    assert {r["name"] for r in system} == SYSTEM_NAMES
+    (ROOT / "isa/system.json").write_text(json.dumps(system, indent=2) + "\n")
     assert data["_meta"]["version"]["schema"] == "2.7.4"
     a64 = next(x for x in data["instructions"] if x["name"] == "A64")
     records = {x["name"]: x for x in walk(a64)}
@@ -163,7 +173,7 @@ def requirements(node):
         assert node["name"] == "IsFeatureImplemented" and node["parameters"] == []
         assert len(node["arguments"]) == 1 and node["arguments"][0]["_type"] == "AST.Identifier"
         feature = node["arguments"][0]["value"]
-        assert feature in {"FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE", "FEAT_SVE", "FEAT_SME"} | NUMERIC_FEATURES | SME_FEATURES
+        assert feature in {"FEAT_FP", "FEAT_AdvSIMD", "FEAT_LSE", "FEAT_SVE", "FEAT_SME"} | NUMERIC_FEATURES | SME_FEATURES | COMPAT_FEATURES
         return [f'Requirement::Feature("{feature}")']
     if node.get("_type") == "AST.UnaryOp" and node["op"] == "!":
         return [f'Requirement::Not(&Requirement::All(&[{", ".join(requirements(node["expr"]))}]))']
@@ -176,7 +186,7 @@ def requirements(node):
         if node["op"] in ("==", "!=", "IN"):
             assert node["left"]["_type"] == "AST.Identifier"
             field = node["left"]["value"]
-            assert field in ("option", "size", "op1", "op2", "CRm", "immh", "Rm")
+            assert field in ("option", "size", "op1", "op2", "CRm", "immh", "Rm", "Rt")
             right = node["right"]
             if node["op"] == "IN":
                 assert right["_type"] == "AST.Set" and right["values"]
@@ -255,6 +265,27 @@ def generate(data):
             lines.append(f'Field {{ name: "{name}", id: FieldId::{name}, start: {start}, width: {width} }},')
         lines.append("], requirements: &[" + ", ".join(conditions) + "] },")
     lines.append("];\n")
+    lines.append("pub(super) fn system_operand(op: &str, name: &str) -> Option<&'static [(FieldId, u32)]> { Some(match (op, name) {")
+    for register in json.loads((ROOT / "isa/system.json").read_text()):
+        for accessor in register["accessors"]:
+            op = {"A64.MRS": "mrs", "A64.MSRregister": "msr", "A64.DC": "dc", "A64.IC": "ic"}[accessor["name"]]
+            assert accessor["condition"] == {"_type": "AST.Bool", "value": True}
+            assert len(accessor["encoding"]) == 1
+            encoding = accessor["encoding"][0]
+            fields = []
+            for field, value in encoding["encodings"].items():
+                bits = value["value"].strip("'")
+                assert set(bits) <= set("01")
+                number = int(bits, 2)
+                if field == "op0":
+                    if op in ("dc", "ic"):
+                        assert number == 1
+                        continue
+                    assert number in (2, 3)
+                    field, number = "o0", number - 2
+                fields.append(f"(FieldId::{field}, {number})")
+            lines.append(f'("{op}", "{encoding["asmvalue"].lower()}") => &[{", ".join(fields)}],')
+    lines.append("_ => return None, }) }")
     # Keep dispatch and records in the same order, generated from one source.
     # Rust lowers this match into a decision tree rather than scanning names.
     lines.append("pub(super) fn encoding(name: &str) -> Option<&'static Encoding> {\nSome(match name {")

@@ -436,6 +436,16 @@ pub(super) fn literal<'a>(
     args: &[&'a str],
     arena: &'a bumpalo::Bump,
 ) -> Result<Option<super::control::Branch<'a>>, String> {
+    if op == "prfm" && args.get(1).is_some_and(|s| !s.starts_with('[')) {
+        count(args, 2, 2)?;
+        return Ok(Some(super::control::Branch {
+            encoding: "PRFM_P_loadlit",
+            field: FieldId::imm19,
+            width: 19,
+            fields: bumpalo::vec![in arena; (FieldId::Rt, prefetch_op(args[0])?)],
+            target: args[1],
+        }));
+    }
     if !matches!(op, "ldr" | "ldrsw") || !args.get(1).is_some_and(|s| !s.starts_with('[')) {
         return Ok(None);
     }
@@ -459,4 +469,84 @@ pub(super) fn literal<'a>(
         fields: bumpalo::vec![in arena; (FieldId::Rt, t.number)],
         target: args[1],
     }))
+}
+
+pub(super) fn prefetch_op(text: &str) -> Result<u32, String> {
+    let text = lower(text);
+    if text.starts_with('#') {
+        return unsigned(&text, 31);
+    }
+    let (kind, rest) = if let Some(s) = text.strip_prefix("pld") {
+        (0, s)
+    } else if let Some(s) = text.strip_prefix("pli") {
+        (8, s)
+    } else if let Some(s) = text.strip_prefix("pst") {
+        (16, s)
+    } else {
+        return Err("invalid prefetch operation".into());
+    };
+    let (level, policy) = match rest {
+        "l1keep" => (0, 0),
+        "l1strm" => (0, 1),
+        "l2keep" => (2, 0),
+        "l2strm" => (2, 1),
+        "l3keep" => (4, 0),
+        "l3strm" => (4, 1),
+        _ => return Err("invalid prefetch level or policy".into()),
+    };
+    Ok(kind + level + policy)
+}
+pub(super) fn prefetch(op: &str, args: &[&str]) -> Result<u32, String> {
+    count(args, 2, 2)?;
+    let rt = prefetch_op(args[0])?;
+    let a = address(&args[1..])?;
+    if a.mode != Mode::Offset {
+        return Err("prefetch does not support writeback".into());
+    }
+    match a.offset {
+        Offset::Immediate(offset) => {
+            let (name, field, value) = if op == "prfum" {
+                if !(-256..=255).contains(&offset) {
+                    return Err("unscaled prefetch offset out of range".into());
+                }
+                (
+                    "PRFUM_P_ldst_unscaled",
+                    FieldId::imm9,
+                    (offset & 511) as u32,
+                )
+            } else {
+                if !(0..=32760).contains(&offset) || offset % 8 != 0 {
+                    return Err("prefetch offset requires a scaled unsigned 12-bit value".into());
+                }
+                ("PRFM_P_ldst_pos", FieldId::imm12, (offset / 8) as u32)
+            };
+            crate::encode(
+                name,
+                &[
+                    (FieldId::Rt, rt),
+                    (FieldId::Rn, a.base.number),
+                    (field, value),
+                ],
+            )
+        }
+        Offset::Register {
+            index,
+            option,
+            shift,
+        } => {
+            if op == "prfum" || !matches!(shift, None | Some(0 | 3)) {
+                return Err("invalid prefetch register offset".into());
+            }
+            crate::encode(
+                "PRFM_P_ldst_regoff",
+                &[
+                    (FieldId::Rt, rt),
+                    (FieldId::Rn, a.base.number),
+                    (FieldId::Rm, index.number),
+                    (FieldId::option, option),
+                    (FieldId::S, u32::from(shift == Some(3))),
+                ],
+            )
+        }
+    }
 }

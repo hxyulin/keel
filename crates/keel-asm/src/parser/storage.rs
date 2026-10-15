@@ -39,6 +39,13 @@ pub(super) fn encode_named(
     name: fmt::Arguments<'_>,
     fields: &[(FieldId, u32)],
 ) -> Result<u32, String> {
+    encode_named_features(name, fields, crate::TargetFeatures::default())
+}
+pub(super) fn encode_named_features(
+    name: fmt::Arguments<'_>,
+    fields: &[(FieldId, u32)],
+    features: crate::TargetFeatures,
+) -> Result<u32, String> {
     struct Name {
         bytes: [u8; 128],
         len: usize,
@@ -57,12 +64,12 @@ pub(super) fn encode_named(
         len: 0,
     };
     if buffer.write_fmt(name).is_err() {
-        return crate::encode(&name.to_string(), fields);
+        return crate::encode_with_features(&name.to_string(), fields, features);
     }
     // SAFETY: Name::write_str appends only complete &str fragments and updates
     // len after each successful copy. Failed formatting uses the fallback above.
     let name = unsafe { std::str::from_utf8_unchecked(&buffer.bytes[..buffer.len]) };
-    crate::encode(name, fields)
+    crate::encode_with_features(name, fields, features)
 }
 
 pub(super) struct Operands<'a> {

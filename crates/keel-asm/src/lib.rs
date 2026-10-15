@@ -226,6 +226,7 @@ pub struct TargetFeatures {
     sve: bool,
     sme: bool,
     numeric: u16,
+    compat: u8,
     matrix: u8,
 }
 impl TargetFeatures {
@@ -325,11 +326,59 @@ impl TargetFeatures {
             sve: false,
             sme: true,
             numeric: (1 << 9) - 1,
+            compat: 127,
             matrix: 31,
         }
     }
+    /// Permit pointer authentication encodings (without enabling an ABI).
+    pub const fn with_pauth(mut self) -> Self {
+        self.compat |= 1;
+        self
+    }
+    /// Permit branch target identification.
+    pub const fn with_bti(mut self) -> Self {
+        self.compat |= 2;
+        self
+    }
+    /// Permit AES round instructions.
+    pub const fn with_aes(mut self) -> Self {
+        self.compat |= 4;
+        self
+    }
+    /// Permit SHA-1 instructions.
+    pub const fn with_sha1(mut self) -> Self {
+        self.compat |= 8;
+        self
+    }
+    /// Permit SHA-256 instructions.
+    pub const fn with_sha256(mut self) -> Self {
+        self.compat |= 16;
+        self
+    }
+    /// Permit CRC32 and CRC32C instructions.
+    pub const fn with_crc32(mut self) -> Self {
+        self.compat |= 32;
+        self
+    }
+    /// Permit 64-bit polynomial multiply long.
+    pub const fn with_pmull(mut self) -> Self {
+        self.compat |= 64;
+        self
+    }
     fn supports(self, feature: &str) -> bool {
         TARGET_FEATURES.contains(&feature)
+            || [
+                "FEAT_PAuth",
+                "FEAT_BTI",
+                "FEAT_AES",
+                "FEAT_SHA1",
+                "FEAT_SHA256",
+                "FEAT_CRC32",
+                "FEAT_PMULL",
+            ]
+            .iter()
+            .position(|f| *f == feature)
+            .is_some_and(|i| self.compat & (1 << i) != 0)
             || (feature == "FEAT_SVE" && self.sve)
             || (feature == "FEAT_SME" && self.sme)
             || [

@@ -1,0 +1,1194 @@
+[
+  {
+    "name": "CNTFRQ_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CNTFRQ_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1110'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CNTFRQ_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1110'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "CNTPCT_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CNTPCT_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1110'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "CNTVCT_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CNTVCT_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1110'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'010'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "CTR_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CTR_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DC CIVAC",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.DC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CIVAC",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1110'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DC CVAC",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.DC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CVAC",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1010'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DC CVAU",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.DC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "CVAU",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1011'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DC ZVA",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.DC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "ZVA",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "DCZID_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "DCZID_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'111'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "FPCR",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "FPCR",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "FPCR",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "FPSR",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "FPSR",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "FPSR",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "IC IALLU",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.IC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "IALLU",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0101'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "IC IALLUIS",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.IC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "IALLUIS",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0001'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "IC IVAU",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.IC",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "IVAU",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0101'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0111'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'01'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'001'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "NZCV",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "NZCV",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0010'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "NZCV",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0010'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0100'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'000'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "TPIDR_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "TPIDR_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1101'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'010'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "TPIDR_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1101'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'010'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "TPIDRRO_EL0",
+    "condition": {
+      "_type": "AST.Function",
+      "arguments": [
+        {
+          "_type": "AST.Identifier",
+          "value": "FEAT_AA64"
+        }
+      ],
+      "name": "IsFeatureImplemented",
+      "parameters": []
+    },
+    "accessors": [
+      {
+        "name": "A64.MRS",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "TPIDRRO_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1101'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "A64.MSRregister",
+        "condition": {
+          "_type": "AST.Bool",
+          "value": true
+        },
+        "encoding": [
+          {
+            "_type": "Encoding",
+            "asmvalue": "TPIDRRO_EL0",
+            "encodings": {
+              "CRm": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'0000'"
+              },
+              "CRn": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'1101'"
+              },
+              "op0": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'11'"
+              },
+              "op1": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              },
+              "op2": {
+                "_type": "Values.Value",
+                "meaning": null,
+                "value": "'011'"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+]
