@@ -1037,3 +1037,89 @@ The final report retains all 432 batches / 6,336 measured file calls, including
 the first nine rounds. Storage instrumentation and four six-second stack
 captures run separately from latency measurement. Saved timing, memory, stack,
 provenance, and interactive HTML reports are `c-frontend-ssa-reads-*`.
+
+### Parser lookup and type-node reuse (2026-10-15)
+
+This comparison starts from `b961ed0`, after compact SSA definitions. Ordinary
+identifier lookup previously hashed a spelling once per enclosing scope. The
+parser now performs one hash lookup into a visible-binding table, followed by
+the last entry of a short per-name scope stack. A per-scope name list restores
+bindings on exit. File-scope bindings introduced while local shadows exist are
+inserted beneath those shadows, preserving the previous lookup/merge behavior.
+Repeated declarations in one scope update their existing entry.
+
+Type and reserved-keyword membership now uses compiler-generated string matches
+instead of linear spelling lists. Builtin/typedef-name exceptions are preserved
+and checked against the old membership rule. Immutable scalar and struct type
+leaves are shared through a compilation-local cache; the plain qualifier node
+is shared too. Pointer, array, and atomic constructors reuse these `Rc` nodes.
+Composite types retain their existing representation and ownership. A struct
+leaf still identifies the struct table by index, so completing a forward tag
+updates the same semantic type. This introduces no public API or handwritten
+unsafe code. `smallvec` was already locked at 1.16.3 and is now a direct keel-c
+dependency for short scope stacks.
+
+All 87 C frontend, driver, and SSA tests pass. New checks cover keyword spelling
+membership and exceptions, differential scope-stack lookup against the old
+scope search, deep shadows that spill inline stacks, an inner extern restoring
+an outer local and file binding, and distinct shared scalar/struct nodes.
+Existing qualifier-depth, volatile/atomic, ABI, debug-info, executable C fixture,
+and preprocessing tests pass. All 176 normal/debug cross-variant IR snapshots
+match byte-for-byte and verify, including public versus staged compilation.
+
+Build/freeze the baseline examples at `b961ed0` in a separate checkout, then
+build/freeze the current examples with the same release/debug-symbol settings.
+Source, manifest, lockfile, and binary hashes are recorded in the details report.
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=1 cargo build --release -p keel-c --features profile --example profile --example profile_allocations
+python3 suite/measure_c_frontend.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --variant baseline=target/frontend-profile/parser/profile-baseline \
+  --variant parser=target/frontend-profile/parser/profile-parser \
+  --rounds 13 --work-dir target/frontend-profile/parser/paired \
+  --output suite/reports/c-frontend-parser-20261015.json
+python3 suite/measure_frontend_storage.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --baseline target/frontend-profile/parser/allocations-baseline \
+  --candidate target/frontend-profile/parser/allocations-parser \
+  --candidate-name parser \
+  --output suite/reports/c-frontend-parser-storage-20261015.json
+python3 suite/capture_frontend_stacks.py \
+  --profile suite/reports/c-frontend-stages-20261015.json \
+  --binary target/frontend-profile/parser/profile-parser \
+  --output suite/reports/c-frontend-parser-stacks-20261015.json
+python3 suite/render_ssa_index.py --kind parser \
+  --profile suite/reports/c-frontend-parser-20261015.json \
+  --storage suite/reports/c-frontend-parser-storage-20261015.json \
+  --output suite/reports/c-frontend-parser-20261015.html
+```
+
+The thirteen-pair result is **4.4% less normal-mode frontend time**
+(equal-application geometric mean; 95% paired bootstrap interval 3.8–5.1%)
+and **4.8% less time with debug info** (4.4–5.3%). Normal compile medians are
+Lua 43.97 → 41.47 ms, QuickJS 101.00 → 97.58 ms, and SQLite 137.09 → 130.96 ms.
+Normal parse/type-checking medians are 19.18 → 17.12 ms, 39.40 → 35.76 ms, and
+44.67 → 40.05 ms: **10.1% less parse/type-checking time** across applications.
+The debug-mode parse/type reduction is 10.0%. Normal cleanup medians are
+2.19 → 1.99 ms, 4.83 → 4.59 ms, and 7.43 → 7.00 ms (about 5–9% less).
+There are 312 timing batches / 4,576 measured file calls. Stage reductions
+compare staged medians, while headline ratios use paired public compilation.
+All thirteen rounds are retained. This compares to the already optimized
+frontend at `b961ed0`, not the original pre-lexer baseline. Allocation counters
+and four six-second stack captures run separately from latency measurements.
+
+Normal allocation/reallocation calls fall 3.0–7.8% (2.6–6.5% with debug info).
+The visible-binding table trades some storage for fewer lookup probes: requested
+allocation bytes rise 1.2% on Lua, are nearly unchanged on QuickJS, and fall
+0.3% on SQLite in normal mode. Peak RSS observations are included in the report
+as single full counting-process measurements, including resident inputs and
+warmups; they do not establish isolated-call peak memory. Timing and counter
+builds retain the same verified IR outputs.
+
+Fresh samples identify the next focused candidate in IR generation:
+`Gen::preserve_access_alignment` linearly searches all globals for every used
+data symbol, followed by a possible module-data search. Its iterator/global-scan
+frame accounts for about 1.7% of QuickJS and 3.6% of SQLite self samples. A symbol
+alignment index could remove repeated searches while retaining conservative
+alignment guarantees. This parser pass does not change alignment semantics.

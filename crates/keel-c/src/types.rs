@@ -255,11 +255,36 @@ pub const LONG: Ty = Ty::Int(IntKind::Long);
 pub const ULONG: Ty = Ty::Int(IntKind::ULong);
 pub const CHAR: Ty = Ty::Int(IntKind::Char);
 
-impl Ty {
-    pub fn ptr_to(ty: Ty) -> Ty {
-        Ty::Ptr(Rc::new(ty))
-    }
+/// Immutable leaf nodes reused within one compilation. Composite and function
+/// types retain their own ownership; struct nodes identify the mutable table by
+/// index, so sharing does not freeze an incomplete tag's eventual definition.
+#[derive(Default)]
+pub(crate) struct TypeNodes {
+    scalar: [Option<Rc<Ty>>; IntKind::UInt128 as usize + 5],
+    structs: Vec<Option<Rc<Ty>>>,
+}
 
+impl TypeNodes {
+    pub fn node(&mut self, ty: Ty) -> Rc<Ty> {
+        let slot = match ty {
+            Ty::Void => &mut self.scalar[0],
+            Ty::Int(kind) => &mut self.scalar[1 + kind as usize],
+            Ty::Float => &mut self.scalar[IntKind::UInt128 as usize + 2],
+            Ty::Double => &mut self.scalar[IntKind::UInt128 as usize + 3],
+            Ty::Half => &mut self.scalar[IntKind::UInt128 as usize + 4],
+            Ty::Struct(id) => {
+                if self.structs.len() <= id {
+                    self.structs.resize_with(id + 1, || None);
+                }
+                &mut self.structs[id]
+            }
+            other => return Rc::new(other),
+        };
+        slot.get_or_insert_with(|| Rc::new(ty)).clone()
+    }
+}
+
+impl Ty {
     /// The type without `_Atomic`.
     pub fn unatomic(&self) -> &Ty {
         match self {
@@ -584,4 +609,47 @@ pub fn layout_struct<'a>(
         }
     }
     Ok((members, size, align))
+}
+
+#[cfg(test)]
+mod node_tests {
+    use super::*;
+
+    #[test]
+    fn common_nodes_share_storage_without_conflating_types() {
+        let mut nodes = TypeNodes::default();
+        let types = [
+            Ty::Void,
+            Ty::Int(IntKind::Bool),
+            Ty::Int(IntKind::Char),
+            Ty::Int(IntKind::SChar),
+            Ty::Int(IntKind::UChar),
+            Ty::Int(IntKind::Short),
+            Ty::Int(IntKind::UShort),
+            Ty::Int(IntKind::Int),
+            Ty::Int(IntKind::UInt),
+            Ty::Int(IntKind::Long),
+            Ty::Int(IntKind::ULong),
+            Ty::Int(IntKind::LLong),
+            Ty::Int(IntKind::ULLong),
+            Ty::Int(IntKind::Int128),
+            Ty::Int(IntKind::UInt128),
+            Ty::Float,
+            Ty::Double,
+            Ty::Half,
+            Ty::Struct(2),
+            Ty::Struct(100),
+        ];
+        for ty in &types {
+            let a = nodes.node(ty.clone());
+            let b = nodes.node(ty.clone());
+            assert!(Rc::ptr_eq(&a, &b));
+            assert_eq!(&*a, ty);
+        }
+        for ty in &types {
+            assert_eq!(&*nodes.node(ty.clone()), ty);
+        }
+        let composite = Ty::Array(nodes.node(INT), Some(7));
+        assert_eq!(*nodes.node(composite.clone()), composite);
+    }
 }

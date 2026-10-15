@@ -9,11 +9,11 @@ def main():
     p.add_argument('--profile', type=pathlib.Path, required=True)
     p.add_argument('--storage', type=pathlib.Path, required=True)
     p.add_argument('--output', type=pathlib.Path, required=True)
-    p.add_argument('--kind', choices=['index', 'reads'], default='index')
+    p.add_argument('--kind', choices=['index', 'reads', 'parser'], default='index')
     args = p.parse_args()
     profile = json.loads(args.profile.read_text())
     storage = json.loads(args.storage.read_text())
-    variant = 'compact' if args.kind == 'reads' else 'indexed'
+    variant = {'index': 'indexed', 'reads': 'compact', 'parser': 'parser'}[args.kind]
     # Normalize the display schema; the saved measurements retain variant names.
     data = dict(aggregate={k.replace(variant + ':', 'indexed:'): v for k, v in profile['aggregate'].items()},
                 summaries={}, memory={})
@@ -59,7 +59,7 @@ const apps=['lua','quickjs','sqlite'],labels={lua:'Lua',quickjs:'QuickJS',sqlite
 const f=x=>x.toFixed(1),pct=x=>f(100*x)+'%',delta=x=>(x>=0?'+':'')+pct(x);
 function render(){const mode=document.getElementById('mode').value,a=D.aggregate['indexed:'+mode];
 document.getElementById('headline').textContent=pct(1-a.equal_application_geomean_ratio);
-document.getElementById('interval').textContent=f(a.speedup)+'× speedup · 95% interval: '+pct(1-a.ratio_ci95[1])+'–'+pct(1-a.ratio_ci95[0])+' less frontend time';
+document.getElementById('interval').textContent=a.speedup.toFixed(2)+'× speedup · 95% interval: '+pct(1-a.ratio_ci95[1])+'–'+pct(1-a.ratio_ci95[0])+' less frontend time';
 const rows=apps.map(app=>({app,s:D.summaries[app+':'+mode],m:D.memory[app+':'+mode]}));
 const irRatio=Math.exp(rows.reduce((sum,r)=>sum+Math.log(r.s.variants.indexed.stages_median_ms.irgen_ms/r.s.variants.baseline.stages_median_ms.irgen_ms),0)/rows.length);
 document.getElementById('ir').textContent=pct(1-irRatio);
@@ -81,6 +81,23 @@ document.getElementById('memory').innerHTML=rows.map(r=>{const b=r.m.baseline,c=
                             'Regression coverage includes sparse variable IDs, repeated updates, inline growth, wide-block promotion, raw block gaps, loops, and trivial-parameter elimination.')
         html = html.replace('Baseline: 7528fb6, which already includes the lexer and arena/interner work.',
                             'Baseline: f39567e, which already includes incoming-edge indexing, the lexer rewrite, and arena/interner work.')
+    elif args.kind == 'parser':
+        html = html.replace('SSA: index incoming edges as control flow grows', 'Parser: scoped lookups and shared type nodes')
+        html = html.replace('Incoming-edge index', 'Lookup / type-node reuse').replace('>81</div>', '>87</div>')
+        html = html.replace('IR generation', 'Parsing / types').replace('IR-generation reduction', 'Parser reduction')
+        html = html.replace('irgen_ms', 'parse_ms').replace('less Parsing / types time', 'less parser/type time')
+        start = html.index("<p>Each source block's outgoing edges")
+        end = html.index('<h3>Allocation and memory checks</h3>', start)
+        html = html[:start] + '''<p><strong>One spelling lookup.</strong> Ordinary identifiers use a visible-binding table with short per-name scope stacks. Scope exit restores shadowed bindings. File-scope bindings introduced inside nested blocks are inserted beneath local shadows.</p>
+<p><strong>Shared immutable nodes.</strong> A compilation-local cache reuses scalar and struct type leaves, plus the plain qualifier node. Pointer, array, and atomic constructors reuse those reference-counted nodes. Composite types keep their existing ownership and qualifier structure.</p>
+<p><strong>Keyword dispatch.</strong> Type and reserved-word membership use compiler-generated string matches, preserving the previous builtin/typedef-name exceptions.</p>
+''' + html[end:]
+        html = html.replace('Regression coverage includes loops, duplicate destinations, raw destination rewrites, removal/movement, and source visitation order.',
+                            'Regression coverage includes keyword membership, typedef shadowing, deep nested scopes, inner extern declarations, shared type identity, and existing volatile/atomic behavior.')
+        html = html.replace('Baseline: 7528fb6, which already includes the lexer and arena/interner work.',
+                            'Baseline: b961ed0, which already includes the lexer, arena/interner, incoming-edge index, and compact SSA definition tables.')
+        cleanup = [100 * (1 - row['variants'][variant]['stages_median_ms']['cleanup_ms'] / row['variants']['baseline']['stages_median_ms']['cleanup_ms']) for key, row in profile['summaries'].items() if key.endswith(':False')]
+        html = html.replace('<h3>Allocation and memory checks</h3>', f'<p class="muted">Normal-mode cleanup also takes {min(cleanup):.0f}–{max(cleanup):.0f}% less time.</p><h3>Allocation and memory checks</h3>')
     html = html.replace('Nine paired serial rounds', str(profile['rounds']) + ' paired serial rounds')
     if profile.get('extension_note'):
         html = html.replace('Inputs are preprocessed and resident.', 'The run was extended from 9 to 18 pairs after large latency spikes; every original sample is retained. Inputs are preprocessed and resident.')

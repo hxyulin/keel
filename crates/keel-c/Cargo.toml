@@ -15,6 +15,7 @@ required-features = ["profile"]
 
 [dependencies]
 memchr = "2"
+smallvec = "1"
 bumpalo = { version = "3", features = ["collections"] }
 typed-arena = "2"
 memmap2 = "0.9"

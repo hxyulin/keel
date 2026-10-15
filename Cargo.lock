@@ -388,6 +388,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "simdutf8",
+ "smallvec",
  "typed-arena",
 ]
 

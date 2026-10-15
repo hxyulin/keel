@@ -9,7 +9,6 @@ use crate::types::*;
 use crate::{Error, Loc};
 use keel_ir::Target;
 use keel_ir::{OverflowOp, RmwOp};
-use std::rc::Rc;
 
 pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty, loc: Loc) -> Expr<'a> {
     Expr {
@@ -517,7 +516,7 @@ impl<'a> Parser<'a> {
                         fs.label_addrs.len()
                     }
                 };
-                Ok(mk(ExprKind::LabelAddr(n), Ty::ptr_to(Ty::Void), loc))
+                Ok(mk(ExprKind::LabelAddr(n), self.ptr_type(Ty::Void), loc))
             }
             "*" => {
                 self.advance();
@@ -571,8 +570,8 @@ impl<'a> Parser<'a> {
             })?;
         }
         self.mark_address_taken(&e);
-        let ty = Ty::ptr_to(e.ty.clone());
-        let sugar = Sugar::Ptr(Rc::new(e.sugar.clone()));
+        let ty = self.ptr_type(e.ty.clone());
+        let sugar = Sugar::Ptr(self.sugar_ref(e.sugar.clone()));
         Ok(mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar))
     }
 
@@ -683,7 +682,7 @@ impl<'a> Parser<'a> {
         };
         let mut sugar = m.sugar.clone();
         if base.sugar.is_volatile(&self.typedefs) {
-            sugar = Sugar::Volatile(Rc::new(sugar));
+            sugar = Sugar::Volatile(self.sugar_ref(sugar));
         }
         Ok(mk(
             ExprKind::Member {
@@ -890,7 +889,11 @@ impl<'a> Parser<'a> {
         let len = (bytes.len() / unit) as u64;
         let i = self.add_string(bytes, wide);
         let elem = if wide { INT } else { CHAR };
-        mk(ExprKind::Str(i), Ty::Array(Rc::new(elem), Some(len)), loc)
+        mk(
+            ExprKind::Str(i),
+            Ty::Array(self.type_ref(elem), Some(len)),
+            loc,
+        )
     }
 
     fn builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
@@ -915,7 +918,7 @@ impl<'a> Parser<'a> {
                     "overflow result pointer has an incompatible type",
                 ));
             }
-            let params = [ty.clone(), ty.clone(), Ty::ptr_to(ty)];
+            let params = [ty.clone(), ty.clone(), self.ptr_type(ty)];
             let args = args
                 .into_iter()
                 .zip(&params)
@@ -1047,7 +1050,7 @@ impl<'a> Parser<'a> {
                 if !(n as u64).is_power_of_two() {
                     return Err(Error::new(loc, "alignment must be a nonzero power of two"));
                 }
-                let ptr = Ty::ptr_to(Ty::Void);
+                let ptr = self.ptr_type(Ty::Void);
                 let mut args = args.into_iter();
                 let value = self.convert_for_assign(args.next().unwrap(), &ptr)?;
                 args.next(); // The checked constant alignment carries no runtime effect.
@@ -1147,7 +1150,10 @@ impl<'a> Parser<'a> {
                 let arg = if base.ends_with('l') { ULONG } else { UINT };
                 self.builtin_call(op, &[arg], INT, loc)
             }
-            "alloca" => self.builtin_call(Builtin::Alloca, &[ULONG], Ty::ptr_to(Ty::Void), loc),
+            "alloca" => {
+                let ptr = self.ptr_type(Ty::Void);
+                self.builtin_call(Builtin::Alloca, &[ULONG], ptr, loc)
+            }
             "frame_address" => {
                 let args = self.builtin_args(1, loc)?;
                 if eval_int(&args[0]) != Some(0) {
@@ -1158,7 +1164,7 @@ impl<'a> Parser<'a> {
                 }
                 Ok(mk(
                     ExprKind::Builtin(Builtin::FrameAddress, Vec::new()),
-                    Ty::ptr_to(Ty::Void),
+                    self.ptr_type(Ty::Void),
                     loc,
                 ))
             }
@@ -1289,7 +1295,8 @@ impl<'a> Parser<'a> {
                 // On a byte: set to 1 (giving whether it was set) or 0.
                 want(&args, 2)?;
                 let ptr = args.remove(0);
-                let ptr = self.cast(ptr, Ty::ptr_to(Ty::Int(IntKind::UChar)));
+                let ty = self.ptr_type(Ty::Int(IntKind::UChar));
+                let ptr = self.cast(ptr, ty);
                 let value = mk(ExprKind::Int(i64::from(op == "test_and_set")), INT, loc);
                 let value = self.cast(value, Ty::Int(IntKind::UChar));
                 let args = vec![ptr, value, args.remove(0)];
@@ -1571,7 +1578,7 @@ impl<'a> Parser<'a> {
     /// The address of an `_Atomic` lvalue, for an atomic access.
     fn address_of_atomic(&mut self, e: Expr<'a>) -> Expr<'a> {
         self.mark_address_taken(&e);
-        let ty = Ty::ptr_to(e.ty.clone());
+        let ty = self.ptr_type(e.ty.clone());
         let loc = e.loc;
         mk(ExprKind::Addr(Box::new(e)), ty, loc)
     }
@@ -1584,7 +1591,7 @@ impl<'a> Parser<'a> {
         match self.target {
             Target::Aarch64AppleDarwin => {
                 self.mark_address_taken(&ap);
-                let ty = Ty::ptr_to(ap.ty.clone());
+                let ty = self.ptr_type(ap.ty.clone());
                 let loc = ap.loc;
                 mk(ExprKind::Addr(Box::new(ap)), ty, loc)
             }
@@ -1605,13 +1612,13 @@ impl<'a> Parser<'a> {
                 let ty = Ty::Ptr(elem.clone());
                 let loc = e.loc;
                 self.mark_address_taken(&e);
-                let sugar = Sugar::Ptr(Rc::new(e.sugar.pointee(&self.typedefs)));
+                let sugar = Sugar::Ptr(self.sugar_ref(e.sugar.pointee(&self.typedefs)));
                 mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
             }
             Ty::Func(_) => {
-                let ty = Ty::ptr_to(e.ty.clone());
+                let ty = self.ptr_type(e.ty.clone());
                 let loc = e.loc;
-                let sugar = Sugar::Ptr(Rc::new(e.sugar.clone()));
+                let sugar = Sugar::Ptr(self.sugar_ref(e.sugar.clone()));
                 mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
             }
             _ => e,
