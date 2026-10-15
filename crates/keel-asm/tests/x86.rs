@@ -296,6 +296,7 @@ mov rcx,[rip+absolute@GOTPCREL]
 lea rsi,[rip+forward_absolute]
 jmp forward_absolute
 .set forward_absolute,0x5678
+test rax,offset external
 call external@PLT
 jmp external@PLT
 mov r9,[rip+external@GOTPCREL+8]

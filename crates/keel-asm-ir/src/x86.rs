@@ -507,7 +507,7 @@ pub fn symbol(s: &str) -> Result<String, String> {
 pub fn address(s: &str) -> Result<Address, String> {
     let mut out = Address::default();
     let (mut quote, mut escaped, mut start, mut sign) = (false, false, 0, 1i128);
-    let mut terms = Vec::new();
+    let mut terms = SmallVec::<[_; 4]>::new();
     for (i, c) in s.char_indices() {
         if escaped {
             escaped = false;
@@ -534,7 +534,14 @@ pub fn address(s: &str) -> Result<Address, String> {
     terms.push((sign, &s[start..]));
     for (sign, term) in terms {
         let term = term.trim();
-        if let Ok(n) = integer(term) {
+        // Symbol names cannot start with a digit. Avoid formatting an integer
+        // parse error for every ordinary symbolic address term.
+        let number = if term.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            integer(term).ok()
+        } else {
+            None
+        };
+        if let Some(n) = number {
             out.expression.constant = out
                 .expression
                 .constant
@@ -617,7 +624,7 @@ fn operand(s: &str) -> Result<Operand, String> {
         };
         // Split signed address terms outside quotes; registers cannot be subtracted.
         let (mut quote, mut escaped, mut start, mut sign) = (false, false, 0, 1);
-        let mut terms = Vec::new();
+        let mut terms = SmallVec::<[_; 4]>::new();
         for (i, c) in body.char_indices() {
             if escaped {
                 escaped = false;
