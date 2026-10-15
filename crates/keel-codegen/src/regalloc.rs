@@ -88,6 +88,8 @@ mod local;
 mod program;
 #[cfg(feature = "experimental-regalloc")]
 mod split;
+#[cfg(feature = "experimental-regalloc")]
+mod weighted;
 pub use program::*;
 
 use keel_ir::{Block, EntityRef, Function, InstData, Type, Value, ValueDef};
@@ -171,6 +173,9 @@ pub enum AllocationTier {
     /// Experimental splitting of spilled ranges into available registers.
     #[cfg(feature = "experimental-regalloc")]
     Split,
+    /// Experimental loop-weighted spill density over Full intervals.
+    #[cfg(feature = "experimental-regalloc")]
+    Weighted,
     #[default]
     Full,
 }
@@ -182,10 +187,16 @@ impl RegisterAllocator for AllocationTier {
             Self::Local => "local",
             #[cfg(feature = "experimental-regalloc")]
             Self::Split => "split",
+            #[cfg(feature = "experimental-regalloc")]
+            Self::Weighted => "weighted",
             Self::Full => "full",
         }
     }
     fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        #[cfg(feature = "experimental-regalloc")]
+        if *self == Self::Weighted {
+            return weighted::allocate(input);
+        }
         #[cfg(feature = "experimental-regalloc")]
         if *self == Self::Split {
             return split::allocate(input);
@@ -268,7 +279,7 @@ fn allocate_tier_inner(
     let mut locs = [vec![None; func.num_values()], vec![None; func.num_values()]];
     let spill_slots = match tier {
         #[cfg(feature = "experimental-regalloc")]
-        AllocationTier::Local | AllocationTier::Split => {
+        AllocationTier::Local | AllocationTier::Split | AllocationTier::Weighted => {
             unreachable!("experimental allocators have their own entry points")
         }
         AllocationTier::Fast => {
@@ -884,6 +895,18 @@ fn linear_scan<'a>(
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &std::collections::HashMap<Value, Vec<Value>>,
 ) -> Vec<&'a Interval> {
+    linear_scan_with_priority(intervals, pools, locs, hints, |a, b| b.end().cmp(&a.end()))
+}
+
+/// A higher priority keeps a value in a register. The default policy prefers
+/// the earliest endpoint; experimental policies can compare spill costs.
+fn linear_scan_with_priority<'a>(
+    intervals: &'a [Interval],
+    pools: &Pools,
+    locs: &mut [Vec<Option<Loc>>; 2],
+    hints: &std::collections::HashMap<Value, Vec<Value>>,
+    priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
+) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
     backend_scope!(Scan);
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
@@ -983,18 +1006,17 @@ fn linear_scan<'a>(
             continue;
         }
 
-        // Out of registers. Of the active intervals whose register `cur`
-        // could use (once they are evicted), find the one that ends last.
-        // If it outlives `cur`, take its register and spill it; otherwise
-        // spill `cur`.
+        // Out of registers. Choose the lowest-priority eligible active
+        // interval. Replace it only if keeping `cur` is more valuable.
+        // The default policy evicts the interval whose endpoint is latest.
         let victim = active
             .iter()
             .enumerate()
             .filter(|(_, (_, reg))| allowed(*reg) && !blocked_by_inactive(*reg))
-            .max_by_key(|(_, (iv, _))| iv.end())
+            .max_by(|(_, (a, _)), (_, (b, _))| priority(b, a))
             .map(|(i, _)| i);
         match victim {
-            Some(i) if active[i].0.end() > cur.end() => {
+            Some(i) if priority(cur, active[i].0).is_gt() => {
                 let (evicted, reg) = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted);

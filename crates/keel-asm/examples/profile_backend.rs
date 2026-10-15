@@ -1,6 +1,6 @@
 //! AArch64 backend profiles on preprocessed C or textual IR. Frontend work and
 //! optimization are outside timing. Both output paths must yield identical objects.
-//! Usage: profile_backend INPUT.i|INPUT.keel ROUNDS [--opt] [--debug] [--selection-all] [--regalloc-fast|--regalloc-local|--regalloc-split]
+//! Usage: profile_backend INPUT.i|INPUT.keel ROUNDS [--opt] [--debug] [--selection-all] [--regalloc-fast|--regalloc-local|--regalloc-split|--regalloc-weighted]
 use keel_codegen::{
     Target,
     backend_profile::{self, Stage, Timing},
@@ -71,6 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "--regalloc-fast"
                 | "--regalloc-local"
                 | "--regalloc-split"
+                | "--regalloc-weighted"
         ) {
             return Err(format!("unknown flag: {flag}").into());
         }
@@ -83,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|arg| {
             matches!(
                 arg.as_str(),
-                "--regalloc-fast" | "--regalloc-local" | "--regalloc-split"
+                "--regalloc-fast" | "--regalloc-local" | "--regalloc-split" | "--regalloc-weighted"
             )
         })
         .count()
@@ -97,7 +98,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         keel_codegen::regalloc::AllocationTier::Full
     };
     #[cfg(feature = "experimental-regalloc")]
-    let allocation = if args.iter().any(|arg| arg == "--regalloc-split") {
+    let allocation = if args.iter().any(|arg| arg == "--regalloc-weighted") {
+        keel_codegen::regalloc::AllocationTier::Weighted
+    } else if args.iter().any(|arg| arg == "--regalloc-split") {
         keel_codegen::regalloc::AllocationTier::Split
     } else if args.iter().any(|arg| arg == "--regalloc-local") {
         keel_codegen::regalloc::AllocationTier::Local
@@ -105,11 +108,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         allocation
     };
     #[cfg(not(feature = "experimental-regalloc"))]
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--regalloc-local" | "--regalloc-split"))
-    {
-        return Err("local/split require the experimental-regalloc feature".into());
+    if args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--regalloc-local" | "--regalloc-split" | "--regalloc-weighted"
+        )
+    }) {
+        return Err("local/split/weighted require the experimental-regalloc feature".into());
     }
     let source = std::fs::read_to_string(path)?;
     let mut module = if path.ends_with(".keel") {
@@ -275,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!(
         "{}",
-        json!({"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
+        json!({"input":path,"rounds":rounds,"optimized":opt,"debug":debug,"selection_all":selection_all,"regalloc_fast":allocation == keel_codegen::regalloc::AllocationTier::Fast,"regalloc_local":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "local","regalloc_weighted":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "weighted","regalloc_split":keel_codegen::regalloc::RegisterAllocator::name(&allocation) == "split",
         "functions":module.functions.len(),"ir_instructions":module.functions.iter().map(|f|f.layout_insts().count()).sum::<usize>(),
         "object_bytes":expected.len(),"code_bytes":assembly.text.len(),"native_instructions":program.stats().instructions,
         "allocation_metrics":{"spill_slots":allocation_metrics.spill_slots,"spilled_value_halves":allocation_metrics.spilled_value_halves,"callee_saves":allocation_metrics.callee_saves},"explicit_spill_helper_calls":spill_counters,"objects_identical":true,"runs":runs,"function_profiles":hot_functions})

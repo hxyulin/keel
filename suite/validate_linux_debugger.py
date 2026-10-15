@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--include-split', action='store_true', help='also validate experimental spill-range splitting')
     parser.add_argument('--include-local', action='store_true', help='also validate experimental local allocation')
+    parser.add_argument('--include-weighted', action='store_true', help='also validate experimental loop-weighted allocation')
     args = parser.parse_args()
     args.work_dir.mkdir(parents=True, exist_ok=True)
     source = Path(__file__).resolve().parent.parent / 'crates/keel-c/tests/debug/vars.c'
@@ -60,6 +61,8 @@ printf "EXIT=%d\n", $_exitcode
         builds += [('local', 'local', False), ('local-opt', 'local', True)]
     if args.include_split:
         builds += [('split', 'split', False), ('split-opt', 'split', True)]
+    if args.include_weighted:
+        builds += [('weighted', 'weighted', False), ('weighted-opt', 'weighted', True)]
     for name, allocation, optimized in builds:
         executable = args.work_dir / name
         if allocation is None:

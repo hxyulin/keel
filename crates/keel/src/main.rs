@@ -121,8 +121,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("local") => keel_codegen::regalloc::AllocationTier::Local,
                     #[cfg(feature = "experimental-regalloc")]
                     Some("split") => keel_codegen::regalloc::AllocationTier::Split,
+                    #[cfg(feature = "experimental-regalloc")]
+                    Some("weighted") => keel_codegen::regalloc::AllocationTier::Weighted,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full (local/split require experimental-regalloc)".into()),
+                    _ => return Err("`--regalloc` needs fast or full (local/split/weighted require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
