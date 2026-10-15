@@ -167,11 +167,28 @@ fn run_program(
             keel_opt::optimize(&mut module).map_err(|e| e.to_string())?;
         }
     }
+    let selector = keel_codegen::OptionsSelector(selection);
+    let features = std::env::var("KEEL_TEST_X86_FEATURES")
+        .ok()
+        .map(|s| keel_asm_ir::x86::Features::parse(&s))
+        .transpose()?
+        .unwrap_or_default();
+    #[cfg(target_arch = "x86_64")]
+    if (features.avx && !std::is_x86_feature_detected!("avx"))
+        || (features.bmi1 && !std::is_x86_feature_detected!("bmi1"))
+        || (features.bmi2 && !std::is_x86_feature_detected!("bmi2"))
+    {
+        return Err("requested test x86 ISA is unavailable on this host".into());
+    }
+    let selector = keel_codegen::x86_features::FeatureSelector {
+        inner: &selector,
+        features,
+    };
     let asm = compile_with_pipeline(
         &module,
         pools,
         &keel_codegen::CodegenPipeline {
-            selector: &keel_codegen::OptionsSelector(selection),
+            selector: &selector,
             allocator: &allocation,
         },
     )
@@ -187,7 +204,8 @@ fn run_program(
         if keel_codegen::Target::host() != Some(keel_codegen::Target::X86_64LinuxGnu) {
             return Err("KEEL_TEST_ASSEMBLER=native currently requires x86-64 Linux".into());
         }
-        let object = keel_asm::x86::assemble_object(&asm).map_err(|e| e.to_string())?;
+        let object = keel_asm::x86::assemble_object_with_features(&asm, features)
+            .map_err(|e| e.to_string())?;
         let object_path = dir.join(format!("{stem}.o"));
         std::fs::write(&object_path, object).map_err(|e| e.to_string())?;
         object_path
