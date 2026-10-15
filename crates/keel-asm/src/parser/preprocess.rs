@@ -90,14 +90,16 @@ struct Processor {
 }
 
 pub(super) fn expand(source: &str) -> Result<Expanded, Error> {
-    let lines: Vec<_> = scanning::Lines::new(source)
-        .enumerate()
-        .map(|(i, text)| Line {
-            text: text.to_owned(),
-            line: i + 1,
-            invocation: None,
+    let arena = bumpalo::Bump::new();
+    let lines: Vec<_> = scanning::Lines::new(source, &arena)
+        .map(|result| {
+            result.map(|(line, text)| Line {
+                text: text.to_owned(),
+                line,
+                invocation: None,
+            })
         })
-        .collect();
+        .collect::<Result<_, Error>>()?;
     let mut processor = Processor::default();
     processor.run(&lines, 0)?;
     Ok(Expanded {

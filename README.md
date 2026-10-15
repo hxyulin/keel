@@ -214,6 +214,13 @@ Use `--` before input names beginning with a dash. This assembler accepts AArch6
 syntax and emits Apple arm64 Mach-O; x86 AT&T/Intel syntax and ELF output require
 separate target support.
 
+Hand-written assembly can use named `.macro` parameters (`\name` substitution
+and `\()` concatenation), nested `.rept` blocks, and literal `.if`/`.elseif`/
+`.else` conditionals. See [the standalone example](crates/keel-asm/examples/standalone.s).
+The supported subset and expansion limits are described in
+[the assembler design](docs/design.md#assembler); includes, symbolic conditional
+expressions and advanced macro parameter modes are not yet supported.
+
 Instruction metrics are available through `keel asm-metrics input.s` and
 [`tools/instruction_metrics.py`](tools/instruction_metrics.py). The tool generates
 an inventory of all supported A64 forms, optionally imports CPU scheduling

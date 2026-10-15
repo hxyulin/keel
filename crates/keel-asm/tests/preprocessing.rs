@@ -187,3 +187,25 @@ fn ordinary_source_and_quoted_directive_names_are_unchanged() {
     common::compare_clang(".ascii \".macro .rept .if // ;\"\n.p2align 2\nnop\n");
     assert_eq!(assemble("nop\nret").unwrap().text.len(), 8);
 }
+
+#[test]
+fn expansion_combines_with_block_comments_radices_and_physical_lines() {
+    let source = "/* heading\n comment */\n.macro bump reg\nadd \\reg, /* operand\n comment */ \\reg, #0b1\n.endm\n.rept 02\nbump x0\n.endr\nret\n";
+    for source in [source.to_owned(), source.replace('\n', "\r")] {
+        common::compare_clang(&source);
+        let (_, metrics) = assemble_with_metrics(&source).unwrap();
+        assert_eq!(
+            metrics.iter().map(|m| m.line).collect::<Vec<_>>(),
+            [4, 4, 10]
+        );
+        let error = assemble(&source.replace("#0b1", "#99999")).unwrap_err();
+        assert_eq!(error.line, 4);
+        assert!(error.message.contains("expanded at line 8"), "{error}");
+    }
+    assert_eq!(assemble(".rept 1\n/* unclosed").unwrap_err().line, 2);
+}
+
+#[test]
+fn standalone_example_matches_clang() {
+    common::compare_clang(include_str!("../examples/standalone.s"));
+}

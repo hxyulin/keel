@@ -1158,6 +1158,44 @@ library can return encoded text and symbols or a complete relocatable object;
 `keel asm input.s -o output.o` writes that object. Apple’s linker remains the
 linker for now.
 
+Source accepts LF, CRLF and bare CR line endings, Darwin `;` and `//` comments,
+and C-style `/* ... */` comments. A block comment acts as whitespace, including
+within an operand across physical lines; diagnostics retain physical source
+lines. Mnemonics, registers and shift names are case-insensitive. Integers may
+be decimal, hexadecimal (`0x`), binary (`0b`) or leading-zero octal. `x31`/`w31`
+are zero-register spellings, not stack-pointer aliases, and remain invalid in
+operands that reject the zero register. Numeric local labels (`1:`/`1f`/`1b`)
+are not yet supported. AT&T/Intel x86 syntax and ELF objects are outside this
+AArch64 Mach-O target's scope.
+
+`keel asm --cpu apple-m5 one.s two.s --out-dir objects` writes one independently
+assembled object per input in one process, amortizing process startup. Output
+names use the input stem and `.o`; collisions and outputs aliasing inputs are
+rejected before writing. Processing is serial and stops on the first error;
+completed objects remain available. Each input's mapping and assembly state
+are released before processing the next. Input files must stay unchanged while
+being parsed. This interface has no persistent service or daemon state.
+
+**Standalone source expansion.** Named `.macro` definitions end at `.endm` or
+`.endmacro`; parameters are plain unique names and invocation arguments are
+comma-separated positional values. `\name` substitutes a parameter and `\()`
+separates it from following text for concatenation. Quote arguments containing
+spaces or commas. `.rept`/`.endr` supports nested repetition with literal counts.
+`.if`, `.ifeq`, `.ifne`, `.ifgt`, `.ifge`, `.iflt`, `.ifle`, `.elseif`, `.else`
+and `.endif` support integer-literal tests, including literals substituted by
+macros. Each invocation or expansion directive must occupy its own statement;
+label-prefixed macro calls are not supported. Keyword/default/required/variadic
+parameters, Darwin `$0` positional parameters, `\@`, symbolic/arithmetic
+conditions, `.ifdef` and filesystem `.include` are unsupported.
+
+Expansion is local to an assembly call and begins only when the ordinary parser
+reports an unsupported expansion directive. Compiler output without these
+directives avoids a preprocessing pass. Diagnostics and instruction metrics
+retain original definition lines; expanded errors also name the invocation line.
+Nesting is limited to 64, expansion work to 100,000 steps and expanded output to
+8 MiB. These limits apply to sources requiring expansion; ordinary source has no
+such size limit. The pure string assembly API does not read additional files.
+
 **Generated encoding tables.** `crates/keel-asm/isa/a64.json` contains selected
 instruction names, conditions, and encoding records copied from Arm’s
 BSD-licensed AARCHMRS December 2025 release (schema 2.7.4). The source URL,
@@ -1208,8 +1246,11 @@ Line and comment scanning share one structural scan. On little-endian AArch64
 targets with NEON enabled, a 16-byte block generates masks for newline,
 semicolon, slash, quote and backslash; subsequent lines reuse unconsumed mask
 bits. Full-line comments skip to newline. Other targets and short tails use
-scalar masks. Quoting state resets at each physical line, matching the
-original `str::lines`/comment-removal behavior, including CRLF and UTF-8.
+scalar masks. The scanner also recognizes CR line endings. Block comments
+allocate joined statement text in the pass arena only when needed; ordinary
+statements retain borrowed slices. Quoting state resets at statement endings;
+newlines inside block comments count toward physical lines without splitting
+the surrounding statement. UTF-8 strings and comments remain accepted.
 
 Normal Cargo builds use the checked-in Rust tables and need no network,
 Python, or ISA download. To regenerate, with Python 3 and rustfmt available:
