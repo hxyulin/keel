@@ -750,15 +750,17 @@ analyses they need; there is no analysis cache yet.
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
+| `loop-vectorize` | guarded contiguous counted loops with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
 The default pipeline (`-O`) is `simplify-cfg, canonicalize, instcombine,
-simplify-cfg, gvn, dce, gcm`. Basic uses `simplify-cfg, canonicalize, instcombine,
+simplify-cfg, gvn, dce, gcm, loop-vectorize`. Basic uses `simplify-cfg, canonicalize, instcombine,
 simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
-to avoid invalidating it immediately; this order produces identical assembly
-on the measured corpus with lower compile cost. A pass can request canonical form on entry; the manager
+to avoid invalidating it immediately. The scalar cleanup order was chosen for
+lower compile cost while preserving assembly on the earlier measured corpus.
+Vectorization then adds guarded vector loops where the supported pattern matches. A pass can request canonical form on entry; the manager
 restores it after intervening changes, including lazy aliases. This applies to
 explicit and custom pipelines too. The contract and its limits are documented
 in the [canonicalization section](simplification.md#canonicalization-contract).

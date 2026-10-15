@@ -61,6 +61,7 @@ fn neon_operations_emit_zero_text_and_identical_objects() {
         let (text, _) = compile(&source, selection, allocation, tiny);
         for instruction in [
             "fadd\tv",
+            "dup\tv",
             "fmul\tv",
             "fdiv\tv",
             "fmin\tv",
@@ -152,6 +153,11 @@ fn native_neon_instruction_encodings_match_clang() {
     use object::{Object, ObjectSection};
     let mut source = String::new();
     for shape in VectorType::ALL {
+        source += &format!(
+            "func @splat_{shape}({},ptr) {{\nblock0(v0: {},v1: ptr):\n v2 = vsplat.{shape} v0\n store v2,v1\n return\n}}\n",
+            shape.lane_type(),
+            shape.lane_type()
+        );
         for op in vector_common::operations(shape) {
             let binary: Result<keel_ir::VectorBinaryOp, _> = op.parse();
             let keep = if shape.lane_type().is_float() {

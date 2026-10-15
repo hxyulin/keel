@@ -96,10 +96,40 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorUnary { op, arg } => {
             unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
         }
+        InstData::VectorSplat { .. } => true,
         _ => false,
     })
 }
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_splat(&mut self, ty: Type, arg: Value, result: Option<Value>) {
+        let shape = ty.vector().unwrap();
+        let lane = shape.lane_type();
+        let d = self.def_freg(result);
+        let (opcode, source) = if lane.is_float() {
+            (Opcode::DUP_asimdins_DV_v, self.use_freg(arg, FS1))
+        } else {
+            (Opcode::DUP_asimdins_DR_r, self.use_reg(arg, S0))
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, 1),
+                (FieldId::imm5, lane.bytes().unwrap()),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, source.into()),
+            ],
+            || {
+                let scalar = if lane.is_float() {
+                    format!("v{source}.{}[0]", if lane == Type::F32 { "s" } else { "d" })
+                } else {
+                    format!("{}{source}", if lane == Type::I64 { "x" } else { "w" })
+                };
+                format!("dup\tv{d}.{}, {scalar}", arrangement(shape))
+            },
+        );
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_binary(&mut self, op: V, args: [Value; 2], result: Option<Value>) {
         let spec = binary(op, self.ty(args[0]).vector().unwrap()).expect("legalized NEON binary");
         let d = self.def_freg(result);

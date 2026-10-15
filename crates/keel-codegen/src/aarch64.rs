@@ -1141,8 +1141,8 @@ impl<'a> FunctionCompiler<'a> {
         match func.inst_data(inst).clone() {
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
-            InstData::VectorSplat { .. }
-            | InstData::VectorExtract { .. }
+            InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
+            InstData::VectorExtract { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorIcmp { .. }

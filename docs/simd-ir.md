@@ -10,9 +10,9 @@ aggregate layout. Lane zero occupies the lowest-addressed bytes in memory.
 These are target-independent IR operations. Parsing, verification, typed builders,
 printing, operand rewriting and generic optimization support them. The x86-64 Linux
 and AArch64 Apple backends compile every operation below, with packed SSE/SSE2 or
-NEON instructions for common cases and shared scalar lane expansion for the rest. The C frontend does not yet
-produce these vector values automatically; this support is available to IR clients.
-There is no automatic vectorization or SIMD performance claim here.
+NEON instructions for common cases and shared scalar lane expansion for the rest. IR clients can construct these values explicitly. The C frontend emits scalar
+loops that Full optimization can now vectorize, as described below. Explicit C
+vector types and intrinsics are not part of this change.
 
 ```text
 func @add_lane(ptr, i32) -> i32 {
@@ -142,7 +142,7 @@ add/subtract/multiply/divide, NaN-propagating min/max, negation, absolute value,
 square root and all four rounding operations. These use typed instruction
 encodings directly, with no text assembly fallback.
 
-Comparisons, lane selection, shifts, shuffles, splat/extract/insert, bitcasts,
+Comparisons, lane selection, shifts, shuffles, extract/insert, bitcasts,
 copy-sign, 64-bit multiplication and the remaining integer unary operations use
 the same scalar legalization as x86. This is complete operation coverage, not
 complete packed-instruction coverage. SVE/SME and scalable vector IR are not part
@@ -178,3 +178,56 @@ parsed Keel Mach-O objects match with zero text IR emission.
 Validation: `cargo test -p keel-codegen --test vector_aarch64 --test vector_ir`.
 AArch64 macOS executes the runtime harnesses; other hosts check emission and
 instruction encodings.
+
+## Automatic loop vectorization
+
+Full optimization (`-O` or `--opt-tier full`) now runs `loop-vectorize` after
+scalar cleanup and code motion. The C frontend emits ordinary scalar IR; the
+pass discovers vector operations, and codegen chooses their machine encodings.
+There is no frontend dependency in the pass. Basic optimization and unoptimized
+builds retain scalar loops. Explicit `-p` pipelines include the pass only when
+listed, for example `-p simplify-cfg,canonicalize,instcombine,simplify-cfg,gvn,dce,gcm,loop-vectorize`.
+
+The initial subset is zero-based, increasing-by-one counted loops with a 32- or
+64-bit induction variable, a separate header and straight-line body, one store,
+and contiguous streams of one scalar element type. Loads, copies, fills, integer
+add/subtract/bitwise operations, and floating add/subtract/multiply/divide can be
+widened to the matching 128-bit shape. Uniform scalar operands are broadcast once
+outside the vector loop. NEON broadcasts use typed `DUP` instructions for all six
+shapes. Signed positive bounds and scalar cleanup are supported, without floating
+reassociation or a fast-math requirement.
+
+A runtime guard requires at least four vector groups, checks byte-range overflow,
+and permits each input to be either identical to the output or disjoint from it.
+Partial overlap runs the unchanged scalar loop, preserving dependencies such as
+`out == input + 1`. Reads may overlap one another freely. The vector loop covers
+only complete groups; its final index enters the original scalar loop for the
+tail. Neither path widens access beyond the original iteration range. Accesses
+remain unaligned-safe and volatile operations are excluded.
+
+The first cost gate uses packed operation availability, fixed register pressure
+limits (24 expression values, four streams), and a trip-count threshold. It is
+not a full target cost model. `VectorTarget::{Portable,Aarch64Neon,X86Sse2}`
+configures `run_passes_for_target` or `run_pipeline_for_target`; existing optimizer
+APIs default to the portable intersection. The driver supplies the selected target
+for `cc`/`compile`, including explicit pipelines. `keel opt --target <triple>`
+selects that target's gate; without a target, `opt` uses portable capabilities.
+For example, i32 multiplication vectorizes for NEON but remains scalar for the
+current SSE2 lowering; i64 multiplication remains scalar on both.
+
+Offsets between streams, non-unit strides, reductions, induction values used as
+lane data or live-outs, additional loop-carried values, calls, atomics, volatile
+memory, mixed element widths, narrowing/widening conversions, conditional bodies,
+and general SLP vectorization are not yet supported. Narrow C arithmetic often
+includes integer promotions and therefore falls outside this subset. Loops that
+do not match are left untouched. Constant loops below the trip threshold are
+also left untouched.
+
+Validation: `cargo test -p keel-opt --test loop_vectorize` and
+`cargo test -p keel --test vectorize`. The C tests check target-specific IR,
+compile both object formats, and execute on native AArch64 macOS or x86-64 Linux
+under three codegen configurations. Runtime cases cover overlapping streams in
+both directions, exact aliases, disjoint streams, zero/short inputs, signed
+negative bounds, tails, and protected page boundaries. The reproducible
+`suite/scripts/bench_vectorize.py` compares the same compiler pipeline with and
+without the vectorizer, plus Clang, reporting compilation and runtime separately.

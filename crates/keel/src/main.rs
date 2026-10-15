@@ -3,7 +3,7 @@
 //! ```text
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
-//! keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+//! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
 //! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 A64 assembly to Mach-O
 //! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch A64 assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
@@ -35,7 +35,7 @@ mod link;
 const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
-  keel opt [--opt-tier <tier>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
@@ -88,9 +88,21 @@ impl Options {
         match &self.passes {
             Some(names) => {
                 let names: Vec<_> = names.iter().map(String::as_str).collect();
-                keel_opt::run_passes(module, &names)
+                keel_opt::run_passes_for_target(module, &names, self.vector_target())
             }
-            None => keel_opt::optimize_with_tier(module, self.optimization),
+            None => keel_opt::run_passes_for_target(
+                module,
+                self.optimization.pipeline(),
+                self.vector_target(),
+            ),
+        }
+    }
+
+    fn vector_target(&self) -> keel_opt::VectorTarget {
+        match self.target.or_else(Target::host) {
+            Some(Target::Aarch64AppleDarwin) => keel_opt::VectorTarget::Aarch64Neon,
+            Some(Target::X86_64LinuxGnu) => keel_opt::VectorTarget::X86Sse2,
+            None => keel_opt::VectorTarget::Portable,
         }
     }
 
@@ -433,17 +445,28 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
-            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O"])?;
+            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O", "--target"])?;
             let (input, mut module) = load(&opts)?;
+            let target = if opts.target.is_some() {
+                opts.vector_target()
+            } else {
+                keel_opt::VectorTarget::Portable
+            };
             let result = match &opts.passes {
                 Some(names) => {
                     let names: Vec<&str> = names.iter().map(String::as_str).collect();
-                    keel_opt::run_passes(&mut module, &names)
+                    keel_opt::run_passes_for_target(&mut module, &names, target)
                 }
                 None if rest.iter().any(|arg| arg == "--opt-tier" || arg == "-O") => {
-                    keel_opt::optimize_with_tier(&mut module, opts.optimization)
+                    keel_opt::run_passes_for_target(
+                        &mut module,
+                        opts.optimization.pipeline(),
+                        target,
+                    )
                 }
-                None => keel_opt::optimize(&mut module),
+                None => {
+                    keel_opt::run_passes_for_target(&mut module, keel_opt::DEFAULT_PIPELINE, target)
+                }
             };
             result.map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &module.to_string())
