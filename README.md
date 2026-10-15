@@ -49,20 +49,24 @@ For C, preprocessing must use the same target and its headers, for example
 `clang -E --target=<triple>` with the appropriate sysroot. Passing
 `--target` to keel does not change an already preprocessed file.
 
-`asm`, `compile`, `cc`, and `opt` also accept experimental `--mmap` input.
-This uses a read-only copy-on-write file mapping instead of an owned read
+`asm`, `compile`, `cc`, and `opt` map input files by default.
+They use a read-only copy-on-write file mapping instead of an owned read
 buffer for nonempty regular files, while retaining UTF-8 validation. Keep
 mapped inputs unchanged until parsing completes; copy-on-write does not
 protect against another process truncating the file. Empty files, streams,
 and filesystems that reject mapping fall back to ordinary reads. Mappings
 are released before writing output, including when output reuses the input
-path. Ordinary reads remain the default while input strategies are measured.
+path.
 
 To compare the two paths on already generated Lua assembly, run
 `python3 suite/measure_assembler_io.py --compiler target/release/keel
+--read-compiler target/assembler-bench/pre-default-read-keel
 --input-dir target/suite/lua/build/keel --work-dir target/assembler-bench/io
 --output target/assembler-bench/io/report.json`. Builds and tests should finish
 before timing. This measures warm-cache CLI costs, not cold-storage latency.
+The read comparison requires an archived release driver from before mapping
+became the default, such as commit `cc01b96`. Historical reports retain the
+commands and flags used at the time.
 
 ## Compiler tiers and profiling
 
@@ -234,8 +238,7 @@ top of `crates/keel-asm/src/parser.rs`. Separate
 show the debug-heavy input's peak RSS increasing by about 0.6 MiB.
 
 The [mapped-input comparison](suite/reports/assembler-mmap-aarch64-2026-10-15.json)
-found no clear overall warm-cache speedup before these parser changes; use
-`--mmap` explicitly when experimenting with stable inputs. These measurements
+found no clear overall warm-cache speedup before these parser changes. These measurements
 do not establish cold-storage behavior or benefits on larger applications.
 
 For synthetic large-file scaling checks:
@@ -243,6 +246,7 @@ For synthetic large-file scaling checks:
 ```sh
 python3 suite/generate_assembler_scale.py --output-dir target/assembler-bench/scale --mib 64 256
 python3 suite/measure_assembler_io.py --compiler target/release/keel \
+  --read-compiler target/assembler-bench/pre-default-read-keel \
   --input-dir target/assembler-bench/scale --input-group synthetic-scale \
   --work-dir target/assembler-bench/scale-objects --rounds 11 --warmups 1 \
   --output target/assembler-bench/scale-report.json

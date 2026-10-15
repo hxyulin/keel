@@ -1,4 +1,5 @@
-//! Optional mapped input for stable files. Mappings live through parsing only;
+//! Mapped input for stable files, with ordinary reads for unmappable inputs.
+//! Mappings live through parsing only;
 //! returned compiler/assembler data owns its storage independently.
 use memmap2::{Mmap, MmapOptions};
 use std::{fs::File, io, io::Read, path::Path};
@@ -9,16 +10,13 @@ pub(super) enum Source {
 }
 
 impl Source {
-    /// `mapped` comes from explicit CLI --mmap selection. The input must not be
-    /// changed or truncated by another process until parsing completes.
-    pub(super) fn open(path: impl AsRef<Path>, mapped: bool) -> io::Result<Self> {
-        if !mapped {
-            return std::fs::read_to_string(path).map(Self::Read);
-        }
+    /// The input must not be changed or truncated by another process until
+    /// parsing completes.
+    pub(super) fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut file = File::open(path)?;
         let metadata = file.metadata()?;
         if metadata.is_file() && metadata.len() != 0 {
-            // SAFETY: --mmap is an opt-in for stable input files. No reference
+            // SAFETY: CLI inputs remain stable while parsing. No reference
             // escapes parsing, and the caller drops Source before writing its
             // output. Copy-on-write does not protect against external truncation;
             // the documented CLI input-stability contract still applies.
@@ -84,7 +82,7 @@ mod tests {
         ] {
             std::fs::write(&path, bytes).unwrap();
             let expected = std::fs::read_to_string(&path);
-            let actual = Source::open(&path, true).unwrap();
+            let actual = Source::open(&path).unwrap();
             match expected {
                 Ok(text) => assert_eq!(actual.text().unwrap(), text),
                 Err(error) => {
@@ -94,7 +92,7 @@ mod tests {
                 }
             }
         }
-        assert!(Source::open(temp.0.join("missing"), true).is_err());
+        assert!(Source::open(temp.0.join("missing")).is_err());
     }
 
     #[test]
@@ -105,7 +103,6 @@ mod tests {
         let expected = keel_asm::assemble_object(".text\nret\n").unwrap();
         super::super::run(vec![
             "asm".into(),
-            "--mmap".into(),
             path.to_str().unwrap().into(),
             "-o".into(),
             path.to_str().unwrap().into(),
@@ -117,7 +114,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn mapped_selection_falls_back_for_non_regular_input() {
-        let source = Source::open("/dev/null", true).unwrap();
+        let source = Source::open("/dev/null").unwrap();
+        assert!(matches!(source, Source::Read(_)));
+        assert_eq!(source.text().unwrap(), "");
+    }
+
+    #[test]
+    fn regular_files_map_automatically_and_empty_files_use_reads() {
+        let temp = Temp::new();
+        let path = temp.0.join("input.s");
+        std::fs::write(&path, ".text\nret\n").unwrap();
+        let source = Source::open(&path).unwrap();
+        assert!(matches!(source, Source::Mapped(_)));
+        drop(source);
+        std::fs::write(&path, "").unwrap();
+        let source = Source::open(&path).unwrap();
         assert!(matches!(source, Source::Read(_)));
         assert_eq!(source.text().unwrap(), "");
     }

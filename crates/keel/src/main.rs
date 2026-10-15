@@ -33,7 +33,7 @@ const USAGE: &str = "usage:
   keel asm <input.s> -o <output.o>
   keel passes
 
-  --mmap: map stable input files for asm/compile/cc/opt; keep input unchanged during parsing";
+  Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
     #[cfg(feature = "profile-with-tracy")]
@@ -60,7 +60,6 @@ struct Options {
     emit_ir: bool,
     passes: Option<Vec<String>>,
     target: Option<Target>,
-    mmap: bool,
 }
 
 impl Options {
@@ -91,7 +90,6 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             return Err(format!("unknown flag `{flag}`\n{USAGE}"));
         }
         match flag {
-            "--mmap" => opts.mmap = true,
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
@@ -167,13 +165,13 @@ fn run(args: Vec<String>) -> Result<(), String> {
     };
     match cmd.as_str() {
         "asm" => {
-            let opts = parse_options(rest, &["-o", "--mmap"])?;
+            let opts = parse_options(rest, &["-o"])?;
             let input = opts.input.as_ref().ok_or(USAGE)?;
             let output = opts
                 .output
                 .as_ref()
                 .ok_or("`asm` requires `-o <output.o>`")?;
-            let src = input::Source::open(input, opts.mmap).map_err(|e| format!("{input}: {e}"))?;
+            let src = input::Source::open(input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let object = keel_asm::assemble_object(text).map_err(|e| format!("{input}: {e}"))?;
             // Release the mapping before opening output, including in-place output.
@@ -193,7 +191,6 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-tier",
                     "--regalloc",
                     "--isel-tier",
-                    "--mmap",
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
@@ -224,12 +221,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--opt-tier",
                     "--regalloc",
                     "--isel-tier",
-                    "--mmap",
                 ],
             )?;
             let input = opts.input.clone().ok_or(USAGE)?;
-            let src =
-                input::Source::open(&input, opts.mmap).map_err(|e| format!("{input}: {e}"))?;
+            let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
             let text = src.text().map_err(|e| format!("{input}: {e}"))?;
             let target = opts.target()?;
             let c_opts = keel_c::Options {
@@ -265,7 +260,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             write_output(&opts, &asm)
         }
         "opt" => {
-            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O", "--mmap"])?;
+            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O"])?;
             let (input, mut module) = load(&opts)?;
             let result = match &opts.passes {
                 Some(names) => {
@@ -298,7 +293,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
 fn load(opts: &Options) -> Result<(String, Module), String> {
     profiling::scope!("parse-and-verify");
     let input = opts.input.clone().ok_or(USAGE)?;
-    let src = input::Source::open(&input, opts.mmap).map_err(|e| format!("{input}: {e}"))?;
+    let src = input::Source::open(&input).map_err(|e| format!("{input}: {e}"))?;
     let text = src.text().map_err(|e| format!("{input}: {e}"))?;
     let module = if opts.ir_lines {
         keel_ir::parse_with_ir_lines(text, &input)
@@ -339,6 +334,14 @@ mod tests {
                 "--regalloc",
             ],
         )
+    }
+
+    #[test]
+    fn removed_mmap_flag_is_rejected_for_every_input_command() {
+        for command in ["asm", "compile", "cc", "opt"] {
+            let error = run(vec![command.into(), "--mmap".into()]).unwrap_err();
+            assert!(error.starts_with("unknown flag `--mmap`"));
+        }
     }
 
     #[test]
