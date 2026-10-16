@@ -2060,6 +2060,15 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         }
         let ins = self.b.ins();
         Ok(Some(match op {
+            Builtin::Memory(id) => {
+                // All arguments were evaluated once above, including at
+                // length zero. The intrinsic has no result; C returns dst.
+                if id == Intrinsic::Memset {
+                    vals[1] = ins.trunc(Type::I8, vals[1]);
+                }
+                self.b.ins().intrinsic(id, &vals);
+                vals[0]
+            }
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
             Builtin::Overflow(op) => {

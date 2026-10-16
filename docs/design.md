@@ -1177,6 +1177,10 @@ supported for selected scalar operations, with the limits below. A `__builtin_` 
 with a declared library equivalent can also resolve to that function;
 this is not blanket support for every builtin.
 
+Explicit [`__builtin_memcpy`, `__builtin_memmove`, and `__builtin_memset`](memory-builtins.md)
+lower to existing memory intrinsics without needing libc declarations.
+Ordinary library names retain ordinary call semantics.
+
 Some accepted extensions have deliberately limited behavior:
 
 - `__builtin_expect` and `__builtin_expect_with_probability` return their
@@ -1193,9 +1197,11 @@ Some accepted extensions have deliberately limited behavior:
 - `__builtin_constant_p` recognizes integer expressions the frontend can
   evaluate, rather than asking the optimizer whether a value is constant.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` always
-  return the unknown-size value. Fortified `__builtin___*_chk` calls
-  handled by the frontend become their plain library equivalents and do
-  not retain the supplied bounds check.
+  return the unknown-size value. Fortified memory builtins (`memcpy`,
+  `memmove`, `memset`) call a correctly declared checked external function
+  with all four arguments, or are diagnosed if none is available. Other
+  fortified `__builtin___*_chk` calls handled by the legacy fallback still
+  become plain library calls and lose the supplied bounds check.
 - `__builtin_unreachable` lowers to a trap, as `__builtin_trap` does;
   it does not introduce an optimizer assumption.
 - GNU `packed` and `aligned` control aggregate and member layout.
@@ -1286,8 +1292,8 @@ mapping source annotations onto unrelated flags:
 - Signed C overflow and in-bounds pointer arithmetic have no corresponding
   IR flags; integer arithmetic remains wrapping. Do not substitute trapping
   arithmetic, `notrap` or unrestricted reassociation for those contracts.
-- Object-size builtins still return unknown bounds, and fortified calls lose
-  their supplied checks as described above. This is also a compatibility gap,
+- Object-size builtins still return unknown bounds, and unrelated fortified
+  calls lose their supplied checks as described above. This is a compatibility gap,
   not evidence that the checks are redundant.
 
 The direct-call and access-alignment changes expose facts without claiming a

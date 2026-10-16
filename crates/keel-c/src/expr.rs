@@ -8,7 +8,7 @@ use crate::parse::{Parser, R};
 use crate::types::*;
 use crate::{Error, Loc};
 use keel_ir::Target;
-use keel_ir::{OverflowOp, RmwOp};
+use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 
 pub(crate) fn mk<'a>(kind: ExprKind<'a>, ty: Ty, loc: Loc) -> Expr<'a> {
     Expr {
@@ -964,6 +964,34 @@ impl<'a> Parser<'a> {
             ));
         }
         match base {
+            "memcpy" | "memmove" | "memset" => self.memory_builtin(base, loc),
+            "__memcpy_chk" | "__memmove_chk" | "__memset_chk" => {
+                // A supplied bound can fail or have side effects even when
+                // object_size usually returns unknown. Never erase it.
+                if let Ok(f) = self.lookup_value(base, loc)
+                    && let Ty::Func(fty) = &f.ty
+                {
+                    let ptr = self.ptr_type(Ty::Void);
+                    let second = if base == "__memset_chk" {
+                        INT
+                    } else {
+                        ptr.clone()
+                    };
+                    if !fty.prototyped
+                        || fty.variadic
+                        || fty.ret != ptr
+                        || fty.params != [ptr.clone(), second, ULONG, ULONG]
+                    {
+                        return Err(Error::new(loc, "invalid checked memory builtin prototype"));
+                    }
+                    self.expect("(")?;
+                    return self.call(f, loc);
+                }
+                Err(Error::new(
+                    loc,
+                    format!("`{name}` needs a declared checked library function `{base}`"),
+                ))
+            }
             "va_start" | "va_arg" | "va_end" | "va_copy" => {
                 self.expect("(")?;
                 let ap = self.assign()?;
@@ -1204,16 +1232,16 @@ impl<'a> Parser<'a> {
             "trap" | "unreachable" => self.builtin_call(Builtin::Trap, &[], Ty::Void, loc),
             "debugtrap" => self.builtin_call(Builtin::Debugtrap, &[], Ty::Void, loc),
             _ => {
-                // `__builtin_memcpy` and friends: the library function.
+                // Other builtins with declared library equivalents.
                 if let Ok(e) = self.lookup_value(base, loc)
                     && matches!(e.ty, Ty::Func(_))
                 {
                     return Ok(e);
                 }
-                // `_FORTIFY_SOURCE`'s `__builtin___memcpy_chk(dst, src, n,
-                // size)`: the size of `dst` is never known here (see
-                // `object_size`), so the check cannot fail and this is
-                // `memcpy(dst, src, n)`.
+                // Legacy fallback for other fortified library functions.
+                // The three memory _chk names are handled above and must
+                // retain their bound. This fallback remains a compatibility
+                // limitation for unrelated _chk builtins.
                 if let Some(plain) = base.strip_prefix("__").and_then(|b| b.strip_suffix("_chk"))
                     && let Ok(f) = self.lookup_value(plain, loc)
                     && matches!(f.ty, Ty::Func(_))
@@ -1232,6 +1260,57 @@ impl<'a> Parser<'a> {
                 Err(Error::new(loc, format!("`{name}` is not supported")))
             }
         }
+    }
+
+    /// These explicit names have standard prototypes independent of whether
+    /// the translation unit declares the corresponding ordinary libc symbol.
+    fn memory_builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
+        let args = self.builtin_args(3, loc)?;
+        let fill = name == "memset";
+        for (i, arg) in args.iter().enumerate() {
+            if i == 2 || (i == 1 && fill) {
+                if !arg.ty.is_arith() {
+                    return Err(Error::new(
+                        arg.loc,
+                        "memory builtin needs an arithmetic argument",
+                    ));
+                }
+                continue;
+            }
+            if (!arg.ty.is_ptr() && !is_null(arg)) || matches!(arg.ty.pointee(), Some(Ty::Func(_)))
+            {
+                return Err(Error::new(
+                    arg.loc,
+                    "memory builtin needs an object pointer",
+                ));
+            }
+            let pointee = arg.sugar.pointee(&self.typedefs);
+            if pointee.is_volatile(&self.typedefs) {
+                return Err(Error::new(
+                    arg.loc,
+                    "memory builtin cannot discard volatile qualification",
+                ));
+            }
+            if i == 0 && memory_builtin_const(&pointee, &self.typedefs) {
+                return Err(Error::new(
+                    arg.loc,
+                    "memory builtin destination must not be const",
+                ));
+            }
+        }
+        let ptr = self.ptr_type(Ty::Void);
+        let params = [ptr.clone(), if fill { INT } else { ptr.clone() }, ULONG];
+        let args = args
+            .into_iter()
+            .zip(&params)
+            .map(|(arg, ty)| self.convert_for_assign(arg, ty))
+            .collect::<R<Vec<_>>>()?;
+        let id = match name {
+            "memcpy" => Intrinsic::Memcpy,
+            "memmove" => Intrinsic::Memmove,
+            _ => Intrinsic::Memset,
+        };
+        Ok(mk(ExprKind::Builtin(Builtin::Memory(id), args), ptr, loc))
     }
 
     /// GCC's `__atomic_load_n` and `__atomic_store_n` on a scalar.
@@ -1702,6 +1781,15 @@ impl<'a> Parser<'a> {
             return Err(Error::new(e.loc, "incompatible types in assignment"));
         }
         Ok(self.cast(e, ty.clone()))
+    }
+}
+
+fn memory_builtin_const(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
+    match sugar {
+        Sugar::Const(_) => true,
+        Sugar::Volatile(inner) | Sugar::Array(inner) => memory_builtin_const(inner, defs),
+        Sugar::Typedef(i) => memory_builtin_const(&defs[*i].sugar, defs),
+        _ => false,
     }
 }
 
