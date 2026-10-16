@@ -6,11 +6,45 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 HERE = pathlib.Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location('arm_runner', HERE/'run.py')
 runner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runner)
+
+
+class SampleParserTests(unittest.TestCase):
+    def sample_record(self, **changes):
+        # Nonzero, consistent checksum; only the field under test is invalid.
+        row = dict(seconds=0.01, checksum='4e20', single='2', n=7, repeat=10000)
+        row.update(changes)
+        with patch.object(runner, 'command', return_value=json.dumps(row)), \
+                patch.object(runner.time, 'perf_counter', side_effect=[10.0, 10.02]):
+            return runner.sample(pathlib.Path('mock-driver'), {'id': 0}, 7, 10000, 1761)
+
+    def test_parser_accepts_finite_positive_record(self):
+        row = self.sample_record()
+        self.assertEqual(row['seconds'], 0.01)
+        self.assertEqual(row['checksum'], '4e20')
+        self.assertEqual(row['single'], '2')
+        self.assertEqual((row['n'], row['repeat']), (7, 10000))
+        self.assertAlmostEqual(row['process_seconds'], 0.02)
+
+    def test_parser_rejects_invalid_time_with_valid_work_counts(self):
+        for seconds in (0, -0.01, float('nan'), float('inf'), -float('inf'), 0.03):
+            with self.subTest(seconds=seconds):
+                with self.assertRaisesRegex(RuntimeError, 'invalid timer'):
+                    self.sample_record(seconds=seconds)
+
+    def test_parser_rejects_wrong_n_with_valid_time(self):
+        with self.assertRaisesRegex(RuntimeError, 'invalid timer or work count'):
+            self.sample_record(n=8)
+
+    def test_parser_rejects_wrong_repeat_with_valid_time(self):
+        # Keep the checksum valid for the requested repeat, isolating the count guard.
+        with self.assertRaisesRegex(RuntimeError, 'invalid timer or work count'):
+            self.sample_record(repeat=3)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -52,12 +86,6 @@ class EvidenceTests(unittest.TestCase):
                 runner.sample(binary, control, 7, 10000, 1761, poison=True)
             with self.assertRaisesRegex(RuntimeError, 'exit 3'):
                 runner.sample(binary, {'id': 4}, 7, 10000, 1761)
-            # A fabricated record with zero time cannot pass parser validation.
-            from unittest.mock import patch
-            row = dict(seconds=0, checksum='0', single='0', n=7, repeat=3)
-            with patch.object(runner, 'command', return_value=json.dumps(row)):
-                with self.assertRaisesRegex(RuntimeError, 'invalid timer'):
-                    runner.sample(binary, control, 7, 10000, 1761)
 
 
 if __name__ == '__main__':
