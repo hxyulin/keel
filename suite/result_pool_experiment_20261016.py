@@ -90,7 +90,8 @@ def parity():
                 if label=='header-free': h.compare_outputs(*dests,[p])
                 else:
                     output=[next(x.iterdir()).read_text() for x in dests]
-                    assert output[0]==output[1] and '`__int128` to float is not supported' in output[0]
+                    expected='Diagnostic { file: '+json.dumps(str(p))+', line: 1, col: 46, message: '+json.dumps('`__int128` to float is not supported')+' }'
+                    assert output==[expected,expected]
                     save('late-error-'+target+'-'+d,dict(path=str(p),diagnostic=output[0]))
     save('parity',rows)
 

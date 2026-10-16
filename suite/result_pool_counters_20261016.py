@@ -8,10 +8,10 @@ DIAG='''
 #[doc(hidden)]
 pub mod pool_diagnostic {
     use std::cell::Cell;
-    thread_local! { static COUNTS: Cell<[u64; 15]> = const { Cell::new([0; 15]) }; }
+    thread_local! { static COUNTS: Cell<[u64; 17]> = const { Cell::new([0; 17]) }; }
     pub fn add(index: usize, n: u64) { COUNTS.with(|c| { let mut a=c.get(); a[index]+=n; c.set(a); }); }
-    pub fn counts() -> [u64;15] { COUNTS.with(|c| c.get()) }
-    pub fn reset() { COUNTS.with(|c| c.set([0;15])); }
+    pub fn counts() -> [u64;17] { COUNTS.with(|c| c.get()) }
+    pub fn reset() { COUNTS.with(|c| c.set([0;17])); }
     pub fn growth(kind: usize, before: usize, after: usize, size: usize) {
         if before != after { add(kind, 1); add(kind+1, (after*size) as u64); }
     }
@@ -24,6 +24,7 @@ def generate():
     for n in ['Cargo.toml','Cargo.lock']:shutil.copyfile(src/n,dst/n)
     for n in ['crates','.cargo']:shutil.copytree(src/n,dst/n)
     p=dst/'crates/keel-ir/src/lib.rs';p.write_text(p.read_text()+DIAG)
+    p=dst/'crates/keel-c/src/irgen.rs';s=p.read_text().replace('                    self.module.functions.push(func);', '                    let cap=self.module.functions.capacity();\n                    self.module.functions.push(func);\n                    keel_ir::pool_diagnostic::growth(15,cap,self.module.functions.capacity(),std::mem::size_of::<Function>());');p.write_text(s)
     p=dst/'crates/keel-ir/src/entity.rs';s=p.read_text().replace('    pub fn len(&self) -> usize {','    pub fn diagnostic_capacity(&self) -> usize { self.items.capacity() }\n\n    pub fn len(&self) -> usize {');p.write_text(s)
     p=dst/'crates/keel-ir/src/function.rs';s=p.read_text()
     s=s.replace('    pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {','    pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {\n        crate::pool_diagnostic::add(8, 1);')
@@ -58,7 +59,7 @@ def generate():
         for (n, &ty) in result_tys.iter().enumerate() {''',1)
     if v=='candidate':storage='[self.result_pool.len(), self.result_pool.capacity(), self.insts.iter().filter(|(_,n)| n.block.is_none()).map(|(_,n)| n.results.end-n.results.start).sum()]'
     else:storage='[self.insts.iter().map(|(_,n)| n.results.len()).sum(), self.insts.iter().map(|(_,n)| n.results.capacity()).sum(), self.insts.iter().filter(|(_,n)| n.block.is_none()).map(|(_,n)| n.results.len()).sum()]'
-    s+='\nimpl Function { pub fn diagnostic_storage(&self) -> [usize;5] { let a = '+storage+'; [a[0],a[1],a[2],std::mem::size_of::<InstNode>(),std::mem::align_of::<InstNode>()] } }\n'
+    s+='\nimpl Function { pub fn diagnostic_storage(&self) -> [usize;8] { let a = '+storage+'; [a[0],a[1],a[2],std::mem::size_of::<InstNode>(),std::mem::align_of::<InstNode>(),std::mem::size_of::<Function>(),self.insts.len(),self.insts.diagnostic_capacity()] } }\n'
     p.write_text(s)
     if v=='candidate':
         p=dst/'crates/keel-frontend/src/lib.rs';s=p.read_text();s+='''
@@ -85,9 +86,9 @@ fn main() -> Result<(),Box<dyn std::error::Error>> {
         let result=keel_c::compile(&src,path,opts);
         let before=COUNTS.with(|c|{let n=c.get();c.set(Counts::default());n});
         let sites=keel_ir::pool_diagnostic::counts();
-        let mut storage=[0usize;5];
+        let mut storage=[0usize;8];
         match &result {
-            Ok(m)=>{keel_ir::verify_module(m).map_err(|e|format!("{e:?}"))?;for f in &m.functions {let a=f.diagnostic_storage();for i in 0..3{storage[i]+=a[i];} storage[3]=a[3];storage[4]=a[4];}},
+            Ok(m)=>{keel_ir::verify_module(m).map_err(|e|format!("{e:?}"))?;for f in &m.functions {let a=f.diagnostic_storage();for i in 0..3{storage[i]+=a[i];} storage[3]=a[3];storage[4]=a[4];storage[5]=a[5];storage[6]+=a[6];storage[7]+=a[7];}},
             Err(e)=>eprintln!("{e:?}"),
         }
         COUNTS.with(|c|c.set(Counts{enabled:true,..Default::default()}));
