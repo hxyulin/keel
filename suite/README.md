@@ -32,8 +32,12 @@ them: a name, a `compiler` (`clang`: `clang -c` on the preprocessed file;
 what benchmark ratios are against; `test` is what `cargo suite test` builds
 unless given `-c`.
 
-`keel-select` and `keel-O-select` enable `--isel all`; ordinary `keel` and
-`keel-O` leave optional target selection off. `keel-O-trees`,
+`keel-select` and `keel-O-select` explicitly enable `--isel all`; `keel-O`
+also enables all selection passes through the CLI `-O` preset. Ordinary
+`keel` keeps baseline selection. To compare optimized IR with baseline
+selection, use `-O --isel none` (either flag order). Explicit selection
+selectors override the preset, with the last explicit selector winning.
+`--opt-tier` and `-p` control IR independently and do not reset selection. `keel-O-trees`,
 `keel-O-folds`, and `keel-O-hints` enable one selection pass at a time for
 ablation measurements. The default test configurations include both modes.
 
