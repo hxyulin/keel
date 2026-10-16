@@ -248,16 +248,19 @@ impl<'a> Parser<'a> {
                 self.init_item(&sub, None, items)?;
             }
             let (n, stride) = range;
-            let one: Vec<InitItem<'a>> = items[first..].to_vec();
-            for k in 1..n as u64 {
-                items.extend(one.iter().cloned().map(|mut item| {
-                    match &mut item {
-                        InitItem::Expr { offset, .. } | InitItem::Bytes { offset, .. } => {
-                            *offset += k * stride
+            // Only a range with extra elements needs a replication snapshot.
+            if n > 1 {
+                let one: Vec<InitItem<'a>> = items[first..].to_vec();
+                for k in 1..n as u64 {
+                    items.extend(one.iter().cloned().map(|mut item| {
+                        match &mut item {
+                            InitItem::Expr { offset, .. } | InitItem::Bytes { offset, .. } => {
+                                *offset += k * stride
+                            }
                         }
-                    }
-                    item
-                }));
+                        item
+                    }));
+                }
             }
             next += 1;
             count = count.max(next as u64);
