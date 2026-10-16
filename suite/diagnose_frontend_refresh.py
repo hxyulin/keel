@@ -71,6 +71,27 @@ thread_local! { static INIT_CLONE_STATS:std::cell::RefCell<InitCloneStats>=Defau
             eprintln!("PHASE backend_output_ns {}",phase_start.elapsed().as_nanos());
             result''',1)
     t=head+tail;p.write_text(t)
+    # Context only: optimizer verification is counted distinctly from pass
+    # transforms, including call-contracts. No optimizer campaign or ablation.
+    p=dst/'crates/keel-opt/src/lib.rs';t=p.read_text()
+    old='        profiling::scope!("pass", pass.name());'
+    assert t.count(old)==1
+    t=t.replace(old,old+'\n        let _diagnostic_clock = DiagnosticPassClock::new(pass.name());')
+    # Restrict wrappers to the pipeline function, preserving its error paths.
+    start=t.index('pub fn run_pipeline_for_target(');end=t.index('/// Runs [`DEFAULT_PIPELINE`]',start)
+    section=t[start:end].replace('verify(func)', '{ let s=std::time::Instant::now(); let v=verify(func); DIAGNOSTIC_VERIFY_NS.with(|n| n.set(n.get()+s.elapsed().as_nanos())); v }')
+    t=t[:start]+section+t[end:]
+    t+=r'''
+thread_local! { static DIAGNOSTIC_VERIFY_NS:std::cell::Cell<u128>=const {std::cell::Cell::new(0)}; }
+struct DiagnosticPassClock<'a> {name:&'a str,start:std::time::Instant,verify_before:u128}
+impl<'a> DiagnosticPassClock<'a> {fn new(name:&'a str)->Self {
+ Self{name,start:std::time::Instant::now(),verify_before:DIAGNOSTIC_VERIFY_NS.with(|n|n.get())}
+}}
+impl Drop for DiagnosticPassClock<'_> {fn drop(&mut self) {
+ eprintln!("OPT_CONTEXT {} total_ns={} verify_ns={}",self.name,self.start.elapsed().as_nanos(),DIAGNOSTIC_VERIFY_NS.with(|n|n.get())-self.verify_before);
+}}
+'''
+    p.write_text(t)
     store('diagnostic-source', {'files':{str(p.relative_to(dst)):sha(p) for p in dst.rglob('*.rs')},'generator_sha256':sha(__file__)})
 
 def collect():
