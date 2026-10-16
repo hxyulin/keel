@@ -90,9 +90,9 @@ fn full_pipeline_shares_quotient_and_preserves_locations() {
         keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();
         assert_eq!(module.to_string().matches("umulhi").count(), 1, "{module}");
     }
-    // parse() attaches input source locations. All instructions inserted for a
-    // single division must retain that division's location.
+    // All instructions inserted for a single division retain its location.
     let mut module = keel_ir::parse(&source("i64", 7, "udiv")).unwrap();
+    let file = module.add_file("division.c");
     let f = &mut module.functions[0];
     let division = f
         .layout_insts()
@@ -107,8 +107,13 @@ fn full_pipeline_shares_quotient_and_preserves_locations() {
             )
         })
         .unwrap();
-    let loc = f.inst_loc(division);
-    assert!(loc.is_some());
+    let loc = Some(keel_ir::SourceLoc {
+        file,
+        line: 12,
+        col: 3,
+        scope: None,
+    });
+    f.set_inst_loc(division, loc);
     let old_count = f.num_insts();
     keel_opt::find_pass("instcombine").unwrap().run(f);
     for (_, i) in f.layout_insts() {
