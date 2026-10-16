@@ -1242,6 +1242,11 @@ impl<'a> FunctionCompiler<'a> {
                         ),
                     },
                     // Writing a 32-bit register clears the upper 32 bits.
+                    ConvertOp::Uext if self.zero_extended_narrow(arg) => {
+                        if d != a {
+                            self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&r32(a))]);
+                        }
+                    }
                     ConvertOp::Uext => match from {
                         Type::I32 => {
                             self.emit(Opcode::Mov, [asm_arg(&(r32(d))), asm_arg(&(r32(a)))])
@@ -3566,6 +3571,10 @@ impl<'a> FunctionCompiler<'a> {
         if self.next_block != Some(target) {
             self.emit(Opcode::Jmp, [asm_arg(&(self.label(target)))]);
         }
+    }
+
+    fn zero_extended_narrow(&self, value: Value) -> bool {
+        crate::fold::zero_extended_narrow(self.func, &self.selection, &self.alloc, value, false)
     }
 
     /// Sign- or zero-extends a narrow value in `src` to 32 bits in
