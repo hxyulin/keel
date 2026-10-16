@@ -283,9 +283,6 @@ const TYPE_KEYWORDS: &[&str] = &[
 
 /// Qualifiers that change nothing for code generation.
 const IGNORED_QUALIFIERS: &[&str] = &[
-    "restrict",
-    "__restrict",
-    "__restrict__",
     "_Nullable",
     "_Nonnull",
     "_Null_unspecified",
@@ -1254,6 +1251,7 @@ impl<'a> Parser<'a> {
         let mut counter = 0u32;
         let mut other: Option<Ty> = None;
         let mut is_atomic = false;
+        let mut is_restrict = false;
         let mut is_complex = false;
         while let Tok::Ident(word) = self.peek() {
             let storage = match word {
@@ -1274,6 +1272,7 @@ impl<'a> Parser<'a> {
                 "inline" | "__inline" | "__inline__" => spec.inline = true,
                 "_Thread_local" | "__thread" => spec.thread_local = true,
                 "_Noreturn" => spec.attrs.noreturn = true,
+                "restrict" | "__restrict" | "__restrict__" => is_restrict = true,
                 w if IGNORED_QUALIFIERS.contains(&w) => {}
                 "_Atomic" if !matches!(self.peek_at(1), Tok::Punct("(")) => is_atomic = true,
                 "_Complex" => is_complex = true,
@@ -1467,6 +1466,9 @@ impl<'a> Parser<'a> {
         if is_atomic {
             spec.ty = self.atomic_type(spec.ty, loc)?;
         }
+        if is_restrict {
+            spec.sugar = Sugar::Restrict(self.sugar_ref(spec.sugar));
+        }
         if spec.is_volatile {
             spec.sugar = Sugar::Volatile(self.sugar_ref(spec.sugar));
         }
@@ -1516,12 +1518,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Pointer qualifiers after a `*`. Returns (const, volatile, atomic).
-    fn qualifiers(&mut self, attrs: &mut Attrs) -> R<(bool, bool, bool)> {
-        let (mut c, mut v, mut a) = (false, false, false);
+    /// Pointer qualifiers after a `*`. Returns (const, volatile, atomic, restrict).
+    fn qualifiers(&mut self, attrs: &mut Attrs) -> R<(bool, bool, bool, bool)> {
+        let (mut c, mut v, mut a, mut r) = (false, false, false, false);
         loop {
             match self.peek() {
                 Tok::Ident(w) if w == "_Atomic" => a = true,
+                Tok::Ident("restrict" | "__restrict" | "__restrict__") => r = true,
                 Tok::Ident(w) if w == "const" || w == "__const" => c = true,
                 Tok::Ident(w) if w == "volatile" || w == "__volatile__" || w == "__volatile" => {
                     v = true
@@ -1531,7 +1534,7 @@ impl<'a> Parser<'a> {
                     self.attributes(attrs)?;
                     continue;
                 }
-                _ => return Ok((c, v, a)),
+                _ => return Ok((c, v, a, r)),
             }
             self.advance();
         }
@@ -1570,10 +1573,13 @@ impl<'a> Parser<'a> {
             let loc = self.loc();
             ty = self.ptr_type(ty);
             sugar = sugar.wrap(Sugar::Ptr);
-            let is_atomic;
-            (is_const, is_volatile, is_atomic) = self.qualifiers(&mut attrs)?;
+            let (is_atomic, is_restrict);
+            (is_const, is_volatile, is_atomic, is_restrict) = self.qualifiers(&mut attrs)?;
             if is_atomic {
                 ty = self.atomic_type(ty, loc)?;
+            }
+            if is_restrict {
+                sugar = Sugar::Restrict(self.sugar_ref(sugar));
             }
             if is_volatile {
                 sugar = Sugar::Volatile(self.sugar_ref(sugar));
@@ -1706,9 +1712,9 @@ impl<'a> Parser<'a> {
         }
         if self.eat("[") {
             let mut array_attrs = Attrs::default();
-            while self.eat("static") || self.qualifiers(&mut array_attrs)? != (false, false, false)
-            {
-            }
+            while self.eat("static")
+                || self.qualifiers(&mut array_attrs)? != (false, false, false, false)
+            {}
             if array_attrs.alignment().is_some() || array_attrs.alignas.is_some() {
                 return Err(Error::new(
                     self.loc(),

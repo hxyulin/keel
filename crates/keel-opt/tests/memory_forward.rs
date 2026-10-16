@@ -167,3 +167,69 @@ block0(v0: ptr, v1: i64):
     );
     assert_eq!(loads(&module), 2);
 }
+
+#[test]
+fn restrict_keeps_a_load_across_a_distinct_restricted_store() {
+    for (contract, expected) in [
+        (" restrict_params(0, 1)", 1),
+        ("", 2),
+        (" restrict_params(0)", 2),
+    ] {
+        let source = format!(
+            "func @f(ptr, ptr, i32) -> i32{contract} {{
+block0(v0: ptr, v1: ptr, v2: i32):
+ v3 = load.i32 v0
+ store v2, v1
+ v4 = load.i32 v0
+ return v4
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected, "{source}");
+    }
+}
+
+#[test]
+fn restricted_read_only_aliases_are_not_folded_together() {
+    let m = optimize(
+        "func @f(ptr, ptr) -> i32 restrict_params(0, 1) {
+block0(v0: ptr, v1: ptr):
+ v2 = load.i32 v0
+ v3 = load.i32 v1
+ v4 = iadd v2, v3
+ return v4
+}",
+    );
+    assert_eq!(loads(&m), 2);
+}
+
+#[test]
+fn restrict_unknown_uses_and_observable_operations_are_conservative() {
+    for barrier in [
+        "v8 = ptradd v0, v3",
+        "store v0, v4",
+        "call @effect(v0)",
+        "call @nothing()",
+        "v8 = load.i32 volatile v0",
+        "v8 = atomic_load.i32 relaxed v0",
+        "v8 = icmp.eq v0, v1",
+    ] {
+        let source = format!(
+            "decl @effect(ptr)
+decl @nothing()
+func @f(ptr, ptr, i32, i64, ptr) -> i32 restrict_params(0, 1) {{
+block0(v0: ptr, v1: ptr, v2: i32, v3: i64, v4: ptr):
+ v5 = load.i32 v0
+ {barrier}
+ store v2, v1
+ v6 = load.i32 v0
+ return v6
+}}"
+        );
+        let expected = if barrier.contains("load.i32 volatile") {
+            3
+        } else {
+            2
+        };
+        assert_eq!(loads(&optimize(&source)), expected, "{source}");
+    }
+}

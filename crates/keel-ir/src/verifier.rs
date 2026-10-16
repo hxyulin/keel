@@ -440,6 +440,20 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
             v.error(format!("callee @{}", decl.name), message.into());
         }
     }
+    let mut seen = std::collections::HashSet::new();
+    for &index in &func.restrict_params {
+        let valid = func
+            .sig
+            .params
+            .get(index as usize)
+            .is_some_and(|p| p.ty == Type::Ptr && p.purpose == crate::Purpose::Normal);
+        if !valid || !seen.insert(index) {
+            v.error(
+                "restrict_params".into(),
+                format!("invalid or duplicate restrict parameter index {index}"),
+            );
+        }
+    }
     v.run();
     if v.errors.is_empty() {
         Ok(())

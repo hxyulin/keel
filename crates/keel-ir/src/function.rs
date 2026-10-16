@@ -309,6 +309,15 @@ pub enum InsertPoint {
 
 #[derive(Clone)]
 pub struct Function {
+    /// Definition-only C restrict access contracts, indexed into entry parameters.
+    /// For an object accessed through a restricted parameter and modified during
+    /// this invocation, all accesses must be based on that parameter. Read-only
+    /// aliasing is permitted. This implies neither unequal pointer values nor
+    /// nonnull, alignment, dereferenceability, or immutable memory. Indices must
+    /// be unique, normal-purpose pointer parameters. C pointee eligibility is a
+    /// frontend obligation: opaque IR pointers cannot express it. Cloning the
+    /// whole function preserves scope; inlining must drop callee contracts.
+    pub restrict_params: Vec<u32>,
     pub attrs: FunctionAttrs,
     pub name: String,
     pub sig: Signature,
@@ -376,6 +385,7 @@ impl fmt::Debug for Function {
             }
         }
         f.debug_struct("Function")
+            .field("restrict_params", &self.restrict_params)
             .field("attrs", &self.attrs)
             .field("name", &self.name)
             .field("sig", &self.sig)
@@ -400,6 +410,7 @@ impl fmt::Debug for Function {
 impl Function {
     pub fn new(name: impl Into<String>, sig: Signature) -> Self {
         Self {
+            restrict_params: Vec::new(),
             attrs: FunctionAttrs::default(),
             name: name.into(),
             sig,
@@ -852,6 +863,11 @@ impl Function {
 impl fmt::Display for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "func @{}{}{}", self.name, self.sig, self.attrs)?;
+        if !self.restrict_params.is_empty() {
+            f.write_str(" restrict_params(")?;
+            write_list(f, self.restrict_params.iter())?;
+            f.write_str(")")?;
+        }
         if self.local {
             f.write_str(" local")?;
         }

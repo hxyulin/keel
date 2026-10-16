@@ -910,7 +910,7 @@ impl<'a> Parser<'a> {
             fn is_const(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
                 match sugar {
                     Sugar::Const(_) => true,
-                    Sugar::Volatile(inner) => is_const(inner, defs),
+                    Sugar::Volatile(inner) | Sugar::Restrict(inner) => is_const(inner, defs),
                     Sugar::Typedef(i) => is_const(&defs[*i].sugar, defs),
                     _ => false,
                 }

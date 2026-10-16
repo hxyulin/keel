@@ -476,6 +476,7 @@ type ParsedDebugVar = (
 
 /// A function as written, built once all signatures in the module are known.
 struct ParsedFunction {
+    restrict_params: Vec<u32>,
     attrs: crate::FunctionAttrs,
     name: String,
     sig: Signature,
@@ -806,6 +807,21 @@ impl Parser {
         let name = self.global("a function name like `@main`")?;
         let sig = self.signature()?;
         let attrs = self.function_attrs()?;
+        let mut restrict_params = Vec::new();
+        if self.eat(&Tok::Ident("restrict_params".into())) {
+            self.expect(Tok::Punct('('))?;
+            loop {
+                let loc = self.loc();
+                let n = self.int("a parameter index")?;
+                let n = u32::try_from(n)
+                    .map_err(|_| error(loc, "invalid restrict parameter index".into()))?;
+                restrict_params.push(n);
+                if !self.eat(&Tok::Punct(',')) {
+                    break;
+                }
+            }
+            self.expect(Tok::Punct(')'))?;
+        }
         let local = self.eat(&Tok::Ident("local".into()));
         let personality = if self.eat(&Tok::Ident("personality".into())) {
             Some(self.global("a personality function like `@__gxx_personality_v0`")?)
@@ -883,6 +899,7 @@ impl Parser {
             self.skip_newlines();
         }
         Ok(ParsedFunction {
+            restrict_params,
             attrs,
             name,
             sig,
@@ -1923,6 +1940,7 @@ fn build(
     ir_file: Option<SourceFile>,
 ) -> Result<Function, ParseError> {
     let ParsedFunction {
+        restrict_params,
         attrs,
         name,
         sig,
@@ -2081,6 +2099,7 @@ fn build(
     }
 
     let mut func = Function::new(name.clone(), sig.clone());
+    func.restrict_params = restrict_params.clone();
     func.personality = personality.clone();
     func.local = *local;
     func.attrs = *attrs;

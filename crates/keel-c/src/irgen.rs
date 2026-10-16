@@ -382,6 +382,17 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
         let mut func = Function::new(global.symbol.to_owned(), sig.clone());
+        // Only the definition's own parameter objects supply restrict facts.
+        // Declarations and ABI signatures deliberately carry none.
+        for (index, &id) in def.params.iter().enumerate() {
+            let local = &def.locals[id];
+            if matches!(&local.ty, Ty::Ptr(t) if !matches!(t.as_ref(), Ty::Func(_) | Ty::Void))
+                && local.sugar.is_restrict(&self.p.typedefs)
+            {
+                func.restrict_params
+                    .push((index + usize::from(def.ty.ret.is_struct())) as u32);
+            }
+        }
         func.attrs = global.function_attrs;
         func.local = global.internal;
         let mut b = FunctionBuilder::new(&mut func);

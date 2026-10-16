@@ -37,6 +37,7 @@ impl DebugTypes {
         // DWARF 4 has no atomic types.
         let ty = ty.unatomic();
         match (sugar, ty) {
+            (Sugar::Restrict(inner), _) => self.get(module, p, ty, inner),
             (Sugar::Typedef(i), _) => {
                 if let Some(&dt) = self.typedefs.get(i) {
                     return Some(dt);

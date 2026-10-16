@@ -124,6 +124,8 @@ pub enum Sugar {
     Enum(usize),
     Const(Rc<Sugar>),
     Volatile(Rc<Sugar>),
+    /// C restrict qualification on this type layer.
+    Restrict(Rc<Sugar>),
     /// A pointer, an array, or a function (its return type).
     Ptr(Rc<Sugar>),
     Array(Rc<Sugar>),
@@ -135,7 +137,9 @@ impl Sugar {
     pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef<'_>]) -> &'a Sugar {
         match self {
             Self::Typedef(i) => defs[*i].sugar.unqualified(defs),
-            Self::Const(inner) | Self::Volatile(inner) => inner.unqualified(defs),
+            Self::Const(inner) | Self::Volatile(inner) | Self::Restrict(inner) => {
+                inner.unqualified(defs)
+            }
             other => other,
         }
     }
@@ -144,7 +148,9 @@ impl Sugar {
     pub fn alignment(&self, defs: &[TypedefDef<'_>]) -> Option<u64> {
         match self {
             Self::Typedef(i) => defs[*i].align.or_else(|| defs[*i].sugar.alignment(defs)),
-            Self::Const(s) | Self::Volatile(s) | Self::Array(s) => s.alignment(defs),
+            Self::Const(s) | Self::Volatile(s) | Self::Restrict(s) | Self::Array(s) => {
+                s.alignment(defs)
+            }
             _ => None,
         }
     }
@@ -152,8 +158,19 @@ impl Sugar {
     pub fn is_volatile(&self, defs: &[TypedefDef<'_>]) -> bool {
         match self {
             Self::Volatile(_) => true,
-            Self::Const(inner) | Self::Array(inner) => inner.is_volatile(defs),
+            Self::Const(inner) | Self::Restrict(inner) | Self::Array(inner) => {
+                inner.is_volatile(defs)
+            }
             Self::Typedef(i) => defs[*i].sugar.is_volatile(defs),
+            _ => false,
+        }
+    }
+
+    pub fn is_restrict(&self, defs: &[TypedefDef<'_>]) -> bool {
+        match self {
+            Self::Restrict(_) => true,
+            Self::Const(s) | Self::Volatile(s) => s.is_restrict(defs),
+            Self::Typedef(i) => defs[*i].sugar.is_restrict(defs),
             _ => false,
         }
     }
