@@ -116,6 +116,8 @@ fn spans_rematerialize_constants_without_losing_compare_uses() {
         let allocation = RematerializingAllocator {
             base: &base,
             prefer_spilling: true,
+            constants: true,
+            stack_addresses: true,
         };
         for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
             let (text, _) = compile(
