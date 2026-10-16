@@ -186,7 +186,7 @@ fn sparse_instruction_positions_preserve_same_block_dominance() {
             block,
             InstData::Iconst {
                 ty: Type::I64,
-                value: 0,
+                imm: 0,
             },
         );
         f.remove_inst(hole);
@@ -195,7 +195,7 @@ fn sparse_instruction_positions_preserve_same_block_dominance() {
         block,
         InstData::Iconst {
             ty: Type::I64,
-            value: 1,
+            imm: 1,
         },
     );
     let value = f.first_result(def);
@@ -245,7 +245,7 @@ fn large_call_and_asm_operands_keep_resolved_first_occurrence_order() {
             block,
             InstData::Iconst {
                 ty: Type::I64,
-                value: n,
+                imm: n,
             },
         ));
     }
@@ -258,7 +258,7 @@ fn large_call_and_asm_operands_keep_resolved_first_occurrence_order() {
         block,
         InstData::Iconst {
             ty: Type::I64,
-            value: 0,
+            imm: 0,
         },
     );
     let alias_value = f.first_result(alias);
@@ -267,7 +267,7 @@ fn large_call_and_asm_operands_keep_resolved_first_occurrence_order() {
         block,
         InstData::Iconst {
             ty: Type::I64,
-            value: 0,
+            imm: 0,
         },
     );
     let alias2_value = f.first_result(alias2);
@@ -334,21 +334,21 @@ fn switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses(
         entry,
         InstData::Iconst {
             ty: Type::I64,
-            value: 1,
+            imm: 1,
         },
     );
     let b = f.append_inst(
         entry,
         InstData::Iconst {
             ty: Type::I64,
-            value: 2,
+            imm: 2,
         },
     );
     let alias = f.append_inst(
         entry,
         InstData::Iconst {
             ty: Type::I64,
-            value: 0,
+            imm: 0,
         },
     );
     let (av, bv, aliasv) = (f.first_result(a), f.first_result(b), f.first_result(alias));
