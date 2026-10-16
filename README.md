@@ -179,7 +179,7 @@ The stages can be tuned independently:
 
 - `--opt-tier none|basic|full`: no IR passes; CFG simplification, constant
   folding, instruction combining and DCE; or the full pipeline including
-  GVN and GCM.
+  GVN, bounded [small-memory expansion](docs/small-memory.md), and GCM.
   `-O` remains an alias for `full`; the default is `none`.
 - `--isel-tier baseline|trees|full`: existing per-instruction lowering;
   generated tree selection; or trees plus folded operand liveness and

@@ -93,7 +93,7 @@ fn variable_large_negative_and_wrapping_lengths_are_unchanged() {
 }
 
 #[test]
-fn zero_preserves_operand_producers_and_default_pipeline_is_unchanged() {
+fn zero_preserves_operand_producers() {
     let input = "decl @dest() -> ptr\ndecl @src() -> ptr\ndecl @effect()\nfunc @f() {\nblock0:\nv0 = call @dest()\nv1 = call @src()\ncall @effect()\nv2 = iconst.i64 0\nintrinsic memmove(v0, v1, v2)\nreturn\n}";
     let mut m = expand(input);
     keel_opt::run_passes(&mut m, &["dce"]).unwrap();
@@ -103,12 +103,6 @@ fn zero_preserves_operand_producers_and_default_pipeline_is_unchanged() {
             .filter(|(_, i)| matches!(m.functions[0].inst_data(*i), InstData::Call { .. }))
             .count(),
         3
-    );
-    assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"small-memory"));
-    assert!(
-        !keel_opt::OptimizationTier::Basic
-            .pipeline()
-            .contains(&"small-memory")
     );
 }
 
@@ -313,4 +307,51 @@ int main(void) {{
         "{body}"
     );
     eprintln!("native evidence retained at {}", dir.display());
+}
+
+#[test]
+fn full_expands_small_memory_before_stack_forward_only() {
+    use keel_opt::{DEFAULT_PIPELINE, OptimizationTier};
+    assert_eq!(OptimizationTier::Full.pipeline(), DEFAULT_PIPELINE);
+    let at = DEFAULT_PIPELINE
+        .iter()
+        .position(|p| *p == "small-memory")
+        .unwrap();
+    assert_eq!(DEFAULT_PIPELINE[at + 1], "stack-forward");
+    assert_eq!(
+        DEFAULT_PIPELINE
+            .iter()
+            .filter(|p| **p == "small-memory")
+            .count(),
+        1
+    );
+    for pass in ["memory-forward", "loop-memory", "loop-unroll"] {
+        assert!(!DEFAULT_PIPELINE.contains(&pass));
+    }
+    assert!(OptimizationTier::None.pipeline().is_empty());
+    assert_eq!(
+        OptimizationTier::Basic.pipeline(),
+        &[
+            "simplify-cfg",
+            "canonicalize",
+            "instcombine",
+            "call-contracts",
+            "simplify-cfg",
+            "dce",
+        ]
+    );
+    for tier in [
+        OptimizationTier::None,
+        OptimizationTier::Basic,
+        OptimizationTier::Full,
+    ] {
+        for length in ["16", "33", "variable"] {
+            let mut module = keel_ir::parse(&source("memcpy", length)).unwrap();
+            keel_opt::optimize_with_tier(&mut module, tier).unwrap();
+            let retains = module.functions[0].layout_insts().any(|(_, i)| {
+                matches!(module.functions[0].inst_data(i), InstData::Intrinsic { .. })
+            });
+            assert_eq!(retains, tier != OptimizationTier::Full || length != "16");
+        }
+    }
 }

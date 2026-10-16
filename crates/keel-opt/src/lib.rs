@@ -202,7 +202,8 @@ pub const PASSES: &[&dyn Pass] = &[
 ];
 
 /// Independent optimizer effort; Full adds value numbering, code motion, and
-/// bounded direct-call inlining, private stack forwarding, and guarded loop vectorization.
+/// bounded direct-call inlining, small memory expansion, private stack forwarding,
+/// and guarded loop vectorization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
@@ -240,6 +241,7 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "call-contracts",
     "simplify-cfg",
     "gvn",
+    "small-memory",
     "stack-forward",
     "canonicalize",
     "instcombine",

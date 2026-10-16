@@ -1341,7 +1341,10 @@ python3 suite/compare_app_clang.py \
 ## Compiler inlining and bounded scans (2026-10-16)
 
 Full optimization now runs a bounded module-level `inline` pass and
-`stack-forward` cleanup. The inliner clones small private direct-call functions,
+`stack-forward` cleanup. Full also expands ordinary constant memory intrinsics
+of at most 32 bytes immediately before `stack-forward`; Basic and unoptimized
+pipelines omit this pass. See [small-memory](../docs/small-memory.md).
+The inliner clones small private direct-call functions,
 preserving SSA, control flow, stack objects, aggregate argument snapshots,
 return values, and lexical debug scopes. Its original ordinary limits were
 64 instructions, eight blocks and 512 bytes of fixed stack storage, with

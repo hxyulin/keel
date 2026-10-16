@@ -1,11 +1,12 @@
 # Bounded memory intrinsic expansion
 
-The opt-in `small-memory` pass expands existing ordinary `memcpy`, `memmove`
+The `small-memory` pass expands existing ordinary `memcpy`, `memmove`
 and `memset` IR intrinsics with constant i64 lengths from 0 through 32 bytes.
-It is registered by name and is absent from the default and Basic pipelines.
-For example, `keel cc -O -p canonicalize,instcombine,small-memory,dce input.c`
-selects it explicitly. Run it before allocation. Pipeline activation belongs
-to the integration owner after combined correctness and cost gates.
+Full optimization (`-O`) runs it immediately before `stack-forward`. Basic
+and unoptimized compilation do not run it. Explicit `-p` pipelines continue
+to select their own passes; for example,
+`keel cc -O -p canonicalize,instcombine,small-memory,dce input.c`.
+`memory-forward`, `loop-memory` and `loop-unroll` remain opt-in.
 
 The 32-byte cap bounds each expansion to at most six exact chunks. Greedy
 8/4/2/1-byte integer accesses never reach outside the original extent. Loads
@@ -51,15 +52,10 @@ cargo test --offline -j2 -p keel-c --test memory --test memory_builtins
 ```
 
 Native artifacts stay under ignored `target/`; campaign logs stay under
-ignored `suite/reports/`. This pass has no measured runtime, application,
-code-size or compile-cost claim. The audited frontend/LLVM kernel contrasts
-motivate investigation and do not predict this patch's speedup. Root owns
-later serial performance, application, code-size and 44-TU compile-cost gates,
-plus independent correctness review of the committed checkpoint.
-
-Integration note: registering a pass changes the unknown-pass diagnostic.
-The shared `crates/keel-opt/tests/golden/unknown_pass.out` fixture needs a
-combined registry update by root. This branch leaves that file outside its
-ownership unchanged; the full optimizer run currently fails only that
-expected diagnostic comparison. The remaining optimizer tests pass with
-`cargo test --offline -j2 -p keel-opt -- --skip golden --test-threads=1`.
+ignored `suite/reports/`. The default decision accepts the audited short-copy
+kernel benefit and a bounded compile-cost tradeoff. The measured 16-byte copy
+lost its memcpy call; this does not establish an application speedup. The
+SM-only pipeline produced identical assembly for the measured 44 translation
+units and identical code in the three full applications. Wider and dynamic
+copies retain calls. See the validation handoff for exact compiler and input
+identities; no new performance claim follows from default wiring.

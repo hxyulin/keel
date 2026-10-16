@@ -744,6 +744,7 @@ analyses they need; there is no analysis cache yet.
 | Pass | What it does |
 |---|---|
 | `inline` | module-level bounded private direct-call expansion, including fresh by-value snapshots and remapped CFG/SSA/stack slots |
+| `small-memory` | expand ordinary constant memory intrinsics of 0–32 bytes with exact accesses; preload memmove sources before stores; see [bounded memory expansion](small-memory.md) |
 | `stack-forward` | block-local byte forwarding for nonescaping fixed stack objects, including partial integer writes; remove private stores only after every load from the object disappears |
 | `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |
@@ -763,9 +764,9 @@ See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
 The default pipeline (`-O`) is `inline, simplify-cfg, canonicalize, instcombine,
-simplify-cfg, gvn, stack-forward, canonicalize, instcombine, dce, gcm,
+call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
 loop-vectorize`. Basic uses `simplify-cfg, canonicalize, instcombine,
-simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
+call-contracts, simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
 to avoid invalidating it immediately. The scalar cleanup order was chosen for
 lower compile cost while preserving assembly on the earlier measured corpus.
 Inlining precedes cleanup so constants and aggregate temporaries become visible;
