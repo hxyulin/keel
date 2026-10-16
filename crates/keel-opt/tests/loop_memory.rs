@@ -390,6 +390,7 @@ fn aliased_header_definitions_are_rejected_in_memory_without_changing_guard_or_l
         "result-bound",
         "result-param",
         "result-earlier-result",
+        "result-chain-bound",
         "param-bound",
         "param-earlier-param",
     ] {
@@ -399,6 +400,11 @@ fn aliased_header_definitions_are_rejected_in_memory_without_changing_guard_or_l
                 " v29 = iconst.i64 0\n v30 = iconst.i64 1\n v7 = icmp",
             )
             .replace("return v12", "return v29")
+        } else if case == "result-chain-bound" {
+            LOOP.replace(
+                " v7 = icmp",
+                " v29 = iconst.i64 2\n v30 = iconst.i64 1\n v7 = icmp",
+            )
         } else if case.starts_with("result-") {
             LOOP.replace(" v7 = icmp", " v30 = iconst.i64 1\n v7 = icmp")
         } else {
@@ -430,6 +436,9 @@ fn aliased_header_definitions_are_rejected_in_memory_without_changing_guard_or_l
             (sum, if case == "param-bound" { bound } else { iv })
         };
         f.replace_all_uses(old, replacement);
+        if case == "result-chain-bound" {
+            f.replace_all_uses(replacement, bound);
+        }
         assert_ne!(old, f.resolve(old));
         keel_ir::verify(f).unwrap();
         // Do not print/parse round-trip: text resolves operands and erases
@@ -446,7 +455,7 @@ fn aliased_header_definitions_are_rejected_in_memory_without_changing_guard_or_l
             failures.push(case);
         }
         keel_ir::verify(f).unwrap();
-        assert_eq!(f.resolve(old), replacement);
+        assert_eq!(f.resolve(old), f.resolve(replacement));
     }
     assert!(
         failures.is_empty(),
