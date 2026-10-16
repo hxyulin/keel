@@ -233,3 +233,153 @@ block0(v0: ptr, v1: ptr, v2: i32, v3: i64, v4: ptr):
         assert_eq!(loads(&optimize(&source)), expected, "{source}");
     }
 }
+
+#[test]
+fn constant_paths_forward_equivalent_addresses_and_keep_adjacent_fields() {
+    for (middle, expected) in [
+        ("store v1, v6", 0),
+        ("store v1, v7", 1),
+        ("store v9, v7", 1),
+        ("store v1, v10", 1),
+        ("store v1, v11", 1),
+    ] {
+        let source = format!(
+            "func @f(ptr, i64, i64, ptr) -> i64 {{
+block0(v0: ptr, v1: i64, v2: i64, v3: ptr):
+ v4 = iconst.i64 8
+ v5 = ptradd v0, v4
+ v6 = ptradd v5, v4
+ v8 = iconst.i64 12
+ v7 = ptradd v0, v8
+ v9 = iconst.i8 7
+ v10 = ptradd v0, v2
+ v11 = ptradd v3, v4
+ store v1, v5
+ {middle}
+ v12 = ptradd v0, v4
+ v13 = load.i64 v12
+ return v13
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected, "{middle}");
+    }
+}
+
+#[test]
+fn negative_paths_and_checked_overflow_are_conservative() {
+    for (offset, width, expected) in [
+        ("-8", "i64", 1),
+        ("-4", "i64", 2),
+        ("-1", "i8", 1),
+        ("4", "i64", 2),
+    ] {
+        let source = format!(
+            "func @f(ptr, {width}) -> i64 {{
+block0(v0: ptr, v1: {width}):
+ v2 = iconst.i64 {offset}
+ v3 = ptradd v0, v2
+ v4 = load.i64 v0
+ store v1, v3
+ v5 = load.i64 v0
+ return v5
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected, "{offset}/{width}");
+    }
+    let m = optimize(
+        "func @f(ptr, i64) -> i64 {
+block0(v0: ptr, v1: i64):
+ v2 = iconst.i64 9223372036854775807
+ v3 = ptradd v0, v2
+ v4 = iconst.i64 1
+ v5 = ptradd v3, v4
+ v6 = load.i64 v0
+ store v1, v5
+ v7 = load.i64 v0
+ return v7
+}",
+    );
+    assert_eq!(loads(&m), 2);
+}
+
+#[test]
+fn restricted_derived_addresses_require_both_unescaped_roots() {
+    for (extra, expected) in [
+        ("", 1),
+        ("v12 = icmp.eq v5, v6", 2),
+        ("v12 = ptradd v5, v2", 2),
+        ("store v5, v3", 2),
+        ("call @escape(v5)", 2),
+        ("v12 = load.i64 volatile v5", 3),
+        ("v12 = atomic_load.i64 relaxed v5", 2),
+    ] {
+        let source = format!(
+            "decl @escape(ptr)
+func @f(ptr, ptr, i64, ptr) -> i64 restrict_params(0, 1) {{
+block0(v0: ptr, v1: ptr, v2: i64, v3: ptr):
+ v4 = iconst.i64 8
+ v5 = ptradd v0, v4
+ v6 = ptradd v1, v4
+ v7 = load.i64 v5
+ {extra}
+ store v2, v6
+ v8 = load.i64 v5
+ return v8
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected, "{extra}");
+    }
+}
+
+#[test]
+fn block_argument_use_disqualifies_restricted_derived_root() {
+    let m = optimize(
+        "func @f(ptr, ptr, i64) -> i64 restrict_params(0, 1) {
+block0(v0: ptr, v1: ptr, v2: i64):
+ v3 = iconst.i64 8
+ v4 = ptradd v0, v3
+ v5 = load.i64 v4
+ store v2, v1
+ v6 = load.i64 v4
+ jump block1(v4, v6)
+block1(v7: ptr, v8: i64):
+ return v8
+}",
+    );
+    assert_eq!(loads(&m), 2);
+}
+
+#[test]
+fn signed_paths_cancel_but_unknown_offsets_stay_opaque() {
+    for (offset, expected) in [("v2", 1), ("v7", 0)] {
+        let source = format!(
+            "func @f(ptr, i64, i64) -> i64 {{
+block0(v0: ptr, v1: i64, v2: i64):
+ v3 = iconst.i64 8
+ v4 = ptradd v0, v3
+ v7 = iconst.i64 -8
+ v5 = ptradd v4, {offset}
+ store v1, v0
+ v6 = load.i64 v5
+ return v6
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected);
+    }
+}
+
+#[test]
+fn wide_store_invalidates_every_overlapping_fact() {
+    let m = optimize(
+        "func @f(ptr, i128) -> i64 {
+block0(v0: ptr, v1: i128):
+ v2 = iconst.i64 8
+ v3 = ptradd v0, v2
+ v4 = load.i64 v3
+ store v1, v0
+ v5 = load.i64 v3
+ return v5
+}",
+    );
+    assert_eq!(loads(&m), 2);
+}
