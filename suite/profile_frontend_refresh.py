@@ -151,7 +151,7 @@ def rss():
 
 def sample():
     b=ROOT/'target-fp/release/examples/profile';r={'start':snapshot(),'binary_sha256':sha(b),'profiles':[]}
-    # Existing perf permissions only. Task-scoped software event, attach after
+    # Existing perf permissions only. Task-scoped user cycles, attach after
     # validation and warmup. Two independent 8-second captures per workload.
     for app,ps in inputs().items():
         for capture in range(2):
@@ -164,8 +164,8 @@ def sample():
                         if proc.poll() is not None or time.monotonic()>deadline:raise RuntimeError(log.read_text())
                         time.sleep(.05)
                     data=ROOT/'evidence'/f'{app}-{capture}.perf.data'
-                    record=run([PERF,'record','-e','cpu-clock:u','-F','499','-g','--call-graph','fp','-p',str(proc.pid),'-o',data,'--','sleep','8'],env=ENV)
-                    decoded=run([PERF,'script','--no-inline','-i',data,'-F','comm,pid,tid,time,event,ip,sym,dso,period'],env=ENV)
+                    record=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'record','-e','cycles:u','-F','499','-g','--call-graph','fp','-p',str(proc.pid),'-o',data,'--','sleep','8'],env=ENV)
+                    decoded=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'script','--no-inline','-i',data,'-F','comm,pid,tid,time,event,ip,sym,dso,period'],env=ENV)
                     (data.with_suffix('.script.txt')).write_text(decoded['stdout'])
                     r['profiles'].append(dict(app=app,capture=capture,record=record,decode_stderr=decoded['stderr'],decode_command=decoded['command'],data_sha256=sha(data)))
                 finally:
