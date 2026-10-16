@@ -316,7 +316,7 @@ fn native_constants_abi_payloads_spills_cycles_and_nzcv_execute() {
 uint64_t expected(uint64_t a, uint64_t b) {\n\
  uint64_t r = a - b;\n\
  return ((r >> 63) << 31) | ((uint64_t)(r == 0) << 30) |\n\
-        ((uint64_t)(a >= b) << 29) | ((((a ^ b) & (a ^ r)) >> 63) << 28;\n}\n",
+        ((uint64_t)(a >= b) << 29) | ((((a ^ b) & (a ^ r)) >> 63) << 28);\n}\n",
     );
     let mut checks = String::from(
         "uint64_t pairs[][2] = {{(uint64_t)-7, 3}, {3, (uint64_t)-7}, {3, 3},\n\
