@@ -136,3 +136,83 @@ fn matching_extensions_fold_in_basic_and_expose_full_gvn_equivalence() {
         }
     }
 }
+
+#[test]
+fn full_collapses_observed_js_is_exception_boolean_chain() {
+    // The retained QuickJS helper tests tag == 6, then negates the extended
+    // boolean twice before returning it as a C int.
+    let source = "func @JS_IsException(i64) -> i32 {
+block0(v0: i64):
+ v1 = iconst.i64 6
+ v2 = icmp.eq v0, v1
+ v3 = uext.i32 v2
+ v4 = iconst.i32 0
+ v5 = icmp.eq v3, v4
+ v6 = uext.i32 v5
+ v7 = icmp.eq v6, v4
+ v8 = uext.i32 v7
+ return v8
+}";
+    let original = keel_ir::parse(source).unwrap();
+    let mut module = original.clone();
+    keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();
+    let text = module.to_string();
+    assert_eq!(text.matches("icmp.").count(), 1, "{text}");
+    assert!(text.contains("icmp.eq v0,"), "{text}");
+    assert_eq!(text.matches("uext.i32").count(), 1, "{text}");
+    for tag in [0, 1, 5, 6, 7, u64::MAX, 1 << 63] {
+        assert_eq!(
+            support::execute(&original.functions[0], &[tag]),
+            u64::from(tag == 6)
+        );
+        assert_eq!(
+            support::execute(&module.functions[0], &[tag]),
+            u64::from(tag == 6)
+        );
+    }
+    let snapshot = module.to_string();
+    keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();
+    assert_eq!(module.to_string(), snapshot);
+}
+
+#[test]
+fn full_exposes_adjacent_integer_compare_branch_after_extension_removal() {
+    for extension in ["uext", "sext"] {
+        let source = format!(
+            "func @f(i64, i64) -> i64 {{
+block0(v0: i64, v1: i64):
+ v2 = icmp.slt v0, v1
+ v3 = {extension}.i64 v2
+ brif v3, block1, block2
+block1:
+ return v0
+block2:
+ return v1
+}}"
+        );
+        let original = keel_ir::parse(&source).unwrap();
+        let mut module = original.clone();
+        keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();
+        let f = &module.functions[0];
+        let entry = f.block_insts(f.entry_block().unwrap());
+        let branch = entry[entry.len() - 1];
+        let compare = entry[entry.len() - 2];
+        assert!(
+            matches!(f.inst_data(compare), keel_ir::InstData::Icmp { .. }),
+            "{module}"
+        );
+        assert!(
+            matches!(f.inst_data(branch), keel_ir::InstData::Brif { cond, .. } if f.resolve(*cond) == f.first_result(compare)),
+            "{module}"
+        );
+        assert!(!module.to_string().contains("ext."), "{module}");
+        for a in [0, 1, u64::MAX, 1 << 63] {
+            for b in [0, 1, u64::MAX, 1 << 63] {
+                assert_eq!(
+                    support::execute(&original.functions[0], &[a, b]),
+                    support::execute(f, &[a, b])
+                );
+            }
+        }
+    }
+}
