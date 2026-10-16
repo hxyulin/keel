@@ -317,3 +317,139 @@ fn debug_variable_descriptions_and_escaped_restricted_roots_are_skipped() {
         assert_eq!(before, optimize(&source).to_string());
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+enum FirstObservable {
+    Load(u64),
+    Return(Vec<u64>),
+}
+
+// This evaluator stops before any memory access. In particular it can
+// demonstrate a spurious null load without executing an invalid C/IR access.
+// Bind definitions by their raw identity, but read operands through aliases:
+// an instruction whose result was replaced must not redefine its alias target.
+fn first_observable(f: &keel_ir::Function, bound: u64, seed: u64) -> FirstObservable {
+    use keel_ir::{BinaryOp, IntCC};
+    use std::collections::HashMap;
+    let mut block = f.entry_block().unwrap();
+    let mut values: HashMap<_, _> = f
+        .block_params(block)
+        .iter()
+        .copied()
+        .zip([0, 8, bound, seed])
+        .collect();
+    for _ in 0..32 {
+        let mut next = None;
+        for &i in f.block_insts(block) {
+            let get = |v| values[&f.resolve(v)];
+            let result = match f.inst_data(i) {
+                InstData::Iconst { imm, .. } => Some(*imm as u64),
+                InstData::Binary {
+                    op: BinaryOp::Iadd,
+                    args,
+                } => Some(get(args[0]).wrapping_add(get(args[1]))),
+                InstData::Icmp {
+                    cond: IntCC::Ult,
+                    args,
+                } => Some(u64::from(get(args[0]) < get(args[1]))),
+                InstData::Load { addr, .. } => return FirstObservable::Load(get(*addr)),
+                InstData::Return { args } => {
+                    return FirstObservable::Return(args.iter().map(|&v| get(v)).collect());
+                }
+                InstData::Jump { dest } => {
+                    next = Some(dest);
+                    None
+                }
+                InstData::Brif { cond, dests } => {
+                    next = Some(&dests[usize::from(get(*cond) == 0)]);
+                    None
+                }
+                other => panic!("unexpected instruction before first observable: {other:?}"),
+            };
+            if let Some(value) = result {
+                values.insert(f.first_result(i), value);
+            }
+            if next.is_some() {
+                break;
+            }
+        }
+        let dest = next.expect("terminator");
+        let args: Vec<_> = dest.args.iter().map(|&v| values[&f.resolve(v)]).collect();
+        block = dest.block;
+        for (&param, value) in f.block_params(block).iter().zip(args) {
+            values.insert(param, value);
+        }
+    }
+    panic!("first observable not reached within bound")
+}
+
+#[test]
+fn aliased_header_definitions_are_rejected_in_memory_without_changing_guard_or_load_trace() {
+    let mut failures = Vec::new();
+    for case in [
+        "result-bound",
+        "result-param",
+        "result-earlier-result",
+        "param-bound",
+        "param-earlier-param",
+    ] {
+        let source = if case == "result-earlier-result" {
+            LOOP.replace(
+                " v7 = icmp",
+                " v29 = iconst.i64 0\n v30 = iconst.i64 1\n v7 = icmp",
+            )
+            .replace("return v12", "return v29")
+        } else if case.starts_with("result-") {
+            LOOP.replace(" v7 = icmp", " v30 = iconst.i64 1\n v7 = icmp")
+        } else {
+            LOOP.to_string()
+        };
+        let mut module = keel_ir::parse(&source).unwrap();
+        let f = &mut module.functions[0];
+        let entry = f.entry_block().unwrap();
+        let header = f.blocks().nth(1).unwrap();
+        let bound = f.block_params(entry)[2];
+        let iv = f.block_params(header)[0];
+        let sum = f.block_params(header)[1];
+        let (old, replacement) = if case.starts_with("result-") {
+            let old = f
+                .block_insts(header)
+                .iter()
+                .find_map(|&i| {
+                    matches!(f.inst_data(i), InstData::Iconst { imm: 1, .. })
+                        .then(|| f.first_result(i))
+                })
+                .unwrap();
+            let replacement = match case {
+                "result-bound" => bound,
+                "result-param" => iv,
+                _ => f.first_result(f.block_insts(header)[0]),
+            };
+            (old, replacement)
+        } else {
+            (sum, if case == "param-bound" { bound } else { iv })
+        };
+        f.replace_all_uses(old, replacement);
+        assert_ne!(old, f.resolve(old));
+        keel_ir::verify(f).unwrap();
+        // Do not print/parse round-trip: text resolves operands and erases
+        // precisely the valid Function API alias state being tested.
+        let before = format!("{f:?}");
+        let trip_bound = u64::from(case == "result-param");
+        let expected = first_observable(f, trip_bound, 1);
+        let changed = keel_opt::find_pass("loop-memory").unwrap().run(f);
+        let actual = first_observable(f, trip_bound, 1);
+        println!(
+            "{case}: bound={trip_bound} seed=1 before={expected:?} after={actual:?} changed={changed}"
+        );
+        if changed || before != format!("{f:?}") || expected != actual {
+            failures.push(case);
+        }
+        keel_ir::verify(f).unwrap();
+        assert_eq!(f.resolve(old), replacement);
+    }
+    assert!(
+        failures.is_empty(),
+        "aliased header cases changed: {failures:?}"
+    );
+}

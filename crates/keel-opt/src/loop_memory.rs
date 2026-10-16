@@ -48,7 +48,11 @@ fn available(f: &Function, dom: &DominatorTree, pre: Block, v: Value) -> bool {
 // intrinsics, floating point, memory, or potentially trapping division.
 fn guard_instruction(f: &Function, i: Inst) -> bool {
     let d = f.inst_data(i);
-    if d.is_pinned() || d.may_trap() || f.inst_results(i).len() != 1 {
+    if d.is_pinned()
+        || d.may_trap()
+        || f.inst_results(i).len() != 1
+        || f.inst_results(i).iter().any(|&v| f.resolve(v) != v)
+    {
         return false;
     }
     let mut integer = f.value_type(f.first_result(i)).is_int();
@@ -65,6 +69,13 @@ fn analyze(
     header: Block,
 ) -> Option<Candidate> {
     if depth.depth(header) != 1 || cfg.preds(header).len() != 2 {
+        return None;
+    }
+    // Function API aliases can leave replaced parameters/results in layout.
+    // Publishing a clone under the resolved identity would overwrite an
+    // invariant or another header definition, changing the initial guard.
+    // Reject these states rather than resurrecting replaced definitions.
+    if f.block_params(header).iter().any(|&v| f.resolve(v) != v) {
         return None;
     }
     let insts = f.block_insts(header);
@@ -277,7 +288,7 @@ fn transform(f: &mut Function, mut c: Candidate) {
         .block_params(c.header)
         .iter()
         .zip(&c.incoming.args)
-        .map(|(&v, &a)| (f.resolve(v), f.resolve(a)))
+        .map(|(&v, &a)| (v, f.resolve(a)))
         .collect();
     let header = f.block_insts(c.header).to_vec();
     for &i in &header[..header.len() - 1] {
@@ -285,7 +296,7 @@ fn transform(f: &mut Function, mut c: Candidate) {
         data.for_each_operand_mut(|v| *v = mapped(f, &values, *v));
         let copy = f.insert_inst(InsertPoint::Before(c.pre_term), data);
         f.set_inst_loc(copy, f.inst_loc(i));
-        values.insert(f.resolve(f.first_result(i)), f.first_result(copy));
+        values.insert(f.first_result(i), f.first_result(copy));
     }
     let mut exit_replacements = HashMap::new();
     for &v in &c.exit_values {
