@@ -157,7 +157,7 @@ def stress(args):
             commands = {}
             outputs = {}
             for name, driver in [("before", args.before), ("after", args.after)]:
-                commands[name] = [driver, "compile", "--opt-tier", "full", "--emit-ir", source]
+                commands[name] = [driver, "opt", "--opt-tier", "full", source]
                 p, _ = run(commands[name])
                 dest = args.work / f"{kind}-{n}-{name}.ir"
                 dest.write_bytes(p.stdout)
