@@ -410,7 +410,8 @@ impl Selection {
                         } = *func.inst_data(child)
                         && func.value_type(func.resolve(args[1])) == Type::I64
                         && let Some(offset) = crate::fold::iconst(func, args[1])
-                        && let Some(size) = ty.bytes().filter(|&size| size <= 8)
+                        && let Some(size) = (if ty == Type::Ptr { Some(8) } else { ty.bytes() })
+                            .filter(|&size| size <= 8)
                         && match target {
                             Target::Aarch64 => {
                                 offset >= 0

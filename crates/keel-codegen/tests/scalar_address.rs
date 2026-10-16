@@ -45,6 +45,8 @@ fn displacement_limits_and_selection_tiers() {
             ("i32", 16380, true),
             ("i32", 16384, false),
             ("i64", 32760, true),
+            ("ptr", 32760, true),
+            ("ptr", 32768, false),
             ("i64", 32768, false),
             ("i64", 7, false),
             ("i8", -1, false),
