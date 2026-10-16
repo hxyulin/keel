@@ -125,16 +125,26 @@ fn typed_mask_normalization_and_shared_mask_preserve_their_uses() {
 #[test]
 fn native_extraction_matches_independent_bits_with_spills() {
     use std::{fs, process::Command};
-    let dir = std::env::temp_dir().join(format!("keel-arm-wave6-ubfx-{}", std::process::id()));
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../suite/reports/optimization-wave6-20261016/native-tests/ubfx-{}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     for bits in [32u32, 64] {
         for shift in [0i64, 7, -1, i64::from(bits) + 7] {
             let lsb = shift as u32 & (bits - 1);
             let width = 8.min(bits - lsb);
             let mask = (1u64 << width) - 1;
-            let src = source(bits, shift, mask as i64, false, false);
+            let mut src = source(bits, shift, mask as i64, false, false);
+            if bits == 32 {
+                // Truncation can leave dirty high bits in a 64-bit stack home.
+                // The selected extraction must read the W execution width.
+                src = src
+                    .replace("func @f(i32)", "func @f(i64)")
+                    .replace("block0(v0: i32):", "block0(v10: i64):\n v0 = trunc.i32 v10");
+            }
             let c = format!(
-                "#include <stdint.h>\nextern uint{bits}_t f(uint{bits}_t);\nint main(void) {{\n uint64_t x=0x123456789abcdef0ULL;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;\n uint{bits}_t input=(uint{bits}_t)x;\n if(f(input)!=((input >> {lsb}) & UINT64_C({mask}))) return 1;\n }}\nreturn 0;\n}}"
+                "#include <stdint.h>\nextern uint{bits}_t f(uint64_t);\nint main(void) {{\n uint64_t x=0x123456789abcdef0ULL;\n for(int i=0;i<1000;i++) {{\n x^=x<<13;x^=x>>7;x^=x<<17;\n uint{bits}_t input=(uint{bits}_t)x;\n if(f(x)!=((input >> {lsb}) & UINT64_C({mask}))) return 1;\n }}\nreturn 0;\n}}"
             );
             fs::write(dir.join("test.c"), c).unwrap();
             for allocation in [AllocationTier::Fast, AllocationTier::Full] {

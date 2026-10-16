@@ -428,8 +428,9 @@ fn addsub_immediate(func: &Function, data: &InstData) -> Option<AddSubImmediate>
 }
 
 /// The operand of `data` that is a constant encoded in the instruction
-/// itself, and that immediate: an `add`/`sub`/`cmp` immediate is 12 bits
-/// unsigned, I32/I64 logical masks use the execution width, a shift amount
+/// itself, and that immediate: typed add/sub/compare plans can reverse the
+/// operation and shift a 12-bit magnitude; legacy narrow/pointer forms stay
+/// unsigned and unshifted. I32/I64 logical masks use the execution width, a shift amount
 /// is taken modulo the width, and a stored zero
 /// is the zero register.
 fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
