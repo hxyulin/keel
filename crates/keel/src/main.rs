@@ -37,6 +37,7 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
+  keel compile|cc|opt [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
@@ -65,6 +66,7 @@ fn main() -> ExitCode {
 struct Options {
     input: Option<String>,
     output: Option<String>,
+    opt_report: Option<String>,
     optimization: keel_opt::OptimizationTier,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
@@ -100,6 +102,43 @@ impl Options {
                 self.vector_target(),
             ),
         }
+    }
+
+    fn optimize_with_output(&self, module: &mut Module) -> Result<(), String> {
+        if self.opt_report.is_none() {
+            return self.optimize(module).map_err(|e| e.to_string());
+        }
+        let names: Vec<_> = self
+            .passes
+            .as_ref()
+            .map(|names| names.iter().map(String::as_str).collect())
+            .unwrap_or_else(|| self.optimization.pipeline().to_vec());
+        self.run_optimization(module, &names, self.vector_target())
+    }
+
+    fn run_optimization(
+        &self,
+        module: &mut Module,
+        names: &[&str],
+        target: keel_opt::VectorTarget,
+    ) -> Result<(), String> {
+        let Some(path) = &self.opt_report else {
+            return keel_opt::run_passes_for_target(module, names, target)
+                .map_err(|e| e.to_string());
+        };
+        let mut report = keel_opt::OptimizationReport::default();
+        keel_opt::run_passes_for_target_with_report(module, names, target, &mut report)
+            .map_err(|e| e.to_string())?;
+        // Never overwrite an input, output, previous report, symlink, or device.
+        // Path conflicts are checked before compilation; create_new also guards races.
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| format!("optimization report {path}: {e}"))?;
+        file.write_all(report.to_json().as_bytes())
+            .map_err(|e| format!("optimization report {path}: {e}"))
     }
 
     fn vector_target(&self) -> keel_opt::VectorTarget {
@@ -220,6 +259,15 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-E" => opts.preprocess_only = true,
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
+            "--opt-report" => {
+                let path = args.next().ok_or("`--opt-report` needs a file")?;
+                if path.is_empty() || path == "-" {
+                    return Err("`--opt-report` needs a nonempty file path (not stdout)".into());
+                }
+                if opts.opt_report.replace(path.clone()).is_some() {
+                    return Err("`--opt-report` may only be specified once".into());
+                }
+            }
             "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
@@ -327,7 +375,55 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     {
         return Err("--remat pressure requires --regalloc fast or full".into());
     }
+    if let Some(report) = &opts.opt_report {
+        if opts.preprocess_only {
+            return Err("`--opt-report` cannot be used with preprocessing only".into());
+        }
+        let path = std::path::Path::new(report);
+        if path.symlink_metadata().is_ok() {
+            return Err(format!("optimization report {report}: file already exists"));
+        }
+        let resolved_report = report_destination(path)?;
+        for other in [&opts.input, &opts.output].into_iter().flatten() {
+            if report_destination(std::path::Path::new(other))? == resolved_report {
+                return Err("optimization report path conflicts with input or output".into());
+            }
+        }
+    }
     Ok(opts)
+}
+
+fn report_destination(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let mut path = path.to_path_buf();
+    // canonicalize handles existing files and parent aliases. Resolve a dangling
+    // final symlink as well, so a later -o cannot overwrite the newly made report.
+    for _ in 0..40 {
+        if let Ok(resolved) = path.canonicalize() {
+            return Ok(resolved);
+        }
+        if let Ok(link) = std::fs::read_link(&path) {
+            path = if link.is_absolute() {
+                link
+            } else {
+                path.parent()
+                    .unwrap_or_else(|| std::path::Path::new("."))
+                    .join(link)
+            };
+            continue;
+        }
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let parent = parent
+            .canonicalize()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| format!("{}: expected a file path", path.display()))?;
+        return Ok(parent.join(name));
+    }
+    Err(format!("{}: too many symbolic links", path.display()))
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
@@ -377,6 +473,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--target",
                     "--emit-object",
                     "--isel",
+                    "--opt-report",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -386,7 +483,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                 ],
             )?;
             let (input, mut module) = load(&opts)?;
-            opts.optimize(&mut module)
+            opts.optimize_with_output(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
@@ -411,6 +508,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--target",
                     "--emit-object",
                     "--isel",
+                    "--opt-report",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -471,7 +569,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     lines.join("\n")
                 ));
             }
-            opts.optimize(&mut module)
+            opts.optimize_with_output(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
             if opts.emit_ir && opts.emit_object {
                 return Err("`--emit-ir` and `--emit-object` are mutually exclusive".into());
@@ -482,7 +580,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
-            let opts = parse_options(rest, &["-o", "-p", "--opt-tier", "-O", "--target"])?;
+            let opts = parse_options(
+                rest,
+                &["-o", "-p", "--opt-tier", "-O", "--target", "--opt-report"],
+            )?;
             let (input, mut module) = load(&opts)?;
             let target = if opts.target.is_some() {
                 opts.vector_target()
@@ -492,18 +593,12 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let result = match &opts.passes {
                 Some(names) => {
                     let names: Vec<&str> = names.iter().map(String::as_str).collect();
-                    keel_opt::run_passes_for_target(&mut module, &names, target)
+                    opts.run_optimization(&mut module, &names, target)
                 }
                 None if rest.iter().any(|arg| arg == "--opt-tier" || arg == "-O") => {
-                    keel_opt::run_passes_for_target(
-                        &mut module,
-                        opts.optimization.pipeline(),
-                        target,
-                    )
+                    opts.run_optimization(&mut module, opts.optimization.pipeline(), target)
                 }
-                None => {
-                    keel_opt::run_passes_for_target(&mut module, keel_opt::DEFAULT_PIPELINE, target)
-                }
+                None => opts.run_optimization(&mut module, keel_opt::DEFAULT_PIPELINE, target),
             };
             result.map_err(|e| format!("{input}: {e}"))?;
             write_output(&opts, &module.to_string())

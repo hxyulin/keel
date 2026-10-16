@@ -2,7 +2,7 @@
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. The module budget is consumed in
 //! layout order. ABI by-value arguments get a fresh snapshot.
-use crate::Pass;
+use crate::{InlineSite, Pass};
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
     BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic, Module,
@@ -23,6 +23,13 @@ impl Pass for Inline {
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
         Some(run(module))
+    }
+    fn run_module_with_report(
+        &self,
+        module: &mut Module,
+        sites: &mut Vec<InlineSite>,
+    ) -> Option<bool> {
+        Some(run_observed(module, Some(sites)).changed)
     }
 }
 const MAX_INSTS: usize = 64;
@@ -48,43 +55,88 @@ pub struct InlineSkip {
     pub reason: &'static str,
 }
 
-fn profitable(f: &Function) -> bool {
+fn profitability_reason(f: &Function) -> Option<&'static str> {
     let scale = if f.attrs.inlinehint { 2 } else { 1 };
-    f.attrs.alwaysinline
-        || (f.blocks().count() <= MAX_BLOCKS * scale
-            && f.layout_insts().count() <= MAX_INSTS * scale
-            && f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>()
-                <= MAX_STACK * scale as u64)
+    if f.attrs.alwaysinline {
+        return None;
+    }
+    if f.blocks().count() > MAX_BLOCKS * scale {
+        Some("profitability_blocks")
+    } else if f.layout_insts().count() > MAX_INSTS * scale {
+        Some("profitability_instructions")
+    } else if f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>()
+        > MAX_STACK * scale as u64
+    {
+        Some("profitability_stack_declaration_bytes")
+    } else {
+        None
+    }
 }
 
-fn eligible(f: &Function) -> bool {
-    f.local
-        && !f.attrs.noinline
-        && !f.sig.variadic
-        && !f.sig.returns_twice
-        && f.personality.is_none()
-        && f.entry_block().is_some()
-        && f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() <= HARD_STACK
-        && f.sig
-            .params
-            .iter()
-            .all(|p| !matches!(&p.purpose, Purpose::ByVal(l) if l.size() > 128))
-        && f.layout_insts().all(|(_, i)| match f.inst_data(i) {
-            InstData::Call { func, .. } => !f.callee(*func).sig.returns_twice,
-            InstData::CallIndirect { sig, .. } => !f.signature(*sig).returns_twice,
-            InstData::Intrinsic { id, .. } => matches!(
-                id,
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Debugtrap
-            ),
-            InstData::VaArg { .. }
-            | InstData::Invoke { .. }
-            | InstData::LandingPad { .. }
-            | InstData::EhTypeid { .. }
-            | InstData::ReturnCall { .. }
-            | InstData::ReturnCallIndirect { .. }
-            | InstData::InlineAsm { .. } => false,
-            _ => true,
-        })
+fn eligibility_reason(f: &Function) -> Option<&'static str> {
+    if !f.local {
+        return Some("public_definition");
+    }
+    if f.attrs.noinline {
+        return Some("noinline");
+    }
+    if f.sig.variadic {
+        return Some("variadic_callee");
+    }
+    if f.sig.returns_twice {
+        return Some("returns_twice_callee");
+    }
+    if f.personality.is_some() {
+        return Some("callee_personality");
+    }
+    if f.entry_block().is_none() {
+        return Some("callee_without_entry");
+    }
+    if f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() > HARD_STACK {
+        return Some("callee_hard_stack_declaration_bytes");
+    }
+    if f.sig
+        .params
+        .iter()
+        .any(|p| matches!(&p.purpose, Purpose::ByVal(l) if l.size() > 128))
+    {
+        return Some("byval_snapshot_size");
+    }
+    for (_, i) in f.layout_insts() {
+        let reason = match f.inst_data(i) {
+            InstData::Call { func, .. } if f.callee(*func).sig.returns_twice => {
+                Some("callee_calls_returns_twice")
+            }
+            InstData::CallIndirect { sig, .. } if f.signature(*sig).returns_twice => {
+                Some("callee_calls_returns_twice")
+            }
+            InstData::Intrinsic { id, .. }
+                if !matches!(
+                    id,
+                    Intrinsic::Memcpy
+                        | Intrinsic::Memmove
+                        | Intrinsic::Memset
+                        | Intrinsic::Debugtrap
+                ) =>
+            {
+                Some("unsupported_callee_intrinsic")
+            }
+            InstData::VaArg { .. } => Some("callee_va_arg"),
+            InstData::Invoke { .. } => Some("callee_invoke"),
+            InstData::LandingPad { .. } | InstData::EhTypeid { .. } => {
+                Some("callee_exception_instruction")
+            }
+            InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } => {
+                Some("callee_tail_call")
+            }
+            InstData::InlineAsm { .. } => Some("callee_inline_asm"),
+            _ => None,
+        };
+        if reason.is_some() {
+            return reason;
+        }
+    }
+    None
 }
 
 pub fn run(module: &mut Module) -> bool {
@@ -92,6 +144,10 @@ pub fn run(module: &mut Module) -> bool {
 }
 
 pub fn run_with_report(module: &mut Module) -> InlineReport {
+    run_observed(module, None)
+}
+
+fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
     let definitions: HashMap<_, _> = module
         .functions
         .iter()
@@ -127,31 +183,40 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
         }
         false
     };
-    let templates: HashMap<_, _> = module
-        .functions
-        .iter()
-        .filter(|f| eligible(f) && profitable(f) && !recursive(&f.name))
-        .map(|f| (f.name.clone(), f.clone()))
-        .collect();
-    let rejected: HashMap<_, _> = module
-        .functions
-        .iter()
-        .filter(|f| !templates.contains_key(&f.name))
-        .map(|f| {
-            (
-                f.name.clone(),
-                if f.attrs.noinline {
-                    "noinline policy"
-                } else if recursive(&f.name) {
-                    "recursive callee"
-                } else if !eligible(f) {
-                    "unsupported callee or hard stack bound"
-                } else {
-                    "profitability threshold"
-                },
-            )
-        })
-        .collect();
+    let explicit_definitions = sites.as_ref().map(|_| {
+        module
+            .functions
+            .iter()
+            .filter(|f| f.attrs.alwaysinline)
+            .map(|f| f.name.clone())
+            .collect::<HashSet<_>>()
+    });
+    // Freeze both templates and their rejection decisions at pass entry.
+    // Keep the existing diagnostic precedence (noinline, recursion, legality,
+    // profitability); the event stream uses these decisions, not a later probe.
+    let mut templates = HashMap::new();
+    let mut rejected = HashMap::new();
+    for f in &module.functions {
+        let legality = eligibility_reason(f);
+        let profitability = if legality.is_none() {
+            profitability_reason(f)
+        } else {
+            None
+        };
+        let recursion = !f.attrs.noinline && recursive(&f.name);
+        let reason = if f.attrs.noinline {
+            Some("noinline")
+        } else if recursion {
+            Some("recursive_callee")
+        } else {
+            legality.or(profitability)
+        };
+        if let Some(reason) = reason {
+            rejected.insert(f.name.clone(), reason);
+        } else {
+            templates.insert(f.name.clone(), f.clone());
+        }
+    }
     let mut report = InlineReport::default();
     let mut module_growth = 0;
     for caller in &mut module.functions {
@@ -181,28 +246,55 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
                     .get(&decl.name)
                     .is_some_and(|f| f.attrs.alwaysinline);
             let reason = if caller.sig.returns_twice || caller.personality.is_some() {
-                Some("unsupported caller")
+                Some((
+                    "unsupported caller",
+                    if caller.sig.returns_twice {
+                        "returns_twice_caller"
+                    } else {
+                        "caller_personality"
+                    },
+                ))
             } else if !matches!(caller.inst_data(call), InstData::Call { .. }) {
-                Some("unsupported call instruction")
+                Some((
+                    "unsupported call instruction",
+                    "unsupported_call_instruction",
+                ))
             } else if decl.attrs.noinline {
-                Some("noinline policy")
+                Some(("noinline policy", "noinline"))
             } else if let Some(callee) = templates.get(&decl.name) {
                 if decl.sig != callee.sig {
-                    Some("ABI signature mismatch")
+                    Some(("ABI signature mismatch", "abi_signature_mismatch"))
                 } else if callee.name == caller.name {
-                    Some("recursive callee")
+                    Some(("recursive callee", "recursive_callee"))
                 } else {
                     None
                 }
             } else {
-                Some(
-                    rejected
-                        .get(&decl.name)
-                        .copied()
-                        .unwrap_or("no private definition"),
-                )
+                Some({
+                    let detail = rejected.get(&decl.name).copied().unwrap_or("no_definition");
+                    let legacy = match detail {
+                        "noinline" => "noinline policy",
+                        "recursive_callee" => "recursive callee",
+                        "no_definition" => "no private definition",
+                        r if r.starts_with("profitability_") => "profitability threshold",
+                        _ => "unsupported callee or hard stack bound",
+                    };
+                    (legacy, detail)
+                })
             };
-            if let Some(reason) = reason {
+            if let Some((reason, detail)) = reason {
+                if let Some(sites) = sites.as_deref_mut() {
+                    sites.push(InlineSite::new(
+                        caller,
+                        &decl.name,
+                        call,
+                        requested
+                            || explicit_definitions
+                                .as_ref()
+                                .is_some_and(|names| names.contains(&decl.name)),
+                        detail,
+                    ));
+                }
                 if requested {
                     report.skipped.push(InlineSkip {
                         caller: caller.name.clone(),
@@ -239,11 +331,30 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
                         _ => 0,
                     })
                     .sum::<u64>();
-            if count == MAX_CALLS
-                || growth + cost > MAX_GROWTH
-                || module_growth + cost > MAX_MODULE_GROWTH
-                || stack_growth + stack_cost > HARD_STACK
-            {
+            let budget = if count == MAX_CALLS {
+                Some("caller_call_count_budget")
+            } else if growth + cost > MAX_GROWTH {
+                Some("caller_instruction_growth_budget")
+            } else if module_growth + cost > MAX_MODULE_GROWTH {
+                Some("module_instruction_growth_budget")
+            } else if stack_growth + stack_cost > HARD_STACK {
+                Some("caller_stack_growth_budget")
+            } else {
+                None
+            };
+            if let Some(detail) = budget {
+                if let Some(sites) = sites.as_deref_mut() {
+                    sites.push(InlineSite::new(
+                        caller,
+                        &callee.name,
+                        call,
+                        requested
+                            || explicit_definitions
+                                .as_ref()
+                                .is_some_and(|names| names.contains(&decl.name)),
+                        detail,
+                    ));
+                }
                 if requested {
                     report.skipped.push(InlineSkip {
                         caller: caller.name.clone(),
@@ -253,6 +364,15 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
                     });
                 }
                 continue;
+            }
+            if let Some(sites) = sites.as_deref_mut() {
+                sites.push(InlineSite::new(
+                    caller,
+                    &callee.name,
+                    call,
+                    requested,
+                    "inlined",
+                ));
             }
             inline_call(caller, call, callee);
             growth += cost;
@@ -429,4 +549,100 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         },
     );
     caller.set_inst_loc(jump, origin);
+}
+
+#[cfg(test)]
+mod report_tests {
+    use super::*;
+    // Isolated guard fixtures may be structurally invalid whole functions: these
+    // test exact decisions without implying the verifier accepts such inputs.
+    #[test]
+    fn eligibility_reports_each_unsupported_construct() {
+        let source = "func @h(ptr) local {\nblock0(v0: ptr):\n return\n}";
+        for (body, expected) in [
+            ("v1 = va_arg.i64 v0\n return", "callee_va_arg"),
+            (
+                "v1, v2 = landingpad cleanup\n return",
+                "callee_exception_instruction",
+            ),
+            (
+                "v1 = eh_typeid @type\n return",
+                "callee_exception_instruction",
+            ),
+            ("return_call @external(v0)", "callee_tail_call"),
+            ("return_call_indirect v0(v0) : (ptr)", "callee_tail_call"),
+            (
+                "invoke @external(v0), block1, block2\nblock1:\n return\nblock2:\n trap",
+                "callee_invoke",
+            ),
+        ] {
+            let text = format!(
+                "decl @external(ptr)\ndecl data @type\n{}",
+                source.replace(" return", body)
+            );
+            let module = keel_ir::parse(&text).unwrap();
+            assert_eq!(
+                eligibility_reason(&module.functions[0]),
+                Some(expected),
+                "{text}"
+            );
+        }
+        for (attrs, expected) in [
+            ("returns_twice", "returns_twice_callee"),
+            ("personality @p", "callee_personality"),
+        ] {
+            let text = if attrs == "returns_twice" {
+                source.replace("local {", "returns_twice local {")
+            } else {
+                source.replace("local {", &format!("local {attrs} {{"))
+            };
+            let module = keel_ir::parse(&text).unwrap();
+            assert_eq!(eligibility_reason(&module.functions[0]), Some(expected));
+        }
+        let mut f = Function::new("empty", keel_ir::Signature::new(&[], &[]));
+        f.local = true;
+        assert_eq!(eligibility_reason(&f), Some("callee_without_entry"));
+        let fields = vec!["i64"; 17].join(", ");
+        let module = keel_ir::parse(&format!(
+            "func @h(ptr byval {{{fields}}}) local {{\nblock0(v0: ptr):\n return\n}}"
+        ))
+        .unwrap();
+        assert_eq!(
+            eligibility_reason(&module.functions[0]),
+            Some("byval_snapshot_size")
+        );
+        let mut module = keel_ir::parse(source).unwrap();
+        let f = &mut module.functions[0];
+        let inst = f.layout_insts().next().unwrap().1;
+        *f.inst_data_mut(inst) = InstData::InlineAsm {
+            asm: Box::new(keel_ir::InlineAsm {
+                template: String::new(),
+                outputs: vec![],
+                inputs: vec![],
+                clobbers: vec![],
+            }),
+            args: vec![],
+        };
+        assert_eq!(eligibility_reason(f), Some("callee_inline_asm"));
+        for indirect in [false, true] {
+            let mut module = keel_ir::parse(source).unwrap();
+            let f = &mut module.functions[0];
+            let mut sig = keel_ir::Signature::new(&[], &[]);
+            sig.returns_twice = true;
+            let call = if indirect {
+                let sig = f.import_signature(sig);
+                InstData::CallIndirect {
+                    sig,
+                    callee: keel_ir::Value::new(0),
+                    args: vec![],
+                }
+            } else {
+                let func = f.import_function("external", sig);
+                InstData::Call { func, args: vec![] }
+            };
+            let inst = f.layout_insts().next().unwrap().1;
+            *f.inst_data_mut(inst) = call;
+            assert_eq!(eligibility_reason(f), Some("callee_calls_returns_twice"));
+        }
+    }
 }
