@@ -237,7 +237,11 @@ fn compile_output(
         let func = vector::lower(original);
         let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
-        let slots = compiler.slot_frame_offsets();
+        let slots = if debug {
+            compiler.slot_frame_offsets()
+        } else {
+            Vec::new()
+        };
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
     }
@@ -340,7 +344,12 @@ fn invert_cond(cond: &str) -> &'static str {
 /// The offset of the stack slot whose address `addr` is, if an access of
 /// type `ty` can address it directly: `ldr`/`str`'s immediate is 12 bits
 /// unsigned, scaled by the access size.
-fn folded_offset(func: &Function, offsets: &[usize], addr: Value, ty: Type) -> Option<usize> {
+fn folded_offset(
+    func: &Function,
+    offsets: &crate::stack_frame::SlotOffsets,
+    addr: Value,
+    ty: Type,
+) -> Option<usize> {
     let ValueDef::Result(inst, _) = func.value_def(func.resolve(addr)) else {
         return None;
     };
@@ -390,7 +399,11 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 
 /// The operands of `data` folded into it: a stack address [`folded_offset`]
 /// addresses directly, and a [`folded_imm`].
-fn folds(func: &Function, offsets: &[usize], data: &InstData) -> Vec<Value> {
+fn folds(
+    func: &Function,
+    offsets: &crate::stack_frame::SlotOffsets,
+    data: &InstData,
+) -> Vec<Value> {
     let addr = match *data {
         InstData::Load { ty, addr, .. } => Some((addr, ty)),
         InstData::Store { value, addr, .. } => Some((addr, func.value_type(func.resolve(value)))),
@@ -466,7 +479,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     /// Offset from `sp` of each IR stack slot.
-    stack_slot_offsets: Vec<usize>,
+    stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` results only used as the address of loads and stores
     /// that address the slot directly (`[sp, #offset]`): the address
     /// itself is never computed.
@@ -524,8 +537,8 @@ impl<'a> FunctionCompiler<'a> {
             + self.alloc.float_callee_saved_used.len().div_ceil(2);
         let sp = -((16 * pairs + self.frame_size) as i64);
         self.stack_slot_offsets
-            .iter()
-            .map(|&offset| sp + offset as i64)
+            .debug_offsets()
+            .map(|offset| sp + offset as i64)
             .collect()
     }
 
@@ -791,7 +804,7 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(slot) = copy_temp {
             vector_spills.insert(slot);
         }
-        let mut offset =
+        let offset =
             spill_base + 8 * (alloc.spill_slots as usize + if has_vectors { 2 } else { 0 });
         if offset > MAX_SLOT_OFFSET {
             return Err(err(format!(
@@ -800,12 +813,8 @@ impl<'a> FunctionCompiler<'a> {
         }
         // `sp` is 16-byte aligned and slot alignment is at most 16, so an
         // aligned offset gives an aligned address.
-        let mut stack_slot_offsets = Vec::new();
-        for (_, slot) in func.stack_slots() {
-            offset = offset.next_multiple_of(slot.align as usize);
-            stack_slot_offsets.push(offset);
-            offset += slot.size as usize;
-        }
+        let (stack_slot_offsets, offset) =
+            crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
         let frame_size = offset.next_multiple_of(16);
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
