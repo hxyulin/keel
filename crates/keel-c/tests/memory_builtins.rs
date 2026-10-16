@@ -363,6 +363,8 @@ fn memory_builtin_argument_diagnostics() {
         "void f(volatile int *p) { __builtin_memset(p,1,0); }",
         "void f(void *d, volatile int *p) { __builtin_memmove(d,p,0); }",
         "typedef const int C; void f(C *p) { __builtin_memset(p,1,0); }",
+        "void f(const int *restrict p) { __builtin_memset(p,1,0); }",
+        "void f(int *const restrict *p) { __builtin_memset(p,1,0); }",
     ] {
         let error = keel_c::compile(source, "invalid-memory.c", Default::default())
             .unwrap_err()

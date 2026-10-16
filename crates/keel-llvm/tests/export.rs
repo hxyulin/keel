@@ -4,6 +4,13 @@ fn translate(src: &str) -> Result<String, String> {
     export(&keel_ir::parse(src).unwrap(), TargetProfile::AppleArm64)
 }
 #[test]
+fn definition_restrict_facts_are_conservatively_omitted() {
+    let ll = translate("func @read(ptr) -> i32 restrict_params(0) {\nblock0(v0: ptr):\n v1 = load.i32 v0\n return v1\n}\n").unwrap();
+    assert!(ll.contains("define i32"));
+    assert!(!ll.contains("noalias"));
+    assert!(!ll.contains("restrict_params"));
+}
+#[test]
 fn cfg_and_semantic_shapes() {
     let ll = translate(include_str!("fixtures/core.keel")).unwrap();
     assert!(ll.contains("phi i64 [ %v1, %edge3_0 ]"));

@@ -1810,7 +1810,9 @@ pub(crate) fn checked_memory_prototype(id: Intrinsic, ty: &Ty) -> bool {
 fn memory_builtin_const(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
     match sugar {
         Sugar::Const(_) => true,
-        Sugar::Volatile(inner) | Sugar::Array(inner) => memory_builtin_const(inner, defs),
+        Sugar::Volatile(inner) | Sugar::Restrict(inner) | Sugar::Array(inner) => {
+            memory_builtin_const(inner, defs)
+        }
         Sugar::Typedef(i) => memory_builtin_const(&defs[*i].sugar, defs),
         _ => false,
     }
