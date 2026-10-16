@@ -22,7 +22,7 @@ def main():
     with tarfile.open(archive, "w:gz") as tar:
         for path in sorted(args.source.rglob("*")):
             rel = path.relative_to(args.source)
-            if not path.is_file() or rel.parts[0] in ["apps", "avx-apps"]:
+            if not path.is_file() or (rel.parts[0] in ["apps", "avx-apps"] and path.name != "correctness.log"):
                 continue
             if path.suffix not in [".json", ".gz", ".log", ".keel", ".ir", ".c", ".rs", ".s", ".dump", ".sh"]:
                 continue
