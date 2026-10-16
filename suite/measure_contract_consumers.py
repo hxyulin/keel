@@ -140,7 +140,7 @@ def generated(kind, n):
         for i in range(n):
             if i:
                 lines += [f"block{i}:"]
-            lines += [f" v{2*i+1} = iconst.i32 {i}", f" v{2*i+2} = icmp eq v0, v{2*i+1}", f" brif v{2*i+2}, block{n+i+1}, block{i+1}"]
+            lines += [f" v{2*i+1} = iconst.i32 {i}", f" v{2*i+2} = icmp.eq v0, v{2*i+1}", f" brif v{2*i+2}, block{n+i+1}, block{i+1}"]
         lines += [f"block{n}:", " return"]
         for i in range(n):
             lines += [f"block{n+i+1}:", " call @stop(v0)", " call @effect(v0)", " return"]
