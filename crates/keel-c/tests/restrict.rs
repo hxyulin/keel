@@ -105,7 +105,12 @@ fn c_aliases_and_barriers_keep_loads() {
             2,
         ),
         (
+            // Recognized constant derivations retain the entry contract.
             "int f(int *restrict p, int *restrict q) { int a=*p; q[1]=1; return a+*p; }",
+            1,
+        ),
+        (
+            "int f(int *restrict p, int *restrict q, int n) { int a=*p; q[n]=1; return a+*p; }",
             2,
         ),
     ] {
