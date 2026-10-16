@@ -27,6 +27,7 @@ pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod known_bits;
 mod loop_memory;
+mod loop_unroll;
 mod loop_vectorize;
 pub use loop_vectorize::VectorTarget;
 mod memory_alias;
@@ -195,6 +196,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[12],
     &BUILTINS[13],
     &loop_memory::LoopMemory,
+    &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &inline::Inline,
 ];
