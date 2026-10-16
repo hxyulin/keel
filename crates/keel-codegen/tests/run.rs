@@ -282,6 +282,48 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 }
 
 #[test]
+fn compact_frame_storage() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
+    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+    }
+    #[cfg(feature = "experimental-regalloc")]
+    for allocation in [
+        AllocationTier::Local,
+        AllocationTier::Split,
+        AllocationTier::Weighted,
+    ] {
+        run_program(
+            &path,
+            &TINY,
+            false,
+            &format!("-compact-{allocation:?}"),
+            keel_codegen::SelectionOptions::ALL,
+            &allocation,
+        )
+        .unwrap();
+    }
+    #[cfg(feature = "experimental-regalloc")]
+    for base in [AllocationTier::Fast, AllocationTier::Full] {
+        let allocation = keel_codegen::regalloc::RematerializingAllocator {
+            base: &base,
+            prefer_spilling: true,
+            constants: true,
+            stack_addresses: true,
+        };
+        run_program(
+            &path,
+            &TINY,
+            false,
+            &format!("-compact-remat-{base:?}"),
+            keel_codegen::SelectionOptions::ALL,
+            &allocation,
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 fn folding_duplicate_operands() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/folding_duplicate.keel");
     for (pools, optimize, suffix, selection, allocation) in CONFIGS {

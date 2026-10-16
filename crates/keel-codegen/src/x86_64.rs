@@ -200,7 +200,11 @@ fn compile_output(
         let func = vector::lower(original);
         let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
         compiler.debug = debug;
-        let slots = compiler.slot_frame_offsets();
+        let slots = if debug {
+            compiler.slot_frame_offsets()
+        } else {
+            Vec::new()
+        };
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
     }
@@ -395,7 +399,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     /// Offset from `rsp` of each IR stack slot.
-    stack_slot_offsets: Vec<usize>,
+    stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` and `iconst` results folded into every use, which
     /// need no code.
     folded_values: HashSet<Value>,
@@ -449,8 +453,8 @@ impl<'a> FunctionCompiler<'a> {
     fn slot_frame_offsets(&self) -> Vec<i64> {
         let top = (self.frame_size + 8 * self.saved.len()) as i64;
         self.stack_slot_offsets
-            .iter()
-            .map(|&offset| offset as i64 - top)
+            .debug_offsets()
+            .map(|offset| offset as i64 - top)
             .collect()
     }
 
@@ -617,14 +621,10 @@ impl<'a> FunctionCompiler<'a> {
             vector_spills.insert(slot);
         }
         let spill_base = offset.next_multiple_of(8);
-        let mut offset = spill_base
+        let offset = spill_base
             + 8 * (alloc.spill_slots as usize + staging + if has_vectors { 2 } else { 0 });
-        let mut stack_slot_offsets = Vec::new();
-        for (_, slot) in func.stack_slots() {
-            offset = offset.next_multiple_of(slot.align as usize);
-            stack_slot_offsets.push(offset);
-            offset += slot.size as usize;
-        }
+        let (stack_slot_offsets, offset) =
+            crate::stack_frame::SlotOffsets::layout(func, offset, !module.files.is_empty());
         // rsp is 16-byte aligned after `push rbp`; the pushes and the frame
         // together keep it so.
         let saved = alloc.callee_saved_used.clone();

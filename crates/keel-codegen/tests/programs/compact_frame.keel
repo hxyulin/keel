@@ -1,0 +1,31 @@
+; Sparse SlotIds, large unused declarations, folded loads/stores, escaped
+; aligned homes and a dynamic frame. The C callee checks address observability.
+; expect: exit 0
+decl @touch_frame(ptr, ptr) -> i64
+
+func @compact_frame(i64) -> i64 cc(c) {
+    ss0 = stack_slot 2147483647, align 16
+    ss1 = stack_slot 24, align 16
+    ss2 = stack_slot 65536, align 16
+    ss3 = stack_slot 8, align 8
+    ss4 = stack_slot 2147483647, align 16
+block0(v0: i64):
+    v1 = stack_addr ss1
+    v2 = stack_addr ss3
+    store v0, v1
+    v3 = iconst.i64 17
+    store v3, v2
+    v4 = iconst.i64 64
+    v5 = intrinsic stack_alloc(v4)
+    store v3, v5
+    jump block1(v1)
+block1(v6: ptr):
+    v7 = call @touch_frame(v6, v2)
+    v8 = load.i64 v1
+    v9 = load.i64 v2
+    v10 = load.i64 v5
+    v11 = iadd v8, v9
+    v12 = iadd v11, v10
+    v13 = iadd v12, v7
+    return v13
+}

@@ -18,6 +18,7 @@ mod dwarf;
 mod fold;
 mod metadata;
 mod parallel_copy;
+mod stack_frame;
 pub mod regalloc;
 pub mod select;
 mod sysv;
