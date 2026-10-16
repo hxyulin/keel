@@ -165,7 +165,8 @@ def sample():
                         time.sleep(.05)
                     data=ROOT/'evidence'/f'{app}-{capture}.perf.data'
                     record=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'record','-e','cycles:u','-F','499','-g','--call-graph','fp','-p',str(proc.pid),'-o',data,'--','sleep','8'],env=ENV)
-                    decoded=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'script','--no-inline','-i',data,'-F','comm,pid,tid,time,event,ip,sym,dso,period'],env=ENV)
+                    store(f'{app}-{capture}-record',record)
+                    decoded=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'script','-f','--no-inline','-i',data,'-F','comm,pid,tid,time,event,ip,sym,dso,period'],env=ENV)
                     (data.with_suffix('.script.txt')).write_text(decoded['stdout'])
                     r['profiles'].append(dict(app=app,capture=capture,record=record,decode_stderr=decoded['stderr'],decode_command=decoded['command'],data_sha256=sha(data)))
                 finally:
