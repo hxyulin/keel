@@ -252,7 +252,7 @@ fn tree_selection_is_opt_in_and_independent_from_other_passes() {
 }
 
 #[test]
-fn scalar_canonicalization_exposes_aarch64_immediate_operands() {
+fn aarch64_commutative_immediates_work_before_and_after_canonicalization() {
     let mut module = keel_ir::parse(
         "func @f(i64) -> i64 {
 block0(v0: i64):
@@ -263,7 +263,8 @@ block0(v0: i64):
     )
     .unwrap();
     let before = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
-    assert!(before.contains("\tmovz\t"), "{before}");
+    assert!(before.contains("#37"), "{before}");
+    assert!(!before.contains("\tmovz\t"), "{before}");
     keel_opt::run_passes(&mut module, &["canonicalize"]).unwrap();
     let after = keel_codegen::compile(&module, Target::Aarch64AppleDarwin).unwrap();
     assert!(after.contains("#37"), "{after}");

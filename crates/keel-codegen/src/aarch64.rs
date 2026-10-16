@@ -363,12 +363,80 @@ fn folded_offset(
         .then_some(offset)
 }
 
+/// One checked plan shared by preallocation folding and emission. Only exact
+/// execution-width integers participate; pointer/narrow lowering stays unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AddSubImmediate {
+    constant: Value,
+    input: Value,
+    imm12: u32,
+    shift: u8,
+    subtract: bool,
+}
+
+fn addsub_immediate(func: &Function, data: &InstData) -> Option<AddSubImmediate> {
+    let (args, subtract, commute, compare) = match *data {
+        InstData::Binary {
+            op: BinaryOp::Iadd,
+            args,
+        } => (args, false, true, false),
+        InstData::Binary {
+            op: BinaryOp::Isub,
+            args,
+        } => (args, true, false, false),
+        InstData::Icmp { cond, args } => {
+            // Replacing subtraction by addition preserves the result and Z,
+            // but not every NZCV bit. Only EQ/NE can use a negative constant.
+            (args, true, false, !matches!(cond, IntCC::Eq | IntCC::Ne))
+        }
+        _ => return None,
+    };
+    let ty = func.value_type(func.resolve(args[0]));
+    if !matches!(ty, Type::I32 | Type::I64) {
+        return None;
+    }
+    for side in if commute { &[1, 0][..] } else { &[1][..] } {
+        let constant = func.resolve(args[*side]);
+        let Some(raw) = iconst(func, constant) else {
+            continue;
+        };
+        let signed = if ty == Type::I32 {
+            raw as i32 as i64
+        } else {
+            raw
+        };
+        if compare && signed < 0 {
+            continue;
+        }
+        let magnitude = signed.unsigned_abs();
+        let (imm12, shift) = if magnitude < 4096 {
+            (magnitude as u32, 0)
+        } else if magnitude & 4095 == 0 && magnitude >> 12 < 4096 {
+            ((magnitude >> 12) as u32, 12)
+        } else {
+            continue;
+        };
+        return Some(AddSubImmediate {
+            constant,
+            input: func.resolve(args[1 - *side]),
+            imm12,
+            shift,
+            subtract: subtract ^ (signed < 0),
+        });
+    }
+    None
+}
+
 /// The operand of `data` that is a constant encoded in the instruction
-/// itself, and that immediate: an `add`/`sub`/`cmp` immediate is 12 bits
-/// unsigned, I32/I64 logical masks use the execution width, a shift amount
+/// itself, and that immediate: typed add/sub/compare plans can reverse the
+/// operation and shift a 12-bit magnitude; legacy narrow/pointer forms stay
+/// unsigned and unshifted. I32/I64 logical masks use the execution width, a shift amount
 /// is taken modulo the width, and a stored zero
 /// is the zero register.
 fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
+    if let Some(plan) = addsub_immediate(func, data) {
+        return Some((plan.constant, i64::from(plan.imm12) << plan.shift));
+    }
     let fits = |v| iconst(func, v).filter(|k| (0..4096).contains(k));
     match *data {
         InstData::Binary { op, args } if func.value_type(func.resolve(args[0])) != Type::I128 => {
@@ -772,7 +840,7 @@ impl<'a> FunctionCompiler<'a> {
         };
         let fused_compares = {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| {
+            selection.fuse_aarch64_compares(func, |data| {
                 folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
             })
         };
@@ -1165,6 +1233,32 @@ impl<'a> FunctionCompiler<'a> {
         use crate::select::Machine;
         let ty = self.ty(matched.args[0]);
         let a = self.use_reg(matched.args[0], S0);
+        if let Machine::Ubfx { lsb, width } = matched.machine {
+            let d = self.def_reg(result);
+            self.native(
+                if ty == Type::I64 {
+                    Opcode::UBFM_64M_bitfield
+                } else {
+                    Opcode::UBFM_32M_bitfield
+                },
+                [
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, a.into()),
+                    (FieldId::immr, lsb.into()),
+                    (FieldId::imms, u32::from(lsb) + u32::from(width) - 1),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "ubfx\t{}, {}, #{lsb}, #{width}",
+                        reg(d, ty),
+                        reg(a, ty)
+                    )
+                },
+            );
+            self.def_done(result, d);
+            return;
+        }
         let b = self.use_reg(matched.args[1], S1);
         let d = self.def_reg(result);
         let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
@@ -3149,6 +3243,27 @@ impl<'a> FunctionCompiler<'a> {
     fn binary(&mut self, op: BinaryOp, args: [Value; 2], d: u8) {
         let ty = self.ty(args[0]);
         let data = InstData::Binary { op, args };
+        if let Some(plan) = addsub_immediate(self.func, &data) {
+            let a = self.use_reg(plan.input, S0);
+            let mnemonic = if plan.subtract { "sub" } else { "add" };
+            if plan.shift == 0 {
+                self.mach(
+                    mnemonic,
+                    [reg(d, ty).into(), reg(a, ty).into(), Arg::imm(plan.imm12)],
+                );
+            } else {
+                self.mach(
+                    mnemonic,
+                    [
+                        reg(d, ty).into(),
+                        reg(a, ty).into(),
+                        Arg::imm(plan.imm12),
+                        Arg::shift("lsl", plan.shift),
+                    ],
+                );
+            }
+            return;
+        }
         if matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::Xor)
             && let Some((folded, k)) = folded_imm(self.func, &data)
         {
@@ -3626,6 +3741,23 @@ impl<'a> FunctionCompiler<'a> {
         match *self.func.inst_data(inst) {
             InstData::Icmp { cond, args } => {
                 let ty = self.ty(args[0]);
+                if let Some(plan) = addsub_immediate(self.func, self.func.inst_data(inst)) {
+                    let a = self.use_reg(plan.input, S0);
+                    let mnemonic = if plan.subtract { "cmp" } else { "cmn" };
+                    if plan.shift == 0 {
+                        self.mach(mnemonic, [reg(a, ty).into(), Arg::imm(plan.imm12)]);
+                    } else {
+                        self.mach(
+                            mnemonic,
+                            [
+                                reg(a, ty).into(),
+                                Arg::imm(plan.imm12),
+                                Arg::shift("lsl", plan.shift),
+                            ],
+                        );
+                    }
+                    return cond_code(cond);
+                }
                 let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
                 let a = self.use_reg(args[0], S0);
                 let a = if !signed && self.zero_extended_narrow(args[0]) {
