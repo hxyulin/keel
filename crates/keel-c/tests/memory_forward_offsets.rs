@@ -44,7 +44,11 @@ fn explicit_forwarding_offsets_matches_clang_and_both_targets() {
     }
     std::fs::write(dir.join("after.keel"), m.to_string()).unwrap();
     for target in Target::ALL {
-        keel_codegen::compile(&m, target).unwrap();
+        std::fs::write(
+            dir.join(format!("smoke-{}.s", target.triple())),
+            keel_codegen::compile(&m, target).unwrap(),
+        )
+        .unwrap();
     }
     let c = dir.join("input.c");
     std::fs::write(&c, source).unwrap();
@@ -100,11 +104,16 @@ block0(v0: ptr, v1: i64):
     .unwrap();
     keel_opt::run_passes(&mut m, &["memory-forward"]).unwrap();
     assert_eq!(loads(&m, "wrapped"), 2);
-    for target in Target::ALL {
-        keel_codegen::compile(&m, target).unwrap();
-    }
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("memory-forward-wrap");
     std::fs::create_dir_all(&dir).unwrap();
+    for target in Target::ALL {
+        std::fs::write(
+            dir.join(format!("smoke-{}.s", target.triple())),
+            keel_codegen::compile(&m, target).unwrap(),
+        )
+        .unwrap();
+    }
+    std::fs::write(dir.join("after.keel"), m.to_string()).unwrap();
     let driver = dir.join("driver.c");
     std::fs::write(&driver, "extern unsigned long long wrapped(unsigned long long *, unsigned long long); int main(void) { unsigned long long x=11; unsigned long long r=wrapped(&x,29); return !(r==40 && x==29); }").unwrap();
     let asm = dir.join("wrapped.s");
