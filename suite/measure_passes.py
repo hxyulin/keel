@@ -95,6 +95,7 @@ def main():
     parser.add_argument("--compile-warmups", type=int, default=1)
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--command-log", type=pathlib.Path)
+    parser.add_argument("--runtime-path", type=pathlib.Path, help="copy each executable to this fixed pathname before the timer starts")
     args = parser.parse_args()
     if args.command_log:
         import gzip
@@ -147,6 +148,7 @@ def main():
         "compile_warmups": args.compile_warmups,
         "jobs": args.jobs,
         "compiler_paths": {name: binary for name, (binary, _) in configs.items()},
+        "runtime_path": str(args.runtime_path.resolve()) if args.runtime_path else None,
         "compiler_sha256": {
             name: hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
             for name, (binary, _) in configs.items()
@@ -279,6 +281,10 @@ def main():
                             else [("after", name), ("before", "baseline")]
                         ):
                             exe = str(work / config / suite / binary)
+                            if args.runtime_path:
+                                args.runtime_path.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(exe, args.runtime_path)
+                                exe = str(args.runtime_path.resolve())
                             if suite == "lua":
                                 command = [
                                     exe,
