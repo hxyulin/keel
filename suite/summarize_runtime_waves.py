@@ -27,8 +27,14 @@ def aggregate(rows):
             indices = rng.choices(range(count), k=count)
             boots.append(gm([st.median([r[i] for i in indices]) for r in ratios]))
         boots.sort()
+        block_ratios = [gm([r[i] for r in ratios]) for i in range(count)]
+        block_median = st.median(block_ratios)
         out[name] = {'median': gm([st.median(r) for r in ratios]),
                      'ci95': [boots[249], boots[9749]],
+                     'block_geomean_ratios': block_ratios,
+                     'block_dispersion': {'median': block_median,
+                         'mad': st.median(abs(r - block_median) for r in block_ratios),
+                         'range': [min(block_ratios), max(block_ratios)]},
                      'method': 'Equal-workload geometric mean of paired median ratios; seed42 10000 common-block bootstrap resamples.'}
     return out
 
