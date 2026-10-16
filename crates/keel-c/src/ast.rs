@@ -147,7 +147,8 @@ impl BinOp {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Builtin {
-    /// Explicit C memory builtin; returns the evaluated destination pointer.
+    /// Explicit C memory builtin; three operands, or four for its checked
+    /// runtime variant. Both return the destination pointer.
     Memory(Intrinsic),
     Bswap,
     Fabs,

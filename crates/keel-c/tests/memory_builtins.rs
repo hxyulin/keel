@@ -144,15 +144,10 @@ fn memory_builtin_argument_diagnostics() {
 fn checked_memory_calls_preserve_bound_and_prototype_checks() {
     for target in Target::ALL {
         for name in ["memcpy", "memmove", "memset"] {
-            let second_ty = if name == "memset" {
-                "int"
-            } else {
-                "const void *"
-            };
             let second = if name == "memset" { "257" } else { "s" };
             for bound in ["3", "bound()", "__builtin_object_size(d,0)"] {
                 let source = format!(
-                    "void *__{name}_chk(void *, {second_ty}, unsigned long, unsigned long); unsigned long bound(void); void *f(void *d, const void *s) {{ return __builtin___{name}_chk(d,{second},7,{bound}); }}"
+                    "unsigned long bound(void); void *f(void *d, const void *s) {{ return __builtin___{name}_chk(d,{second},7,{bound}); }}"
                 );
                 let module = compile(&source, target);
                 let f = module.functions.iter().find(|f| f.name == "f").unwrap();
@@ -177,19 +172,75 @@ fn checked_memory_calls_preserve_bound_and_prototype_checks() {
         }
     }
     for source in [
-        "void *memcpy(void *, const void *, unsigned long); void f(void *p) { __builtin___memcpy_chk(p,p,7,3); }",
         "int __memcpy_chk(void *, const void *, unsigned long, unsigned long); void f(void *p) { __builtin___memcpy_chk(p,p,7,3); }",
         "void *__memcpy_chk(void *, const void *, unsigned long); void f(void *p) { __builtin___memcpy_chk(p,p,7,3); }",
         "void *__memset_chk(); void f(void *p) { __builtin___memset_chk(p,0,7,3); }",
+        "void f(void *p) { __builtin___memcpy_chk(p,p,7,3); } int __memcpy_chk(void *, const void *, unsigned long, unsigned long);",
+        "int __memmove_chk; void f(void *p) { __builtin___memmove_chk(p,p,7,3); }",
     ] {
         let error = keel_c::compile(source, "checked.c", Default::default())
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("invalid checked memory builtin prototype")
-                || error.contains("needs a declared checked library function"),
+            error.contains("invalid checked memory builtin prototype"),
             "{error}"
         );
+    }
+}
+
+#[test]
+fn checked_memory_runtime_declarations_are_canonical_and_reusable() {
+    for target in Target::ALL {
+        for name in ["memcpy", "memmove", "memset"] {
+            for declared in [false, true] {
+                let second = if name == "memset" {
+                    "int"
+                } else {
+                    "const void *"
+                };
+                let declaration = if declared {
+                    format!("void *__{name}_chk(void *, {second}, unsigned long, unsigned long);")
+                } else {
+                    String::new()
+                };
+                let value = if name == "memset" { "257" } else { "s" };
+                let source = format!(
+                    "{declaration} void *f(void *d, const void *s) {{ return __builtin___{name}_chk(d,{value},7,3); }} void *g(void *d, const void *s) {{ return __builtin___{name}_chk(d,{value},7,3); }}"
+                );
+                let mut module = compile(&source, target);
+                let runtime = format!("__{name}_chk");
+                assert_eq!(
+                    module
+                        .decls
+                        .iter()
+                        .filter(|decl| decl.name == runtime)
+                        .count(),
+                    1
+                );
+                let decl = module
+                    .decls
+                    .iter()
+                    .find(|decl| decl.name == runtime)
+                    .unwrap();
+                assert_eq!(
+                    decl.sig.param_types(),
+                    [
+                        Type::Ptr,
+                        if name == "memset" {
+                            Type::I32
+                        } else {
+                            Type::Ptr
+                        },
+                        Type::I64,
+                        Type::I64
+                    ]
+                );
+                assert_eq!(decl.sig.return_types(), [Type::Ptr]);
+                keel_opt::optimize(&mut module).unwrap();
+                keel_ir::verify_module(&module).unwrap();
+                keel_codegen::compile(&module, target).unwrap();
+            }
+        }
     }
 }
 
@@ -239,8 +290,8 @@ fn native_fortify_headers_have_explicit_compatibility_behavior() {
     )
     .unwrap();
     // Darwin gates memory fortification on __has_builtin; Keel must leave
-    // these as ordinary calls. Other SDKs may select undeclared checked
-    // builtins, which must diagnose rather than discard their bounds.
+    // these as ordinary calls. Other SDKs may select checked builtins,
+    // whose canonical prototypes preserve all four arguments.
     if cfg!(target_os = "macos") {
         let module = compile(&text, keel_c::Options::default().target);
         let f = module.functions.iter().find(|f| f.name == "f").unwrap();
@@ -253,15 +304,8 @@ fn native_fortify_headers_have_explicit_compatibility_behavior() {
             .collect();
         assert_eq!(calls, ["memcpy", "memmove", "memset"]);
     } else {
-        match keel_c::compile(&text, "fortify-memory.c", Default::default()) {
-            Ok(module) => keel_ir::verify_module(&module).unwrap(),
-            Err(error) => assert!(
-                error
-                    .to_string()
-                    .contains("needs a declared checked library function"),
-                "{error}"
-            ),
-        }
+        let module = compile(&text, keel_c::Options::default().target);
+        keel_ir::verify_module(&module).unwrap();
     }
 }
 

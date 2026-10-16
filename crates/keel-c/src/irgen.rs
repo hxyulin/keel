@@ -2053,10 +2053,72 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         Ok(overflow)
     }
 
+    /// Checked memory builtins carry a canonical C prototype even when a
+    /// fortified header has not declared the runtime entry point.
+    fn checked_memory_builtin(
+        &mut self,
+        id: Intrinsic,
+        args: &[Expr<'p>],
+        vals: &[Value],
+        e: &Expr<'p>,
+    ) -> R<Value> {
+        let name = match id {
+            Intrinsic::Memcpy => "__memcpy_chk",
+            Intrinsic::Memmove => "__memmove_chk",
+            Intrinsic::Memset => "__memset_chk",
+            _ => unreachable!(),
+        };
+        let params: Vec<_> = args.iter().map(|arg| arg.ty.clone()).collect();
+        let mut declared = None;
+        // Inspect the completed translation unit, including declarations
+        // after the builtin's source position. Never use an incompatible
+        // ordinary declaration to choose the builtin's ABI.
+        for (g, global) in self.g.p.globals.iter().enumerate() {
+            if global.name != name && global.symbol != name {
+                continue;
+            }
+            let Ty::Func(fty) = &global.ty else {
+                return Err(Error::new(
+                    e.loc,
+                    "invalid checked memory builtin prototype",
+                ));
+            };
+            if !fty.prototyped || fty.variadic || fty.ret != e.ty || fty.params != params {
+                return Err(Error::new(
+                    e.loc,
+                    "invalid checked memory builtin prototype",
+                ));
+            }
+            declared = Some(g);
+        }
+        let sig = Signature::new(&params.iter().map(Ty::ir).collect::<Vec<_>>(), &[Type::Ptr]);
+        let symbol = if let Some(g) = declared {
+            self.g.use_global(g);
+            self.g.p.globals[g].symbol
+        } else {
+            if !self.g.module.decls.iter().any(|decl| decl.name == name) {
+                self.g.module.decls.push(FuncDecl {
+                    name: name.to_owned(),
+                    attrs: Default::default(),
+                    sig: sig.clone(),
+                });
+            }
+            name
+        };
+        let callee = self.b.import_function(symbol, sig);
+        let call = self.b.ins().call(callee, vals);
+        Ok(self.b.function().inst_results(call)[0])
+    }
+
     fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
         let mut vals = Vec::new();
         for a in args {
             vals.push(self.val(a)?);
+        }
+        if let Builtin::Memory(id) = op
+            && args.len() == 4
+        {
+            return self.checked_memory_builtin(id, args, &vals, e).map(Some);
         }
         let ins = self.b.ins();
         Ok(Some(match op {

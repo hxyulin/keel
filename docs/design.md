@@ -1198,8 +1198,9 @@ Some accepted extensions have deliberately limited behavior:
   evaluate, rather than asking the optimizer whether a value is constant.
 - `__builtin_object_size` and `__builtin_dynamic_object_size` always
   return the unknown-size value. Fortified memory builtins (`memcpy`,
-  `memmove`, `memset`) call a correctly declared checked external function
-  with all four arguments, or are diagnosed if none is available. Other
+  `memmove`, `memset`) have canonical prototypes and call checked external
+  runtime functions with all four arguments, with or without declarations.
+  Conflicting declarations are diagnosed. Linking requires those symbols. Other
   fortified `__builtin___*_chk` calls handled by the legacy fallback still
   become plain library calls and lose the supplied bounds check.
 - `__builtin_unreachable` lowers to a trap, as `__builtin_trap` does;

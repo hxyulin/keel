@@ -8,7 +8,6 @@ static const void *source(void) { ++src_calls; return src; }
 static unsigned long count(void) { ++len_calls; return length; }
 static int fill(void) { ++fill_calls; return 0x12345; }
 static unsigned long bound(void) { ++bound_calls; return 8192; }
-void *__memcpy_chk(void *, const void *, unsigned long, unsigned long);
 static void reset(void) {
     for (int i = 0; i < 8192; ++i) {
         dst[i] = expected[i] = (unsigned char)(i * 17 + 9);
@@ -68,6 +67,11 @@ int main(void) {
     bound_calls = 0;
     errors += __builtin___memcpy_chk(dst, src, 7, bound()) != dst;
     errors += bound_calls != 1;
+    errors += __builtin___memmove_chk(dst + 1, dst, 7, bound()) != dst + 1;
+    errors += bound_calls != 2;
+    errors += __builtin___memset_chk(dst, 0x12345, 7, bound()) != dst;
+    errors += bound_calls != 3;
+    for (int i = 0; i < 7; ++i) errors += dst[i] != 0x45;
     printf("%d %lu\n", errors, hash);
     return errors != 0;
 }

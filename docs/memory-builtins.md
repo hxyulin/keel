@@ -28,23 +28,28 @@ const qualification. Volatile loads used to compute ordinary pointer values
 or lengths remain explicit volatile loads.
 
 Fortified `__builtin___memcpy_chk`, `__builtin___memmove_chk`, and
-`__builtin___memset_chk` no longer discard their fourth argument. A correctly
-prototyped declaration of `__memcpy_chk`, `__memmove_chk`, or `__memset_chk`
-lets the frontend emit a checked external call with all four converted
-arguments, retaining bound evaluation and checking. Without that declaration,
-or with an incompatible prototype, the call is diagnosed. Even a constant
+`__builtin___memset_chk` no longer discard their fourth argument. Their
+canonical C prototypes are known independently of source declarations. Keel
+emits `__memcpy_chk`, `__memmove_chk`, or `__memset_chk` external calls with
+all four converted arguments, retaining bound evaluation and checking. Any
+conflicting declaration in the translation unit is diagnosed. Even a constant
 bound smaller than the length stays on the checked call; Keel does not
-silently turn it into an unchecked intrinsic. Checked variants are not
-unconditionally advertised by `__has_builtin`.
+silently turn it into an unchecked intrinsic. Checked variants remain
+unadvertised by `__has_builtin`.
 
-This narrows compatibility with externally preprocessed fortified headers
-that emit checked builtins without declaring their checked library symbols.
-They now receive a diagnostic. Source inspection of the installed macOS SDK
-`secure/_string.h` shows that its memory fortify macros test `__has_builtin`;
-Keel's native preprocessor consequently leaves those memory names as ordinary
-library calls. This is not a claim of complete SDK or glibc fortify support.
-The legacy fallback for unrelated fortified builtins remains unchanged and
-can still discard bounds; object-size queries still report unknown sizes.
+Both backends can emit these C ABI calls. Linking requires a runtime providing
+the checked symbols; a freestanding or alternative libc must supply them.
+The native differential test links and executes all three on macOS MacHost.
+Linux target lowering is covered by codegen tests; no Linux native execution
+is claimed. The existing extension fixture is unchanged and exercises Clang's
+fortified-header expansion without checked-function declarations.
+
+The installed macOS SDK `secure/_string.h` gates its memory fortify macros on
+`__has_builtin`; Keel's native preprocessor consequently leaves those names
+as ordinary library calls. Native fortified-header compilation is tested.
+This is not a claim of complete SDK or glibc fortify support. The legacy
+fallback for unrelated fortified builtins remains unchanged and can still
+discard bounds; object-size queries still report unknown sizes.
 
 The audit found existing lowering for `bswap16/32/64`, `clz`, `ctz`, and
 `popcount` (including `l` and `ll`), typed and generic overflow, alignment

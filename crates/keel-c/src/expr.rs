@@ -964,33 +964,14 @@ impl<'a> Parser<'a> {
             ));
         }
         match base {
-            "memcpy" | "memmove" | "memset" => self.memory_builtin(base, loc),
+            "memcpy" | "memmove" | "memset" => self.memory_builtin(base, false, loc),
             "__memcpy_chk" | "__memmove_chk" | "__memset_chk" => {
-                // A supplied bound can fail or have side effects even when
-                // object_size usually returns unknown. Never erase it.
-                if let Ok(f) = self.lookup_value(base, loc)
-                    && let Ty::Func(fty) = &f.ty
-                {
-                    let ptr = self.ptr_type(Ty::Void);
-                    let second = if base == "__memset_chk" {
-                        INT
-                    } else {
-                        ptr.clone()
-                    };
-                    if !fty.prototyped
-                        || fty.variadic
-                        || fty.ret != ptr
-                        || fty.params != [ptr.clone(), second, ULONG, ULONG]
-                    {
-                        return Err(Error::new(loc, "invalid checked memory builtin prototype"));
-                    }
-                    self.expect("(")?;
-                    return self.call(f, loc);
-                }
-                Err(Error::new(
-                    loc,
-                    format!("`{name}` needs a declared checked library function `{base}`"),
-                ))
+                let plain = base
+                    .strip_prefix("__")
+                    .unwrap()
+                    .strip_suffix("_chk")
+                    .unwrap();
+                self.memory_builtin(plain, true, loc)
             }
             "va_start" | "va_arg" | "va_end" | "va_copy" => {
                 self.expect("(")?;
@@ -1264,11 +1245,11 @@ impl<'a> Parser<'a> {
 
     /// These explicit names have standard prototypes independent of whether
     /// the translation unit declares the corresponding ordinary libc symbol.
-    fn memory_builtin(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
-        let args = self.builtin_args(3, loc)?;
+    fn memory_builtin(&mut self, name: &str, checked: bool, loc: Loc) -> R<Expr<'a>> {
+        let args = self.builtin_args(if checked { 4 } else { 3 }, loc)?;
         let fill = name == "memset";
         for (i, arg) in args.iter().enumerate() {
-            if i == 2 || (i == 1 && fill) {
+            if i >= 2 || (i == 1 && fill) {
                 if !arg.ty.is_arith() {
                     return Err(Error::new(
                         arg.loc,
@@ -1299,7 +1280,10 @@ impl<'a> Parser<'a> {
             }
         }
         let ptr = self.ptr_type(Ty::Void);
-        let params = [ptr.clone(), if fill { INT } else { ptr.clone() }, ULONG];
+        let mut params = vec![ptr.clone(), if fill { INT } else { ptr.clone() }, ULONG];
+        if checked {
+            params.push(ULONG);
+        }
         let args = args
             .into_iter()
             .zip(&params)
