@@ -138,6 +138,17 @@ def allocations():
             r['runs'].append(dict(app=app,debug=d,**run(['python3','-c',wrapper,b,*ps,*(['--debug'] if d else [])])))
     r['end']=snapshot();store('allocations',r)
 
+def rss():
+    # Separate feature-free run; no counting allocator or sampler. Process RSS
+    # includes resident inputs, public compile warmup, validation and module drop.
+    b=ROOT/'target-plain/release/examples/resident'
+    wrapper='import resource,subprocess,sys; p=subprocess.run(sys.argv[1:]); print("RSS_KIB",resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,file=sys.stderr);sys.exit(p.returncode)'
+    r={'start':snapshot(),'binary_sha256':sha(b),'runs':[]}
+    for app,ps in inputs().items():
+        for d in [False,True]:
+            r['runs'].append(dict(app=app,debug=d,**run(['python3','-c',wrapper,b,'baseline','1',*ps,*(['--debug'] if d else [])])))
+    r['end']=snapshot();store('rss',r)
+
 def sample():
     b=ROOT/'target-fp/release/examples/profile';r={'start':snapshot(),'binary_sha256':sha(b),'profiles':[]}
     # Existing perf permissions only. Task-scoped software event, attach after
@@ -163,5 +174,5 @@ def sample():
     r['end']=snapshot();store('samples',r)
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['setup','resident','cli','preprocess','allocations','sample']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['setup','resident','cli','preprocess','allocations','rss','sample']);a=p.parse_args()
     globals()[a.mode]()
