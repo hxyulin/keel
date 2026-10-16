@@ -692,9 +692,11 @@ and blocks are laid out in reverse postorder only.
 
 **Tree selection on the SSA DAG.** `keel-codegen/patterns.txt` describes
 binary root/child patterns and register affinities; `build.rs` generates
-the rule table and affinity matcher. These target codegen passes are
-opt-in: `--isel all` enables them, `--isel trees,folds,hints` chooses passes
-independently, and `--isel none` is the default. They run after any IR
+the rule table and affinity matcher. The CLI `-O` preset enables all of these
+target codegen passes, as does `--isel all`. `--isel trees,folds,hints` chooses
+passes independently; explicit selectors override `-O` in either order, with
+the last selector winning. Without `-O`, and in the library API, selection
+defaults to baseline (`--isel none`). They run after any IR
 optimization and before allocation,
 visiting consumers first. A rule consumes a pure, single-use child in the
 same block, preserving distinct source lines when debug locations exist.
