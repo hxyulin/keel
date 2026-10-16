@@ -20,6 +20,9 @@ import statistics
 import subprocess
 import tempfile
 import time
+import atexit
+
+COMMANDS = []
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SUITES = [
@@ -31,6 +34,7 @@ SUITES = [
 
 def run(command, stdin=None):
     result = subprocess.run(command, input=stdin, capture_output=True, check=False)
+    COMMANDS.append({"command": list(map(str, command)), "stdin_sha256": hashlib.sha256(stdin).hexdigest() if stdin is not None else None, "returncode": result.returncode, "stdout": result.stdout.decode(errors="replace"), "stderr": result.stderr.decode(errors="replace")})
     if result.returncode:
         raise RuntimeError(
             f"{command!r}: exit {result.returncode}\n{result.stderr.decode(errors='replace')}"
@@ -39,6 +43,8 @@ def run(command, stdin=None):
 
 
 def optimizer_arguments(passes):
+    if passes in ("tier:none", "tier:basic", "tier:full"):
+        return ["--opt-tier", passes.split(":")[1]]
     # An empty -p is one empty pass name to the CLI, not an empty pipeline.
     return ["-p", passes] if passes else ["--opt-tier", "none"]
 
@@ -54,6 +60,8 @@ def summary(samples, rng):
         "after_ms": statistics.median(samples["after"]),
         "after_over_before": statistics.median(ratios),
         "ratio_95_interval": [boots[49], boots[1949]],
+        "ratio_mad": statistics.median(abs(r - statistics.median(ratios)) for r in ratios),
+        "ratio_range": [min(ratios), max(ratios)],
     }
 
 
@@ -84,7 +92,18 @@ def main():
     parser.add_argument("--pairs", type=int, default=7)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--compile-pairs", type=int, default=5)
+    parser.add_argument("--compile-warmups", type=int, default=1)
+    parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--command-log", type=pathlib.Path)
     args = parser.parse_args()
+    if args.command_log:
+        import gzip
+        def save_commands():
+            args.command_log.parent.mkdir(parents=True, exist_ok=True)
+            with gzip.open(args.command_log, "wt") as stream:
+                for row in COMMANDS:
+                    stream.write(json.dumps(row) + "\n")
+        atexit.register(save_commands)
     if min(args.pairs, args.compile_pairs) < 3 or args.warmups < 1:
         parser.error("use at least three paired samples and one warmup")
     if args.assembler == "keel" and (platform.system() != "Darwin" or platform.machine() != "arm64"):
@@ -125,6 +144,9 @@ def main():
         "runtime_pairs": args.pairs,
         "warmups": args.warmups,
         "compile_pairs": args.compile_pairs,
+        "compile_warmups": args.compile_warmups,
+        "jobs": args.jobs,
+        "compiler_paths": {name: binary for name, (binary, _) in configs.items()},
         "compiler_sha256": {
             name: hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest()
             for name, (binary, _) in configs.items()
@@ -174,7 +196,7 @@ def main():
                         run(["clang", "-c", str(asm), "-o", str(obj)])
                     return obj
 
-                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
                     objects = list(pool.map(build, sources[suite]))
                 run(["clang", *map(str, objects), "-o", str(out / binary), *libs])
                 size = (
@@ -299,7 +321,7 @@ def main():
 
         for suite, _, _ in suites:
             samples = {name: {"before": [], "after": []} for name in variants}
-            for iteration in range(1 + args.compile_pairs):
+            for iteration in range(args.compile_warmups + args.compile_pairs):
                 order = variants.copy()
                 rng.shuffle(order)
                 for name in order:
@@ -322,7 +344,7 @@ def main():
                                     "/dev/null",
                                 ]
                             )
-                        if iteration:
+                        if iteration >= args.compile_warmups:
                             samples[name][version].append(
                                 (time.perf_counter() - start) * 1000
                             )
