@@ -143,7 +143,7 @@ fn controlled_overlap_instructions_and_materialization() {
                     }
                     if layout.starts_with("stack") {
                         assert!(
-                            asm.contains("[rbp -"),
+                            asm.contains("qword ptr [rbp + -"),
                             "missing spill materialization: {asm}"
                         );
                     }
