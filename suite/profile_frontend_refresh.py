@@ -35,7 +35,7 @@ def rawinputs():
     'sqlite':[r/'sqlite/sqlite-amalgamation-3460100'/n for n in ['shell.c','sqlite3.c']]}
 
 def flags(app):
-    return {'lua':['-DLUA_USE_LINUX=1'],'quickjs':['-D_GNU_SOURCE=1','-DCONFIG_VERSION="2024-01-13"','-DCONFIG_BIGNUM=1','-I',str(ROOT/'raw/quickjs/quickjs-2024-01-13')],'sqlite':['-DSQLITE_THREADSAFE=1']}[app]
+    return {'lua':['-DLUA_USE_LINUX=1'],'quickjs':['-D_GNU_SOURCE=1','-DCONFIG_VERSION="2024-01-13"','-DCONFIG_BIGNUM=1','-I',str(ROOT/'raw/quickjs/quickjs-2024-01-13')],'sqlite':['-DSQLITE_THREADSAFE=1','-D_GNU_SOURCE=1','-DLONGDOUBLE_TYPE=double']}[app]
 
 def setup():
     # Feature-free driver calls the unchanged public compile API. Its Debug IR
@@ -50,7 +50,7 @@ def setup():
     (p/'resident.rs').write_text(t)
     # Host-correct preprocessing helper; source feature changes only output of
     # stats mode. Linux source definitions match suite manifests.
-    t=(p/'profile_preprocess.rs').read_text().replace('LUA_USE_MACOSX','LUA_USE_LINUX')
+    t=(p/'profile_preprocess.rs').read_text().replace('LUA_USE_MACOSX','LUA_USE_LINUX').replace('&[("SQLITE_THREADSAFE", "1")]', '&[("SQLITE_THREADSAFE", "1"), ("_GNU_SOURCE", "1"), ("LONGDOUBLE_TYPE", "double")]')
     (p/'preprocess_linux.rs').write_text(t)
 
 def store(name, data):
