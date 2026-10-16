@@ -364,7 +364,8 @@ fn folded_offset(
 
 /// The operand of `data` that is a constant encoded in the instruction
 /// itself, and that immediate: an `add`/`sub`/`cmp` immediate is 12 bits
-/// unsigned, a shift amount is taken modulo the width, and a stored zero
+/// unsigned, I32/I64 logical masks use the execution width, a shift amount
+/// is taken modulo the width, and a stored zero
 /// is the zero register.
 fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
     let fits = |v| iconst(func, v).filter(|k| (0..4096).contains(k));
@@ -374,6 +375,17 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
             match op {
                 BinaryOp::Iadd | BinaryOp::Ptradd | BinaryOp::Isub => {
                     fits(args[1]).map(|k| (args[1], k))
+                }
+                BinaryOp::And | BinaryOp::Or | BinaryOp::Xor
+                    if matches!(ty, Type::I32 | Type::I64) =>
+                {
+                    // These operations commute. Prefer the RHS, but also fold
+                    // raw IR with a constant on the LHS, without an IR rewrite.
+                    [args[1], args[0]].into_iter().find_map(|v| {
+                        let k = iconst(func, v)?;
+                        native::logical_immediate(k as u64, if ty == Type::I32 { 32 } else { 64 })
+                            .map(|plan| (func.resolve(v), plan.value as i64))
+                    })
                 }
                 BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                     let bits = 8 * ty.bytes()? as i64;
@@ -3135,8 +3147,66 @@ impl<'a> FunctionCompiler<'a> {
     /// Computes `args[0] op args[1]` into `d`.
     fn binary(&mut self, op: BinaryOp, args: [Value; 2], d: u8) {
         let ty = self.ty(args[0]);
-        let a = self.use_reg(args[0], S0);
         let data = InstData::Binary { op, args };
+        if matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::Xor)
+            && let Some((folded, k)) = folded_imm(self.func, &data)
+        {
+            let is64 = ty == Type::I64;
+            // Use the very same width normalization and checked encoding as
+            // eligibility. Only one operand occurrence is folded, even for k op k.
+            if let Some(plan) = native::logical_immediate(k as u64, if is64 { 64 } else { 32 }) {
+                let input = if self.func.resolve(args[1]) == folded {
+                    args[0]
+                } else {
+                    args[1]
+                };
+                let a = self.use_reg(input, S0);
+                let (mnemonic, opcode) = match (op, is64) {
+                    (BinaryOp::And, false) => ("and", Opcode::AND_32_log_imm),
+                    (BinaryOp::And, true) => ("and", Opcode::AND_64_log_imm),
+                    (BinaryOp::Or, false) => ("orr", Opcode::ORR_32_log_imm),
+                    (BinaryOp::Or, true) => ("orr", Opcode::ORR_64_log_imm),
+                    (BinaryOp::Xor, false) => ("eor", Opcode::EOR_32_log_imm),
+                    (BinaryOp::Xor, true) => ("eor", Opcode::EOR_64_log_imm),
+                    _ => unreachable!(),
+                };
+                let text = |out: &mut String| {
+                    write!(
+                        out,
+                        "{mnemonic}\t{}, {}, #0x{:x}",
+                        reg(d, ty),
+                        reg(a, ty),
+                        plan.value
+                    )
+                };
+                if is64 {
+                    self.native(
+                        opcode,
+                        [
+                            (FieldId::Rd, d.into()),
+                            (FieldId::Rn, a.into()),
+                            (FieldId::immr, plan.immr),
+                            (FieldId::imms, plan.imms),
+                            (FieldId::N, plan.n),
+                        ],
+                        text,
+                    );
+                } else {
+                    self.native(
+                        opcode,
+                        [
+                            (FieldId::Rd, d.into()),
+                            (FieldId::Rn, a.into()),
+                            (FieldId::immr, plan.immr),
+                            (FieldId::imms, plan.imms),
+                        ],
+                        text,
+                    );
+                }
+                return;
+            }
+        }
+        let a = self.use_reg(args[0], S0);
         if let Some((_, k)) = folded_imm(self.func, &data) {
             let rd = reg(d, ty);
             let mnemonic = match op {
@@ -3144,7 +3214,8 @@ impl<'a> FunctionCompiler<'a> {
                 BinaryOp::Isub => "sub",
                 BinaryOp::Shl => "lsl",
                 BinaryOp::Ushr => "lsr",
-                _ => "asr",
+                BinaryOp::Sshr => "asr",
+                _ => unreachable!("folded binary opcode must have explicit emission"),
             };
             let a = match op {
                 BinaryOp::Ushr => self.extend(S0, a, ty, false),

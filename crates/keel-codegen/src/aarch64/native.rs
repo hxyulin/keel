@@ -307,7 +307,23 @@ fn cc(a: Arg) -> u32 {
 fn zero(r: Reg) -> Arg {
     if r.bits() == 64 { Reg::XZR } else { Reg::WZR }.into()
 }
-fn bitmask(value: u64, bits: u32) -> (u32, u32, u32) {
+/// Checked logical-immediate plan. `value` is normalized to the execution
+/// width; only 32 and 64 are accepted. Work is bounded by six element sizes,
+/// with no search over rotations or encoded masks. Zero/all-ones return None.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct LogicalImmediate {
+    pub value: u64,
+    pub n: u32,
+    pub immr: u32,
+    pub imms: u32,
+}
+
+pub(super) fn logical_immediate(value: u64, bits: u32) -> Option<LogicalImmediate> {
+    if !matches!(bits, 32 | 64) {
+        return None;
+    }
+    let width_mask = u64::MAX >> (64 - bits);
+    let value = value & width_mask;
     for size in [2, 4, 8, 16, 32, 64] {
         if size > bits {
             break;
@@ -315,33 +331,38 @@ fn bitmask(value: u64, bits: u32) -> (u32, u32, u32) {
         let mask = u64::MAX >> (64 - size);
         let element = value & mask;
         let ones = element.count_ones();
-        if ones == 0 || ones == size {
+        if ones == 0 || ones == size || element * (width_mask / mask) != value {
             continue;
         }
-        let mut repeated = 0;
-        for offset in (0..bits).step_by(size as usize) {
-            repeated |= element << offset;
-        }
-        if repeated != value {
-            continue;
-        }
+        // A run either starts above bit zero or wraps through it. In the
+        // latter case the high run length is its right rotation from bit zero.
+        let rotation = if element & 1 == 0 {
+            size - element.trailing_zeros()
+        } else {
+            (element << (64 - size)).leading_ones()
+        };
         let run = (1u64 << ones) - 1;
-        for rotation in 0..size {
-            let rotated = if rotation == 0 {
-                run
-            } else {
-                ((run >> rotation) | (run << (size - rotation))) & mask
-            };
-            if rotated == element {
-                return (
-                    u32::from(size == 64),
-                    rotation,
-                    ((-(2 * size as i32)) as u32 | (ones - 1)) & 63,
-                );
-            }
+        let rotated = if rotation == 0 {
+            run
+        } else {
+            ((run >> rotation) | (run << (size - rotation))) & mask
+        };
+        if rotated == element {
+            return Some(LogicalImmediate {
+                value,
+                n: u32::from(size == 64),
+                immr: rotation,
+                imms: ((-(2 * size as i32)) as u32 | (ones - 1)) & 63,
+            });
         }
     }
-    panic!("invalid codegen logical immediate")
+    None
+}
+
+// Keep the existing emitter's failure contract for invalid internal callers.
+fn bitmask(value: u64, bits: u32) -> (u32, u32, u32) {
+    let plan = logical_immediate(value, bits).expect("invalid codegen logical immediate");
+    (plan.n, plan.immr, plan.imms)
 }
 
 pub(super) fn lower(op: &str, a: &[Arg]) -> Instruction {
@@ -1451,5 +1472,71 @@ fn atomic_opcode(root: &str, order: &str, width: &str, bits: u32) -> O {
         ("stlr", "", "b", 32) => O::STLRB_SL32_ldstord,
         ("stlr", "", "h", 32) => O::STLRH_SL32_ldstord,
         _ => panic!("invalid atomic encoding"),
+    }
+}
+
+#[cfg(test)]
+mod logical_immediate_tests {
+    use super::logical_immediate;
+
+    // Decode the architectural N:immr:imms fields independently of the
+    // planner's run recognition. Enumerate all 8192 field triples per width.
+    fn decode(n: u32, r: u32, s: u32, bits: u32) -> Option<u64> {
+        let discriminator = (n << 6) | (!s & 63);
+        let len = 31u32.checked_sub(discriminator.leading_zeros())?;
+        if len < 1 {
+            return None;
+        }
+        let size = 1 << len;
+        if size > bits {
+            return None;
+        }
+        let levels = size - 1;
+        let ones = (s & levels) + 1;
+        if ones == size {
+            return None;
+        }
+        let mask = u64::MAX >> (64 - size);
+        let run = (1u64 << ones) - 1;
+        let rotation = r & levels;
+        let element = if rotation == 0 {
+            run
+        } else {
+            ((run >> rotation) | (run << (size - rotation))) & mask
+        };
+        let mut value = 0;
+        for offset in (0..bits).step_by(size as usize) {
+            value |= element << offset;
+        }
+        Some(value)
+    }
+
+    #[test]
+    fn every_legal_field_encoding_round_trips_and_invalid_queries_are_total() {
+        for bits in [32, 64] {
+            for n in 0..=1 {
+                for r in 0..64 {
+                    for s in 0..64 {
+                        if let Some(value) = decode(n, r, s, bits) {
+                            let plan = logical_immediate(value, bits).unwrap();
+                            assert_eq!(plan.value, value);
+                            assert_eq!(decode(plan.n, plan.immr, plan.imms, bits), Some(value));
+                            if bits == 32 {
+                                assert_eq!(
+                                    logical_immediate(value | 0xdeadbeef00000000, bits),
+                                    Some(plan)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            for value in [0, u64::MAX, 0x1234567812345678] {
+                assert!(logical_immediate(value, bits).is_none());
+            }
+        }
+        for bits in [0, 1, 8, 16, 31, 33, 65, u32::MAX] {
+            assert!(logical_immediate(63, bits).is_none());
+        }
     }
 }
