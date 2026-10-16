@@ -31,8 +31,9 @@ preserves imported callee contracts.
 
 Verification checks representation and consistency, not arbitrary semantic
 contracts. A `return` in a `noreturn` body is accepted, just as an external
-contract cannot be proved here. No contract-based dead-code or unwinding
-rewrite is introduced. A contradictory body is a producer contract violation,
+contract cannot be proved here. The `call-contracts` optimizer pass consumes
+explicit direct contracts as described below. It never infers them from function
+bodies. A contradictory body is a producer contract violation,
 not a proof result or an excuse to change existing runtime behavior.
 
 ## C declarations and contracts
@@ -104,8 +105,46 @@ and retained per-attribute Clang AST evidence, detailed in
 Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no
 contract propagates through pointer types, casts, matching ABI types, or a
-possible target's name. Indirect calls keep their continuations. Calls and
-invokes are not rewritten based on `nounwind`.
+possible target's name. Indirect calls keep their continuations. A direct
+`nounwind` invoke may be lowered to a call and its normal branch,
+subject to the representation safeguards below.
+
+## Optimizer consumers
+
+`call-contracts` runs in Basic and Full, and is available as an explicit pass.
+None remains unchanged. Basic and Full run it before their second CFG cleanup,
+which removes newly redundant joins. This inexpensive contract/CFG cleanup does
+not require the Full tier's analyses. In Full this is after inlining, so imported
+direct calls receive the same treatment. The existing private-only inliner, its
+input pipeline, policy and tier placement are unchanged. The pass manager still
+verifies after every pass.
+
+A direct `noreturn` **call** retains the call and terminates its normal continuation
+with a defensive `trap`. An existing following trap and its debug location are
+preserved. Otherwise the new trap receives the call location. The suffix and
+blocks made unreachable are removed together only if no surviving operand loses
+its resolved SSA definition. Effects before the call, the call itself, and its
+implicit unwinding behavior remain. A `noreturn` **invoke** alone is unchanged:
+there is no new terminator or representation for retaining only its unwind edge.
+
+A direct `nounwind` **invoke** becomes a call with the same instruction handle,
+results, arguments and debug location, followed by a jump to the original normal
+destination with the invoke's location. Shared landing pads needed by other
+invokes remain. `nounwind` alone preserves normal return, including
+`returns_twice`; with `noreturn` the resulting call also receives the defensive
+trap treatment. The caller's personality, ABI and debug scopes/variables remain.
+No indirect-call promises or memory/alias promises are introduced.
+
+Conservative representation limits: the verifier currently permits an invoke
+result in a shared normal destination that is not dominated by the invoke's
+source block. Such a used result cannot become a call result, so that lowering
+is skipped. A cut is also skipped when it would delete an SSA definition used
+on a surviving path, or the last matching catch clause needed by a surviving
+`eh_typeid`. The pass does not synthesize replacement values, move effects or
+invent catch clauses. Preexisting unreachable sites are not independently rewritten.
+The frontend's declarator ownership field for GNU `noreturn` remains separate
+until ownership is resolved; named globals and trap emission use `FunctionAttrs`
+as their single source of truth.
 
 ## Inliner policy and hard boundaries
 

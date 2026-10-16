@@ -14,6 +14,7 @@ use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
 mod branch_ranges;
+mod call_contracts;
 mod canonicalize;
 mod const_fold;
 mod dce;
@@ -132,6 +133,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "fold integer comparisons using ranges from dominating conditional edges",
         run: branch_ranges::run,
     },
+    BuiltinPass {
+        name: "call-contracts",
+        description: "trim direct noreturn call continuations and lower direct nounwind invokes",
+        run: call_contracts::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -166,6 +172,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[10],
     &BUILTINS[11],
     &BUILTINS[12],
+    &BUILTINS[13],
     &loop_vectorize::LoopVectorize,
     &inline::Inline,
 ];
@@ -187,6 +194,7 @@ impl OptimizationTier {
                 "simplify-cfg",
                 "canonicalize",
                 "instcombine",
+                "call-contracts",
                 "simplify-cfg",
                 "dce",
             ],
@@ -205,6 +213,7 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "simplify-cfg",
     "canonicalize",
     "instcombine",
+    "call-contracts",
     "simplify-cfg",
     "gvn",
     "stack-forward",
