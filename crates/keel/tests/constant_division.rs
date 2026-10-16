@@ -25,13 +25,15 @@ fn sources() -> (String, String) {
     let mut harness = String::from("int main(void) { unsigned long long state=123456789;\n");
     let mut declarations = String::new();
     for (ty, width) in [("unsigned", 32), ("unsigned long long", 64)] {
+        let suffix = if width == 32 { "u" } else { "ull" };
         let max = u64::MAX >> (64 - width);
         let mut divisors = DIVISORS.to_vec();
         divisors.extend([max >> 1, (max >> 1) + 1, (max >> 1) + 2, max]);
         for (index, d) in divisors.into_iter().enumerate() {
             let name = format!("f{width}_{index}");
-            source +=
-                &format!("{ty} {name}({ty} n, {ty} *r) {{ *r=n%{d}ull; return n/{d}ull; }}\n");
+            source += &format!(
+                "{ty} {name}({ty} n, {ty} *r) {{ *r=n%{d}{suffix}; return n/{d}{suffix}; }}\n"
+            );
             declarations += &format!("extern {ty} {name}({ty}, {ty}*);\n");
             harness += &format!(
                 "{{ volatile {ty} d={d}ull; {ty} inputs[]={{0,1,({ty})(d-1),d,({ty})(d+1),({ty})-1,({ty})(({ty})-1/d*d)}}; for(unsigned i=0;i<2000;i++) {{ state^=state<<13;state^=state>>7;state^=state<<17; {ty} n=i<7?inputs[i]:({ty})state,r; {ty} q={name}(n,&r); if(q!=n/d || r!=n%d)return 1; }} }}\n"
