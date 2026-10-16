@@ -38,11 +38,18 @@ fn displacement_limits_and_selection_tiers() {
     for target in [Target::Aarch64AppleDarwin, Target::X86_64LinuxGnu] {
         for (ty, offset, arm_matches) in [
             ("i8", 8, true),
+            ("i8", 4095, true),
+            ("i8", 4096, false),
             ("i16", 8190, true),
+            ("i16", 8192, false),
+            ("i32", 16380, true),
+            ("i32", 16384, false),
             ("i64", 32760, true),
             ("i64", 32768, false),
             ("i64", 7, false),
             ("i8", -1, false),
+            ("i8", -2147483648, false),
+            ("i8", -2147483649, false),
             ("i8", 2147483648, false),
         ] {
             let src = source(ty, offset, "return v3");
@@ -63,7 +70,7 @@ fn displacement_limits_and_selection_tiers() {
                             && if target == Target::Aarch64AppleDarwin {
                                 arm_matches
                             } else {
-                                offset <= i32::MAX as i64
+                                i32::try_from(offset).is_ok()
                             };
                         // The original ptradd is a single add (or an add with a materialized constant).
                         assert_eq!(
