@@ -222,7 +222,7 @@ def main():
                 checks = []
                 for n in (0, 1, 7, 257):
                     for seed, mode in ((0, 'random'), (1, 'random'), (1761, 'random'), (1, 'edges')):
-                        checks.append(sample(stem, case, n, 1000, seed, mode))
+                        checks.append(sample(stem, case, n, 10000, seed, mode))
                 report['builds'][name][v['name']] = {'binary': str(stem), 'shape': shape,
                     'object_bytes': obj.stat().st_size, 'binary_text_bytes': len(text_bytes(stem)),
                     'functional': checks}
@@ -233,7 +233,7 @@ def main():
         control = cases[0]
         binary = report['builds'][control['name']][variants[0]['name']]['binary']
         try:
-            sample(binary, control, 1, 1000, 1761, poison=True)
+            sample(binary, control, 1, 10000, 1761, poison=True)
         except RuntimeError as error:
             if 'exit 4' not in str(error):
                 raise
@@ -254,7 +254,7 @@ def main():
                         detail[str(n)] = {'invalid': 'payload loop/load absent in at least one variant'}
                         continue
                     # Common repeat count, calibrated to the slowest variant. Retain probes.
-                    repeat = 1000
+                    repeat = 10000
                     probes = []
                     for _ in range(5):
                         observed = []

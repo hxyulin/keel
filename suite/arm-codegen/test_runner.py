@@ -47,17 +47,17 @@ class EvidenceTests(unittest.TestCase):
             source.write_text('unsigned long long kernel(const unsigned long long*p,unsigned long n){return n;}')
             subprocess.run(['clang', '-O2', str(HERE/'driver.c'), str(source), '-o', str(binary)], check=True)
             control = {'id': 0}
-            runner.sample(binary, control, 7, 1000, 1761)
+            runner.sample(binary, control, 7, 10000, 1761)
             with self.assertRaisesRegex(RuntimeError, 'exit 4'):
-                runner.sample(binary, control, 7, 1000, 1761, poison=True)
+                runner.sample(binary, control, 7, 10000, 1761, poison=True)
             with self.assertRaisesRegex(RuntimeError, 'exit 3'):
-                runner.sample(binary, {'id': 4}, 7, 1000, 1761)
+                runner.sample(binary, {'id': 4}, 7, 10000, 1761)
             # A fabricated record with zero time cannot pass parser validation.
             from unittest.mock import patch
             row = dict(seconds=0, checksum='0', single='0', n=7, repeat=3)
             with patch.object(runner, 'command', return_value=json.dumps(row)):
                 with self.assertRaisesRegex(RuntimeError, 'invalid timer'):
-                    runner.sample(binary, control, 7, 1000, 1761)
+                    runner.sample(binary, control, 7, 10000, 1761)
 
 
 if __name__ == '__main__':
