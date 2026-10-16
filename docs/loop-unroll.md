@@ -21,7 +21,10 @@ followed by one sum; each can independently be i32 or i64. Entry IV is constant
 zero, bound and seed dominate the preheader, and the backedge increments IV by
 one. The sum update is a Keel wrapping integer `iadd(sum, independent_term)` in
 either operand order. Neither the sum nor its updated result may feed other body
-instructions. The independent term can depend on IV and ordinary loads.
+instructions. The independent term can depend on IV and ordinary loads. Header parameters must
+resolve to themselves; an aliased comparison result is rejected. Body operations
+must each have exactly one result that resolves to itself: retained dead alias
+definitions must never overwrite clone mappings for invariant/earlier values.
 
 Body operations are restricted to integer literals, wrapping add/subtract/multiply,
 bitwise operations, modulo-width shifts, pointer addition, integer width
@@ -32,7 +35,7 @@ all operations, including unused loads, in original order.
 
 The pass rejects stores, calls, volatile accesses, atomics, lifetimes, trapping
 integer division/remainder, floating point, conditional bodies, additional exits,
-body parameters, body-defined external liveouts, dependent recurrences, nested
+body parameters, aliased body results, body-defined external liveouts, dependent recurrences, nested
 loops, and functions carrying debug return/location/variable/scope information.
 It leaves all such candidates unchanged. Arbitrary invariant starts, signed IVs,
 other predicates, additional carried values, and a general rotation framework

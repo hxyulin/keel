@@ -433,3 +433,100 @@ block3:
         );
     }
 }
+
+#[test]
+fn in_memory_aliased_body_results_do_not_resurrect_dead_computations() {
+    for alias_to_load in [false, true] {
+        let mut m = keel_ir::parse(&kernel(Type::I64)).unwrap();
+        let f = &mut m.functions[0];
+        let xor = f
+            .layout_insts()
+            .find_map(|(_, i)| matches!(f.inst_data(i), D::Binary { op: B::Xor, .. }).then_some(i))
+            .unwrap();
+        let original = f.first_result(xor);
+        let target = if alias_to_load {
+            let load = f
+                .layout_insts()
+                .find_map(|(_, i)| matches!(f.inst_data(i), D::Load { .. }).then_some(i))
+                .unwrap();
+            f.first_result(load)
+        } else {
+            f.block_params(f.entry_block().unwrap())[2]
+        };
+        // Deliberately retain the original XOR in layout: a valid intermediate
+        // alias state which printing/reparsing cannot preserve.
+        f.replace_all_uses(original, target);
+        keel_ir::verify(f).unwrap();
+        let before = f.clone();
+        let memory = HashMap::from([(0x1000, 1), (0x1008, 1)]);
+        let inputs = [0x1000, 2, 3, 0];
+        let expected = execute(&before, &inputs, &memory, None);
+        let changed = keel_opt::find_pass("loop-unroll").unwrap().run(f);
+        keel_ir::verify(f).unwrap();
+        let actual = execute(f, &inputs, &memory, None);
+        println!(
+            "alias_to_load={alias_to_load}, expected={expected:?}, actual={actual:?}, changed={changed}"
+        );
+        assert_eq!(actual, expected);
+        assert!(
+            !changed,
+            "aliased body result must be conservatively rejected"
+        );
+        assert_eq!(f.resolve(original), target);
+        assert_eq!(f.layout_insts().count(), before.layout_insts().count());
+    }
+}
+
+#[test]
+fn in_memory_header_aliases_and_multiresult_body_are_rejected() {
+    for which in 0..4 {
+        let src = if which == 3 {
+            kernel(Type::I64).replace(" v13 = xor", " v40,v41 = uadd_overflow v12,v2\n v13 = xor")
+        } else {
+            kernel(Type::I64)
+        };
+        let mut m = keel_ir::parse(&src).unwrap();
+        let f = &mut m.functions[0];
+        let entry = f.entry_block().unwrap();
+        let header = f
+            .blocks()
+            .find(|&b| b != entry && f.block_params(b).len() == 2)
+            .unwrap();
+        let (original, target) = match which {
+            0 => (f.block_params(header)[0], f.block_params(entry)[1]),
+            1 => (f.block_params(header)[1], f.block_params(entry)[3]),
+            2 => {
+                let pre_jump = *f.block_insts(entry).last().unwrap();
+                let zero = f.insert_inst(
+                    keel_ir::InsertPoint::Before(pre_jump),
+                    D::Iconst {
+                        ty: Type::I8,
+                        imm: 0,
+                    },
+                );
+                (
+                    f.first_result(f.block_insts(header)[0]),
+                    f.first_result(zero),
+                )
+            }
+            3 => {
+                let i = f
+                    .layout_insts()
+                    .find_map(|(_, i)| matches!(f.inst_data(i), D::Overflow { .. }).then_some(i))
+                    .unwrap();
+                (f.first_result(i), f.block_params(entry)[2])
+            }
+            _ => unreachable!(),
+        };
+        f.replace_all_uses(original, target);
+        keel_ir::verify(f).unwrap();
+        let count = f.layout_insts().count();
+        assert!(
+            !keel_opt::find_pass("loop-unroll").unwrap().run(f),
+            "case {which}"
+        );
+        keel_ir::verify(f).unwrap();
+        assert_eq!(f.resolve(original), target);
+        assert_eq!(f.layout_insts().count(), count);
+    }
+}

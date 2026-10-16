@@ -178,7 +178,11 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             }
             _ => return None,
         }
+        // An alias can leave its defining instruction in layout. Cloning it
+        // under resolve(result) would overwrite the mapping for an invariant
+        // or an earlier result and resurrect a dead computation.
         if f.inst_results(i).len() != 1
+            || f.resolve(f.first_result(i)) != f.first_result(i)
             || !matches!(
                 f.value_type(f.first_result(i)),
                 Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
