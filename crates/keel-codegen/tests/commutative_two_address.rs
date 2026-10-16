@@ -154,6 +154,39 @@ fn controlled_overlap_instructions_and_materialization() {
 }
 
 #[test]
+fn resolved_alias_uses_the_same_destination_once() {
+    use keel_ir::{EntityRef, Value};
+    for bits in WIDTHS {
+        for op in &OPS[..6] {
+            let mut module = keel_ir::parse(
+                &source(op, bits, "same").replace(&format!("{op} v0, v0"), &format!("{op} v0, v1")),
+            )
+            .unwrap();
+            module.functions[0].replace_all_uses(Value::new(1), Value::new(0));
+            keel_ir::verify_module(&module).unwrap();
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                let asm = keel_codegen::x86_64::compile_with_pipeline(
+                    &module,
+                    &keel_codegen::x86_64::REGISTERS,
+                    &CodegenPipeline {
+                        selector: &selector,
+                        allocator: &Controlled,
+                    },
+                )
+                .unwrap();
+                let mnemonic = match *op {
+                    "iadd" => "add",
+                    "isub" => "sub",
+                    other => other,
+                };
+                let reg = if bits == 64 { "rsi" } else { "esi" };
+                assert!(asm.contains(&format!("{mnemonic}\t{reg}, {reg}")), "{asm}");
+            }
+        }
+    }
+}
+
+#[test]
 fn immediate_multiply_and_shifts_keep_their_operand_order() {
     for bits in WIDTHS {
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {

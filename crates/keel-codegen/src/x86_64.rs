@@ -36,8 +36,9 @@
 //! operand, so `d = a + b` is `mov d, a; add d, b`. A result may share a
 //! register with an operand that dies at the same instruction (see the
 //! regalloc docs on program points): if `d` is `b`'s register, the copy
-//! would overwrite `b` before it is read, so the operation runs in rax and
-//! the result moves to `d` after. **A lowering must read every operand
+//! would overwrite `b` before it is read. Commutative integer operations
+//! instead use `op d, a`; subtraction runs in rax and moves the result to
+//! `d` after. **A lowering must read every operand
 //! before it writes the destination.**
 //!
 //! Values narrower than 64 bits have unspecified upper bits. Arithmetic on
