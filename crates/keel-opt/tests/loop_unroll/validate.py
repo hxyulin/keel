@@ -68,11 +68,15 @@ def main():
         retained_path=str(retained),
         retained_sha256=hashlib.sha256(retained.read_bytes()).hexdigest()), indent=2) + '\n')
     opt(out / 'unroll.keel', out / 'twice.keel', 'loop-unroll')
-    assert after == (out / 'twice.keel').read_text()
+    # Parsing renumbers result IDs in layout order (the inserted preheader
+    # zero was allocated last). Compare against a no-pass parse/print baseline.
+    run([keel, 'opt', '--opt-tier', 'none', out / 'unroll.keel', '-o', out / 'unroll-normalized.keel'])
+    assert (out / 'unroll-normalized.keel').read_bytes() == (out / 'twice.keel').read_bytes()
     opt(out / 'unroll.keel', out / 'cleanup.keel')
     run([keel, 'cc', '--emit-ir', '-p', scalar, fixture / 'unsupported.c', '-o', out / 'unsupported.keel'])
     opt(out / 'unsupported.keel', out / 'unsupported-after.keel', 'loop-unroll')
-    assert (out / 'unsupported.keel').read_bytes() == (out / 'unsupported-after.keel').read_bytes()
+    run([keel, 'opt', '--opt-tier', 'none', out / 'unsupported.keel', '-o', out / 'unsupported-normalized.keel'])
+    assert (out / 'unsupported-normalized.keel').read_bytes() == (out / 'unsupported-after.keel').read_bytes()
     for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
         for variant in ['before', 'unroll', 'cleanup', 'retained-unroll']:
             stem = out / (variant + '-' + target)
