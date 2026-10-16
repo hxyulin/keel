@@ -3382,6 +3382,10 @@ impl<'a> FunctionCompiler<'a> {
     /// clear), false for NaN, and `a < b` is `b > a`. Equality needs two
     /// flags (ZF set, PF clear), combined into al and tested.
     fn compare(&mut self, inst: Inst) -> &'static str {
+        if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {
+            let cc = self.compare(source);
+            return if invert { invert_cond(cc) } else { cc };
+        }
         match *self.func.inst_data(inst) {
             InstData::Icmp { cond, args } => {
                 let ty = self.ty(args[0]);
@@ -3640,6 +3644,10 @@ impl<'a> FunctionCompiler<'a> {
     fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> Memory {
         if let Some(slot) = stack_slot(self.func, addr) {
             return sized(self.frame(self.stack_slot_offsets[slot]), ptr(ty));
+        }
+        if let Some(&(base, offset)) = self.selection.addresses.get(&self.func.resolve(addr)) {
+            let base = self.use_reg(base, scratch);
+            return sized(memory(r64(base), i128::from(offset)), ptr(ty));
         }
         sized(memory(r64(self.use_reg(addr, scratch)), 0), ptr(ty))
     }
