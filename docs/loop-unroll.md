@@ -90,10 +90,11 @@ After a root-granted exclusive local MacHost build/native lease, announce before
 starting jobs, then run serially:
 
 ```sh
-cargo test -p keel-opt -p keel-ir
-cargo build -p keel
+cargo test -j 2 -p keel-opt -p keel-ir
+cargo build -j 2 -p keel
 python3 crates/keel-opt/tests/loop_unroll/validate.py \
   --keel target/debug/keel \
+  --retained-hot /path/to/retained/build/hot/scalar.keel \
   --out suite/reports/optimization-wave7-loop-unroll-20261017-validation
 ```
 
@@ -102,6 +103,7 @@ directory. It records full commands and compiler/artifact SHA-256 hashes. First
 it compiles the bounded C variants of the measured hot kernel through the frozen
 scalar pipeline, asserts one load becomes three in each function, asserts a
 three-parameter paired header and remaining-count guard, and checks idempotence.
+The retained measured hot scalar IR must also pass the same activation gate.
 Only after those assertions does it generate both AArch64 Mach-O and x86-64 ELF
 assembly/objects for scalar, explicit-unroll, and unroll-plus-default-cleanup IR.
 Unsupported C cases must remain byte-identical under the named pass.

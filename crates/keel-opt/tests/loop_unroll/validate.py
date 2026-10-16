@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--keel', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--retained-hot', type=Path, required=True)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[4]
     out = args.out.resolve()
@@ -47,14 +48,25 @@ def main():
     opt(out / 'before.keel', out / 'unroll.keel', 'loop-unroll')
     before = (out / 'before.keel').read_text()
     after = (out / 'unroll.keel').read_text()
-    # Assert real C activation before compiling or comparing generated code.
-    for name in ['hot32', 'hot64']:
+    # Assert real C and retained measured IR activation before codegen/native.
+    def assert_unrolled(before, after, name):
         original = re.search(r'func @' + name + r'\(.*?\n}', before, re.S).group()
         transformed = re.search(r'func @' + name + r'\(.*?\n}', after, re.S).group()
         assert len(re.findall(r' = load\.', original)) == 1, original
         assert len(re.findall(r' = load\.', transformed)) == 3, transformed
         assert 'icmp.uge' in transformed and ' = isub ' in transformed, transformed
         assert re.search(r'block\d+\(v\d+: i\d+, v\d+: i\d+, v\d+: i\d+\)', transformed), transformed
+    for name in ['hot32', 'hot64']:
+        assert_unrolled(before, after, name)
+    retained = args.retained_hot.resolve()
+    (out / 'retained-before.keel').write_bytes(retained.read_bytes())
+    opt(out / 'retained-before.keel', out / 'retained-unroll.keel', 'loop-unroll')
+    assert_unrolled((out / 'retained-before.keel').read_text(),
+                    (out / 'retained-unroll.keel').read_text(), 'hot')
+    (out / 'activation.json').write_text(json.dumps(dict(
+        fresh_C=['hot32', 'hot64'], retained_IR='hot',
+        retained_path=str(retained),
+        retained_sha256=hashlib.sha256(retained.read_bytes()).hexdigest()), indent=2) + '\n')
     opt(out / 'unroll.keel', out / 'twice.keel', 'loop-unroll')
     assert after == (out / 'twice.keel').read_text()
     opt(out / 'unroll.keel', out / 'cleanup.keel')
@@ -62,7 +74,7 @@ def main():
     opt(out / 'unsupported.keel', out / 'unsupported-after.keel', 'loop-unroll')
     assert (out / 'unsupported.keel').read_bytes() == (out / 'unsupported-after.keel').read_bytes()
     for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
-        for variant in ['before', 'unroll', 'cleanup']:
+        for variant in ['before', 'unroll', 'cleanup', 'retained-unroll']:
             stem = out / (variant + '-' + target)
             run([keel, 'compile', '-O', '--opt-tier', 'none', '--target', target,
                  out / (variant + '.keel'), '-o', stem.with_suffix('.s')])

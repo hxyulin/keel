@@ -47,7 +47,11 @@ fn loads(f: &Function) -> usize {
         .count()
 }
 fn mask(ty: Type) -> u64 {
-    u64::MAX >> (64 - ty.bytes().unwrap() * 8)
+    if ty == Type::Ptr {
+        u64::MAX
+    } else {
+        u64::MAX >> (64 - ty.bytes().unwrap() * 8)
+    }
 }
 
 // A bounded independent integer/CFG model with a checked byte-addressed memory.
