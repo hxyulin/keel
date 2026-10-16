@@ -145,7 +145,7 @@ rejection and metadata checks. Existing AArch64 assembler tests exercise the
 unchanged target path. Native NUC validation uses an isolated checkout/build
 location and reads the parent's prepared suite inputs without modifying them.
 
-The [NUC validation and timing report](../suite/reports/native-x86-assembler-linux-20261015.json)
+The NUC validation and timing report
 records successful execution of 53 codegen fixtures in eight configurations (424
 runs, plus focused spill regressions), 20 C fixture assembly checks in four modes,
 and Lua/QuickJS/SQLite correctness with baseline, optimized, debug and optimized
@@ -205,7 +205,7 @@ linked and stripped sizes, temporary-symbol counts, and alternating paired
 runtime measurements. Run it on an otherwise idle Linux host; it pins itself
 and its children to the requested CPU.
 
-The [layout follow-up report](../suite/reports/native-x86-layout-20261015.json)
+The layout follow-up report
 compares `426d6fc` with `e3a4bc6` on the i7-1360P NUC. Each mode uses the same
 44 fixed Keel-generated assembly files, prebuilt assemblers and the system linker.
 Baseline/optimized aggregate object text shrinks **6.88%/6.21%**, leaving it only
@@ -299,7 +299,7 @@ to 188 ms. QuickJS parsing falls to about 71 ms and total to 133 ms. These diagn
 samples identify bottlenecks; the paired CLI measurements establish the overall
 speed change.
 
-The [speed follow-up report](../suite/reports/native-x86-speed-20261015.json)
+The speed follow-up report
 compares the integrated pre-optimization implementation (`0738fc4`, code-identical
 to the session's `a958895`) with `23e141e`. Seven alternating warm paired batches
 on NUC CPU 2 assemble the same 44 files per mode:
@@ -393,7 +393,7 @@ measurements above. They include C compilation, startup, reads and writes;
 linking and application runtime are excluded. Clang compiles no C in this
 comparison: it assembles the same new Keel output.
 
-The [structured-emission report](../suite/reports/native-x86-structured-20261015.json)
+The structured-emission report
 compares `23e141e` with `8b9e0b6` in seven alternating warm paired batches:
 
 | Host / input mode | Keel before | Structured Keel | New Keel text + Clang | Paired time reduction |

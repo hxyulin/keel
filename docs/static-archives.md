@@ -110,7 +110,7 @@ that toolchain lacks `cargo-clippy`; no host components were installed.
 Both hosts used rustc 1.99.0 (`b940084d7`, LLVM 23.1.1); system Clang versions
 were Apple 21.0.0 and Ubuntu 18.1.3 respectively.
 
-The [validation record](static-archives-validation-20261016.json) contains exact
+The validation record contains exact
 commands/results, host/kernel details, source hashes, resolved tool hashes,
 test/driver binary hashes, and archive/executable hashes. Separate manual
 archive fixtures exercised repeated bytes, reverse dependency order, duplicate
@@ -156,7 +156,7 @@ on every failure. Both formats' metadata checks run on each host. Native Keel
 and system-linker probes exit 42 on each host, and compiler common/weak system
 consumption passes. Local scoped all-target Clippy and formatting passed.
 
-The [corrective validation record](static-archives-correction-validation-20261016.json)
+The corrective validation record
 contains exact commands/results, source/toolchain/tool/executable hashes,
 original evidence hashes and reproducible native probe commands. Linux source
 hashes match local source hashes. The remote directory is
@@ -208,6 +208,6 @@ kinds, REL/RELA, and exact field-end boundaries. Historical special-symbol and
 extended-index tests remain in place. Exact retained reviewer objects are checked
 separately without changing the original evidence directories.
 
-See the [round 2 validation record](static-archives-round2-validation-20261016.json)
+See the round 2 validation record
 for exact source revision, commands, results, hashes and remaining coverage gaps.
 Independent corrective review and integration follow separately.

@@ -1,1 +1,14 @@
 /target/
+
+# Generated benchmark reports, experiment outputs, and review evidence stay local.
+/suite/reports/
+/review/
+/docs/evidence/
+/docs/review-evidence/
+/docs/*-evidence/
+/docs/*-validation/
+/docs/*-validation-*/
+/perf.data
+/perf.data.old
+*.profraw
+*.profdata

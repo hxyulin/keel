@@ -77,7 +77,7 @@ restoration after a custom pass exposes a literal through an alias. The native
 fixture covers signed and unsigned comparisons with literals initially on the
 left through both selectors and allocators under restricted registers.
 
-The [stage comparison](../suite/reports/canonical-stage-aarch64-2026-10-15.json)
+The stage comparison
 measures the previous Full compiler against this contract and initial stage on
 the same 44 preprocessed files with Keel assembly (7 paired runtime samples,
 5 paired compile samples). The candidate release binary after final formatting
@@ -157,7 +157,7 @@ ranges. Code motion remains at the end of the experiments here.
 
 ## Sweep
 
-The [ordering report](../suite/reports/simplification-order-aarch64-2026-10-15.json)
+The ordering report
 compares the existing Full pipeline with four alternatives on identical
 preprocessed Lua, QuickJS and SQLite sources, using Keel's assembler:
 
@@ -196,7 +196,7 @@ requiring every consumer to handle both `constant + x` and `x + constant`.
 For example, the existing AArch64 emitter folds its right operand into an
 immediate: canonicalizing `37 + x` removes a materialized constant register.
 
-The [isolated comparison](../suite/reports/canonical-constants-aarch64-2026-10-15.json)
+The isolated comparison
 uses saved pre-change and candidate compilers with identical Full pipelines and
 Keel assembly. It reduces literal-left cases from 518 to zero across the corpus,
 with exactly the same static IR instruction and block counts. Generated text
@@ -229,7 +229,7 @@ and allocators with restricted registers. Each incremental benchmark here uses
 three paired runtime and compile samples and one warmup; these short screens
 can expose regressions but do not establish small application speedups.
 
-The [incremental Boolean report](../suite/reports/boolean-aarch64-2026-10-15.json) records 0 fewer IR instructions, +0 text bytes, runtime ratio 1.0053, and compile-time ratio 0.9936. These three-pair results are screening measurements, not an established runtime gain.
+The incremental Boolean report records 0 fewer IR instructions, +0 text bytes, runtime ratio 1.0053, and compile-time ratio 0.9936. These three-pair results are screening measurements, not an established runtime gain.
 
 ## Integer cast chains
 
@@ -246,7 +246,7 @@ whether it should collapse, verifies idempotence, and checks concrete narrow
 inputs and wider sign boundaries. Native tests include i128 intermediates and
 a sign-then-zero extension that must preserve its intermediate sign bits.
 
-The [incremental cast-chain report](../suite/reports/cast-chains-aarch64-2026-10-15.json) records 914 fewer IR instructions, -3,628 text bytes, runtime ratio 0.9991, and compile-time ratio 1.0017. Three-pair timing does not establish a small runtime gain.
+The incremental cast-chain report records 914 fewer IR instructions, -3,628 text bytes, runtime ratio 0.9991, and compile-time ratio 1.0017. Three-pair timing does not establish a small runtime gain.
 
 ## Wrapping integer algebra
 
@@ -264,7 +264,7 @@ common addends in every operand position, wider overflow boundaries, i128
 representation and shared-chain guards. Native regression inputs include
 unsigned wraparound and run with restricted registers.
 
-The [incremental algebra report](../suite/reports/algebra-aarch64-2026-10-15.json) records 129 fewer IR instructions, -360 text bytes, runtime ratio 0.9942, and compile-time ratio 1.0047. Three-pair timing does not establish a small runtime gain.
+The incremental algebra report records 129 fewer IR instructions, -360 text bytes, runtime ratio 0.9942, and compile-time ratio 1.0047. Three-pair timing does not establish a small runtime gain.
 
 ## Carry-aware arithmetic facts
 
@@ -281,7 +281,7 @@ unsigned and signed overflow boundaries, borrow, negation and derived bounds;
 a native fixture checks an i128 addition and its comparison. Richer interval
 and relational facts are still outside this domain.
 
-The [incremental arithmetic-facts report](../suite/reports/arithmetic-bits-aarch64-2026-10-15.json) uses identical late-known-bits recipes on both compilers. It records 4 fewer IR instructions, -16 text bytes, runtime ratio 0.9868, and compile-time ratio 1.0131. This domain remains opt-in; short timing screens do not justify promoting the pipeline.
+The incremental arithmetic-facts report uses identical late-known-bits recipes on both compilers. It records 4 fewer IR instructions, -16 text bytes, runtime ratio 0.9868, and compile-time ratio 1.0131. This domain remains opt-in; short timing screens do not justify promoting the pipeline.
 
 ## Ranges from conditional edges
 
@@ -306,11 +306,11 @@ and unsigned queries, parallel edges, joins, loops, distinct memory reads and
 16 combinations of other passes. Native fixtures use both selectors and
 allocators under restricted registers.
 
-The [incremental branch-range report](../suite/reports/branch-ranges-aarch64-2026-10-15.json) holds late combining/CFG cleanup constant on both sides. Adding the analysis removes 12 IR instructions, changes text by -152 bytes, and measures runtime ratio 0.9997 and compile-time ratio 1.0190. It remains opt-in pending stronger profitability evidence.
+The incremental branch-range report holds late combining/CFG cleanup constant on both sides. Adding the analysis removes 12 IR instructions, changes text by -152 bytes, and measures runtime ratio 0.9997 and compile-time ratio 1.0190. It remains opt-in pending stronger profitability evidence.
 
 ## Ordering after the expanded scalar rules
 
-The [new ordering comparison](../suite/reports/scalar-order-aarch64-2026-10-15.json)
+The new ordering comparison
 uses one immutable compiler, seven paired runtime samples, two warmups and five
 paired compile samples. The baseline is the former default order with all new
 scalar rules. Variants are:
@@ -354,9 +354,9 @@ of bit and interval domains, and cheaper targeted feedback between passes.
 
 ## Final paired benchmark of the complete change
 
-The [before/after report](../suite/reports/scalar-final-before-after-aarch64-2026-10-15.json)
+The before/after report
 compares Full at `26d2da0` with Full at `d6961e6`. The
-[comparison against None](../suite/reports/scalar-final-vs-none-aarch64-2026-10-15.json)
+comparison against None
 uses the same current compiler for None, default Full, and the opt-in combined
 facts recipe. All use the same 44 preprocessed C files, generic target tuning,
 baseline instruction selection, full allocation, and Keel assembly on Apple M5

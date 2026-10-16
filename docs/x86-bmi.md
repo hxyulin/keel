@@ -93,4 +93,4 @@ selection remains unchanged when features are absent.
 
 The guarded assembler and codegen runtime tests passed on the i7-1360P Linux
 NUC. Combined AVX/BMI application and baseline compatibility results are recorded
-in [the integration report](../suite/reports/native-x86-features-20261015.json).
+in the integration report.

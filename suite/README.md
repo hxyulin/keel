@@ -1,5 +1,9 @@
 # The suite
 
+Generated reports and raw evidence belong in the ignored `suite/reports/` directory.
+They are local run outputs and are not stored in Git. Historical report links
+have been removed; benchmark and profiling commands can generate fresh outputs.
+
 Real programs that keel must build correctly and that measure how fast its
 code is. Each directory here with a `suite.toml` is one program; the
 `keel-suite` tool (`crates/keel-suite`) finds them by scanning.
@@ -139,13 +143,13 @@ For committed compiler comparisons, `--baseline-passes tier:full --variant
 current=tier:full` runs each revision's actual Full preset. `--jobs 1`,
 `--compile-warmups 2`, and `--command-log PATH.jsonl.gz` support serial builds
 and retained commands; `--runtime-path PATH` copies each application to one
-pathname before timing. The [FunctionAttrs consumer comparison](reports/functionattrs-benchmark-2026-10-16/README.md)
+pathname before timing. The FunctionAttrs consumer comparison
 uses fresh release targets on MacHost and LinuxHost, 11 paired samples, whole-app
 machine-code parity, C compilation/RSS, generated contract scaling and a separate
 same-compiler SSE2/AVX flag comparison. Its identical application executables
 show no runtime/code-size change, with roughly 2–3% more compilation time.
 
-The checked-in [pass ablations](reports/pass-ablations-aarch64-2026-10-15.json)
+The checked-in pass ablations
 use five pairs after one warmup on Apple M5 Max. Removing GCM costs 4.2% in
 runtime geometric mean. Removing GVN has mixed runtime effects and grows
 aggregate text by 5.1%; Full keeps it, while Basic omits it. Late phi cleanup
@@ -156,7 +160,7 @@ in the default pipelines. These choices concern this measured pipeline;
 individual pass profitability can change with the selector or allocator.
 
 The opt-in `keel-O-memory` and `keel-O-memory-select` presets add conservative
-block-local memory forwarding after GVN. The [paired memory sweep](reports/memory-forward-aarch64-2026-10-15.json)
+block-local memory forwarding after GVN. The paired memory sweep
 records both forwarding alone and a subsequent instcombine, plus static load
 counts on the same preprocessed inputs. Forwarding removes 1,758 static loads
 and 7,584 text bytes, but its 0.5% lower aggregate runtime is within the observed
@@ -176,7 +180,7 @@ arguments apply to application builds and compile-time samples. `--assembler
 keel` assembles both variants with their Keel driver; the default is `clang`.
 The selected assembler and compiler arguments are recorded in the report.
 
-The first [M5 application comparison](reports/apple-m5-tuning-aarch64-2026-10-15.json)
+The first M5 application comparison
 is neutral overall (runtime ratio 1.0013), with a 2.3% QuickJS Fibonacci regression
 and 160 fewer text bytes. The isolated multiply dependency-chain improvement
 is about 33%, but this does not translate into a general application speedup.
@@ -184,19 +188,19 @@ M5 tuning is experimental and remains explicit.
 
 The simplification presets `keel-O-cleanup`, `keel-O-bits-early`,
 `keel-O-bits-late`, and `keel-O-bits-repeat` isolate late cleanup, known-bit
-analysis placement, and repetition. Their [ordering sweep](reports/simplification-order-aarch64-2026-10-15.json)
+analysis placement, and repetition. Their ordering sweep
 compares runtime/code size/compile cost on identical preprocessed inputs with
 Keel assembly. See the [simplification audit](../docs/simplification.md) for
 proof tests and the remaining gaps.
 
-The [integer canonicalization comparison](reports/canonical-constants-aarch64-2026-10-15.json)
+The integer canonicalization comparison
 uses separate immutable compiler binaries with the same pipeline. Literal-left
 integer forms fall from 518 to zero; IR instruction counts are unchanged but
 text shrinks by 1,256 bytes, with neutral aggregate runtime and compile cost.
 `measure_ir_counts.py` accepts `--baseline-compiler` for version comparisons and
 verifies each binary and source hash against the report before adding counts.
 
-The [explicit canonicalization stage comparison](reports/canonical-stage-aarch64-2026-10-15.json)
+The explicit canonicalization stage comparison
 measures the initial stage and canonical entry requirements against that compiler:
 297 literal-left comparisons become zero, text shrinks another 1,056 bytes,
 runtime ratio is 0.9923 (mostly intervals spanning one), and compile-time ratio
@@ -210,7 +214,7 @@ records separate Boolean, cast-chain, wrapping-algebra, carry-fact and
 branch-range measurements. Incremental screens use three paired samples;
 small timing differences should not be treated as established speedups.
 
-The [expanded-scalar ordering comparison](reports/scalar-order-aarch64-2026-10-15.json)
+The expanded-scalar ordering comparison
 uses seven paired runtime and five paired compile samples. Moving CFG cleanup
 before operand normalization preserves all 44 IR and assembly files and reduces
 compile time 2.83%; Basic and Full adopt that order. Extra late cleanup and the
@@ -218,8 +222,8 @@ compile time 2.83%; Basic and Full adopt that order. Extra late cleanup and the
 cost without an established runtime gain. Static-only second/third rounds test
 corpus convergence; their runtime has not been measured.
 
-The final 15-pair [before/after comparison](reports/scalar-final-before-after-aarch64-2026-10-15.json)
-and [Full/facts versus None comparison](reports/scalar-final-vs-none-aarch64-2026-10-15.json)
+The final 15-pair before/after comparison
+and Full/facts versus None comparison
 record the complete default change and its total optimizer cost. See the
 [final benchmark interpretation](../docs/simplification.md#final-paired-benchmark-of-the-complete-change).
 An empty `--baseline-passes ''` now selects explicit `--opt-tier none` in the
@@ -253,20 +257,20 @@ the baseline text workflow. Add `--baseline-has-object-api` when that binary
 supports `--emit-object` to compare prior and current direct paths in the same
 randomized CLI rounds. The report retains commands, raw samples and hashes.
 
-The [completed AArch64 migration](reports/compiler-object-api-complete-20261015.html)
-([raw data](reports/compiler-object-api-complete-20261015.json)) reaches
+The completed AArch64 migration
+(raw data) reaches
 85,988/85,988 native Lua instructions with zero remaining text bytes. Current
 codegen plus object generation takes 39.92 ms versus 67.69 ms through text;
 full CLI batches take 217.87 ms versus 322.61 ms. These are separate timing
 boundaries. The previous direct API takes 229.21 ms in the same CLI run; the
 median paired ratio corresponds to 5.2% less time after completing the migration.
 All 33 objects match all four paths, and the linked interpreter passes Lua's
-portable tests. The earlier [partial API report](reports/compiler-object-api-20261015.json)
+portable tests. The earlier partial API report
 remains available for historical context.
 
 ## Native x86-64 Linux bring-up
 
-The [initial NUC report](reports/x86-linux-bringup-20261015.html) ([raw logs](reports/x86-linux-bringup-20261015.json)) contains the
+The initial NUC report (raw logs) contains the
 host/toolchain versions, source commit, commands, logs and known blockers.
 It records correctness, not benchmark comparisons. Run on the Linux host:
 
@@ -283,7 +287,7 @@ reference Clang with the requested CPU/features; the NUC's Clang 18 rejects
 `-mcpu=apple-m5`, so that limitation is recorded separately from compiler
 correctness.
 
-The [allocator validation](reports/premerge-linux-debugger-2026-10-15/summary.json)
+The allocator validation
 adds native Fast/Full coverage, including optimized/unoptimized Lua with
 baseline/full selection, and retained GDB sessions against a Clang reference.
 The report includes the temporary Fast configuration definitions. To repeat
@@ -301,7 +305,7 @@ for both allocators with and without optimization. The existing macOS
 
 ## Full macOS and Linux measurements
 
-The [platform benchmark report](reports/full-platform-benchmarks-20261015.html)
+The platform benchmark report
 compares all eight workloads on Apple M5 Max/macOS and Intel i7-1360P/Ubuntu.
 Raw suite results, configuration lists, commands and validation logs accompany
 that report. Builds use one job and refresh cached Clang statistics; runtime
@@ -320,10 +324,10 @@ and operating system.
 
 ## Compilation-speed boundaries
 
-The [compilation-speed analysis](reports/compilation-speed-analysis-20261015.html)
-([aggregate data](reports/compilation-speed-analysis-20261015.json),
-[macOS CLI samples](reports/compile-boundaries-macos-20261015.json),
-[Linux CLI samples](reports/compile-boundaries-linux-20261015.json)) separates
+The compilation-speed analysis
+(aggregate data,
+macOS CLI samples,
+Linux CLI samples) separates
 C-to-assembly, complete object generation, external assembly and library stages.
 It reuses the exact compiler binaries from the full platform benchmark.
 
@@ -338,7 +342,7 @@ does not change its default or claim equivalent optimized-code quality.
 The optimizer's repeated verifier calls account for 57% of measured pass time
 on macOS and 53% on Linux. The separate pass profiler checks its final IR against
 the ordinary optimizer. Compiler verification policy is unchanged. A short
-[SQLite CPU sample](reports/compilation-speed-keel-sqlite-sample-20261015.txt)
+SQLite CPU sample
 provides additional, partially symbolicated allocation/tokenization/verifier
 leads; its percentages are not a whole-corpus profile.
 
@@ -401,8 +405,8 @@ are retained. These are warm-cache, serial frontend library measurements,
 not cold builds or end-to-end compiler timings. Preprocessing and C-to-IR
 medians are measured separately; adding them estimates the combined cost.
 
-The [15 October baseline report](reports/c-frontend-profile-20261015.html)
-([raw data](reports/c-frontend-profile-20261015.json)) uses local main
+The 15 October baseline report
+(raw data) uses local main
 `ae7c2f8` on Apple M5 Max. To regenerate its stack summaries and presentation:
 
 ```sh
@@ -417,7 +421,7 @@ overlap. It asserts nonnegative leaf weights and conservation of total samples.
 
 ## Preprocessor optimization comparison
 
-The [optimized preprocessor report](reports/c-preprocessor-optimized-20261015.html)
+The optimized preprocessor report
 compares immutable original, compact-scalar and SIMD-search binaries against
 local main `ae7c2f8`. All 44 application outputs are byte-identical and their IR
 verifies. Eleven paired rounds show a 2.44× equal-application geometric mean
@@ -440,7 +444,7 @@ python3 suite/measure_preprocessor.py \
   --output suite/reports/c-preprocessor-optimized-20261015.json
 ```
 
-The [source/build details](reports/c-preprocessor-optimization-details-20261015.json)
+The source/build details
 retain source hashes and the exact runtime-source patch that replaces the three
 SIMD-backed searches with scalar searches. The rest of those variants is
 identical. The timing runner checks output equality, verifies IR through each
@@ -460,16 +464,16 @@ python3 suite/measure_preprocessor_allocations.py \
 python3 suite/render_preprocessor_optimization.py
 ```
 
-The [allocation data](reports/c-preprocessor-allocations-20261015.json) show
+The allocation data show
 76–77% fewer allocation/reallocation calls and 53–55% fewer cumulative requested
 bytes. Requested bytes include full reallocation sizes and are not peak live
 memory or RSS. Counting binaries are never used for timing.
 
 ## Arena and header-source cache comparison
 
-The [arena/cache report](reports/c-preprocessor-arena-20261015.html)
-([raw timing](reports/c-preprocessor-arena-20261015.json),
-[storage measurements](reports/c-preprocessor-arena-storage-20261015.json))
+The arena/cache report
+(raw timing,
+storage measurements)
 measures another 2.83× preprocessing speedup over the SIMD/compact-token
 version, and 6.95× versus the original in the same eleven paired rounds on
 Apple M5 Max. Allocation/reallocation calls fall another 95.6–96.3%.
@@ -502,7 +506,7 @@ cross-CPU benefit is established by these warm-cache timings.
 Build and freeze all variants before timing. The prior optimized binary is the
 baseline; `original` is the original preprocessor. Final/ablation source hashes
 and exact compile-time-constant patches are in the
-[build details](reports/c-preprocessor-arena-details-20261015.json):
+build details:
 
 ```sh
 python3 suite/measure_preprocessor.py \
@@ -546,7 +550,7 @@ Spliced buffers receive one checked validation; no unchecked string conversion
 was added. Include resolution itself remains uncached, preserving caller and
 `include_next` origin behavior.
 
-[Paired measurements](reports/c-preprocessor-easy-20261015.json) compare frozen
+Paired measurements compare frozen
 release binaries with identical build flags. Variants are cumulative: `buffer`,
 `paths`, `macros`, then `all` (validated string scanning). Nine pairs per
 application show an equal-application geometric mean time reduction of 8.6%
@@ -557,7 +561,7 @@ remains less certain. These are warm-cache measurements on one Apple M5 Max.
 Most incremental benefit comes from string slicing; smaller steps are sensitive
 to noise and their contribution depends on order.
 
-[Allocation measurements](reports/c-preprocessor-easy-storage-20261015.json)
+Allocation measurements
 show 15.0%, 19.7%, and 24.1% fewer allocation/reallocation calls for Lua,
 QuickJS, and SQLite. Retaining pending-vector capacity has a memory tradeoff:
 single counting-process peak RSS changes from 43.69 → 51.84 MiB for Lua,
@@ -567,7 +571,7 @@ full-process observations include warmups and are not isolated-call peaks.
 All 65 frontend/driver tests pass, including a new Unicode/splicing regression.
 All five variants produce byte-identical outputs for the 44 corpus files and
 verify their generated IR. The rebuilt release driver's 44 CLI outputs also
-match. [Build details and incremental patches](reports/c-preprocessor-easy-details-20261015.json)
+match. Build details and incremental patches
 record source hashes and the cumulative changes.
 
 ```sh
@@ -585,8 +589,8 @@ python3 suite/measure_preprocessor.py \
 
 ### Current preprocessor stack profile (2026-10-15)
 
-[Interactive report](reports/c-preprocessor-current-profile-20261015.html) and
-[raw timings, stack summaries, and provenance](reports/c-preprocessor-current-profile-20261015.json)
+Interactive report and
+raw timings, stack summaries, and provenance
 record the preprocessor after all four fast paths. Each application has seven
 warm timing rounds and a separate six-second macOS sample capture. Timing and
 sampling run serially; stack sampling is not used for latency measurements.
@@ -617,10 +621,10 @@ python3 suite/render_preprocessor_current.py
 
 ### Scanning, directives, header resolution, and macro streaming (2026-10-15)
 
-[Saved report](reports/c-preprocessor-deeper-20261015.html),
-[paired timings](reports/c-preprocessor-deeper-20261015.json),
-[allocation/RSS measurements](reports/c-preprocessor-deeper-storage-20261015.json),
-and [refreshed stack profiles](reports/c-preprocessor-deeper-profile-20261015.json)
+Saved report,
+paired timings,
+allocation/RSS measurements,
+and refreshed stack profiles
 cover the next pass. The baseline is the previously profiled four-fast-path
 version, not the original preprocessor. All timing variants use identical release
 flags with line-table debug information; binaries are frozen before measurement.
@@ -658,7 +662,7 @@ prefix/suffix boundaries and argument order; header-cache coverage distinguishes
 quoted callers, angle includes, and query misses across invocations. All six
 variants produce byte-identical outputs on the 44 translation units and verify
 IR, and the rebuilt driver matches all 44 CLI outputs. Exact patches and source
-hashes are in the [build details](reports/c-preprocessor-deeper-details-20261015.json).
+hashes are in the build details.
 
 ```sh
 python3 suite/measure_preprocessor.py \
@@ -687,10 +691,10 @@ python3 suite/render_preprocessor_deeper.py
 
 ### Non-preprocessor frontend stages (2026-10-15, commit 2808137)
 
-[Interactive report](reports/c-frontend-stages-20261015.html),
-[raw stage measurements](reports/c-frontend-stages-20261015.json),
-[stack and ownership analysis](reports/c-frontend-stages-analysis-20261015.json),
-and [validation / callsite evidence](reports/c-frontend-stages-details-20261015.json)
+Interactive report,
+raw stage measurements,
+stack and ownership analysis,
+and validation / callsite evidence
 refresh the C-to-IR profile after preprocessing optimization. The same 44 native
 preprocessed input hashes match the original corpus: 1.99 million tokens and
 6,136 functions. Nine serial rounds measure public and staged APIs in normal
@@ -755,7 +759,7 @@ symlinks, missing paths and non-regular files retain full canonicalization and
 its fallback. Parent paths are resolved by the filesystem, preserving symlink
 and `..` semantics. Include spelling and token locations remain unchanged.
 
-The [15-pair comparison](reports/c-preprocessor-scanner-paths-20261015.json)
+The 15-pair comparison
 against the prior pass's frozen `deeper/profile-all` binary shows **10.9% less
 preprocessing time** (1.122x speedup; 95% paired bootstrap reduction interval
 10.5–11.3%). Median application times are Lua 170.95 → 145.57 ms, QuickJS
@@ -766,7 +770,7 @@ the exact parent source is neutral against the frozen binary (aggregate ratio
 0.9999; 95% interval 0.9971–1.0042). All binaries use identical release flags
 with `CARGO_PROFILE_RELEASE_DEBUG=1` and the `profile` feature.
 
-The [seven-pair screen](reports/c-preprocessor-scanner-paths-screen-20261015.json)
+The seven-pair screen
 shows independent reductions of 7.1% for directory caching and 4.0% for byte
 classification. Specializing the scanner for spliced/unspliced location updates
 adds only a small incremental benefit: the final direct paired ratio versus
@@ -774,9 +778,9 @@ the selected candidate is 0.9946 (95% interval 0.9846–0.9999), while growing t
 page-aligned Mach-O text segment by 16 KiB. That specialization was not retained;
 the existing location implementation stays intact. Exact variant patches,
 build logs, source/binary hashes, test logs and the incremental calculation are
-in the [investigation details](reports/c-preprocessor-scanner-paths-details-20261015.json).
+in the investigation details.
 
-[Storage measurements](reports/c-preprocessor-scanner-paths-storage-20261015.json)
+Storage measurements
 show allocation/reallocation calls increasing 1.26%, 1.08% and 0.59% for Lua,
 QuickJS and SQLite, with requested bytes increasing 0.038%, 0.028% and 0.011%.
 The extra directory map lasts only for the current invocation. Single-process
@@ -811,12 +815,12 @@ python3 suite/measure_preprocessor.py \
 
 ### Lexer rewrite, arena/interner, cleanup, and SSA investigation (2026-10-15)
 
-[Interactive report](reports/c-frontend-optimized-20261015.html),
-[paired measurements](reports/c-frontend-optimized-20261015.json),
-[storage measurements](reports/c-frontend-optimized-storage-20261015.json),
-[production and outlined stacks](reports/c-frontend-optimized-stacks-20261015.json),
-[SSA visit counters](reports/c-frontend-ssa-investigation-20261015.json), and
-[build provenance / validation](reports/c-frontend-optimized-details-20261015.json)
+Interactive report,
+paired measurements,
+storage measurements,
+production and outlined stacks,
+SSA visit counters, and
+build provenance / validation
 compare the frontend after commit `24ca853` with the rewrite. These are resident
 preprocessed-C-to-IR measurements, excluding preprocessing and the backend.
 
@@ -1268,7 +1272,7 @@ Both use two warmups and eleven alternating benchmark pairs, retaining raw
 samples, binary/input hashes, and paired bootstrap intervals.
 
 Results and ranked patterns are in
-[`reports/app-hot-loops-20261016.json`](reports/app-hot-loops-20261016.json).
+`reports/app-hot-loops-20261016.json`.
 Forty-eight native captures cover MacHost and the NUC; LinuxHost additionally runs both
 probes and machine-code parity checks. The helper probe reduces QuickJS benchmark
 time by 12–19% on MacHost, 20–48% on LinuxHost, and 4–13% on the NUC. A bounded inliner
@@ -1283,7 +1287,7 @@ has not been established; many token runs in these fixtures are only 1–9 bytes
 ### Clang comparison and proposed next step
 
 The completed three-host comparison is retained in
-[`reports/clang-vectorization-comparison-20261016.json`](reports/clang-vectorization-comparison-20261016.json).
+`reports/clang-vectorization-comparison-20261016.json`.
 Clang already enables loop and SLP vectorization at `-O2`; driver checks and
 successful optimization remarks confirm this for the installed compilers.
 The comparison also disables both vectorizers and adds native CPU targeting
@@ -1388,8 +1392,8 @@ separately measures empty/short/full ASCII inputs and early exits. No applicatio
 source expansion or decimal-division rewrite is used.
 
 The three-host results are retained in
-[`reports/profile-guided-compiler-20261016.json`](reports/profile-guided-compiler-20261016.json)
-and an interactive [comparison](reports/profile-guided-compiler-20261016.html).
+`reports/profile-guided-compiler-20261016.json`
+and an interactive comparison.
 Adding inlining and cleanup with vectorization enabled reduces QuickJS runtime
 by 17–26% on MacHost, 30–40% on LinuxHost, and 18–29% on the NUC in this run. QuickJS
 native code grows about 9–15%. Long ASCII control scans are about 5–9 times
@@ -1412,20 +1416,20 @@ static archives do not create DSOs),
 (`_overflow_p` deferred; largest 128-bit multiply assembly-size caveat, no runtime
 speedup claim), and [packed AVX arithmetic](../docs/x86-avx-subset.md#packed-arithmetic-extension)
 (existing opt-in `--target-features avx`, 128-bit only, no AVX2/AVX-512).
-The [frontend cloning investigation](../docs/c-frontend-cloning.md) rejected the
+The frontend cloning investigation rejected the
 scoped expression change and implemented no gain; initializer incidence motivates
-a separate future session. The [final portability validation](../docs/final-portability-validation.md)
+a separate future session. The final portability validation
 records the focused ownership reruns and inherited round-four workspace evidence.
 
 ## Current application runtime profiles versus stock Clang O2 (2026-10-16)
 
-The [current runtime report](../docs/current-app-runtime-2026-10-16.md) measures
+The current runtime report measures
 production-equivalent `6e6d2c2` application binaries, with two independent native
 captures of every Lua/QuickJS/SQLite workload for both compilers on MacHost and
 LinuxHost. Separate paired latency runs use stock Clang O2, canonical executable
 paths, two warmups and eleven alternating pairs. It retains correctness checks,
 text parity, matching IR/disassembly, sample-quality limits and five bounded
-compiler recommendations. [Raw evidence and reproduction](reports/current-app-runtime-2026-10-16/README.md)
+compiler recommendations. Raw evidence and reproduction
 include hash manifests and losslessly compressed captures. Historical inliner
 probes above remain historical; no source probes or compiler changes enter this
 matrix.

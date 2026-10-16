@@ -117,16 +117,16 @@ clang hello.o -o hello
 ./hello
 ```
 
-The [NUC bring-up report](suite/reports/x86-linux-bringup-20261015.html) records
+The NUC bring-up report records
 native execution on Ubuntu 24.04 / Intel i7-1360P, with Rust 1.99 and Clang 18.
 Compiler tests, ordinary/optimized C fixtures, both assemblers with debug info,
 and Lua's portable tests in all four compiler/selection modes pass. GNU aligned
 typedefs now preserve alignment independently of size and type compatibility,
 so glibc's `pthread.h` parses and QuickJS and SQLite also pass all four modes.
-The [full macOS/Linux benchmark report](suite/reports/full-platform-benchmarks-20261015.html)
+The full macOS/Linux benchmark report
 records the subsequent application measurements.
 
-The [allocator premerge validation](suite/reports/premerge-linux-debugger-2026-10-15/summary.json)
+The allocator premerge validation
 passes 214 compiler test functions and 27 portable assembler tests on that
 Linux NUC, plus Lua in all eight allocator × optimization × selection modes.
 Native Linux GDB and DWARF verification cover Fast/Full with and without
@@ -221,10 +221,10 @@ compilation. The driver starts and retains the client for the invocation.
 Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
 crates and manage the Tracy client themselves. Benchmark uninstrumented
 release builds for final timings; use instrumented builds to locate costs.
-The [frontend cloning investigation](docs/c-frontend-cloning.md) rejected the
+The frontend cloning investigation rejected the
 scoped expression change; initializer clone incidence motivates a separate
 future investigation. No performance gain was implemented.
-The [compilation-speed investigation](suite/reports/compilation-speed-analysis-20261015.html)
+The compilation-speed investigation
 compares complete object workflows with assembly-only output on macOS and Linux,
 and separates frontend, verification, optimization, codegen and object costs.
 
@@ -374,7 +374,7 @@ instructions are typed; its current generator still formats and parses Intel
 source at the boundary. See [native x86 assembly](docs/native-x86-assembler.md)
 and [the AArch64 API design](docs/design.md#assembler).
 The completed migration covers all 85,988 generated Lua instructions, with zero
-source-text bytes. In the [33-file Lua comparison](suite/reports/compiler-object-api-complete-20261015.html),
+source-text bytes. In the 33-file Lua comparison,
 the API is 1.68× faster for codegen plus object generation and 1.48× for the
 complete CLI workflow than the assembly-text round trip. Paired CLI time is
 5.2% lower than the previous partial API; all objects are byte-identical.
@@ -419,7 +419,7 @@ order, discards warmups, and retains raw samples, binary and input hashes,
 and bootstrap intervals. File reading, verification, and prerequisite stages
 are outside each timer; result allocation and destruction are included.
 These synthetic inputs measure compiler throughput, rather than application
-runtime. The [October 15 comparison](suite/reports/pipeline-stages-aarch64-2026-10-15.json)
+runtime. The October 15 comparison
 records the byte-scanning IR lexer, direct assembly formatting, and encoder
 field-validation changes.
 
@@ -457,7 +457,7 @@ not dynamic traffic measurements. Additional coarse stages separate
 constant/address folding from compare fusion and lowering entry, body, finish,
 and allocation annotations; no per-instruction timers are used.
 
-The [allocator candidate comparison](suite/reports/backend-tiers-aarch64-2026-10-15/report.html)
+The allocator candidate comparison
 compares saved Fast/Full implementations against the new paths, with identical
 IR/selection settings and separate generated-code runtime measurements.
 `suite/measure_backend_tiers.py` builds direct-object application binaries,
@@ -472,7 +472,7 @@ support `--regalloc-fast`. The renderer `suite/render_backend_tiers.py` reads
 to `--output-dir`. Compiler-speed results exclude the frontend and do not
 establish whole-build gains.
 
-The [application backend profile](suite/reports/backend-profile-aarch64-2026-10-15/report.html)
+The application backend profile
 covers all 33 Lua files in default, optimized, and debug configurations,
 plus the QuickJS core and SQLite amalgamation. Its directory retains a summary
 and compressed raw samples. `suite/render_backend_profile.py` rebuilds the report
@@ -494,7 +494,7 @@ in randomized paired rounds, including in-process timings and command-line
 costs. Supply `--candidate NAME CLI PROFILE` for each candidate, including
 `baseline`, plus `--input-dir`, `--work-dir` and `--output`. Each input must
 produce byte-identical Mach-O objects across candidates. The October 15
-[candidate measurements](suite/reports/assembler-candidates-aarch64-2026-10-15.json)
+candidate measurements
 cover all 33 Lua files, mixed instructions, debug output, and separate scanning
 stress inputs. Allocation reduction was retained; the SIMD comment-scanning
 experiment remains on `perf/simd-source-scanning` (`ac18b71`) because its
@@ -503,17 +503,17 @@ strong stress-input gains did not improve ordinary Lua parsing.
 A subsequent scanner fuses line splitting and comment removal, reusing NEON
 delimiter masks across ordinary instruction lines and using a scalar fallback
 on other targets. Combined with per-pass bump scratch and borrowed symbol
-names, the [second candidate run](suite/reports/assembler-arena-simd-aarch64-2026-10-15.json)
+names, the second candidate run
 reduced Lua's in-process assembly time by about 15% and summed CLI time by
 about 5%, relative to the allocation-reduced baseline. All 37 inputs produced
 identical objects. Arena scratch covers fixup queues, label order, debug rows,
 frames and CFI data; independently owned outputs, ordered-map nodes, and some
 parser/writer buffers remain heap allocated. The allocation audit is at the
 top of `crates/keel-asm/src/parser.rs`. Separate
-[memory measurements](suite/reports/assembler-arena-memory-aarch64-2026-10-15.json)
+memory measurements
 show the debug-heavy input's peak RSS increasing by about 0.6 MiB.
 
-The [mapped-input comparison](suite/reports/assembler-mmap-aarch64-2026-10-15.json)
+The mapped-input comparison
 found no clear overall warm-cache speedup before these parser changes. These measurements
 do not establish cold-storage behavior or benefits on larger applications.
 
@@ -528,11 +528,11 @@ python3 suite/measure_assembler_io.py --compiler target/release/keel \
   --output target/assembler-bench/scale-report.json
 ```
 
-The [64/256 MiB scaling run](suite/reports/assembler-mmap-scale-aarch64-2026-10-15.json)
+The 64/256 MiB scaling run
 found less than 1% paired end-to-end speed change on both instruction-dense
 and function-heavy inputs. The function-heavy 256 MiB case had a small
 measurable gain; the instruction-dense case's interval included no gain.
-The [memory check](suite/reports/assembler-mmap-scale-memory-aarch64-2026-10-15.json)
+The memory check
 showed a larger benefit: macOS peak memory footprint dropped by approximately
 the input file size, while peak resident size stayed similar because mapped
 file pages still count toward residency. These generated files are scaling

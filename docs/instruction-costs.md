@@ -27,7 +27,7 @@ ordinary ALU costs when the scheduling model lacks their behavior.
 LLVM 23.1.2 recognizes `apple-m5` but selects **CycloneModel** in its
 [processor definitions](https://github.com/llvm/llvm-project/blob/llvmorg-23.1.2/llvm/lib/Target/AArch64/AArch64Processors.td).
 These are provisional scheduling estimates, not measured M5 latencies.
-The [checked-in catalog](../suite/reports/instruction-costs-apple-m5-llvm23-2026-10-15.json)
+The checked-in catalog
 has usable model metrics for 358 representative forms and explicit gaps for 176,
 mostly LSE atomics, barriers and call/return behavior. Keep this distinction
 when using it. Hardware
@@ -148,7 +148,7 @@ multiply-add covers, shared constants and wrapping integer semantics. Narrow
 integers, i128 and other constants retain their previous lowering. An M5 tuning
 request for the x86 target is rejected by both the driver and backend APIs.
 
-The [native calibration](../suite/reports/apple-m5-integer-2026-10-15.json)
+The native calibration
 measures 32- and 64-bit dependency chains and eight independent streams on an
 Apple M5 Max. Keel assembles the generated kernels; a small C timing/checking
 harness uses the system toolchain. Neither LLVM timing data nor llvm-mca is
@@ -176,7 +176,7 @@ python3 suite/generate_m5_tuning.py --check
 ```
 
 Compare application behavior using `keel-m5` and `keel-m5-fast` suite presets.
-The [application comparison](../suite/reports/apple-m5-tuning-aarch64-2026-10-15.json)
+The application comparison
 uses identical IR passes and full instruction selection on both sides; the
 candidate adds only M5 tuning. Both sides use Keel's assembler, with system
 linking. The final application runtime geometric-mean ratio is 1.0013 (0.13% more

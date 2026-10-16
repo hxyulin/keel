@@ -162,7 +162,7 @@ Validated on 2026-10-16 on LinuxHost (CachyOS, Clang 23.1.1, GNU ld 2.47)
 and rm-nuc-01 (Ubuntu 24.04, Clang 18.1.3, GNU ld 2.42). All nine runtime
 comparisons passed on each host. The full linker/driver Rust tests passed on
 macOS arm64 and LinuxHost; the eight focused ELF/CLI tests also passed on the NUC.
-The [machine-readable report](../suite/reports/elf-linker-x86_64-20261016.json)
+The machine-readable report
 records host/tool versions, outcomes and executable sizes.
 
 The portable Rust tests cover deterministic images, local/global/common/weak
@@ -182,7 +182,7 @@ report and program-header dumps under `--out`. No link-speed claim is made.
 
 ### Library and cross-compilation validation — 2026-10-16
 
-The [library report](../suite/reports/elf-linker-libraries-20261016.json)
+The library report
 records nine additional differential cases on each Linux host: direct/archive
 search, O0/O2 shared imports, shared-library search, mixed static/dynamic search,
 a shared library pulling an executable definition from an archive, choosing a
@@ -192,7 +192,7 @@ exports and function-pointer identity. The 18 Linux comparisons pass, as do
 the nine original static probes on each host. Full linker/driver Rust regression
 suites pass on macOS, LinuxHost and the NUC; strict local Clippy and formatting pass.
 
-The [Mac cross-compilation report](../suite/reports/elf-linker-macos-cross-20261016.json)
+The Mac cross-compilation report
 records three executables assembled/compiled/linked on MacHost macOS arm64 and
 copied unchanged to both Linux hosts. Static-archive, shared-library and dynamic
 libc programs all exit 42; the libc program also prints `hello libc`. Matching

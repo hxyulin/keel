@@ -85,7 +85,7 @@ chain in both widths for baseline/AVX output inspection or a caller-driven
 microbenchmark. No speedup claim is made without measurements on the target CPU.
 
 The guarded runtime tests passed on the i7-1360P Linux NUC. See the
-[integration report](../suite/reports/native-x86-features-20261015.json) for
+integration report for
 combined AVX/BMI application and baseline compatibility validation.
 
 ## Packed arithmetic extension
@@ -113,5 +113,5 @@ These descriptions identify coverage; execution evidence for this revision is
 recorded separately and historical reports above do not validate this extension.
 
 Final packed-extension execution evidence and exact commands/hashes are in
-[the scoped validation report](x86-avx-packed-validation.md). Independent review
+the scoped validation report. Independent review
 and coordinator integration remain separate steps.

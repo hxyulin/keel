@@ -218,7 +218,7 @@ Validated on MacHost, Apple M5 Max, macOS 27.0.1 (26A434), macOS 27.0 SDK,
 Only this OS was tested: an older minimum in `LC_BUILD_VERSION` is not evidence
 of compatibility with older macOS releases.
 
-[Machine-readable results and object audit](../suite/reports/native-linker-aarch64-2026-10-15.json)
+Machine-readable results and object audit
 record both modes, symbol/section/load-command forms, relocation counts, input
 undefined symbols, and executable sizes. The 44 application inputs were compiled
 with this branch's `keel cc --emit-object`, both plain and `-O`. Each set linked
@@ -282,7 +282,7 @@ performance claim is made.
 
 ## Compatibility validation — 2026-10-15
 
-The separate [TLS/weak/debug report](../suite/reports/native-linker-compatibility-20261015.json)
+The separate TLS/weak/debug report
 records the new differential probes and regression suites. This work started
 from main `426d6fc` in an isolated MacHost worktree. macOS 27.0.1 and the macOS 27.0
 SDK are the only tested platform versions. All runtime comparisons use identical

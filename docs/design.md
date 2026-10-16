@@ -775,7 +775,7 @@ in the [canonicalization section](simplification.md#canonicalization-contract).
 `const-fold` stays available for isolated numeric folding and historical
 comparisons; the defaults use the broader combining pass before and after
 private stack forwarding. The paired
-[pass ablation matrix](../suite/reports/pass-ablations-aarch64-2026-10-15.json)
+pass ablation matrix
 supports retaining CFG cleanup, GVN, DCE and GCM. Removing GCM regresses runtime
 by 4.2% overall; removing GVN grows aggregate text by 5.1%, with mixed runtime
 effects. Late phi cleanup avoids the early regression but adds compiler cost
@@ -840,7 +840,7 @@ are exhaustively checked for i8 and at wide integer boundaries, with a
 application measurement (Apple M5 Max) gives runtime ratio 0.973 and compiler
 ratio 1.011 versus the historical Full pipeline; 38/44 translation units
 change assembly. Raw samples and intervals are in
-[`instcombine-aarch64-2026-10-15.json`](../suite/reports/instcombine-aarch64-2026-10-15.json).
+`instcombine-aarch64-2026-10-15.json`.
 
 The final default-pipeline confirmation reproduces the runtime improvement
 (2.7% geometric mean), with 1.5% extra compiler cost and 25,052 bytes less
@@ -849,7 +849,7 @@ in all 44 application files. Workspace/native tests, six application suite
 configurations, Clippy, and the Tracy feature build pass. Debugger/debug-info
 integration tests were excluded from the workspace run. Raw samples,
 compiler/source hashes and commands are in
-[`default-pipeline-aarch64-2026-10-15.json`](../suite/reports/default-pipeline-aarch64-2026-10-15.json).
+`default-pipeline-aarch64-2026-10-15.json`.
 
 Trivial-phi elimination checks every incoming edge, ignoring a parameter's
 own backedge value only when another incoming value anchors it. Replacement
@@ -861,7 +861,7 @@ Tests cover distinct edges, loop induction, SCCP aliases, reverse layout,
 128 pass subsets, and native execution with restricted register pools.
 The pass remains opt-in: placing it before GVN/GCM regressed Lua fib by
 2.21× and QuickJS fib/sort by 1.20×/1.16× in paired application measurements.
-See [`phi-simplify-aarch64-2026-10-15.json`](../suite/reports/phi-simplify-aarch64-2026-10-15.json).
+See `phi-simplify-aarch64-2026-10-15.json`.
 
 Forwarding composes the incoming argument tuple with the outgoing jump,
 including permutations and repeated arguments. A forwarding block whose
@@ -894,7 +894,7 @@ Every i8 operand pair is checked against Rust overflow operations, with
 wide-boundary and native regressions. i128 folds remain conservative because
 the constant immediate cannot represent general i128 results. Application
 assembly was identical in all 44 files and compile timing was neutral; see
-[`checked-fold-aarch64-2026-10-15.json`](../suite/reports/checked-fold-aarch64-2026-10-15.json).
+`checked-fold-aarch64-2026-10-15.json`.
 Regression tests
 compare SCCP followed by all 32 subsets of the original five passes against
 an independent execution model, and
@@ -935,7 +935,7 @@ With these choices, `-O` output is never larger than the unoptimized output on t
 test programs, and programs whose checks are all constants fold away
 entirely, which checks constant folding against results from the hardware.
 
-The [IR contract audit](../suite/reports/ir-contract-audit-2026-10-15.json)
+The IR contract audit
 records the memory contracts, qualifier propagation, rewrite-verifier and
 index/size checks, plus the aggregate-copy/ABI regression (previously 9,
 now 3, matching Clang). Validation covers parser round-trips, both target
@@ -947,7 +947,7 @@ is claimed. Effect/trap classification is exhaustive so future opcodes
 cannot silently inherit memory-free or non-trapping behavior.
 
 The first memory optimization is measured separately in the
-[memory-forward sweep](../suite/reports/memory-forward-aarch64-2026-10-15.json).
+memory-forward sweep.
 It forwards only resolved identical SSA addresses and identical types within
 one block. An earlier successful ordinary load/store establishes the bytes;
 all writes clear the table, then an ordinary store establishes its own value.
@@ -1413,7 +1413,7 @@ Deterministic indexed GNU and Darwin/BSD static archives are available through
 for usage and validation. Static packaging is distinct from DSO creation.
 The Darwin consuming linker's common-only extraction limitation remains.
 
-The [frontend cloning investigation](c-frontend-cloning.md) rejected the scoped
+The frontend cloning investigation rejected the scoped
 expression change and implemented no performance gain. Initializer clone
 incidence motivates a separate future session.
 

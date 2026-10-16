@@ -100,7 +100,7 @@ named-declarator placements and unambiguous grouping remain available. This is
 bounded ownership support, not full GNU attribute-placement or C++ grammar support.
 The classification follows [Clang's attribute definitions](https://github.com/llvm/llvm-project/blob/main/clang/include/clang/Basic/Attr.td)
 and retained per-attribute Clang AST evidence, detailed in
-[the ROUND3 correction record](function-attributes-round3-corrections.md).
+the ROUND3 correction record.
 
 Indirect call signatures carry none of these new attributes. Function
 pointer/declarator attributes do not establish indirect-call promises; no
