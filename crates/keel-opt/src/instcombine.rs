@@ -5,6 +5,8 @@
 //! A use worklist revisits consumers after substitutions, including when
 //! layout order differs from definition order across blocks.
 
+mod constant_division;
+
 use crate::const_fold::{self, constant_data as constant};
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
@@ -297,6 +299,12 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
                     op: new_op,
                     args: [operand, func.first_result(c)],
                 }));
+            }
+            if matches!(op, BinaryOp::Udiv | BinaryOp::Urem)
+                && let Some(divisor) = y
+                && let Some(data) = constant_division::reduce(func, inst, op, a, b, ty, divisor)
+            {
+                return Some(Fold::Data(data));
             }
         }
         InstData::Unary {

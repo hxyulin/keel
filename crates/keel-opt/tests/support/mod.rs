@@ -39,6 +39,10 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
                 InstData::Binary { op, args } => Some(match op {
                     BinaryOp::Iadd => read(args[0]).wrapping_add(read(args[1])),
                     BinaryOp::Isub => read(args[0]).wrapping_sub(read(args[1])),
+                    BinaryOp::Umulhi => {
+                        let width = func.value_type(args[0]).bytes().unwrap() * 8;
+                        ((u128::from(read(args[0])) * u128::from(read(args[1]))) >> width) as u64
+                    }
                     BinaryOp::Imul => read(args[0]).wrapping_mul(read(args[1])),
                     BinaryOp::And => read(args[0]) & read(args[1]),
                     BinaryOp::Or => read(args[0]) | read(args[1]),
