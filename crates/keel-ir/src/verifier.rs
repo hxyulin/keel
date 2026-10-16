@@ -13,7 +13,7 @@ use crate::{
     ValueDef,
 };
 use crate::{DataInit, DataItem, DebugScope, DebugType, DebugTypeData, Module};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -455,6 +455,51 @@ struct Verifier<'a> {
     errors: Vec<VerifierError>,
 }
 
+// Per-verification positions: compact arenas retain direct indexing, while
+// heavily pruned arenas allocate only for instructions still in the layout.
+enum InstPositions {
+    Dense(Vec<usize>),
+    Sparse(HashMap<Inst, usize>),
+}
+
+impl InstPositions {
+    fn new(func: &Function) -> Self {
+        // Counting slice lengths visits blocks, not historical instructions.
+        let live = func.blocks().fold(0usize, |count, block| {
+            count.saturating_add(func.block_insts(block).len())
+        });
+        // A small allowance avoids hashing tiny functions. Otherwise dense
+        // storage is bounded by four slots per live instruction. This is a
+        // memory bound, not a benchmark-tuned crossover.
+        let mut positions = if func.num_insts() <= 1024.max(live.saturating_mul(4)) {
+            Self::Dense(vec![usize::MAX; func.num_insts()])
+        } else {
+            Self::Sparse(HashMap::with_capacity(live))
+        };
+        for block in func.blocks() {
+            for (i, &inst) in func.block_insts(block).iter().enumerate() {
+                match &mut positions {
+                    Self::Dense(slots) => slots[inst.index()] = i,
+                    Self::Sparse(slots) => {
+                        slots.insert(inst, i);
+                    }
+                }
+            }
+        }
+        positions
+    }
+
+    fn get(&self, inst: Inst) -> Option<usize> {
+        match self {
+            Self::Dense(slots) => slots
+                .get(inst.index())
+                .copied()
+                .filter(|&i| i != usize::MAX),
+            Self::Sparse(slots) => slots.get(&inst).copied(),
+        }
+    }
+}
+
 impl Verifier<'_> {
     fn run(&mut self) {
         let func = self.func;
@@ -507,15 +552,8 @@ impl Verifier<'_> {
             );
         }
 
-        // Position of each instruction within its block, for same-block dominance.
-        // Instruction indices are bounded by the arena size, including removed
-        // instructions. Keep holes distinct from the first position in a block.
-        let mut position = vec![usize::MAX; func.num_insts()];
-        for block in func.blocks() {
-            for (i, &inst) in func.block_insts(block).iter().enumerate() {
-                position[inst.index()] = i;
-            }
-        }
+        // Position of each live instruction within its block, for same-block dominance.
+        let position = InstPositions::new(func);
 
         let mut operands = Vec::new();
         for block in func.blocks() {
@@ -1224,7 +1262,7 @@ impl Verifier<'_> {
         }
     }
 
-    fn check_dominance(&mut self, inst: Inst, value: Value, position: &[usize]) {
+    fn check_dominance(&mut self, inst: Inst, value: Value, position: &InstPositions) {
         let func = self.func;
         let value = func.resolve(value);
         let use_block = func.inst_block(inst);
@@ -1241,11 +1279,9 @@ impl Verifier<'_> {
                 let def_block = func.inst_block(def_inst);
                 if def_block == use_block {
                     position
-                        .get(def_inst.index())
-                        .zip(position.get(inst.index()))
-                        .is_some_and(|(&def, &use_)| {
-                            def != usize::MAX && use_ != usize::MAX && def < use_
-                        })
+                        .get(def_inst)
+                        .zip(position.get(inst))
+                        .is_some_and(|(def, use_)| def < use_)
                 } else {
                     self.domtree.dominates(def_block, use_block)
                 }

@@ -179,18 +179,15 @@ fn expect_errors(f: &keel_ir::Function, expected: &[(keel_ir::Inst, String)]) {
 
 #[test]
 fn sparse_instruction_positions_preserve_same_block_dominance() {
+    for holes in [0, 1021, 1022, 4096] {
+        sparse_instruction_positions_preserve_same_block_dominance_with_holes(holes);
+    }
+}
+
+fn sparse_instruction_positions_preserve_same_block_dominance_with_holes(holes: usize) {
     let mut f = keel_ir::Function::new("sparse", keel_ir::Signature::new(&[], &[]));
     let block = f.create_block();
-    for _ in 0..256 {
-        let hole = f.append_inst(
-            block,
-            InstData::Iconst {
-                ty: Type::I64,
-                imm: 0,
-            },
-        );
-        f.remove_inst(hole);
-    }
+    remove_instructions(&mut f, block, holes);
     let def = f.append_inst(
         block,
         InstData::Iconst {
@@ -237,8 +234,15 @@ fn sparse_instruction_positions_preserve_same_block_dominance() {
 
 #[test]
 fn large_call_and_asm_operands_keep_resolved_first_occurrence_order() {
+    for holes in [0, 4096] {
+        large_call_and_asm_operands_keep_resolved_first_occurrence_order_with_holes(holes);
+    }
+}
+
+fn large_call_and_asm_operands_keep_resolved_first_occurrence_order_with_holes(holes: usize) {
     let mut f = keel_ir::Function::new("many_operands", keel_ir::Signature::new(&[], &[]));
     let block = f.create_block();
+    remove_instructions(&mut f, block, holes);
     let mut defs = Vec::new();
     for n in 0..257 {
         defs.push(f.append_inst(
@@ -325,8 +329,19 @@ fn large_call_and_asm_operands_keep_resolved_first_occurrence_order() {
 
 #[test]
 fn switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses() {
+    for holes in [0, 4096] {
+        switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses_with_holes(
+            holes,
+        );
+    }
+}
+
+fn switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses_with_holes(
+    holes: usize,
+) {
     let mut f = keel_ir::Function::new("switch_removed", keel_ir::Signature::new(&[], &[]));
     let entry = f.create_block();
+    remove_instructions(&mut f, entry, holes);
     let target = f.create_block();
     f.append_block_param(target, Type::I32);
     f.append_block_param(target, Type::I64);
@@ -394,8 +409,15 @@ fn switch_operands_deduplicate_aliases_and_keep_type_errors_before_removed_uses(
 
 #[test]
 fn malformed_operands_keep_preflight_order_and_duplicates() {
+    for holes in [0, 4096] {
+        malformed_operands_keep_preflight_order_and_duplicates_with_holes(holes);
+    }
+}
+
+fn malformed_operands_keep_preflight_order_and_duplicates_with_holes(holes: usize) {
     let mut f = keel_ir::Function::new("bad_refs", keel_ir::Signature::new(&[], &[]));
     let block = f.create_block();
+    remove_instructions(&mut f, block, holes);
     let callee = f.import_function("callee", keel_ir::Signature::new(&[], &[]));
     let call = f.append_inst(
         block,
@@ -414,4 +436,90 @@ fn malformed_operands_keep_preflight_order_and_duplicates() {
             })
             .to_vec())
     );
+}
+
+// Removed traps create historical instruction IDs without adding values, so
+// malformed operand handles remain malformed in both storage regimes.
+fn remove_instructions(f: &mut keel_ir::Function, block: Block, count: usize) {
+    for _ in 0..count {
+        let inst = f.append_inst(block, InstData::Trap);
+        f.remove_inst(inst);
+    }
+}
+
+#[test]
+fn holey_positions_preserve_cross_block_and_invoke_dominance() {
+    let mut module = keel_ir::parse(
+        "decl @may_throw(i32) -> i32
+         decl @personality()
+         func @f(i32) -> i32 cc(c) personality @personality {
+         block0(v0: i32):
+             v1 = invoke @may_throw(v0), block1, block2
+         block1:
+             v2 = iadd v1, v0
+             return v2
+         block2:
+             v3, v4 = landingpad cleanup
+             v5 = iadd v1, v2
+             return v5
+         }",
+    )
+    .unwrap();
+    let f = &mut module.functions[0];
+    let entry = f.entry_block().unwrap();
+    let bad_use = f
+        .layout_insts()
+        .find(|&(_, inst)| {
+            matches!(f.inst_data(inst), InstData::Binary { .. })
+                && f.first_result(inst) == Value::new(5)
+        })
+        .unwrap()
+        .1;
+    let expected = [Value::new(1), Value::new(2)].map(|value| {
+        (
+            bad_use,
+            format!("use of {value} is not dominated by its definition"),
+        )
+    });
+    expect_errors(f, &expected);
+    let compact_errors = keel_ir::verify(f);
+    remove_instructions(f, entry, 4096);
+    assert_eq!(keel_ir::verify(f), compact_errors);
+    // Both ordinary and invoke results remain valid in the normal destination;
+    // replacing the unwind uses with an entry parameter repairs the function.
+    f.inst_data_mut(bad_use)
+        .for_each_operand_mut(|v| *v = Value::new(0));
+    keel_ir::verify(f).unwrap();
+}
+
+#[test]
+fn holey_arenas_preserve_all_golden_verifier_outcomes() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "keel"))
+        .collect();
+    paths.sort();
+    let mut checked = 0;
+    for path in paths {
+        let Ok(mut module) = keel_ir::parse(&std::fs::read_to_string(&path).unwrap()) else {
+            continue;
+        };
+        let compact = keel_ir::verify_module(&module);
+        for f in &mut module.functions {
+            if let Some(entry) = f.entry_block() {
+                let holes = f.num_insts().saturating_mul(4).max(4096);
+                remove_instructions(f, entry, holes);
+            }
+        }
+        assert_eq!(
+            keel_ir::verify_module(&module),
+            compact,
+            "{}",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0);
 }
