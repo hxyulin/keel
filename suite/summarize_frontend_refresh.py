@@ -65,7 +65,7 @@ def main(root):
     out['scaling']={}
     for a in ['lua','quickjs','sqlite']:
         ps=out['per_tu'][a+':False'];xs=[p['bytes'] for p in ps];ys=[p['total_ms']['median'] for p in ps]
-        out['scaling'][a]={'translation_units':len(ps),'bytes':sum(xs),'tokens':sum(p['tokens'] for p in ps),'functions':sum(p['functions'] for p in ps),'median_time_sum_ms_per_decimal_mb':sum(ys)/sum(xs)*1e6,'byte_time_pearson':statistics.correlation(xs,ys) if len(xs)>2 else None}
+        out['scaling'][a]={'translation_units':len(ps),'bytes':sum(xs),'tokens':sum(p['tokens'] for p in ps),'functions':sum(p['functions'] for p in ps),'median_time_sum_ms_per_decimal_mb':sum(ys)/sum(xs)*1e6,'byte_time_pearson':(sum((x-statistics.mean(xs))*(y-statistics.mean(ys)) for x,y in zip(xs,ys))/math.sqrt(sum((x-statistics.mean(xs))**2 for x in xs)*sum((y-statistics.mean(ys))**2 for y in ys))) if len(xs)>2 else None}
     if (root/'tests.log').exists():
         text=(root/'tests.log').read_text();audit=[]
         for m in re.finditer(r'  left: (\[[^\n]*\])\n right: (\[[^\n]*\])',text):
