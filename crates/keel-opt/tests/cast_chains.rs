@@ -150,7 +150,7 @@ fn extension_equality_excludes_nonmatching_and_ordered_comparisons() {
         ("i8, i8", "sext.i64 v0", "uext.i64 v1"),
         ("i16, i16", "trunc.i8 v0", "trunc.i8 v1"),
         ("i8, i16", "sext.i64 v0", "sext.i64 v1"),
-        ("i8, i8", "uext.i64 v0", "iconst.i64 0"),
+        ("i8, i8", "uext.i64 v0", "iconst.i64 1"),
         ("ptr, ptr", "ptrtoint.i64 v0", "ptrtoint.i64 v1"),
         ("f32, f32", "fpext.f64 v0", "fpext.f64 v1"),
     ] {
