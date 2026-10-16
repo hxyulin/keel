@@ -209,9 +209,51 @@ def probes(args):
     return rows
 
 
+def runtime_control(args):
+    """A/A check at one pathname, for identical application binaries only."""
+    import shutil
+    report = json.loads(args.apps.read_text())
+    build = pathlib.Path(report["work_dir"])
+    rows = []
+    for suite, binary, benches in [("lua", "lua", ["fib", "sort", "string", "float"]),
+                                   ("quickjs", "qjs", ["fib", "sort", "string"]),
+                                   ("sqlite", "sqlite3", ["queries"])]:
+        original = build / "baseline" / suite / binary
+        candidate = build / "current" / suite / binary
+        assert original.read_bytes() == candidate.read_bytes()
+        canonical = args.work / binary
+        shutil.copy2(original, canonical)
+        for bench in benches:
+            if suite == "lua":
+                cmd = [canonical, ROOT / "suite/lua/bench.lua", bench]
+                stdin = None
+            elif suite == "quickjs":
+                cmd = [canonical, "--stack-size", "4194304", ROOT / "suite/quickjs/bench.js", bench]
+                stdin = None
+            else:
+                cmd = [canonical, ":memory:"]
+                stdin = (ROOT / "suite/sqlite/bench.sql").read_bytes()
+            samples = {"before": [], "after": []}
+            outputs = set()
+            for i in range(13):
+                for label in (["before", "after"] if i % 2 == 0 else ["after", "before"]):
+                    start = time.perf_counter()
+                    p = subprocess.run(list(map(str, cmd)), input=stdin, capture_output=True, check=True)
+                    ms = (time.perf_counter() - start) * 1000
+                    LOG.append(dict(command=list(map(str, cmd)), label=label, iteration=i, wall_ms=ms,
+                                    returncode=p.returncode, stdout=p.stdout.decode(), stderr=p.stderr.decode()))
+                    outputs.add(p.stdout)
+                    if i >= 2:
+                        samples[label].append(ms)
+            assert len(outputs) == 1
+            rows.append(dict(suite=suite, bench=bench, identical_binary_sha256=sha(canonical),
+                             **summary(samples, random.Random(42))))
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["provenance", "inspect-apps", "rss", "stress", "probes"])
+    parser.add_argument("mode", choices=["provenance", "inspect-apps", "rss", "stress", "probes", "runtime-control"])
     parser.add_argument("--before", type=pathlib.Path, default=pathlib.Path("/tmp/keel-bench-target-f0d36f1/release/keel"))
     parser.add_argument("--after", type=pathlib.Path, default=pathlib.Path("/tmp/keel-bench-target-6e6d2c2/release/keel"))
     parser.add_argument("--before-checkout", type=pathlib.Path, default=pathlib.Path("/tmp/keel-bench-f0d36f1"))
@@ -222,7 +264,7 @@ def main():
     args = parser.parse_args()
     args.work.mkdir(parents=True, exist_ok=True)
     try:
-        result = {"provenance": provenance, "inspect-apps": inspect_apps, "rss": rss, "stress": stress, "probes": probes}[args.mode](args)
+        result = {"provenance": provenance, "inspect-apps": inspect_apps, "rss": rss, "stress": stress, "probes": probes, "runtime-control": runtime_control}[args.mode](args)
         (args.work / f"{args.mode}.json").write_text(json.dumps(result, indent=2) + "\n")
     finally:
         with gzip.open(args.work / f"{args.mode}-commands.jsonl.gz", "wt") as f:
