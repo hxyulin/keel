@@ -107,7 +107,7 @@ def main():
         lines += ['']
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
-    (args.output / 'metrics.md').write_text('\n'.join(lines) + '\n')
+    (args.output / 'metrics.md').write_text('\n'.join(lines).rstrip() + '\n')
 
 
 if __name__ == '__main__':
