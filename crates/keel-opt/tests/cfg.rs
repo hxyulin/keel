@@ -243,30 +243,55 @@ block4(v6: i64):
 
 #[test]
 fn merging_cycle_preserves_entry_and_creates_self_loop() {
-    for target in [0, 1] {
+    for two_block_cycle in [false, true] {
+        // Both fixtures keep entry outside the cycle. Constants prevent
+        // forwarding, so the two-block case must merge into a self-loop.
+        let tail = if two_block_cycle {
+            "jump block2\nblock2:\n    v1 = iconst.i64 2\n    jump block1"
+        } else {
+            "jump block1"
+        };
         let src = format!(
             "func @f() {{
 block0:
     jump block1
 block1:
     v0 = iconst.i64 1
-    jump block2
-block2:
-    v1 = iconst.i64 2
-    jump block{target}
+    {tail}
 }}"
         );
         let optimized = optimize(&src);
         let func = &optimized.functions[0];
         let entry = func.entry_block().unwrap();
-        assert_eq!(func.blocks().count(), if target == 0 { 1 } else { 2 });
+        assert_eq!(func.blocks().count(), 2);
         let loop_block = func.blocks().last().unwrap();
+        assert_ne!(loop_block, entry);
+        let entry_term = *func.block_insts(entry).last().unwrap();
+        assert_eq!(
+            func.inst_data(entry_term).branch_dests()[0].block,
+            loop_block
+        );
         let term = *func.block_insts(loop_block).last().unwrap();
         assert_eq!(func.inst_data(term).branch_dests()[0].block, loop_block);
-        if target == 0 {
-            assert_eq!(loop_block, entry);
-        }
+        let constants: Vec<_> = func
+            .layout_insts()
+            .filter_map(|(_, inst)| match func.inst_data(inst) {
+                keel_ir::InstData::Iconst { imm, .. } => Some(*imm),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            constants,
+            if two_block_cycle { vec![1, 2] } else { vec![1] }
+        );
+        keel_ir::verify_module(&optimized).unwrap();
         assert_eq!(optimized.to_string(), optimize(&src).to_string());
+        let mut again = optimized.clone();
+        assert!(
+            !keel_opt::find_pass("simplify-cfg")
+                .unwrap()
+                .run(&mut again.functions[0])
+        );
     }
 }
 
