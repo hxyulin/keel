@@ -127,12 +127,27 @@ outside this initial implementation.
 
 ## Validation and remaining gates
 
-Twelve focused loop-memory tests pass. The broader IR/optimizer run
-passes 239 tests excluding golden tests; the original full attempt has
+Thirteen focused loop-memory tests pass. The broader IR/optimizer run
+passes 243 tests excluding golden tests; the original full attempt has
 one expected `unknown_pass` golden mismatch because the registered pass
 list changed. Root owns updating that shared golden after combining
-registrations. The C suite passes 120 tests. No production fix was needed
-after the independently reviewed source checkpoint.
+registrations. The initial full C run passed 120 tests; after the alias
+eligibility fix, 17 relevant C memory/restrict/attribute tests were rerun
+and passed.
+
+Combined review R1 found a valid in-memory alias-state counterexample:
+replacing a dead header constant's result, or a header sum parameter,
+with the invariant bound could make resolved clone-map keys overwrite the
+bound. At bound zero and seed one the initial guard could then reach a
+null load. The conservative parameter/result rejection above fixes both
+paths. Six direct Function API cases now verify input/output without a
+text roundtrip, require unchanged complete Function state, and compare
+first-load/return traces. They cover aliases to an invariant bound,
+header parameters and earlier results, chained aliases, and duplicate
+resolved parameter keys. The bounded oracle stops before memory access;
+pre-fix failures are retained. The separate source-fix checkpoint requires
+fresh combined review; the earlier source-only approval did not cover
+this counterexample.
 
 Before compiling or executing the fixture, structural checks on both
 fresh C-generated scalar IR and the exact retained `reload_restrict` IR
@@ -157,10 +172,10 @@ header-value returns, multiple liveouts, both branch orientations,
 locations, dominance, cleanup and conservative rejections.
 
 All builds used at most two Cargo jobs; native checks were serial under
-the third exclusive MacHost lease, which was explicitly released after all
-jobs exited. Logs, before/after IR, assembly, objects, retained compiler
+explicit exclusive MacHost leases, each released after all jobs exited. Logs, before/after IR, assembly, objects, retained compiler
 and test binaries, command records and hashes are ignored local evidence
-under `suite/reports/optimization-wave7-loop-memory-20261017/`. No
+under `suite/reports/optimization-wave7-loop-memory-20261017/` and
+`suite/reports/optimization-wave7-loop-memory-alias-fix-20261017/`. No
 performance measurement was performed. Root owns integration, later
 serial runtime/code-size/compile-cost gates, and any decision to enable a
 pass by default. Audited kernel-route
