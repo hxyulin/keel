@@ -195,3 +195,16 @@ block0:
     // The forward reference parses; dominance remains the verifier's concern.
     assert!(keel_ir::verify_module(&m).is_err());
 }
+
+#[test]
+fn inferred_memory_intrinsic_asm_and_metadata_results_match_parser() {
+    for source in [
+        include_str!("golden/atomics.keel"),
+        include_str!("golden/intrinsics.keel"),
+        include_str!("golden/inline_asm.keel"),
+        include_str!("golden/calls.keel"),
+        include_str!("golden/srclocs.keel"),
+    ] {
+        reinsert(source);
+    }
+}
