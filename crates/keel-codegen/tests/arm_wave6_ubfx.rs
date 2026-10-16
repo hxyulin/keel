@@ -18,8 +18,10 @@ fn source(bits: u32, shift: i64, mask: i64, left: bool, shared: bool) -> String 
     } else {
         "return v4"
     };
+    // USHR and masking produce unsigned narrow results.
+    let result_attr = if bits < 32 { " uext" } else { "" };
     format!(
-        "func @f(i{bits}) -> i{bits} {{\nblock0(v0: i{bits}):\n v1 = iconst.i{bits} {shift}\n v2 = ushr v0, v1\n v3 = iconst.i{bits} {mask}\n v4 = and {args}\n {tail}\n}}"
+        "func @f(i{bits}) -> i{bits}{result_attr} {{\nblock0(v0: i{bits}):\n v1 = iconst.i{bits} {shift}\n v2 = ushr v0, v1\n v3 = iconst.i{bits} {mask}\n v4 = and {args}\n {tail}\n}}"
     )
 }
 

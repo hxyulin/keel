@@ -15,7 +15,7 @@ fn source(bits: u32, cc: &str, gap: &str) -> String {
         "func @f(i{bits}, i{bits}) -> i64 {{\n ss0 = stack_slot 8, align 8\nblock0(v0: i{bits}, v1: i{bits}):\n v2 = icmp.{cc} v0, v1\n {gap}\n brif v2, block1, block2\nblock1:\n v20 = iconst.i64 37\n return v20\nblock2:\n v21 = iconst.i64 91\n return v21\n}}"
     )
 }
-const GAP: &str = "v3 = stack_addr ss0\nv4 = iconst.i64 37\nv5 = inttoptr v4";
+const GAP: &str = "v3 = stack_addr ss0\nv4 = iconst.i64 37\nv5 = inttoptr.ptr v4";
 
 fn compile(
     src: &str,

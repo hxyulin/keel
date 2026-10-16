@@ -3,7 +3,13 @@
 use keel_codegen::{SelectionOptions, Target, compile_with_options};
 
 fn asm(ty: &str, body: &str, result: &str) -> String {
-    let src = format!("func @f({ty}) -> {result} {{\nblock0(v0: {ty}):\n{body}\n}}");
+    // Comparisons return an unsigned boolean through the narrow C ABI.
+    let result_attr = if matches!(result, "i8" | "i16") {
+        " uext"
+    } else {
+        ""
+    };
+    let src = format!("func @f({ty}) -> {result}{result_attr} {{\nblock0(v0: {ty}):\n{body}\n}}");
     let module = keel_ir::parse(&src).unwrap();
     keel_ir::verify_module(&module).unwrap();
     compile_with_options(&module, Target::Aarch64AppleDarwin, SelectionOptions::ALL).unwrap()
