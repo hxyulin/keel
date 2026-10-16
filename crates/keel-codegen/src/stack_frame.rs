@@ -86,6 +86,32 @@ mod tests {
     }
 
     #[test]
+    fn removed_address_alias_keeps_only_its_surviving_home() {
+        let mut module = keel_ir::parse(
+            "func @f() -> ptr {
+                ss0 = stack_slot 65536, align 16
+                ss1 = stack_slot 8, align 8
+            block0:
+                v0 = stack_addr ss0
+                v1 = stack_addr ss1
+                return v0
+            }",
+        )
+        .unwrap();
+        let f = &mut module.functions[0];
+        let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+        f.replace_all_uses(f.first_result(insts[0]), f.first_result(insts[1]));
+        f.remove_inst(insts[0]);
+        let (slots, end) = SlotOffsets::layout(f, 0, false);
+        assert_eq!(slots.0, [None, Some(0)]);
+        assert_eq!(end, 8);
+        // Each emitter resolves aliases, including when folding an address.
+        for target in crate::Target::ALL {
+            crate::compile_with_options(&module, target, crate::SelectionOptions::ALL).unwrap();
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "address of omitted stack slot")]
     fn omitted_storage_cannot_be_used_as_an_address() {
         let mut f = Function::new("f", keel_ir::Signature::new(&[], &[]));

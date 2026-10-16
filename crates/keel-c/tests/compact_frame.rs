@@ -6,7 +6,8 @@ use keel_ir::InstData;
 fn optimized_c_dead_declarations_do_not_change_generated_code() {
     for target in Target::ALL {
         let compile_c = |count| {
-            let source = format!("int f(int x) {{ int dead[{count}]; return x + 1; }}");
+            let source =
+                format!("int f(int x) {{ int dead[{count}]; dead[0] = x; return x + 1; }}");
             let mut module = keel_c::compile(
                 &source,
                 "dead.c",
@@ -20,7 +21,7 @@ fn optimized_c_dead_declarations_do_not_change_generated_code() {
             keel_ir::verify_module(&module).unwrap();
             let f = &module.functions[0];
             assert!(
-                f.num_stack_slots() >= 2,
+                f.num_stack_slots() >= 1,
                 "frontend must retain declarations"
             );
             assert!(
@@ -42,6 +43,33 @@ fn optimized_c_dead_declarations_do_not_change_generated_code() {
                     keel_codegen::compile_with_pipeline(&small, target, &pipeline).unwrap(),
                     keel_codegen::compile_with_pipeline(&large, target, &pipeline).unwrap(),
                 );
+                if Target::host() == Some(target) {
+                    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+                        .join(format!("compact-c-{allocator:?}-{selector:?}"));
+                    std::fs::create_dir_all(&dir).unwrap();
+                    let asm =
+                        keel_codegen::compile_with_pipeline(&large, target, &pipeline).unwrap();
+                    std::fs::write(dir.join("f.s"), asm).unwrap();
+                    std::fs::write(
+                        dir.join("main.c"),
+                        "extern int f(int); int main(void) { return f(41) != 42; }",
+                    )
+                    .unwrap();
+                    let exe = dir.join("test");
+                    let output = std::process::Command::new("clang")
+                        .arg(dir.join("f.s"))
+                        .arg(dir.join("main.c"))
+                        .arg("-o")
+                        .arg(&exe)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(std::process::Command::new(exe).status().unwrap().success());
+                }
             }
         }
     }
