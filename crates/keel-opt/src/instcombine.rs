@@ -184,6 +184,58 @@ fn algebra(
     None
 }
 
+// Extensions preserve zero/nonzero only when they strictly widen integers.
+// Resolve both the producer and its operand: aliases need not be in layout order.
+fn widening_source(func: &Function, value: Value) -> Option<Value> {
+    let value = func.resolve(value);
+    let ValueDef::Result(inst, 0) = func.value_def(value) else {
+        return None;
+    };
+    let InstData::Convert {
+        op: ConvertOp::Uext | ConvertOp::Sext,
+        ty,
+        arg,
+    } = *func.inst_data(inst)
+    else {
+        return None;
+    };
+    let arg = func.resolve(arg);
+    let from = func.value_type(arg);
+    (from.is_int() && ty.is_int() && func.value_type(value) == ty && from.bytes() < ty.bytes())
+        .then_some(arg)
+}
+
+fn invert_integer(cond: IntCC) -> IntCC {
+    match cond {
+        IntCC::Eq => IntCC::Ne,
+        IntCC::Ne => IntCC::Eq,
+        IntCC::Slt => IntCC::Sge,
+        IntCC::Sle => IntCC::Sgt,
+        IntCC::Sgt => IntCC::Sle,
+        IntCC::Sge => IntCC::Slt,
+        IntCC::Ult => IntCC::Uge,
+        IntCC::Ule => IntCC::Ugt,
+        IntCC::Ugt => IntCC::Ule,
+        IntCC::Uge => IntCC::Ult,
+    }
+}
+
+fn simplify_branch(func: &Function, inst: Inst) -> Option<InstData> {
+    let InstData::Brif { cond, .. } = func.inst_data(inst) else {
+        return None;
+    };
+    let mut source = widening_source(func, *cond)?;
+    while let Some(narrower) = widening_source(func, source) {
+        source = narrower;
+    }
+    let mut data = func.inst_data(inst).clone();
+    if let InstData::Brif { cond, .. } = &mut data {
+        *cond = source;
+    }
+    crate::canonicalize::normalize(func, &mut data);
+    Some(data)
+}
+
 fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
@@ -376,6 +428,41 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
             }));
         }
         InstData::Icmp { cond, args: [a, b] } if matches!(cond, IntCC::Eq | IntCC::Ne) => {
+            if bits(func, b) == Some(0) {
+                if let Some(source) = widening_source(func, a) {
+                    let zero = func.insert_inst(
+                        InsertPoint::Before(inst),
+                        InstData::Iconst {
+                            ty: func.value_type(source),
+                            imm: 0,
+                        },
+                    );
+                    func.set_inst_loc(zero, func.inst_loc(inst));
+                    return Some(Fold::Data(InstData::Icmp {
+                        cond,
+                        args: [source, func.first_result(zero)],
+                    }));
+                }
+                if func.value_type(a) == Type::I8
+                    && let ValueDef::Result(inner, 0) = func.value_def(a)
+                    && let InstData::Icmp {
+                        cond: inner_cond,
+                        args,
+                    } = *func.inst_data(inner)
+                {
+                    // Integer comparisons are canonical i8 0/1. Copying their
+                    // payload preserves this result's identity and location,
+                    // without changing any other use of the inner comparison.
+                    return Some(Fold::Data(InstData::Icmp {
+                        cond: if cond == IntCC::Eq {
+                            invert_integer(inner_cond)
+                        } else {
+                            inner_cond
+                        },
+                        args: args.map(|v| func.resolve(v)),
+                    }));
+                }
+            }
             if let ValueDef::Result(left, 0) = func.value_def(a)
                 && let ValueDef::Result(right, 0) = func.value_def(b)
                 && let InstData::Convert { op, ty, arg: x } = *func.inst_data(left)
@@ -420,7 +507,21 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
-        if func.is_removed(inst) || func.inst_results(inst).is_empty() {
+        if func.is_removed(inst) {
+            continue;
+        }
+        if func.inst_results(inst).is_empty() {
+            if let Some(data) = simplify_branch(func, inst) {
+                // A terminator has no result users to notify, but its new
+                // condition must notify it if that producer changes later.
+                func.inst_data(inst).for_each_operand(|v| {
+                    users[func.resolve(v).index()].retain(|&user| user != inst);
+                });
+                *func.inst_data_mut(inst) = data;
+                func.inst_data(inst)
+                    .for_each_operand(|v| users[func.resolve(v).index()].push(inst));
+                changed = true;
+            }
             continue;
         }
         let Some(fold) = simplify(func, inst, &users) else {
