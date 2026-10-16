@@ -125,8 +125,13 @@ fn fixture() -> (String, String) {
         ("i32", "int32_t"),
         ("i64", "int64_t"),
     ] {
+        let abi_extension = if matches!(ty, "i8" | "i16") {
+            " sext"
+        } else {
+            ""
+        };
         source += &format!(
-            "func @signed_{ty}() -> {ty} {{\nblock0:\n v0 = iconst.{ty} -1 !f0:1:1\n return v0\n}}\n"
+            "func @signed_{ty}() -> {ty}{abi_extension} {{\nblock0:\n v0 = iconst.{ty} -1 !f0:1:1\n return v0\n}}\n"
         );
         declarations += &format!("extern {c_ty} signed_{ty}(void);\n");
         checks += &format!("if (signed_{ty}() != -1) return 2;\n");
