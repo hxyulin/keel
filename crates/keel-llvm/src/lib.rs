@@ -68,16 +68,23 @@ fn signature(s: &Signature) -> ExportResult<(String, Vec<String>)> {
     Ok((ret, s.params.iter().map(abi).collect::<ExportResult<_>>()?))
 }
 fn attrs(a: FunctionAttrs) -> String {
-    [
-        (a.inlinehint, "inlinehint"),
-        (a.alwaysinline, "alwaysinline"),
-        (a.noinline, "noinline"),
-        (a.noreturn, "noreturn"),
-        (a.nounwind, "nounwind"),
-    ]
-    .into_iter()
-    .filter_map(|(set, s)| set.then_some(format!(" {s}")))
-    .collect()
+    // Ordinary Keel calls have no name-based libc contract. Declaration-level
+    // nobuiltin also prevents LLVM21 InferFunctionAttrs from inferring one;
+    // call-site-only protection would leave that module pass enabled.
+    let mut attributes = String::from(" nobuiltin");
+    attributes.push_str(
+        &[
+            (a.inlinehint, "inlinehint"),
+            (a.alwaysinline, "alwaysinline"),
+            (a.noinline, "noinline"),
+            (a.noreturn, "noreturn"),
+            (a.nounwind, "nounwind"),
+        ]
+        .into_iter()
+        .filter_map(|(set, s)| set.then_some(format!(" {s}")))
+        .collect::<String>(),
+    );
+    attributes
 }
 
 /// Verify and translate the complete module in memory. Errors never return
@@ -540,7 +547,7 @@ impl Emitter<'_> {
                     .collect::<Vec<_>>()
                     .join(", ");
                 self.line(format!(
-                    "{}call {ret} {}({args})",
+                    "{}call {ret} {}({args}) nobuiltin",
                     if results.is_empty() {
                         String::new()
                     } else {
