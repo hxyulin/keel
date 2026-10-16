@@ -187,15 +187,15 @@ def check(report):
         save(WORK / 'checks.json', checks)
 
 
-def timing(report):
+def timing(report, comparison="keel"):
     rows = {}
     canonical = WORK / 'runtime' / 'app'; canonical.parent.mkdir(exist_ok=True)
     for app, details in report['apps'].items():
         for bench in APPS[app][1]:
-            samples = {'keel': [], 'clang': []}; runs = []
+            samples = {comparison: [], 'clang': []}; runs = []
             reference = (WORK / app / f'{bench}-clang.stdout').read_bytes()
             for iteration in range(13):
-                order = ['clang', 'keel'] if iteration % 2 == 0 else ['keel', 'clang']
+                order = ['clang', comparison] if iteration % 2 == 0 else [comparison, 'clang']
                 for variant in order:
                     binary = details['binaries'][variant]
                     assert sha(binary) == details['binary_sha256'][variant]
@@ -210,8 +210,8 @@ def timing(report):
                     runs.append({'iteration': iteration, 'warmup': iteration < 2, 'variant': variant,
                                  'argv': cmd, 'elapsed_ms': elapsed, 'binary_sha256': sha(canonical)})
                     if iteration >= 2: samples[variant].append(elapsed)
-            rows[app + '/' + bench] = {'runs': runs, **summary({'before': samples['clang'], 'after': samples['keel']}, random.Random(42))}
-            save(WORK / 'timing.json', rows)
+            rows[app + '/' + bench] = {'runs': runs, **summary({'before': samples['clang'], 'after': samples[comparison]}, random.Random(42))}
+            save(WORK / ('timing.json' if comparison == 'keel' else 'timing-fp-contract.json'), rows)
             print('timed', app, bench, rows[app + '/' + bench]['after_over_before'], flush=True)
 
 
@@ -332,7 +332,7 @@ def inspect(args, report):
 def main():
     global WORK
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('phase', choices=['prepare', 'build', 'check', 'time', 'profile', 'inspect'])
+    p.add_argument('phase', choices=['prepare', 'build', 'check', 'time', 'fp-time', 'profile', 'inspect'])
     p.add_argument('--compiler', type=pathlib.Path, default=pathlib.Path('/tmp/keel-bench-target-6e6d2c2/release/keel'))
     p.add_argument('--prepared', type=pathlib.Path, required=True)
     p.add_argument('--prior', type=pathlib.Path, required=True)
@@ -351,6 +351,7 @@ def main():
         for variant, path in detail['binaries'].items(): assert sha(path) == detail['binary_sha256'][variant]
     if args.phase == 'check': check(report)
     elif args.phase == 'time': timing(report)
+    elif args.phase == 'fp-time': timing(report, 'clang_contract_off')
     elif args.phase == 'profile': profiles(args, report)
     elif args.phase == 'inspect': inspect(args, report)
 
