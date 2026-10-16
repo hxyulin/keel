@@ -16,14 +16,20 @@ fn implicit_full_expands_16_bytes_and_preserves_fallbacks() {
                 } else {
                     vec!["--opt-tier", tier]
                 };
-                for emit in ["--emit-ir", "--emit-asm", "--emit-object"] {
-                    let output = Command::new(env!("CARGO_BIN_EXE_keel"))
+                for emit in ["--emit-ir", "asm", "--emit-object"] {
+                    let mut command = Command::new(env!("CARGO_BIN_EXE_keel"));
+                    command
                         .current_dir(&dir)
                         .args(["cc", "--target", target])
                         .args(&args)
-                        .args([emit, "copy.c"])
-                        .output()
-                        .unwrap();
+                        .args(if emit == "asm" {
+                            vec!["copy.c"]
+                        } else if emit == "--emit-object" {
+                            vec![emit, "copy.c", "-o", "copy.o"]
+                        } else {
+                            vec![emit, "copy.c"]
+                        });
+                    let output = command.output().unwrap();
                     assert!(
                         output.status.success(),
                         "{}",
