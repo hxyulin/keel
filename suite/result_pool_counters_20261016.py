@@ -19,7 +19,7 @@ pub mod pool_diagnostic {
 '''
 def generate():
  for v in ['base','candidate']:
-    dst=h.source(v,'counts');dst.mkdir(exist_ok=False)
+    dst=h.source(v,'counts-v2');dst.mkdir(exist_ok=False)
     src=h.source(v,'plain')
     for n in ['Cargo.toml','Cargo.lock']:shutil.copyfile(src/n,dst/n)
     for n in ['crates','.cargo']:shutil.copytree(src/n,dst/n)
@@ -62,11 +62,19 @@ def generate():
     s+='\nimpl Function { pub fn diagnostic_storage(&self) -> [usize;8] { let a = '+storage+'; [a[0],a[1],a[2],std::mem::size_of::<InstNode>(),std::mem::align_of::<InstNode>(),std::mem::size_of::<Function>(),self.insts.len(),self.insts.diagnostic_capacity()] } }\n'
     p.write_text(s)
     if v=='candidate':
-        p=dst/'crates/keel-frontend/src/lib.rs';s=p.read_text();s+='''
-impl Drop for FunctionBuilder<'_> {
+        p=dst/'crates/keel-frontend/src/lib.rs';s=p.read_text().replace('    result_tys: Vec<Type>,','    result_tys: PoolScratch,').replace('            result_tys: Vec::new(),','            result_tys: PoolScratch(Vec::new()),');s+='''
+struct PoolScratch(Vec<Type>);
+impl std::ops::Deref for PoolScratch {
+    type Target=Vec<Type>;
+    fn deref(&self)->&Self::Target { &self.0 }
+}
+impl std::ops::DerefMut for PoolScratch {
+    fn deref_mut(&mut self)->&mut Self::Target { &mut self.0 }
+}
+impl Drop for PoolScratch {
     fn drop(&mut self) {
         keel_ir::pool_diagnostic::add(11,1);
-        keel_ir::pool_diagnostic::add(12,self.result_tys.capacity() as u64);
+        keel_ir::pool_diagnostic::add(12,self.0.capacity() as u64);
     }
 }
 ''';p.write_text(s)
@@ -104,19 +112,19 @@ fn main() -> Result<(),Box<dyn std::error::Error>> {
 
 def build():
  for v in ['base','candidate']:
-    dst=h.source(v,'counts');env=dict(h.ENV,CARGO_TARGET_DIR=str(R/('target-'+dst.name)))
+    dst=h.source(v,'counts-v2');env=dict(h.ENV,CARGO_TARGET_DIR=str(R/('target-'+dst.name)))
     h.save(dst.name+'-build',h.run(['cargo','build','--release','--locked','-p','keel-c','--example','pool_counts'],dst,env=env))
-    p=h.binary(v,'counts','examples/pool_counts');h.save(dst.name+'-binary',dict(path=str(p),sha256=h.sha(p),bytes=p.stat().st_size))
+    p=h.binary(v,'counts-v2','examples/pool_counts');h.save(dst.name+'-binary',dict(path=str(p),sha256=h.sha(p),bytes=p.stat().st_size))
 
 def capture():
  rows=[]
  for a,ps in h.h.inputs().items():
     for d in ['normal','debug']:
         for v in ['base','candidate']:
-            x=h.run([h.binary(v,'counts','examples/pool_counts'),*ps,*(['--debug'] if d=='debug' else [])]);rows.append(dict(app=a,debug=d,variant=v,rows=[json.loads(s) for s in x['stdout'].splitlines()]))
+            x=h.run([h.binary(v,'counts-v2','examples/pool_counts'),*ps,*(['--debug'] if d=='debug' else [])]);rows.append(dict(app=a,debug=d,variant=v,rows=[json.loads(s) for s in x['stdout'].splitlines()]))
  h.save('source-counts',rows)
  for v in ['base','candidate']:
-    h.save(v+'-error-counts',h.run([h.binary(v,'counts','examples/pool_counts'),R/'irgen-failure.c']))
+    h.save(v+'-error-counts',h.run([h.binary(v,'counts-v2','examples/pool_counts'),R/'irgen-failure.c']))
 
 if __name__=='__main__':
  for op in sys.argv[1:]:globals()[op]()
