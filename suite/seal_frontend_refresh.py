@@ -1,9 +1,9 @@
 """Seal the completed private remote experiment, retaining original raw data."""
 import gzip,hashlib,json,os,pathlib,subprocess,tarfile
-from profile_frontend_refresh import ROOT,BASE,PROD,PERF,ENV,sha,run,store,snapshot
+from profile_frontend_refresh import ROOT,BASE,PROD,PERF,ENV,sha,run,store,snapshot,rawinputs,flags
 
 def main():
-    r={'base':BASE,'harness_head':'4cac1ee','final_observation':snapshot(),'production_binary':{'path':str(PROD),'sha256':sha(PROD)},'toolchain':run(['/home/hxyulin/.cargo/bin/rustc','-Vv']),'clang':run(['clang','--version']),'perf':run([PERF,'--version'],env=ENV),'perf_sha256':sha(PERF),'libc_sha256':sha('/usr/lib/libc.so.6'),'source_pristine':{},'source_extra_files':[],'input_manifest':{},'binaries':{},'perf_loss_audit':{}}
+    r={'base':BASE,'harness_head':os.environ.get('KEEL_FE_HARNESS','unknown'),'final_observation':snapshot(),'production_binary':{'path':str(PROD),'sha256':sha(PROD)},'toolchain':run(['/home/hxyulin/.cargo/bin/rustc','-Vv']),'clang':run(['clang','--version']),'perf':run([PERF,'--version'],env=ENV),'perf_sha256':sha(PERF),'libc_sha256':sha('/usr/lib/libc.so.6'),'source_pristine':{},'source_extra_files':[],'input_manifest':{},'binaries':{},'perf_loss_audit':{}}
     with tarfile.open(ROOT/'source.tar.gz') as archive:
         expected={}
         for m in archive:
@@ -18,10 +18,10 @@ def main():
     # executables. They were never executed during this compile-time campaign.
     r['input_manifest']['raw']={str(p.relative_to(ROOT)):{'sha256':sha(p),'bytes':p.stat().st_size} for p in (ROOT/'raw').rglob('*') if p.is_file() and p.suffix in ['.c','.h']}
     r['ir_manifest']={str(p.relative_to(ROOT)):sha(p) for p in (ROOT/'evidence/ir').rglob('*.ir')}
-    for target in ['plain','stage','fp','pp-fp','memory','diagnostic','storage']:
+    for target in ['plain','stage','fp','pp-fp','pp-alloc','memory','diagnostic','storage']:
         td=ROOT/f'target-{target}/release'
         bins=[td/'keel']+list((td/'examples').glob('*'))
-        r['binaries'][target]={str(p.relative_to(ROOT)):sha(p) for p in bins if p.is_file() and (p.name in ['profile','resident','resident_memory','profile_allocations','preprocess_linux','keel'])}
+        r['binaries'][target]={str(p.relative_to(ROOT)):sha(p) for p in bins if p.is_file() and (p.name in ['profile','resident','resident_memory','profile_allocations','preprocess_linux','preprocess_allocations_linux','keel'])}
         r.setdefault('cargo_fingerprints',{})[target]={str(p.relative_to(ROOT)):json.loads(p.read_text()) for p in (td/'.fingerprint').glob('keel*/**/*.json')}
     for p in sorted((ROOT/'evidence').glob('*.perf.data')):
         if not p.stat().st_size:continue
@@ -31,6 +31,16 @@ def main():
         dest=p.with_suffix('.raw.txt.gz')
         dest.write_bytes(gzip.compress(x['stdout'].encode(),mtime=0))
         r['perf_loss_audit'][p.name]={'raw_sha256':sha(p),'audit_sha256':sha(dest),'stderr':x['stderr'],'lost_lines':[s for s in x['stdout'].splitlines() if 'PERF_RECORD_LOST' in s or 'LOST_SAMPLES' in s]}
+    r['harness_versions']={'resident':'830a8a8','cli_and_preprocessing_timing':'efd8917','resident_sampling':'5195636','preprocess_sampling':'4cac1ee','initializer_histogram_cli_diagnostics':'c280b9f','storage_counts':'f319b22','preprocess_allocations':'4516e41'}
+    r['preprocessor_output_parity']=[]
+    for app,ps in rawinputs().items():
+        for p in ps:
+            dest=ROOT/'evidence/production-preprocessed.i'
+            result=run([PROD,'cc',p,*flags(app),'-E','--sysroot','/','-o',dest])
+            helper=ROOT/'native-pre'/app/p.with_suffix('.i').name
+            same=sha(dest)==sha(helper)
+            r['preprocessor_output_parity'].append({'path':str(p),'production_sha256':sha(dest),'helper_sha256':sha(helper),'equal':same,**result})
+            assert same,p
     store('provenance',r)
     # Keep IR files remote (1.9 GiB); retain every hash locally. All raw samples,
     # event streams, original logs, helpers and source-generators travel losslessly.
