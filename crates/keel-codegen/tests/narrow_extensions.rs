@@ -117,7 +117,7 @@ fn unknown_upper_bits_and_truncations_still_extend() {
                 for (i, source) in sources.iter().enumerate() {
                     let output = assembly(source, target, selector, allocator, false);
                     let expected = if target == Target::X86_64LinuxGnu && [2, 4, 5].contains(&i) {
-                        2
+                        3
                     } else {
                         1
                     };
@@ -187,7 +187,12 @@ fn aliases_follow_the_resolved_definition_including_block_arguments() {
     use keel_ir::{EntityRef, Value};
     let source = "func @f(ptr, i8) -> i64 {\nblock0(v0: ptr, v1: i8):\n v2 = load.i8 v0\n v3 = uext.i64 v2\n return v3\n}";
     for clean in [false, true] {
-        let mut module = keel_ir::parse(source).unwrap();
+        let source = if clean {
+            source.replace("uext.i64 v2", "uext.i64 v1")
+        } else {
+            source.to_string()
+        };
+        let mut module = keel_ir::parse(&source).unwrap();
         let func = &mut module.functions[0];
         if clean {
             // Chain an otherwise unused parameter through a load definition.
@@ -284,6 +289,7 @@ fn pressure_source() -> String {
     }
     source.push_str("return v59\n}\n");
     // Wrapped arithmetic and truncation must discard deliberately dirty bits.
+    source.push_str("decl @dirty() -> i8\nfunc @call_narrow() -> i64 {\nblock0:\n v0 = call @dirty()\n v1 = uext.i64 v0\n return v1\n}\n");
     source.push_str("func @wrapped(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = trunc.i8 v0\n v3 = trunc.i8 v1\n v4 = iadd v2, v3\n v5 = uext.i64 v4\n return v5\n}\n");
     source.push_str(
         "func @incoming(i8) -> i64 {\nblock0(v0: i8):\n v1 = uext.i64 v0\n return v1\n}\n",
@@ -301,8 +307,15 @@ fn native_loads_survive_call_spills_and_cross_block_liveness() {
     let driver = dir.join("driver.c");
     std::fs::write(&driver, r#"
 #include <stdint.h>
-extern uint64_t pressure(uint16_t *), wrapped(uint64_t,uint64_t), incoming(uint64_t), boolean(uint64_t,uint64_t);
-__attribute__((noinline)) void clobber(void) { __asm__ volatile("" ::: "memory"); }
+extern uint64_t pressure(uint16_t *), wrapped(uint64_t,uint64_t), incoming(uint64_t), boolean(uint64_t,uint64_t), call_narrow(void);
+uint64_t dirty(void) { return UINT64_C(0xfedcba98765432ab); }
+__attribute__((noinline)) void clobber(void) {
+#if defined(__x86_64__)
+ __asm__ volatile("mov $-1, %%rax\nmov $-1, %%rcx\nmov $-1, %%rdx\nmov $-1, %%rsi\nmov $-1, %%rdi\nmov $-1, %%r8\nmov $-1, %%r9\nmov $-1, %%r10\nmov $-1, %%r11" ::: "rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "memory");
+#elif defined(__aarch64__)
+ __asm__ volatile("mov x0, #-1\nmov x1, #-1\nmov x2, #-1\nmov x3, #-1\nmov x4, #-1\nmov x5, #-1\nmov x6, #-1\nmov x7, #-1\nmov x8, #-1\nmov x9, #-1\nmov x10, #-1\nmov x11, #-1\nmov x12, #-1\nmov x13, #-1\nmov x14, #-1\nmov x15, #-1\nmov x16, #-1\nmov x17, #-1" ::: "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "memory");
+#endif
+}
 int main(void) {
  uint16_t p[12];
  for (unsigned k=0;k<256;k++) {
@@ -312,6 +325,7 @@ int main(void) {
   uint64_t a=UINT64_C(0xfedcba9876543200)|k, b=UINT64_C(0x87654321000000ff);
   if (wrapped(a,b)!=(uint8_t)(a+b)) return 2;
   if (incoming(a)!=(uint8_t)a) return 3;
+  if (call_narrow()!=171) return 5;
   if (boolean(a,b)!=(a<b) || boolean(b,a)!=(b<a)) return 4;
  }
  return 0;
@@ -322,11 +336,11 @@ int main(void) {
             for tiny in [false, true] {
                 let output = assembly(&source, target, selector, allocator, tiny);
                 // Every extension in pressure must disappear; x86 retains the
-                // twelve memory loads. Its other functions have three movzx.
+                // twelve memory loads. Its other functions have four movzx.
                 let expected = if target == Target::X86_64LinuxGnu {
-                    15
+                    16
                 } else {
-                    2
+                    3
                 };
                 assert_eq!(extensions(&output, target), expected, "{output}");
                 let asm = dir.join("test.s");
