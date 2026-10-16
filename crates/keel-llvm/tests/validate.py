@@ -11,6 +11,7 @@ import re
 import resource
 import shutil
 import subprocess
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
@@ -74,6 +75,22 @@ try:
     clang_path = shutil.which(a.clang)
     if clang_path:
         manifest["binaries"][clang_path] = sha(clang_path)
+    # /usr/bin/clang on macOS is a small launcher, not the actual compiler.
+    # Pin both the invoked launcher and the compiler identified by --version.
+    installed = re.search(r"^InstalledDir: (.+)$", manifest["tools"]["clang"], re.MULTILINE)
+    if installed:
+        actual_clang = pathlib.Path(installed[1]) / pathlib.Path(a.clang).name
+        if actual_clang.is_file():
+            manifest["binaries"][str(actual_clang.resolve())] = sha(actual_clang)
+    manifest["tools"]["python"] = sys.version
+    manifest["binaries"][str(pathlib.Path(sys.executable).resolve())] = sha(sys.executable)
+    for tool in ["rustc", "cargo"]:
+        launcher = shutil.which(tool)
+        if launcher:
+            manifest["binaries"][launcher] = sha(launcher)
+        if shutil.which("rustup"):
+            actual = pathlib.Path(run("rustup", "which", tool).decode().strip())
+            manifest["binaries"][str(actual.resolve())] = sha(actual)
     source_paths = [p for p in (ROOT / "crates/keel-llvm").rglob("*")
                     if p.is_file() and p.suffix in {".rs", ".py", ".c", ".keel", ".toml", ".md"}]
     source_paths += [ROOT / "Cargo.lock"]
@@ -216,7 +233,8 @@ except BaseException as exc:
 finally:
     manifest["artifact_sha256"] = {str(p.relative_to(a.out)): sha(p)
         for p in sorted(a.out.iterdir()) if p.is_file() and p.name != "manifest.json"}
+    test_paths = {p for pattern in ["export-*", "keel_llvm-*"]
+                  for p in (ROOT / "target/debug/deps").glob(pattern)}
     manifest["test_binary_sha256"] = {str(p.relative_to(ROOT)): sha(p)
-        for p in sorted((ROOT / "target/debug/deps").glob("export-*"))
-        if p.is_file() and not p.suffix}
+        for p in sorted(test_paths) if p.is_file() and not p.suffix}
     (a.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
