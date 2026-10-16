@@ -117,7 +117,7 @@ fn unknown_upper_bits_and_truncations_still_extend() {
                 for (i, source) in sources.iter().enumerate() {
                     let output = assembly(source, target, selector, allocator, false);
                     let expected = if target == Target::X86_64LinuxGnu && [2, 4, 5].contains(&i) {
-                        3
+                        2
                     } else {
                         1
                     };
@@ -296,6 +296,28 @@ fn pressure_source() -> String {
     );
     source.push_str("func @boolean(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.ult v0, v1\n v3 = uext.i64 v2\n return v3\n}\n");
     source
+}
+
+#[test]
+fn pressure_loads_remain_clean_on_both_targets() {
+    for target in Target::ALL {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                for tiny in [false, true] {
+                    let output = assembly(&pressure_source(), target, selector, allocator, tiny);
+                    assert_eq!(
+                        extensions(&output, target),
+                        if target == Target::X86_64LinuxGnu {
+                            16
+                        } else {
+                            3
+                        },
+                        "{output}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]
