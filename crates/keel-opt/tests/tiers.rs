@@ -102,3 +102,37 @@ block0(v0: i64):
         }
     }
 }
+
+#[test]
+fn matching_extensions_fold_in_basic_and_expose_full_gvn_equivalence() {
+    for op in ["sext", "uext"] {
+        for cond in ["eq", "ne"] {
+            let source = format!(
+                "func @f(i8, i8) -> i8 {{\nblock0(v0: i8, v1: i8):\n v2 = {op}.i64 v0\n v3 = {op}.i64 v1\n v4 = icmp.{cond} v2, v3\n return v4\n}}"
+            );
+            for tier in [OptimizationTier::Basic, OptimizationTier::Full] {
+                let mut module = keel_ir::parse(&source).unwrap();
+                keel_opt::optimize_with_tier(&mut module, tier).unwrap();
+                assert_eq!(module.functions[0].layout_insts().count(), 2, "{module}");
+                assert!(module.to_string().contains(&format!("icmp.{cond} v0, v1")));
+            }
+            let source = source.replace(
+                "return v4",
+                &format!("v5 = icmp.{cond} v1, v0\n v6 = xor v4, v5\n return v6"),
+            );
+            let original = keel_ir::parse(&source).unwrap();
+            let mut module = original.clone();
+            keel_opt::optimize(&mut module).unwrap();
+            assert_eq!(module.functions[0].layout_insts().count(), 2, "{module}");
+            assert!(module.to_string().contains("iconst.i8 0"), "{module}");
+            for a in [0, 1, 127, 128, 255] {
+                for b in [0, 1, 127, 128, 255] {
+                    assert_eq!(
+                        support::execute(&original.functions[0], &[a, b]),
+                        support::execute(&module.functions[0], &[a, b])
+                    );
+                }
+            }
+        }
+    }
+}
