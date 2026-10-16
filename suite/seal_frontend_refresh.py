@@ -44,7 +44,7 @@ def main():
     store('provenance',r)
     # Keep IR files remote (1.9 GiB); retain every hash locally. All raw samples,
     # event streams, original logs, helpers and source-generators travel losslessly.
-    paths=[p for p in (ROOT/'evidence').iterdir() if p.is_file()]+list(ROOT.glob('*.log'))+list(ROOT.glob('*.txt'))+list(ROOT.glob('*.py'))+[ROOT/'source.tar.gz']
+    paths=[p for p in (ROOT/'evidence').iterdir() if p.is_file() and p.name!='seal.json']+list(ROOT.glob('*.log'))+list(ROOT.glob('*.txt'))+list(ROOT.glob('*.py'))+[ROOT/'source.tar.gz']
     with tarfile.open(ROOT/'raw-evidence.tar.gz','w:gz') as archive:
         for p in sorted(paths):archive.add(p,arcname=str(p.relative_to(ROOT)))
     with tarfile.open(ROOT/'corpus.tar.gz','w:gz') as archive:
