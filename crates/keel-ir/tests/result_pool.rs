@@ -64,10 +64,12 @@ fn reinsert(source: &str) {
         let insts: Vec<_> = f.layout_insts().map(|(_, inst)| inst).collect();
         for old in insts {
             let data = f.inst_data(old).clone();
+            let loc = f.inst_loc(old);
             let old_results = f.inst_results(old).to_vec();
             let mut scratch = vec![Type::I8; 5];
             let new_inst = f
                 .ins_with_scratch(InsertPoint::Before(old), &mut scratch)
+                .loc(loc)
                 .build(data);
             let new_results = f.inst_results(new_inst).to_vec();
             assert_eq!(old_results.len(), new_results.len());
