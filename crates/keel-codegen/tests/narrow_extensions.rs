@@ -79,11 +79,11 @@ fn materialized_loads_need_no_second_extension() {
                     let source = format!(
                         "func @f(ptr) -> i64 {{
 block0(v0: ptr):
- v1 = load.{ty} v0
- v2 = uext.i64 v1
- v3 = uext.i64 v1
- v4 = iadd v2, v3
- return v4
+\n v1 = load.{ty} v0
+\n v2 = uext.i64 v1
+\n v3 = uext.i64 v1
+\n v4 = iadd v2, v3
+\n return v4
 }}"
                     );
                     for tiny in [false, true] {
@@ -104,11 +104,11 @@ block0(v0: ptr):
 #[test]
 fn unknown_upper_bits_and_truncations_still_extend() {
     let sources = [
-        "func @f(i8) -> i64 { block0(v0: i8): v1 = uext.i64 v0 return v1 }",
-        "func @f(i8, i8) -> i64 { block0(v0: i8, v1: i8): v2 = iadd v0, v1 v3 = uext.i64 v2 return v3 }",
-        "func @f(ptr) -> i64 { block0(v0: ptr): v1 = load.i8 v0 jump block1(v1) block1(v2: i8): v3 = uext.i64 v2 return v3 }",
-        "decl @external() -> i8\nfunc @f() -> i64 { block0: v0 = call @external() v1 = uext.i64 v0 return v1 }",
-        "func @f(ptr) -> i64 { block0(v0: ptr): v1 = load.i16 v0 v2 = trunc.i8 v1 v3 = uext.i64 v2 return v3 }",
+        "func @f(i8) -> i64 {\nblock0(v0: i8):\n v1 = uext.i64 v0\n return v1\n}",
+        "func @f(i8, i8) -> i64 {\nblock0(v0: i8, v1: i8):\n v2 = iadd v0, v1\n v3 = uext.i64 v2\n return v3\n}",
+        "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i8 v0\n jump block1(v1)\n block1(v2: i8):\n v3 = uext.i64 v2\n return v3\n}",
+        "decl @external() -> i8\nfunc @f() -> i64 {\nblock0:\n v0 = call @external()\n v1 = uext.i64 v0\n return v1\n}",
+        "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i16 v0\n v2 = trunc.i8 v1\n v3 = uext.i64 v2\n return v3\n}",
     ];
     for target in Target::ALL {
         for allocator in allocators() {
@@ -129,7 +129,7 @@ fn unknown_upper_bits_and_truncations_still_extend() {
 
 #[test]
 fn cset_is_clean_but_setcc_is_not() {
-    let source = "func @f(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = icmp.ult v0, v1 v3 = uext.i64 v2 return v3 }";
+    let source = "func @f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.ult v0, v1\n v3 = uext.i64 v2\n return v3\n}";
     for target in Target::ALL {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
@@ -148,7 +148,7 @@ fn cset_is_clean_but_setcc_is_not() {
 fn unsigned_narrow_compare_reuses_clean_loads_on_arm() {
     for ty in ["i8", "i16"] {
         let source = format!(
-            "func @f(ptr, ptr) -> i8 {{ block0(v0: ptr, v1: ptr): v2 = load.{ty} v0 v3 = load.{ty} v1 v4 = icmp.ult v2, v3 return v4 }}"
+            "func @f(ptr, ptr) -> i8 {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.{ty} v0\n v3 = load.{ty} v1\n v4 = icmp.ult v2, v3\n return v4\n}}"
         );
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
@@ -181,9 +181,46 @@ fn unsigned_narrow_compare_reuses_clean_loads_on_arm() {
     }
 }
 
+#[test]
+fn aliases_follow_the_resolved_definition_including_block_arguments() {
+    use keel_ir::{EntityRef, Value};
+    let source = "func @f(ptr, i8) -> i64 {\nblock0(v0: ptr, v1: i8):\n v2 = load.i8 v0\n v3 = uext.i64 v2\n return v3\n}";
+    for clean in [false, true] {
+        let mut module = keel_ir::parse(source).unwrap();
+        let func = &mut module.functions[0];
+        if clean {
+            // Chain an otherwise unused parameter through a load definition.
+            func.replace_all_uses(Value::new(1), Value::new(2));
+        } else {
+            // A load result aliased to an argument must lose its proof.
+            func.replace_all_uses(Value::new(2), Value::new(1));
+        }
+        keel_ir::verify_module(&module).unwrap();
+        for target in Target::ALL {
+            for allocator in allocators() {
+                let output = keel_codegen::compile_with_pipeline(
+                    &module,
+                    target,
+                    &CodegenPipeline {
+                        selector: &SelectionTier::Full,
+                        allocator: &allocator,
+                    },
+                )
+                .unwrap();
+                let expected = usize::from(target == Target::X86_64LinuxGnu) + usize::from(!clean);
+                assert_eq!(
+                    extensions(&output, target),
+                    expected,
+                    "clean={clean}: {output}"
+                );
+            }
+        }
+    }
+}
+
 fn pressure_source() -> String {
     let mut source =
-        String::from("decl @clobber()\nfunc @pressure(ptr) -> i64 { block0(v0: ptr):\n");
+        String::from("decl @clobber()\nfunc @pressure(ptr) -> i64 {\nblock0(v0: ptr):\n");
     for i in 0..12 {
         let n = 1 + i * 3;
         source.push_str(&format!(
@@ -204,9 +241,11 @@ fn pressure_source() -> String {
     }
     source.push_str("return v59\n}\n");
     // Wrapped arithmetic and truncation must discard deliberately dirty bits.
-    source.push_str("func @wrapped(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = trunc.i8 v0 v3 = trunc.i8 v1 v4 = iadd v2, v3 v5 = uext.i64 v4 return v5 }\n");
-    source.push_str("func @incoming(i8) -> i64 { block0(v0: i8): v1 = uext.i64 v0 return v1 }\n");
-    source.push_str("func @boolean(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = icmp.ult v0, v1 v3 = uext.i64 v2 return v3 }\n");
+    source.push_str("func @wrapped(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = trunc.i8 v0\n v3 = trunc.i8 v1\n v4 = iadd v2, v3\n v5 = uext.i64 v4\n return v5\n}\n");
+    source.push_str(
+        "func @incoming(i8) -> i64 {\nblock0(v0: i8):\n v1 = uext.i64 v0\n return v1\n}\n",
+    );
+    source.push_str("func @boolean(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = icmp.ult v0, v1\n v3 = uext.i64 v2\n return v3\n}\n");
     source
 }
 
