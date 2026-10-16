@@ -73,21 +73,69 @@ def inputs():
 
 def binary(v,name='examples/snapshot_resident'):return ROOT/('target-'+v+'-release/release')/name
 
+def output_manifest(dest, paths, expected_errors=None):
+    """Require exact intended output names; matching failures never imply IR success.
+
+    Diagnostics must be an explicit name -> complete expected diagnostic mapping.
+    The resident helper verifies each successful module before writing full Debug IR.
+    """
+    expected_errors = expected_errors or {}
+    names = [pathlib.Path(p).with_suffix('.ir').name for p in paths]
+    if len(set(names)) != len(names):
+        raise AssertionError('duplicate output basenames')
+    expected = set(names)
+    for name in expected_errors:
+        ir = str(pathlib.Path(name).with_suffix('.ir'))
+        if not name.endswith('.err') or ir not in expected:
+            raise AssertionError(('unexpected diagnostic specification', name))
+        expected.remove(ir)
+        expected.add(name)
+    actual = {p.name for p in dest.iterdir()}
+    if actual != expected or any(not p.is_file() or p.is_symlink() for p in dest.iterdir()):
+        raise AssertionError(dict(expected=sorted(expected), actual=sorted(actual)))
+    for name, diagnostic in expected_errors.items():
+        if (dest/name).read_text() != diagnostic:
+            raise AssertionError(('unexpected diagnostic', name))
+    return {name: sha(dest/name) for name in sorted(expected)}
+
+
+def compare_outputs(baseline, candidate, paths, expected_errors=None):
+    b = output_manifest(baseline, paths, expected_errors)
+    c = output_manifest(candidate, paths, expected_errors)
+    if b != c:
+        raise AssertionError('complete output hash mismatch')
+    return b
+
+
 def parity():
     cases=inputs();fix=ROOT/'fixtures';fix.mkdir(exist_ok=True)
     shutil.copy(ROOT/'candidate/crates/keel-c/tests/fixtures/initializer_snapshot.c',fix/'initializer_snapshot.c')
     invalid=['int a[2] = {[1 ... 0] = 3};','int a[2] = {[0 ... 2] = 3};','int a[1] = {1, 2};','int a[2] = {.x = 1};','int a[2] = {[0 ... 1] = };','struct S { int x; }; struct S a = {.bad = 1};','int a[2] = {[0 ... 1] = {1, 2}};','int f(void) { int a[2] = {[0 ... 1] = (1 + )}; return 0; }']
-    for i,s in enumerate(invalid):(fix/f'bad{i}.c').write_text('# 71 "malformed-initializer.c"\n'+s+'\n')
-    cases['fixtures']=sorted(fix.glob('*.c'));result=[]
-    for a,ps in cases.items():
+    errors=[(13,'array designator out of range'),(13,'array designator out of range'),(16,'too many initializers'),(13,'`.` designator for a non-struct'),(25,'expected an expression, found `}`'),(36,'no member `bad`'),(29,'expected `}`, found `2`'),(44,'expected an expression, found `)`')]
+    diagnostics={}
+    for i,(source,(column,message)) in enumerate(zip(invalid,errors)):
+        (fix/f'bad{i}.c').write_text('# 71 "malformed-initializer.c"\n'+source+'\n')
+        diagnostics[f'bad{i}.err']=f'Diagnostic {{ file: "malformed-initializer.c", line: 71, col: {column}, message: "{message}" }}'
+    cases['valid-fixture']=[fix/'initializer_snapshot.c']
+    cases['diagnostics']=[fix/f'bad{i}.c' for i in range(len(invalid))]
+    result=[]
+    for a,original in cases.items():
         for target in ['x86','arm']:
+            # Darwin corpus must be prepared and audited separately; never silently
+            # feed Linux preprocessed system declarations to the Darwin frontend.
+            ps=original if target=='x86' or a in ['valid-fixture','diagnostics'] else sorted((ROOT/'darwin-inputs'/a/'pre').glob('*.i'))
+            assert [p.name for p in ps]==[p.name for p in original],(a,target)
+            expected_errors=diagnostics if a=='diagnostics' else None
             for d in ['normal','debug']:
-                manifests=[]
+                destinations=[]
                 for v in ['baseline','candidate']:
                     dest=E/'ir'/a/target/d/v
-                    r=run([binary(v),'ir',target,d,dest,*ps]);m={p.name:sha(p) for p in dest.iterdir()};assert len(m)==len(ps);manifests.append(m)
-                    result.append(dict(app=a,target=target,debug=d,variant=v,files=m,command=r['command']))
-                assert manifests[0]==manifests[1],(a,target,d)
+                    dest.mkdir(parents=True,exist_ok=False)  # refuse stale output reuse
+                    r=run([binary(v),'ir',target,d,dest,*ps])
+                    m=output_manifest(dest,ps,expected_errors)
+                    destinations.append(dest)
+                    result.append(dict(app=a,target=target,debug=d,variant=v,files=m,command=r['command'],cohort='diagnostic' if expected_errors else 'successful-ir'))
+                compare_outputs(*destinations,ps,expected_errors)
     save('parity',result)
     save('inputs',{str(p.relative_to(ROOT/'corpus')):{'sha256':sha(p),'bytes':p.stat().st_size} for p in sorted((ROOT/'corpus').rglob('*')) if p.is_file()})
 
