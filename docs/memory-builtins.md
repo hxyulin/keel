@@ -6,6 +6,12 @@ library declaration and are advertised by `__has_builtin`. Ordinary `memcpy`,
 `memmove`, and `memset` identifiers keep ordinary function call semantics.
 This does not add a freestanding runtime or a new driver option.
 
+With an ordinary library declaration in scope, the explicit builtin name
+also supports function-pointer initialization, address taking and
+parenthesized calls such as `(__builtin_memcpy)(d,s,n)`. These designator
+forms use ordinary library calls; directly spelled builtin calls retain
+intrinsic lowering.
+
 The frontend converts lengths to `size_t` (unsigned long on both supported
 targets), and memset's fill to `int`, then truncates the fill to the IR's
 `i8` byte. All three arguments are evaluated once, left to right (an order
@@ -18,14 +24,16 @@ correctness change, without a performance claim.
 
 Memcpy requires disjoint regions; memmove preserves overlap support. Zero
 length does not add a runtime pointer check or make otherwise invalid C
-pointers valid. Argument typing accepts null pointer constants, independently
+pointers valid. Argument typing accepts integer constant expressions equal
+to zero as null pointer constants, independently
 of whether execution would satisfy the C library's pointer preconditions.
 Non-pointer arguments (except null constants), function pointers, const
 destinations and retained volatile pointee qualification are diagnosed.
-Keel conservatively retains pointer qualifier sugar through explicit casts;
-these builtins therefore also reject casts which still retain volatile or
-const qualification. Volatile loads used to compute ordinary pointer values
-or lengths remain explicit volatile loads.
+Explicit pointer casts use the target type's qualifiers; `(void *)p` can
+explicitly discard const or volatile qualification. This does not change
+the qualifiers on actual argument loads, or permit writing objects defined
+const. Volatile loads used to compute pointer values or lengths remain
+explicit volatile loads.
 
 Fortified `__builtin___memcpy_chk`, `__builtin___memmove_chk`, and
 `__builtin___memset_chk` no longer discard their fourth argument. Their
@@ -36,6 +44,11 @@ conflicting declaration in the translation unit is diagnosed. Even a constant
 bound smaller than the length stays on the checked call; Keel does not
 silently turn it into an unchecked intrinsic. Checked variants remain
 unadvertised by `__has_builtin`.
+
+Each canonical runtime declaration and definition is checked before merging,
+so a later incompatible redeclaration cannot hide behind an earlier prototype.
+`returns_twice` on a checked runtime used by a builtin is diagnosed as an
+incompatible attribute, irrespective of source declaration or call order.
 
 Both backends can emit these C ABI calls. Linking requires a runtime providing
 the checked symbols; a freestanding or alternative libc must supply them.
@@ -62,6 +75,9 @@ loads, checked bounds and feature queries for both target backends. Its native
 differential fixture compares Keel with Clang at O0 and O2 using explicit
 builtins under `-fno-builtin`, side-effecting arguments, lengths 0/1/7/32/257/4096,
 both overlap directions, destination return values and fill conversions.
+A separate child-process regression requires a finite too-small memset bound
+to fail while the allocated buffer can hold the entire requested write; an
+unchecked call would return successfully.
 
 Semantics references: [C11 draft N1570](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf),
 sections 6.5.2.2, 7.24.1, 7.24.2.1, 7.24.2.2 and 7.24.6.1;

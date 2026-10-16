@@ -964,7 +964,18 @@ impl<'a> Parser<'a> {
             ));
         }
         match base {
-            "memcpy" | "memmove" | "memset" => self.memory_builtin(base, false, loc),
+            "memcpy" | "memmove" | "memset" => {
+                if !self.is("(") {
+                    // Library builtins also denote their ordinary library
+                    // function when used as an address or parenthesized callee.
+                    let function = self.lookup_value(base, loc)?;
+                    if !matches!(function.ty, Ty::Func(_)) {
+                        return Err(Error::new(loc, "memory builtin needs a library function"));
+                    }
+                    return Ok(function);
+                }
+                self.memory_builtin(base, false, loc)
+            }
             "__memcpy_chk" | "__memmove_chk" | "__memset_chk" => {
                 let plain = base
                     .strip_prefix("__")
@@ -1258,8 +1269,8 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            if (!arg.ty.is_ptr() && !is_null(arg)) || matches!(arg.ty.pointee(), Some(Ty::Func(_)))
-            {
+            let null = arg.ty.is_integer() && eval_constant(arg, false) == Some(Const::Int(0));
+            if (!arg.ty.is_ptr() && !null) || matches!(arg.ty.pointee(), Some(Ty::Func(_))) {
                 return Err(Error::new(
                     arg.loc,
                     "memory builtin needs an object pointer",
@@ -1766,6 +1777,34 @@ impl<'a> Parser<'a> {
         }
         Ok(self.cast(e, ty.clone()))
     }
+}
+
+pub(crate) fn checked_memory_intrinsic(name: &str) -> Option<Intrinsic> {
+    match name {
+        "__memcpy_chk" => Some(Intrinsic::Memcpy),
+        "__memmove_chk" => Some(Intrinsic::Memmove),
+        "__memset_chk" => Some(Intrinsic::Memset),
+        _ => None,
+    }
+}
+
+/// Canonical C ABI types, shared by declaration merging and builtin lowering.
+/// Validate each declaration before the parser can discard its type.
+pub(crate) fn checked_memory_prototype(id: Intrinsic, ty: &Ty) -> bool {
+    let Ty::Func(fty) = ty else { return false };
+    let void_ptr = |ty: &Ty| matches!(ty, Ty::Ptr(pointee) if **pointee == Ty::Void);
+    fty.prototyped
+        && !fty.variadic
+        && void_ptr(&fty.ret)
+        && fty.params.len() == 4
+        && void_ptr(&fty.params[0])
+        && if id == Intrinsic::Memset {
+            fty.params[1] == INT
+        } else {
+            void_ptr(&fty.params[1])
+        }
+        && fty.params[2] == ULONG
+        && fty.params[3] == ULONG
 }
 
 fn memory_builtin_const(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {

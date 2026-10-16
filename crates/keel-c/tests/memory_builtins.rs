@@ -64,6 +64,250 @@ fn explicit_memory_builtins_use_existing_intrinsics_and_return_destination() {
 }
 
 #[test]
+fn library_builtin_designators_keep_addresses_and_parenthesized_calls() {
+    for target in Target::ALL {
+        for name in ["memcpy", "memmove", "memset"] {
+            let second = if name == "memset" {
+                "int"
+            } else {
+                "const void *"
+            };
+            let source = format!(
+                "void *{name}(void *, {second}, unsigned long); void *(*p)(void *, {second}, unsigned long) = __builtin_{name}; void *(*q)(void *, {second}, unsigned long) = &__builtin_{name}; void *parenthesized(void *d, {second} s) {{ return (__builtin_{name})(d,s,1); }} void *direct(void *d, {second} s) {{ return __builtin_{name}(d,s,1); }}"
+            );
+            let mut module = compile(&source, target);
+            let parenthesized = module
+                .functions
+                .iter()
+                .find(|f| f.name == "parenthesized")
+                .unwrap();
+            assert!(parenthesized.layout_insts().any(|(_, i)| matches!(parenthesized.inst_data(i), InstData::Call { func, .. } if parenthesized.callee(*func).name == name)));
+            let direct = module
+                .functions
+                .iter()
+                .find(|f| f.name == "direct")
+                .unwrap();
+            assert!(direct.layout_insts().any(|(_, i)| matches!(direct.inst_data(i), InstData::Intrinsic { id, .. } if id.info().name == name)));
+            assert!(module.data.iter().any(|data| data.name == "p"));
+            assert!(module.data.iter().any(|data| data.name == "q"));
+            keel_codegen::compile(&module, target).unwrap();
+            keel_opt::optimize(&mut module).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}
+
+#[test]
+fn memory_null_pointers_accept_zero_integer_constant_expressions_only() {
+    for target in Target::ALL {
+        for zero in [
+            "1-1",
+            "ZERO",
+            "sizeof(char)-1",
+            "(int)0.0",
+            "(unsigned long)(2-2)",
+            "0 && effect()",
+        ] {
+            for name in ["memcpy", "memmove", "memset"] {
+                let source = format!(
+                    "enum {{ ZERO = 2-2 }}; int effect(void); unsigned long f(void) {{ return sizeof(__builtin_{name}({zero},0,0)); }}"
+                );
+                // Unevaluated: valid null-pointer typing does not execute a
+                // library call with invalid pointers, even at length zero.
+                compile(&source, target);
+                if name != "memset" {
+                    compile(
+                        &format!(
+                            "enum {{ ZERO = 2-2 }}; int effect(void); unsigned long f(void) {{ return sizeof(__builtin_{name}(0,{zero},0)); }}"
+                        ),
+                        target,
+                    );
+                }
+            }
+        }
+        for value in ["n", "n-n", "1-0", "(effect(),0)", "(0,0)", "1.0-1.0"] {
+            let source = format!(
+                "int effect(void); unsigned long f(int n) {{ return sizeof(__builtin_memcpy({value},0,0)); }}"
+            );
+            let error = keel_c::compile(
+                &source,
+                "non-null-memory.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("memory builtin needs an object pointer"),
+                "{source}\n{error}"
+            );
+        }
+        // The explicitly requested sizeof reducer is kept verbatim.
+        compile(
+            "unsigned long f(void) { return sizeof(__builtin_memcpy(1-1, 0, 0)); }",
+            target,
+        );
+    }
+}
+
+#[test]
+fn checked_memory_returns_twice_never_creates_mismatched_signatures() {
+    for target in Target::ALL {
+        for source in [
+            "void *__memcpy_chk(void *, const void *, unsigned long, unsigned long) __attribute__((returns_twice)); void *f(void *d, const void *s) { return __builtin___memcpy_chk(d,s,1,1); }",
+            "void *f(void *d, const void *s) { return __builtin___memcpy_chk(d,s,1,1); } void *__memcpy_chk(void *, const void *, unsigned long, unsigned long) __attribute__((returns_twice));",
+        ] {
+            let error = keel_c::compile(
+                source,
+                "checked-attributes-exact.c",
+                keel_c::Options {
+                    target,
+                    ..Default::default()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("incompatible checked memory builtin attributes: returns_twice"),
+                "{error}"
+            );
+        }
+        for name in ["memcpy", "memmove", "memset"] {
+            let second_ty = if name == "memset" {
+                "int"
+            } else {
+                "const void *"
+            };
+            let second = if name == "memset" { "257" } else { "s" };
+            let prototype =
+                format!("void *__{name}_chk(void *, {second_ty}, unsigned long, unsigned long)");
+            for late_attribute in [false, true] {
+                for ordinary_first in [false, true] {
+                    let builtin = format!("__builtin___{name}_chk(d,{second},1,1)");
+                    let ordinary = format!("__{name}_chk(d,{second},1,1)");
+                    let body = if ordinary_first {
+                        format!("{ordinary}; return {builtin};")
+                    } else {
+                        format!("{builtin}; return {ordinary};")
+                    };
+                    let attribute = format!("{prototype} __attribute__((returns_twice));");
+                    let function = format!("void *f(void *d, const void *s) {{ {body} }}");
+                    let source = if late_attribute {
+                        format!("{prototype}; {function} {attribute}")
+                    } else {
+                        format!("{attribute} {function}")
+                    };
+                    let error = keel_c::compile(
+                        &source,
+                        "checked-attributes.c",
+                        keel_c::Options {
+                            target,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap_err()
+                    .to_string();
+                    assert!(
+                        error.contains(
+                            "incompatible checked memory builtin attributes: returns_twice"
+                        ),
+                        "{source}\n{error}"
+                    );
+                    // Without the incompatible attribute both import orders
+                    // must produce a verifiable module and valid backend ABI.
+                    let valid = format!("{prototype}; {function}");
+                    let module = compile(&valid, target);
+                    keel_codegen::compile(&module, target).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_checked_memory_redeclaration_is_validated_before_merging() {
+    for target in Target::ALL {
+        for name in ["memcpy", "memmove", "memset"] {
+            let second_ty = if name == "memset" {
+                "int"
+            } else {
+                "const void *"
+            };
+            let second = if name == "memset" { "0" } else { "s" };
+            let canonical =
+                format!("void *__{name}_chk(void *, {second_ty}, unsigned long, unsigned long);");
+            let use_builtin = format!(
+                "void *f(void *d, const void *s) {{ return __builtin___{name}_chk(d,{second},1,1); }}"
+            );
+            let conflicts = [
+                format!("int __{name}_chk(void *, {second_ty}, unsigned long, unsigned long);"),
+                format!("void *__{name}_chk(void *, {second_ty}, unsigned long);"),
+                format!("void *__{name}_chk(void *, {second_ty}, unsigned, unsigned long);"),
+                format!(
+                    "void *__{name}_chk(void *d, {second_ty} s, unsigned n, unsigned long size) {{ return d; }}"
+                ),
+            ];
+            for conflict in conflicts {
+                for late in [false, true] {
+                    let source = if late {
+                        format!("{canonical} {use_builtin} {conflict}")
+                    } else {
+                        format!("{canonical} {conflict} {use_builtin}")
+                    };
+                    let error = keel_c::compile(
+                        &source,
+                        "checked-redeclaration.c",
+                        keel_c::Options {
+                            target,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap_err()
+                    .to_string();
+                    assert!(
+                        error.contains("invalid checked memory builtin prototype"),
+                        "{source}\n{error}"
+                    );
+                }
+            }
+            let definition = format!(
+                "void *__{name}_chk(void *d, {second_ty} s, unsigned long n, unsigned long size) {{ return d; }}"
+            );
+            let module = compile(
+                &format!("{canonical} {use_builtin} {canonical} {definition}"),
+                target,
+            );
+            keel_codegen::compile(&module, target).unwrap();
+        }
+        // The narrowly scoped validation leaves the pre-existing policy for
+        // unrelated function redeclarations alone.
+        compile(
+            "void *other(void *); int other(void *); int f(void) { return 0; }",
+            target,
+        );
+    }
+}
+
+#[test]
+fn explicit_pointer_casts_set_memory_builtin_qualifiers() {
+    for target in Target::ALL {
+        for source in [
+            "void *f(volatile int *p) { return __builtin_memset((void *)p,0,1); }",
+            "void *f(void *d, const volatile int *p) { return __builtin_memcpy(d,(const void *)p,1); }",
+            "void *f(const int *p) { return __builtin_memset((void *)p,0,0); }",
+        ] {
+            // Typing/codegen only: the last case must not be used to write
+            // an object defined const. Cast sugar follows the target type.
+            let module = compile(source, target);
+            keel_codegen::compile(&module, target).unwrap();
+        }
+    }
+}
+
+#[test]
 fn ordinary_memory_symbols_keep_calls_and_volatile_arguments_keep_accesses() {
     let source = "void *memcpy(void *, const void *, unsigned long); void *f(void *d, const void *s) { return memcpy(d,s,7); }";
     for target in Target::ALL {
@@ -366,6 +610,54 @@ fn memory_builtins_native_differential_clang() {
             checked(&mut Command::new(&executable)).stdout,
             *want.as_ref().unwrap(),
             "optimized={optimized}"
+        );
+    }
+}
+
+#[test]
+fn finite_checked_bound_fails_in_child_without_out_of_bounds_storage() {
+    // The actual allocation can hold the entire write. Only the explicit
+    // smaller bound must cause failure, so an unchecked call would exit 0.
+    let source = "int main(void) { unsigned char d[64]; unsigned long n = 8, bound = 1; return __builtin___memset_chk(d,257,n,bound) != d; }";
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("memory-checked-bound-failure");
+    std::fs::create_dir_all(&dir).unwrap();
+    let c_source = dir.join("failure.c");
+    std::fs::write(&c_source, source).unwrap();
+    let oracle = dir.join("clang");
+    checked(
+        Command::new("clang")
+            .args(["-std=c11", "-O0", "-o"])
+            .arg(&oracle)
+            .arg(&c_source),
+    );
+    let outcome = Command::new(&oracle).current_dir(&dir).output().unwrap();
+    assert!(
+        !outcome.status.success(),
+        "Clang oracle unexpectedly ignored the finite bound"
+    );
+    for optimized in [false, true] {
+        let mut module = compile(source, keel_c::Options::default().target);
+        if optimized {
+            keel_opt::optimize(&mut module).unwrap();
+        }
+        keel_ir::verify_module(&module).unwrap();
+        let asm = keel_codegen::compile(&module, keel_c::Options::default().target).unwrap();
+        let assembly = dir.join(format!("keel-{optimized}.s"));
+        let executable = dir.join(format!("keel-{optimized}"));
+        std::fs::write(&assembly, asm).unwrap();
+        checked(
+            Command::new("clang")
+                .arg(&assembly)
+                .arg("-o")
+                .arg(&executable),
+        );
+        let outcome = Command::new(&executable)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            !outcome.status.success(),
+            "optimized={optimized} ignored the finite checked bound"
         );
     }
 }

@@ -2077,16 +2077,16 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             if global.name != name && global.symbol != name {
                 continue;
             }
-            let Ty::Func(fty) = &global.ty else {
+            if !crate::expr::checked_memory_prototype(id, &global.ty) {
                 return Err(Error::new(
                     e.loc,
                     "invalid checked memory builtin prototype",
                 ));
-            };
-            if !fty.prototyped || fty.variadic || fty.ret != e.ty || fty.params != params {
+            }
+            if global.returns_twice {
                 return Err(Error::new(
                     e.loc,
-                    "invalid checked memory builtin prototype",
+                    "incompatible checked memory builtin attributes: returns_twice",
                 ));
             }
             declared = Some(g);
