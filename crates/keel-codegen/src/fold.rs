@@ -18,6 +18,59 @@ pub(crate) fn iconst(func: &Function, v: Value) -> Option<i64> {
     }
 }
 
+/// Whether a materialized narrow value has zero bits above its IR width.
+/// This is a definition invariant, not a property of narrow types: arguments,
+/// block parameters (even with clean incoming edges), calls, truncations and
+/// arithmetic do not qualify. Resolve aliases before inspecting the definition.
+///
+/// Plain i8/i16 loads write a zero-extended full GPR on both targets; AArch64
+/// comparisons also write the whole W register. x86 SETcc only writes a byte.
+/// Both emitters' scalar register/stack transfers, including Fast/Full spills,
+/// edge copies and experimental allocation edits, copy all 64 bits. Thus the
+/// invariant follows the value through allocation, without tracking registers.
+/// Covered/selected producers and unassigned/rematerialized definitions are
+/// deliberately excluded: their machine definition need not be the plain one.
+pub(crate) fn zero_extended_narrow(
+    func: &Function,
+    selection: &crate::select::Selection,
+    alloc: &crate::regalloc::Allocation,
+    value: Value,
+    aarch64: bool,
+) -> bool {
+    use crate::regalloc::{Loc, OperandKind, ValuePart};
+    let value = func.resolve(value);
+    if !matches!(func.value_type(value), Type::I8 | Type::I16) {
+        return false;
+    }
+    let ValueDef::Result(inst, 0) = func.value_def(value) else {
+        return false;
+    };
+    if selection.covered(inst) || selection.matches.contains_key(&inst) {
+        return false;
+    }
+    if !matches!(
+        alloc.operand_loc(
+            alloc.edits.instruction_index(inst),
+            ValuePart::low(value),
+            OperandKind::Def
+        ),
+        Some(Loc::Reg(_) | Loc::Stack(_))
+    ) {
+        return false;
+    }
+    matches!(
+        func.inst_data(inst),
+        InstData::Load {
+            ty: Type::I8 | Type::I16,
+            ..
+        }
+    ) || (aarch64
+        && matches!(
+            func.inst_data(inst),
+            InstData::Icmp { .. } | InstData::Fcmp { .. }
+        ))
+}
+
 /// The `stack_addr` and `iconst` results every use of which is folded
 /// into the instruction using it, by `folds`, which gives the operands an
 /// instruction folds (each once per operand position).

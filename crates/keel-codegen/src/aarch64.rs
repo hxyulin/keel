@@ -1571,6 +1571,11 @@ impl<'a> FunctionCompiler<'a> {
                         _ => self.mach("sxtw", [(Reg::x(d)).into(), (Reg::w(a)).into()]),
                     },
                     // Writing a w register clears the upper 32 bits.
+                    ConvertOp::Uext if self.zero_extended_narrow(arg) => {
+                        if d != a {
+                            self.move_gp(d, a, false);
+                        }
+                    }
                     ConvertOp::Uext => match from {
                         Type::I8 => self.mach("uxtb", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
                         Type::I16 => self.mach("uxth", [(Reg::w(d)).into(), (Reg::w(a)).into()]),
@@ -3551,12 +3556,21 @@ impl<'a> FunctionCompiler<'a> {
                 let ty = self.ty(args[0]);
                 let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
                 let a = self.use_reg(args[0], S0);
-                let a = self.extend(S0, a, ty, signed);
+                let a = if !signed && self.zero_extended_narrow(args[0]) {
+                    a
+                } else {
+                    self.extend(S0, a, ty, signed)
+                };
                 let b = match folded_imm(self.func, self.func.inst_data(inst)) {
                     Some((_, k)) => Arg::imm(k),
                     None => {
                         let b = self.use_reg(args[1], S1);
-                        reg(self.extend(S1, b, ty, signed), ty).into()
+                        let b = if !signed && self.zero_extended_narrow(args[1]) {
+                            b
+                        } else {
+                            self.extend(S1, b, ty, signed)
+                        };
+                        reg(b, ty).into()
                     }
                 };
                 self.mach("cmp", [(reg(a, ty)).into(), (b).into()]);
@@ -3696,6 +3710,10 @@ impl<'a> FunctionCompiler<'a> {
             let label = self.label(target);
             self.out.branch(false, label);
         }
+    }
+
+    fn zero_extended_narrow(&self, value: Value) -> bool {
+        crate::fold::zero_extended_narrow(self.func, &self.selection, &self.alloc, value, true)
     }
 
     /// Sign- or zero-extends a narrow value in `w<src>` into `w<scratch>`

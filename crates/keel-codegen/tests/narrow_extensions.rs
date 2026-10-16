@@ -1,0 +1,272 @@
+//! Definition-sensitive upper-bit checks, plus native spill/call correctness.
+use keel_codegen::{CodegenPipeline, Pools, SelectionTier, Target, regalloc::AllocationTier};
+
+fn allocators() -> Vec<AllocationTier> {
+    #[allow(unused_mut)]
+    let mut tiers = vec![AllocationTier::Fast, AllocationTier::Full];
+    #[cfg(feature = "experimental-regalloc")]
+    tiers.extend([
+        AllocationTier::Local,
+        AllocationTier::Split,
+        AllocationTier::Weighted,
+    ]);
+    tiers
+}
+
+fn assembly(
+    source: &str,
+    target: Target,
+    selector: SelectionTier,
+    allocator: AllocationTier,
+    tiny: bool,
+) -> String {
+    let module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let pipeline = CodegenPipeline {
+        selector: &selector,
+        allocator: &allocator,
+    };
+    match target {
+        Target::X86_64LinuxGnu => {
+            let pools = if tiny {
+                Pools {
+                    caller_saved: &[6],
+                    callee_saved: &[3],
+                    float_caller_saved: &[8],
+                    float_callee_saved: &[],
+                }
+            } else {
+                keel_codegen::x86_64::REGISTERS
+            };
+            keel_codegen::x86_64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()
+        }
+        Target::Aarch64AppleDarwin => {
+            let pools = if tiny {
+                Pools {
+                    caller_saved: &[9],
+                    callee_saved: &[19],
+                    float_caller_saved: &[19],
+                    float_callee_saved: &[8],
+                }
+            } else {
+                keel_codegen::aarch64::REGISTERS
+            };
+            keel_codegen::aarch64::compile_with_pipeline(&module, &pools, &pipeline).unwrap()
+        }
+    }
+}
+
+fn extensions(output: &str, target: Target) -> usize {
+    output
+        .lines()
+        .filter(|line| match target {
+            Target::X86_64LinuxGnu => line.trim_start().starts_with("movzx\t"),
+            Target::Aarch64AppleDarwin => ["uxtb\t", "uxth\t"]
+                .iter()
+                .any(|op| line.trim_start().starts_with(op)),
+        })
+        .count()
+}
+
+#[test]
+fn materialized_loads_need_no_second_extension() {
+    for target in Target::ALL {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                for ty in ["i8", "i16"] {
+                    // The second use keeps the narrow source alive, exercising
+                    // a distinct destination as well as coalesced conversions.
+                    let source = format!(
+                        "func @f(ptr) -> i64 {{
+block0(v0: ptr):
+ v1 = load.{ty} v0
+ v2 = uext.i64 v1
+ v3 = uext.i64 v1
+ v4 = iadd v2, v3
+ return v4
+}}"
+                    );
+                    for tiny in [false, true] {
+                        let output = assembly(&source, target, selector, allocator, tiny);
+                        let expected = usize::from(target == Target::X86_64LinuxGnu);
+                        assert_eq!(
+                            extensions(&output, target),
+                            expected,
+                            "{target:?} {allocator:?} {selector:?}: {output}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn unknown_upper_bits_and_truncations_still_extend() {
+    let sources = [
+        "func @f(i8) -> i64 { block0(v0: i8): v1 = uext.i64 v0 return v1 }",
+        "func @f(i8, i8) -> i64 { block0(v0: i8, v1: i8): v2 = iadd v0, v1 v3 = uext.i64 v2 return v3 }",
+        "func @f(ptr) -> i64 { block0(v0: ptr): v1 = load.i8 v0 jump block1(v1) block1(v2: i8): v3 = uext.i64 v2 return v3 }",
+        "decl @external() -> i8\nfunc @f() -> i64 { block0: v0 = call @external() v1 = uext.i64 v0 return v1 }",
+        "func @f(ptr) -> i64 { block0(v0: ptr): v1 = load.i16 v0 v2 = trunc.i8 v1 v3 = uext.i64 v2 return v3 }",
+    ];
+    for target in Target::ALL {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                for (i, source) in sources.iter().enumerate() {
+                    let output = assembly(source, target, selector, allocator, false);
+                    let expected = if target == Target::X86_64LinuxGnu && [2, 4].contains(&i) {
+                        2
+                    } else {
+                        1
+                    };
+                    assert_eq!(extensions(&output, target), expected, "{i}: {output}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn cset_is_clean_but_setcc_is_not() {
+    let source = "func @f(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = icmp.ult v0, v1 v3 = uext.i64 v2 return v3 }";
+    for target in Target::ALL {
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                let output = assembly(source, target, selector, allocator, false);
+                assert_eq!(
+                    extensions(&output, target),
+                    usize::from(target == Target::X86_64LinuxGnu),
+                    "{output}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unsigned_narrow_compare_reuses_clean_loads_on_arm() {
+    for ty in ["i8", "i16"] {
+        let source = format!(
+            "func @f(ptr, ptr) -> i8 {{ block0(v0: ptr, v1: ptr): v2 = load.{ty} v0 v3 = load.{ty} v1 v4 = icmp.ult v2, v3 return v4 }}"
+        );
+        for allocator in allocators() {
+            for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+                let output = assembly(
+                    &source,
+                    Target::Aarch64AppleDarwin,
+                    selector,
+                    allocator,
+                    false,
+                );
+                assert_eq!(
+                    extensions(&output, Target::Aarch64AppleDarwin),
+                    0,
+                    "{output}"
+                );
+                let signed = source.replace("icmp.ult", "icmp.slt");
+                let output = assembly(
+                    &signed,
+                    Target::Aarch64AppleDarwin,
+                    selector,
+                    allocator,
+                    false,
+                );
+                assert!(
+                    output.contains(if ty == "i8" { "sxtb\t" } else { "sxth\t" }),
+                    "{output}"
+                );
+            }
+        }
+    }
+}
+
+fn pressure_source() -> String {
+    let mut source =
+        String::from("decl @clobber()\nfunc @pressure(ptr) -> i64 { block0(v0: ptr):\n");
+    for i in 0..12 {
+        let n = 1 + i * 3;
+        source.push_str(&format!(
+            "v{n} = iconst.i64 {}\nv{} = ptradd v0, v{n}\nv{} = load.i16 v{}\n",
+            i * 2,
+            n + 1,
+            n + 2,
+            n + 1
+        ));
+    }
+    source.push_str("call @clobber()\njump block1\nblock1:\n");
+    for i in 0..12 {
+        source.push_str(&format!("v{} = uext.i64 v{}\n", 37 + i, 3 + i * 3));
+    }
+    source.push_str("v49 = iadd v37, v38\n");
+    for i in 0..10 {
+        source.push_str(&format!("v{} = iadd v{}, v{}\n", 50 + i, 49 + i, 39 + i));
+    }
+    source.push_str("return v59\n}\n");
+    // Wrapped arithmetic and truncation must discard deliberately dirty bits.
+    source.push_str("func @wrapped(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = trunc.i8 v0 v3 = trunc.i8 v1 v4 = iadd v2, v3 v5 = uext.i64 v4 return v5 }\n");
+    source.push_str("func @incoming(i8) -> i64 { block0(v0: i8): v1 = uext.i64 v0 return v1 }\n");
+    source.push_str("func @boolean(i64, i64) -> i64 { block0(v0: i64, v1: i64): v2 = icmp.ult v0, v1 v3 = uext.i64 v2 return v3 }\n");
+    source
+}
+
+#[test]
+fn native_loads_survive_call_spills_and_cross_block_liveness() {
+    let Some(target) = Target::host() else { return };
+    let source = pressure_source();
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("narrow-extensions");
+    std::fs::create_dir_all(&dir).unwrap();
+    let driver = dir.join("driver.c");
+    std::fs::write(&driver, r#"
+#include <stdint.h>
+extern uint64_t pressure(uint16_t *), wrapped(uint64_t,uint64_t), incoming(uint64_t), boolean(uint64_t,uint64_t);
+__attribute__((noinline)) void clobber(void) { __asm__ volatile("" ::: "memory"); }
+int main(void) {
+ uint16_t p[12];
+ for (unsigned k=0;k<256;k++) {
+  uint64_t expected=0;
+  for (unsigned i=0;i<12;i++) { p[i]=(uint16_t)(k*313+i*997); expected+=p[i]; }
+  if (pressure(p)!=expected) return 1;
+  uint64_t a=UINT64_C(0xfedcba9876543200)|k, b=UINT64_C(0x87654321000000ff);
+  if (wrapped(a,b)!=(uint8_t)(a+b)) return 2;
+  if (incoming(a)!=(uint8_t)a) return 3;
+  if (boolean(a,b)!=(a<b) || boolean(b,a)!=(b<a)) return 4;
+ }
+ return 0;
+}
+"#).unwrap();
+    for allocator in allocators() {
+        for selector in [SelectionTier::Baseline, SelectionTier::Full] {
+            for tiny in [false, true] {
+                let output = assembly(&source, target, selector, allocator, tiny);
+                // Every extension in pressure must disappear; x86 retains the
+                // twelve memory loads. Its other functions have three movzx.
+                let expected = if target == Target::X86_64LinuxGnu {
+                    15
+                } else {
+                    2
+                };
+                assert_eq!(extensions(&output, target), expected, "{output}");
+                let asm = dir.join("test.s");
+                let exe = dir.join("run");
+                std::fs::write(&asm, output).unwrap();
+                let result = std::process::Command::new("clang")
+                    .args([&asm, &driver])
+                    .arg("-o")
+                    .arg(&exe)
+                    .output()
+                    .unwrap();
+                assert!(
+                    result.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let result = std::process::Command::new(&exe).status().unwrap();
+                assert!(
+                    result.success(),
+                    "{allocator:?} {selector:?} tiny={tiny}: {result}"
+                );
+            }
+        }
+    }
+}
