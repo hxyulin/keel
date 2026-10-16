@@ -94,6 +94,27 @@ impl Drop for DiagnosticPassClock<'_> {fn drop(&mut self) {
     p.write_text(t)
     store('diagnostic-source', {'files':{str(p.relative_to(dst)):sha(p) for p in dst.rglob('*.rs')},'generator_sha256':sha(__file__)})
 
+def memory_setup():
+    p=ROOT/'source/crates/keel-c/examples/resident_memory.rs'
+    p.write_text(r'''
+fn main()->Result<(),Box<dyn std::error::Error>> {
+ let args:Vec<_>=std::env::args().skip(1).collect();
+ let opts=keel_c::Options{debug_info:args.iter().any(|x|x=="--debug"),..Default::default()};
+ let inputs:Vec<_>=args.iter().filter(|x|x.as_str()!="--debug").map(|p|Ok((p,std::fs::read_to_string(p)?))).collect::<Result<_,std::io::Error>>()?;
+ for (p,src) in &inputs {drop(std::hint::black_box(keel_c::compile(src,p,opts)?));}
+ Ok(())
+}
+''')
+
+def memory():
+    b=ROOT/'target-memory/release/examples/resident_memory';r={'start':snapshot(),'binary_sha256':sha(b),'runs':[]}
+    wrapper='import resource,subprocess,sys; p=subprocess.run(sys.argv[1:]); print("RSS_KIB",resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,file=sys.stderr);sys.exit(p.returncode)'
+    for i in range(3):
+        for app,ps in inputs().items():
+            for d in [False,True]:
+                r['runs'].append(dict(app=app,debug=d,repeat=i,**run(['python3','-c',wrapper,b,*ps,*(['--debug'] if d else [])])))
+    r['end']=snapshot();store('memory',r)
+
 def collect():
     r={'start':snapshot(),'initializer':[],'allocations_histogram':[],'cli_phases':[],'parity':[]}
     db=ROOT/'target-diagnostic/release'
