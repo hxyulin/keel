@@ -86,8 +86,11 @@ template decisions can affect overhead; no zero-overhead measurement is claimed.
 
 Base: `21d050463a65fb868321eda5107f941443a2b010`, whose measured compiler baseline
 is documented in `current-app-runtime-2026-10-16.md`. This checkpoint instruments
-existing choices. It does not explain the historical remaining QuickJS calls
-until the same input is compiled and its reports inspected. A bounded late
-inlining policy, if supported by those results, is a separate follow-up.
+existing choices. The [validated MacHost QuickJS diagnostic](evidence/optimization-report-2026-10-16/README.md)
+records caller instruction growth as the selected blocker for the remaining
+53 duplicate-value, 32 exception-test, and 21 alwaysinline integer-constructor
+calls in JS_CallInternal; reported/unreported/retained baseline IR match exactly.
+A bounded late inlining policy is a separate follow-up, with no gain inferred
+from these decisions.
 Aggregate CFG promotion remains deferred. Coordinator serial integration and
 independent review are required before integration into main.
