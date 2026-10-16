@@ -85,6 +85,21 @@ fn execute(
                     B::Isub => read(args[0]).wrapping_sub(read(args[1])),
                     B::Imul => read(args[0]).wrapping_mul(read(args[1])),
                     B::Xor => read(args[0]) ^ read(args[1]),
+                    B::And => read(args[0]) & read(args[1]),
+                    B::Or => read(args[0]) | read(args[1]),
+                    B::Shl | B::Ushr | B::Sshr => {
+                        let width = f.value_type(args[0]).bytes().unwrap() * 8;
+                        let shift = read(args[1]) % u64::from(width);
+                        match op {
+                            B::Shl => read(args[0]) << shift,
+                            B::Ushr => read(args[0]) >> shift,
+                            B::Sshr => {
+                                (((read(args[0]) << (64 - width)) as i64 >> (64 - width)) >> shift)
+                                    as u64
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                     _ => panic!("unmodeled {op:?}"),
                 }),
                 D::Convert { arg, .. } => Some(read(*arg)),
