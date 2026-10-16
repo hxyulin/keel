@@ -135,6 +135,16 @@ workloads measure this backend and machine; a neutral median or an interval
 crossing one does not establish a speedup. Benchmark stdout checks complement
 the full correctness suites and semantic pass matrices.
 
+For committed compiler comparisons, `--baseline-passes tier:full --variant
+current=tier:full` runs each revision's actual Full preset. `--jobs 1`,
+`--compile-warmups 2`, and `--command-log PATH.jsonl.gz` support serial builds
+and retained commands; `--runtime-path PATH` copies each application to one
+pathname before timing. The [FunctionAttrs consumer comparison](reports/functionattrs-benchmark-2026-10-16/README.md)
+uses fresh release targets on MacHost and LinuxHost, 11 paired samples, whole-app
+machine-code parity, C compilation/RSS, generated contract scaling and a separate
+same-compiler SSE2/AVX flag comparison. Its identical application executables
+show no runtime/code-size change, with roughly 2–3% more compilation time.
+
 The checked-in [pass ablations](reports/pass-ablations-aarch64-2026-10-15.json)
 use five pairs after one warmup on Apple M5 Max. Removing GCM costs 4.2% in
 runtime geometric mean. Removing GVN has mixed runtime effects and grows
