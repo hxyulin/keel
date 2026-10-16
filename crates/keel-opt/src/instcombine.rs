@@ -375,6 +375,32 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
                 imm: i64::from(truth),
             }));
         }
+        InstData::Icmp { cond, args: [a, b] } if matches!(cond, IntCC::Eq | IntCC::Ne) => {
+            if let ValueDef::Result(left, 0) = func.value_def(a)
+                && let ValueDef::Result(right, 0) = func.value_def(b)
+                && let InstData::Convert { op, ty, arg: x } = *func.inst_data(left)
+                && matches!(op, ConvertOp::Sext | ConvertOp::Uext)
+                && let InstData::Convert {
+                    op: right_op,
+                    ty: right_ty,
+                    arg: y,
+                } = *func.inst_data(right)
+                && op == right_op
+                && ty == right_ty
+            {
+                let (x, y) = (func.resolve(x), func.resolve(y));
+                let from = func.value_type(x);
+                // Matching widening extensions are injective. Truncation and
+                // mixed sign/zero extensions do not preserve equality this way.
+                if from.is_int()
+                    && ty.is_int()
+                    && from == func.value_type(y)
+                    && from.bytes() < ty.bytes()
+                {
+                    return Some(Fold::Data(InstData::Icmp { cond, args: [x, y] }));
+                }
+            }
+        }
         _ => {}
     }
     canonicalized.then_some(Fold::Data(data))
