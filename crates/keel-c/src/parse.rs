@@ -664,7 +664,6 @@ impl<'a> Parser<'a> {
             is_const,
             thread_local: false,
             returns_twice: false,
-            noreturn: false,
             function_attrs: keel_ir::FunctionAttrs::default(),
             func: None,
         });
@@ -934,7 +933,6 @@ impl<'a> Parser<'a> {
                 is_const,
                 thread_local: spec.thread_local,
                 returns_twice: false,
-                noreturn: false,
                 function_attrs: keel_ir::FunctionAttrs::default(),
                 func: None,
             });
@@ -1015,7 +1013,6 @@ impl<'a> Parser<'a> {
                     is_const: false,
                     thread_local: false,
                     returns_twice: false,
-                    noreturn: false,
                     function_attrs: keel_ir::FunctionAttrs::default(),
                     func: None,
                 });
@@ -1058,7 +1055,6 @@ impl<'a> Parser<'a> {
                 "setjmp" | "_setjmp" | "sigsetjmp" | "__sigsetjmp" | "savectx" | "vfork"
             );
         self.globals[g].returns_twice |= returns_twice;
-        self.globals[g].noreturn |= attrs.noreturn;
         let mut policies = attrs.function_attrs;
         policies.inlinehint |= spec.inline;
         policies.noreturn |= attrs.noreturn;

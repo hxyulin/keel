@@ -1895,7 +1895,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
         };
-        if direct.is_some_and(|g| self.g.p.globals[g].noreturn) {
+        if direct.is_some_and(|g| self.g.p.globals[g].function_attrs.noreturn) {
             self.b.ins().trap();
             self.terminated = true;
             self.ensure_block();

@@ -307,7 +307,6 @@ pub struct Global<'a> {
     pub is_const: bool,
     pub thread_local: bool,
     pub returns_twice: bool,
-    pub noreturn: bool,
     pub function_attrs: keel_ir::FunctionAttrs,
     /// Index in the function list, for a defined function.
     pub func: Option<usize>,
