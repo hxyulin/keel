@@ -28,6 +28,7 @@ mod instcombine;
 mod known_bits;
 mod loop_vectorize;
 pub use loop_vectorize::VectorTarget;
+mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
