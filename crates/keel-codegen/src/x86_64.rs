@@ -2670,6 +2670,20 @@ impl<'a> FunctionCompiler<'a> {
     /// integer operation of type `ty`, on 32 or 64 bits.
     fn two_address(&mut self, mnemonic: Opcode, ty: Type, d: u8, a: u8, b: Operand) {
         let width = wide_ty(ty);
+        // These integer operations commute at the emitted width, including
+        // their defined flags (IMUL defines only CF/OF). If b already occupies
+        // d, operate on it directly instead of saving a through S0. Keep this
+        // allowlist explicit: subtraction and other two-address ops cannot swap.
+        if matches!(b, Operand::Reg(r) if r == d)
+            && a != d
+            && matches!(
+                mnemonic,
+                Opcode::Add | Opcode::And | Opcode::Or | Opcode::Xor | Opcode::Imul
+            )
+        {
+            self.emit(mnemonic, [asm_arg(&reg(d, width)), asm_arg(&reg(a, width))]);
+            return;
+        }
         // `mov d, a` would overwrite b.
         let dst = match b {
             Operand::Reg(r) if r == d && r != a => S0,
