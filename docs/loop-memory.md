@@ -94,6 +94,13 @@ invariant bound, at most 16 nontrapping integer header instructions, and a
 single straight-line body of at most 128 instructions. The only cloned
 operations are integer constants, nontrapping integer binary operations,
 and integer comparisons. The original header test remains each iteration.
+Header parameters and cloned header results must be their own resolved
+identities. The Function API permits aliases on definitions still in
+layout; these states are conservatively rejected so a dead definition's
+clone cannot overwrite the mapping of an invariant or another parameter.
+Clone-map keys use raw definition identities. Operands still resolve
+through aliases; body instructions are moved rather than cloned, and
+exit repair only maps scoped uses to fresh exit parameters.
 The body must have exactly one ordinary load, whose address already
 dominates entry, before any store or other pinned/trapping effect. Later
 ordinary stores must be disjoint according to `AliasInfo`; calls,
