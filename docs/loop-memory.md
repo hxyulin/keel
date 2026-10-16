@@ -1,11 +1,11 @@
-# Guarded loop memory motion: shape checkpoint
+# Guarded loop memory motion
 
-Status: source implementation checkpoint, 2026-10-17. The named
+Status: opt-in implementation validated on 2026-10-17. The named
 `loop-memory` pass is opt-in; the default pipeline is unchanged. Root
 subsequently authorized the bounded initial-guard extension below after
-the original design checkpoint found no campaign activation. Build and
-native validation await an explicit serial lease. Source matching alone
-is not an executed C activation result.
+the original design checkpoint found no campaign activation. Fresh C
+frontend output and the exact retained reload IR both activate the pass;
+verification, code generation and bounded native correctness checks passed.
 
 ## Evidence inspected
 
@@ -45,9 +45,9 @@ Duff's device, which is outside the proposed natural-loop subset.
 
 ## Approved subset and proof obligations
 
-The initial subset requires an existing dedicated preheader that enters a
+The original self-loop design subset required an existing dedicated preheader entering a
 single-block counted self-loop unconditionally. Reaching that preheader
-must guarantee the original candidate load executes. The address must be
+would need to guarantee the original candidate load executes. The address must be
 defined outside the loop and dominate the insertion point. A precomputed
 constant-offset address is acceptable; loop-local address definitions
 cannot simply be moved with the load without an additional proof.
@@ -86,8 +86,8 @@ arguments, and route only the entered case through a dedicated load
 preheader. The existing loop can remain unrotated. Substitute initial
 header arguments simultaneously, prove operand dominance and branch
 equivalence, and reject effectful/trapping header prefixes or observable
-effects before the first body load. Root authorized exactly this extension, with a bounded return-exit SSA
-repair. The implementation accepts only a header with two predecessors
+effects before the first body load. Root authorized this extension with a
+bounded return-exit SSA repair. The implementation accepts only a header with two predecessors
 (one unconditional external jump and one body back edge), an integer
 comparison involving a unit-step i32/i64 induction variable and an
 invariant bound, at most 16 nontrapping integer header instructions, and a
@@ -118,28 +118,43 @@ loop depth and alias information are recomputed before each candidate.
 Multiple loads, body block parameters, nested loops and complex exits are
 outside this initial implementation.
 
-## Remaining acceptance gates
+## Validation and remaining gates
 
-First establish actual activation from a realistic C fixture through the
-frontend and the intended cleanup pipeline. Then test explicit invocation
-and subsequent default cleanup with verification after every pass; native
-Clang comparisons at trips 0, 1, odd and many; zero-trip null/protected
-addresses; conditional-body and fault-order fallbacks; aliasing,
-restricted readonly aliases, unknown writes, calls, volatile/atomic,
-barrier, multiple-exit and nested-loop rejection; and both codegen targets.
+Twelve focused loop-memory tests pass. The broader IR/optimizer run
+passes 239 tests excluding golden tests; the original full attempt has
+one expected `unknown_pass` golden mismatch because the registered pass
+list changed. Root owns updating that shared golden after combining
+registrations. The C suite passes 120 tests. No production fix was needed
+after the independently reviewed source checkpoint.
+
+Before compiling or executing the fixture, structural checks on both
+fresh C-generated scalar IR and the exact retained `reload_restrict` IR
+asserted that the load moved from body to entered preheader, dominates
+the body, is bypassed by the initial false edge, and repairs the direct
+return of a header parameter. Fallback functions remained structurally
+unchanged. Explicit invocation followed by default cleanup verifies after
+every pass. Both AArch64 and x86-64 text/object code generation passed;
+x86-64 output was not executed.
 
 The dedicated C fixtures are `crates/keel-opt/tests/loop_memory/reload.c`
 and `driver.c`. They cover the audited reload-style recurrence, aliasing
 nonrestrict accesses, legal readonly restrict aliasing, conditional loads,
 and a store-before-fault fallback. The driver includes zero-trip null and
-protected-page inputs, valid trip counts 0/1/7/257/4096 and sixteen seeds.
+protected-page inputs, valid trip counts 0/1/2/7/8/257/4096 and sixteen seeds. Native explicit-pass
+and subsequent-cleanup outputs match Clang O2 with the same external
+driver. The null/protected zero-trip and conditional checks passed, as
+did the separate store-before-fault probe.
 Fault-order execution deliberately probes native fault behavior and is
 not a valid-input C equivalence proof. Focused IR tests cover direct
 header-value returns, multiple liveouts, both branch orientations,
 locations, dominance, cleanup and conservative rejections.
 
-No build, native execution, or performance measurement was performed for
-this source checkpoint. No validation lease was acquired. Root owns independent
-correctness review, integration, later serial runtime/code-size/compile-cost
-gates, and any decision to enable a pass by default. Audited kernel-route
+All builds used at most two Cargo jobs; native checks were serial under
+the third exclusive MacHost lease, which was explicitly released after all
+jobs exited. Logs, before/after IR, assembly, objects, retained compiler
+and test binaries, command records and hashes are ignored local evidence
+under `suite/reports/optimization-wave7-loop-memory-20261017/`. No
+performance measurement was performed. Root owns integration, later
+serial runtime/code-size/compile-cost gates, and any decision to enable a
+pass by default. Audited kernel-route
 contrasts are not predicted patch speedups or application gains.
