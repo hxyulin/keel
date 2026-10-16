@@ -1,0 +1,127 @@
+[
+  {
+    "id": 0,
+    "name": "control",
+    "feature": "floor",
+    "purpose": "external-call floor"
+  },
+  {
+    "id": 1,
+    "name": "and32",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "and",
+      32,
+      "0x00ff00ff"
+    ]
+  },
+  {
+    "id": 2,
+    "name": "or32-high",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "orr",
+      32,
+      "0x80000001"
+    ]
+  },
+  {
+    "id": 3,
+    "name": "xor32",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "eor",
+      32,
+      "0xff00ff00"
+    ]
+  },
+  {
+    "id": 4,
+    "name": "and64",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "and",
+      64,
+      "0x00ff00ff00ff00ff"
+    ]
+  },
+  {
+    "id": 5,
+    "name": "or64-high",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "orr",
+      64,
+      "0x8000000000000001"
+    ]
+  },
+  {
+    "id": 6,
+    "name": "xor64",
+    "feature": "logical-immediate",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_logical": [
+      "eor",
+      64,
+      "0xff00ff00ff00ff00"
+    ]
+  },
+  {
+    "id": 7,
+    "name": "nonencodable",
+    "feature": "negative",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "forbidden_logical": [
+      "and",
+      64,
+      "0x0123456789abcdef"
+    ]
+  },
+  {
+    "id": 8,
+    "name": "shared",
+    "feature": "interaction",
+    "purpose": "array throughput; n=1 also exposes call-entry cost"
+  },
+  {
+    "id": 9,
+    "name": "mixed-width",
+    "feature": "interaction",
+    "purpose": "array throughput; n=1 also exposes call-entry cost"
+  },
+  {
+    "id": 10,
+    "name": "movz",
+    "feature": "constant-planner",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_materialization": [
+      "movz",
+      64,
+      4660,
+      32
+    ]
+  },
+  {
+    "id": 11,
+    "name": "movn-negative",
+    "feature": "constant-planner",
+    "purpose": "array throughput; n=1 also exposes call-entry cost",
+    "expected_materialization": [
+      "movn",
+      64,
+      60875,
+      32
+    ]
+  },
+  {
+    "id": 12,
+    "name": "pressure",
+    "feature": "interaction",
+    "purpose": "array throughput; n=1 also exposes call-entry cost"
+  }
+]

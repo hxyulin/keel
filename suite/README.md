@@ -1437,3 +1437,86 @@ compiler recommendations. Raw evidence and reproduction
 include hash manifests and losslessly compressed captures. Historical inliner
 probes above remain historical; no source probes or compiler changes enter this
 matrix.
+
+## Targeted native ARM code generation
+
+`suite/arm-codegen/` is a small, download-free AArch64 macOS companion to the
+whole-app suite. Lua, QuickJS and SQLite remain the eight whole-app regression
+gauges; a kernel result does not establish an application gain. Backend unit
+regressions own exhaustive instruction semantics. This suite connects selected
+source patterns to native correctness, emitted shapes and optional observations.
+
+```sh
+python3 -B -m unittest discover -s suite/arm-codegen -p 'test_*.py'
+# Copy/edit config.example.json under target/; supply already-frozen compilers.
+python3 -B suite/arm-codegen/run.py --config target/arm-config.json \
+  --work-dir target/arm-check-01
+# Optional bounded timing: the two named cases plus the call-floor control.
+python3 -B suite/arm-codegen/run.py --config target/arm-config.json \
+  --work-dir target/arm-timing-01 --benchmark \
+  --timing-cases and64,movn-negative --rounds 6 --target-seconds 0.12
+python3 -B suite/arm-codegen/run.py \
+  --verify-report target/arm-timing-01/report.json
+```
+
+`--cases movz` reruns an affected functional fixture plus the control without
+repeating a timing campaign. One variant suffices for baseline validation; Clang O2 is always added. Variant
+paths, exact source/build-feature identities and flags are explicit. `-O` uses
+each binary's actual optimized preset (current Keel includes all selection).
+`["-O", "--isel", "none"]` is an optional same-binary ablation, not an old
+compiler baseline. `features` requests shape gates for that variant only:
+`logical-immediate` checks each simple mask's opcode, width and immediate;
+`constant-planner` checks specific MOVZ/MOVN seed fields. Leave baseline features
+empty: absence of a new shape is reported separately from semantic PASS. Shared
+masks, mixed widths, a nonencodable mask and accumulator pressure are observations,
+not blanket instruction-count minimization rules. No full assembly hashes are
+compared across compilers. Forbidden patterns are scoped to individual cases.
+
+Clang preprocesses each CASE once. All variants compile those identical bytes.
+The Clang-built driver object is compiled once and linked unchanged with each
+kernel object, without LTO, volatile payload accesses or compiler-specific hints.
+The fixed integer ISA regime is baseline ARMv8-A (Keel's native default and
+Clang `-march=armv8-a`); no native CPU tuning or FP work is involved. The driver
+uses runtime-generated input and an independent bit-at-a-time logical oracle,
+including zero-length, high-bit, all-ones and seeded random inputs. Checksum
+failure exits nonzero, including an intentional negative control. Setup, input
+allocation/generation, oracle checks and printing are outside CLOCK_MONOTONIC's
+kernel-call repeat loop; outputs are consumed after it. Process wall duration
+is retained as a diagnostic and bounds the reported inner time.
+
+Every build and correctness check completes before optional timing. Keep the
+host free of concurrent compiler builds and heavy benchmarks; normal desktop
+noise stays in the records. The runner changes no governor, ASLR or other jobs.
+Each case records object text bytes, opcode and materialization counts, decoded
+logical immediates and retained object disassembly. Load/backedge evidence is a
+necessary work-preservation screen, not a proof: inspect the disassembly before
+interpreting any optimization gain. An eliminated payload is explicitly invalid
+for its intended measurement, not a compiler correctness failure. A compiler may
+legitimately find a better transform. A missing expected shape need not mean the
+work vanished; the two checks remain separate.
+
+Calibration targets 100–250 ms for the slowest variant, using one common repeat
+count (bounded at one billion); all probes are retained. Faster variants can
+have shorter intervals. Sizes 1 and 4096 distinguish call-entry from throughput;
+half/full repeat counts check time scaling. An external-call-only control retains
+the driver floor; no timing is subtracted. Constants can be hoisted out of loops:
+static MOV counts describe emitted code, never implied reloads per iteration.
+Pressure cases are opt-in timing cases. The default command runs no timing matrix.
+
+Even-numbered paired rounds counterbalance forward/reverse variant order, with
+one warmup per variant/size/repeat setting. All measured variants use one copied
+executable pathname; copy/hash checks are untimed. Reports retain raw times,
+checksums, work counts, process times, paired median ratios against the first
+variant, and seeded paired-bootstrap percentile 95% intervals (4000 resamples).
+Intervals describe these pairs, not other programs; small campaigns are harness
+sanity checks. Performance has no hard CI threshold. Half/full ratios and call
+floor are diagnostic observations, not pass/fail speed claims.
+
+Generated `.i`, assembly, disassembly, objects, binaries and raw reports must stay
+under ignored `target/` or `suite/reports/` in a fresh directory. Reports retain
+commands, host/target/toolchain, compiler/source/driver/object/binary SHA-256s,
+source IDs, flags, feature labels, harness revision/dirty state and boundary
+process snapshots. Identity checks bracket timing and run before every round;
+`--verify-report` detects later source or binary mutation. Compile command wall
+times include process/I/O overhead and are metadata, not internal stage costs.
+No compiler rebuilds, remote execution, downloads or whole-app reruns occur.
