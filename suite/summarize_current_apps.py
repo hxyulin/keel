@@ -100,7 +100,7 @@ def resolve_function(root, app, variant, name, locations, mac):
                         'offset_has_individual_weight': not mac,
                         'instructions': lines[max(0, index-3):index+5] if index is not None else [],
                         'note': 'Coalesced sample row; no per-PC weight' if mac else 'Cycle sampling may skid; window is not causal attribution'})
-    unique = {}; 
+    unique = {};
     for pc in sorted(pcs, key=lambda x: -x['sample_row_percent_of_all']): unique.setdefault(pc['offset'], pc)
     object_path = None
     linkmap = root / app / (variant + '.link-map.txt')
