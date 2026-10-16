@@ -1232,6 +1232,32 @@ impl<'a> FunctionCompiler<'a> {
         use crate::select::Machine;
         let ty = self.ty(matched.args[0]);
         let a = self.use_reg(matched.args[0], S0);
+        if let Machine::Ubfx { lsb, width } = matched.machine {
+            let d = self.def_reg(result);
+            self.native(
+                if ty == Type::I64 {
+                    Opcode::UBFM_64M_bitfield
+                } else {
+                    Opcode::UBFM_32M_bitfield
+                },
+                [
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, a.into()),
+                    (FieldId::immr, lsb.into()),
+                    (FieldId::imms, u32::from(lsb) + u32::from(width) - 1),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "ubfx\t{}, {}, #{lsb}, #{width}",
+                        reg(d, ty),
+                        reg(a, ty)
+                    )
+                },
+            );
+            self.def_done(result, d);
+            return;
+        }
         let b = self.use_reg(matched.args[1], S1);
         let d = self.def_reg(result);
         let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));

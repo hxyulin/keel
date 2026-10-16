@@ -22,6 +22,11 @@ pub enum Machine {
     ShiftOr,
     ShiftXor,
     Lea,
+    /// AArch64-only, exact-width unsigned bitfield extraction.
+    Ubfx {
+        lsb: u8,
+        width: u8,
+    },
 }
 struct Rule {
     target: Target,
@@ -441,6 +446,76 @@ impl Selection {
                 let ty = func.value_type(func.resolve(args[0]));
                 if !matches!(ty, Type::I32 | Type::I64 | Type::Ptr) {
                     continue;
+                }
+                // ARM unsigned extraction consumes only a single-use shift.
+                // Masks wider than the remaining field deliberately fall back.
+                if target == Target::Aarch64
+                    && op == BinaryOp::And
+                    && matches!(ty, Type::I32 | Type::I64)
+                {
+                    let bits = if ty == Type::I32 { 32u64 } else { 64 };
+                    for side in [0, 1] {
+                        let value = func.resolve(args[side]);
+                        if uses[value.index()] != 1 {
+                            continue;
+                        }
+                        let Some(raw_mask) = crate::fold::iconst(func, args[1 - side]) else {
+                            continue;
+                        };
+                        let mask = raw_mask as u64 & (u64::MAX >> (64 - bits));
+                        // A nonempty proper low run; all-ones remains a plain shift.
+                        let width = mask.trailing_ones() as u64;
+                        if width == 0 || width >= bits || mask != (1u64 << width) - 1 {
+                            continue;
+                        }
+                        let ValueDef::Result(child, _) = func.value_def(value) else {
+                            continue;
+                        };
+                        if func.is_removed(child)
+                            || func.inst_block(child) != block
+                            || plan.covered(child)
+                        {
+                            continue;
+                        }
+                        let InstData::Binary {
+                            op: BinaryOp::Ushr,
+                            args: inputs,
+                        } = *func.inst_data(child)
+                        else {
+                            continue;
+                        };
+                        if func.value_type(func.resolve(inputs[0])) != ty {
+                            continue;
+                        }
+                        let Some(raw_shift) = crate::fold::iconst(func, inputs[1]) else {
+                            continue;
+                        };
+                        let lsb = raw_shift as u64 & (bits - 1);
+                        if lsb + width > bits {
+                            continue;
+                        }
+                        if let (Some(a), Some(b)) = (func.inst_loc(child), func.inst_loc(inst))
+                            && (a.file != b.file || a.line != b.line)
+                        {
+                            continue;
+                        }
+                        plan.cover(child);
+                        plan.matches.insert(
+                            inst,
+                            Match {
+                                machine: Machine::Ubfx {
+                                    lsb: lsb as u8,
+                                    width: width as u8,
+                                },
+                                args: vec![func.resolve(inputs[0])],
+                                shift: 0,
+                            },
+                        );
+                        break;
+                    }
+                    if plan.matches.contains_key(&inst) {
+                        continue;
+                    }
                 }
                 'rules: for rule in RULES.iter().filter(|r| r.target == target && r.root == op) {
                     for &side in if rule.commute { &[1, 0][..] } else { &[1][..] } {
