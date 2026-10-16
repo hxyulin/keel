@@ -69,20 +69,27 @@ token pasting, conditionals, includes and `include_next`, `#pragma once`,
 `_Pragma`, and line markers. This is an initial Clang compatibility milestone;
 [the design notes](docs/design.md#c-frontend) list the remaining gaps.
 
-Target instruction selection is an optional codegen pass, independent of
-`-O`. `--isel all` enables generated tree patterns, allocation of folded
-operands, and register hints. `--isel trees,folds,hints` selects individual
-passes; `--isel none` (the default) keeps the existing selection. `folds`
-removes already folded operands from allocation; ordinary immediate and
-address folding remain active in every mode. For example:
+For `compile` and `cc`, `-O` is a convenience preset: it enables the full
+IR optimization pipeline and all target instruction selection passes.
+`--isel all` enables generated tree patterns, allocation of folded operands,
+and register hints. `--isel trees,folds,hints` selects individual passes;
+`--isel none` or `--isel-tier baseline` keeps baseline selection. Explicit
+`--isel` and `--isel-tier` selectors override the `-O` selection preset in
+either flag order; among explicit selectors, the last wins.
+
+`--opt-tier none|basic|full` controls IR optimization independently. Among
+`-O` and `--opt-tier`, the last sets the IR tier, but any `-O` still enables
+all selection passes unless explicitly overridden. `-p` supplies an explicit
+IR pipeline that overrides the IR tier in either order without changing
+selection. Without `-O`, selection stays baseline unless explicitly selected;
+`--opt-tier full` alone does not enable selection passes. Library API defaults
+also remain baseline. Ordinary immediate and address folding stay active in
+every mode; `folds` removes already folded operands from allocation.
 
 ```sh
-cargo run -p keel -- cc -O --isel all hello.c -o hello.s
-cargo suite run -c keel-O,keel-O-select
+cargo run -p keel -- cc -O hello.c -o hello.s
+cargo run -p keel -- cc --isel none -O hello.c -o baseline-selection.s
 ```
-
-Fewer instructions can still cost more registers or change scheduling, so
-selection remains opt-in while its profitability rules are developed.
 
 `asm`, `compile`, `cc`, and `opt` map input files by default.
 They use a read-only copy-on-write file mapping instead of an owned read

@@ -10,7 +10,7 @@
 //! keel passes                                      list the passes
 //! ```
 //!
-//! `-O` runs the default pass pipeline before code generation; `opt` runs
+//! `-O` enables the full IR pipeline and all target selection passes; `opt` runs
 //! the given passes (the default pipeline without `-p`) and prints the IR.
 //! Assembly has debug info if the input names source files (`file`
 //! lines); `-g` gives an input without them its own lines instead, for
@@ -46,6 +46,9 @@ const USAGE: &str = "usage:
   keel archive [--target <triple>] -o <output.a> <member.o>...
   keel passes
 
+  -O enables full IR optimization and all target selection passes.
+  --isel / --isel-tier override -O selection in either order; last selector wins.
+  --opt-tier controls IR optimization; -p overrides its pipeline in either order.
   Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
@@ -194,6 +197,8 @@ impl Options {
 
 fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
+    let mut optimize_preset = false;
+    let mut explicit_selection = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let raw = arg.as_str();
@@ -268,7 +273,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     return Err("`--opt-report` may only be specified once".into());
                 }
             }
-            "-O" => opts.optimization = keel_opt::OptimizationTier::Full,
+            "-O" => {
+                opts.optimization = keel_opt::OptimizationTier::Full;
+                optimize_preset = true;
+            }
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
                     Some("none") => keel_opt::OptimizationTier::None,
@@ -312,11 +320,13 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     _ => return Err("`--isel-tier` needs baseline, trees, or full".into()),
                 };
                 opts.selection = tier.options();
+                explicit_selection = true;
             }
             "-g" => opts.ir_lines = true,
             "--emit-ir" => opts.emit_ir = true,
             "--emit-object" => opts.emit_object = true,
             "--isel" => {
+                explicit_selection = true;
                 let passes = args
                     .next()
                     .ok_or("`--isel` needs none, all, or trees,folds,hints")?;
@@ -364,6 +374,11 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             _ if opts.input.is_none() => opts.input = Some(arg.clone()),
             _ => return Err(format!("unexpected argument `{arg}`\n{USAGE}")),
         }
+    }
+    // Explicit selectors override the convenience preset regardless of order.
+    // IR tier changes and explicit pipelines do not reset selection.
+    if optimize_preset && !explicit_selection {
+        opts.selection = keel_codegen::SelectionOptions::ALL;
     }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat & 4 != 0
@@ -865,10 +880,151 @@ mod tests {
     }
 
     #[test]
+    fn optimization_preset_selection_and_explicit_overrides() {
+        use keel_codegen::{SelectionOptions, SelectionTier};
+        use keel_opt::OptimizationTier;
+        for tier in ["none", "basic", "full"] {
+            assert_eq!(
+                options(&["--opt-tier", tier]).unwrap().selection,
+                SelectionOptions::default()
+            );
+            for flags in [
+                vec!["-O", "--opt-tier", tier],
+                vec!["--opt-tier", tier, "-O"],
+                vec!["-O", "--opt-tier", tier, "-O"],
+            ] {
+                let opts = options(&flags).unwrap();
+                assert_eq!(opts.selection, SelectionOptions::ALL);
+                let expected = if flags.last() == Some(&"-O") {
+                    OptimizationTier::Full
+                } else {
+                    match tier {
+                        "none" => OptimizationTier::None,
+                        "basic" => OptimizationTier::Basic,
+                        _ => OptimizationTier::Full,
+                    }
+                };
+                assert_eq!(opts.optimization, expected);
+            }
+        }
+        assert_eq!(options(&[]).unwrap().selection, SelectionOptions::default());
+        assert_eq!(
+            options(&["-O", "-O"]).unwrap().selection,
+            SelectionOptions::ALL
+        );
+        for (flag, value, expected) in [
+            ("--isel", "none", SelectionOptions::default()),
+            ("--isel", "all", SelectionOptions::ALL),
+            ("--isel", "trees", SelectionTier::Trees.options()),
+            (
+                "--isel",
+                "folds,hints",
+                SelectionOptions {
+                    trees: false,
+                    folded_operands: true,
+                    register_hints: true,
+                },
+            ),
+            ("--isel-tier", "baseline", SelectionOptions::default()),
+            ("--isel-tier", "trees", SelectionTier::Trees.options()),
+            ("--isel-tier", "full", SelectionOptions::ALL),
+        ] {
+            for flags in [
+                vec![flag, value, "-O"],
+                vec!["-O", flag, value],
+                vec!["-O", flag, value, "-O"],
+            ] {
+                assert_eq!(options(&flags).unwrap().selection, expected, "{flags:?}");
+            }
+        }
+        for flags in [
+            vec!["--isel", "all", "-O", "--isel-tier", "baseline", "-O"],
+            vec!["--isel-tier", "full", "-O", "--isel", "none", "-O"],
+        ] {
+            assert_eq!(
+                options(&flags).unwrap().selection,
+                SelectionOptions::default()
+            );
+        }
+        assert_eq!(
+            options(&["--isel", "none", "-O", "--isel-tier", "full"])
+                .unwrap()
+                .selection,
+            SelectionOptions::ALL
+        );
+    }
+
+    #[test]
+    fn optimization_preset_codegen_and_object_overrides_end_to_end() {
+        let dir = std::env::temp_dir().join(format!("keel-cli-selection-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ir = "func @f(i64, i64, i64) -> i64 {\nblock0(v0: i64, v1: i64, v2: i64):\n v3 = imul v0, v1\n v4 = iadd v3, v2\n return v4\n}\n";
+        let c = "long f(long a, long b, long c) { return a * b + c; }\n";
+        for (command, extension, source) in [("compile", "keel", ir), ("cc", "i", c)] {
+            let input = dir.join(format!("input.{extension}"));
+            let output = dir.join("output");
+            std::fs::write(&input, source).unwrap();
+            for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"] {
+                for object in [false, true] {
+                    let invoke = |flags: &[&str]| {
+                        let mut args = vec![
+                            command.into(),
+                            input.display().to_string(),
+                            "--target".into(),
+                            target.into(),
+                            "-o".into(),
+                            output.display().to_string(),
+                        ];
+                        if object {
+                            args.push("--emit-object".into());
+                        }
+                        args.extend(flags.iter().map(|s| s.to_string()));
+                        run(args).unwrap();
+                        std::fs::read(&output).unwrap()
+                    };
+                    let selected = invoke(&["-O"]);
+                    for flags in [
+                        vec!["--isel", "all", "-O"],
+                        vec!["-O", "--isel", "all"],
+                        vec!["--isel-tier", "full", "-O"],
+                    ] {
+                        assert_eq!(
+                            selected,
+                            invoke(&flags),
+                            "{command} {target} object={object} {flags:?}"
+                        );
+                    }
+                    let baseline = invoke(&["--opt-tier", "full"]);
+                    for flags in [
+                        vec!["--isel", "none", "-O"],
+                        vec!["-O", "--isel", "none"],
+                        vec!["--isel-tier", "baseline", "-O"],
+                    ] {
+                        assert_eq!(
+                            baseline,
+                            invoke(&flags),
+                            "{command} {target} object={object} {flags:?}"
+                        );
+                    }
+                    if target == "aarch64-apple-darwin" && !object {
+                        let selected = String::from_utf8(selected).unwrap();
+                        let baseline = String::from_utf8(baseline).unwrap();
+                        assert!(selected.contains("\tmadd\t"), "{selected}");
+                        assert!(!baseline.contains("\tmadd\t"), "{baseline}");
+                        assert!(baseline.contains("\tmul\t"), "{baseline}");
+                    }
+                }
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn explicit_pipeline_overrides_tiers_in_either_order() {
         let source = "func @f() -> i64 {\nblock0:\n    v0 = iconst.i64 20\n    v1 = iconst.i64 22\n    v2 = iadd v0, v1\n    return v2\n}";
         for args in [["-p", "dce", "-O"], ["-O", "-p", "dce"]] {
             let opts = options(&args).unwrap();
+            assert_eq!(opts.selection, keel_codegen::SelectionOptions::ALL);
             let mut module = keel_ir::parse(source).unwrap();
             opts.optimize(&mut module).unwrap();
             assert!(
@@ -905,9 +1061,16 @@ mod tuning_tests {
         ] {
             let opts = parse(&args).unwrap();
             assert_eq!(opts.tuning, keel_codegen::tuning::TuningCpu::AppleM5);
-            assert!(
-                !opts.selection.trees,
-                "tuning must not change selection effort"
+            assert_eq!(opts.selection, keel_codegen::SelectionOptions::ALL);
+        }
+        for args in [
+            vec!["--tune", "apple-m5"],
+            vec!["--tune", "apple-m5", "--isel-tier", "baseline", "-O"],
+            vec!["-O", "--tune", "apple-m5", "--isel-tier", "baseline"],
+        ] {
+            assert_eq!(
+                parse(&args).unwrap().selection,
+                keel_codegen::SelectionOptions::default()
             );
         }
         assert!(parse(&["--tune", "unrecognized"]).is_err());
