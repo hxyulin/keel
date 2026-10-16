@@ -109,13 +109,14 @@ fn unknown_upper_bits_and_truncations_still_extend() {
         "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i8 v0\n jump block1(v1)\n block1(v2: i8):\n v3 = uext.i64 v2\n return v3\n}",
         "decl @external() -> i8\nfunc @f() -> i64 {\nblock0:\n v0 = call @external()\n v1 = uext.i64 v0\n return v1\n}",
         "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i16 v0\n v2 = trunc.i8 v1\n v3 = uext.i64 v2\n return v3\n}",
+        "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = atomic_load.i8 seq_cst v0\n v2 = uext.i64 v1\n return v2\n}",
     ];
     for target in Target::ALL {
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
                 for (i, source) in sources.iter().enumerate() {
                     let output = assembly(source, target, selector, allocator, false);
-                    let expected = if target == Target::X86_64LinuxGnu && [2, 4].contains(&i) {
+                    let expected = if target == Target::X86_64LinuxGnu && [2, 4, 5].contains(&i) {
                         2
                     } else {
                         1
@@ -148,7 +149,7 @@ fn cset_is_clean_but_setcc_is_not() {
 fn unsigned_narrow_compare_reuses_clean_loads_on_arm() {
     for ty in ["i8", "i16"] {
         let source = format!(
-            "func @f(ptr, ptr) -> i8 {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.{ty} v0\n v3 = load.{ty} v1\n v4 = icmp.ult v2, v3\n return v4\n}}"
+            "func @f(ptr, ptr) -> i64 {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.{ty} v0\n v3 = load.{ty} v1\n v4 = icmp.ult v2, v3\n v5 = uext.i64 v4\n return v5\n}}"
         );
         for allocator in allocators() {
             for selector in [SelectionTier::Baseline, SelectionTier::Full] {
@@ -215,6 +216,48 @@ fn aliases_follow_the_resolved_definition_including_block_arguments() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn distinct_conversion_destination_still_copies_the_value() {
+    use keel_codegen::regalloc::{Allocation, AllocationInput, Loc, RegisterAllocator};
+    struct Distinct;
+    impl RegisterAllocator for Distinct {
+        fn name(&self) -> &'static str {
+            "distinct-test-registers"
+        }
+        fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+            let mut alloc = AllocationTier::Full.allocate(input);
+            for (i, loc) in alloc.locs[0].iter_mut().enumerate() {
+                *loc = Some(Loc::Reg(input.pools.caller_saved[i]));
+            }
+            alloc
+        }
+    }
+    let module = keel_ir::parse("func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i8 v0\n v2 = uext.i64 v1\n return v2\n}").unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    for target in Target::ALL {
+        let output = keel_codegen::compile_with_pipeline(
+            &module,
+            target,
+            &CodegenPipeline {
+                selector: &SelectionTier::Baseline,
+                allocator: &Distinct,
+            },
+        )
+        .unwrap();
+        // The forced source/destination are rdi/r8 on x86 and w10/w11 on ARM.
+        let copy = match target {
+            Target::X86_64LinuxGnu => "mov\tr8d, edi",
+            Target::Aarch64AppleDarwin => "mov\tw11, w10",
+        };
+        assert!(output.contains(copy), "{output}");
+        assert_eq!(
+            extensions(&output, target),
+            usize::from(target == Target::X86_64LinuxGnu),
+            "{output}"
+        );
     }
 }
 
