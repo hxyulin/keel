@@ -115,14 +115,28 @@ def rss(args):
         source = max((args.prepared / suite / "pre").glob("*.i"), key=lambda p: p.stat().st_size)
         commands = {}
         for name, driver in [("before", args.before), ("after", args.after)]:
-            commands[name] = ["/usr/bin/time", "-l" if platform.system() == "Darwin" else "-v", driver,
-                              "cc", "--opt-tier", "full", source, "-o", "/dev/null"]
+            commands[name] = [driver, "cc", "--opt-tier", "full", source, "-o", "/dev/null"]
         samples = {"before": [], "after": []}
         for i in range(13):
             for name in (["before", "after"] if i % 2 == 0 else ["after", "before"]):
-                p, ms = run(commands[name])
+                import tempfile
+                command = list(map(str, commands[name]))
+                with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+                    start = time.perf_counter()
+                    pid = os.posix_spawn(command[0], command, os.environ,
+                                         file_actions=[(os.POSIX_SPAWN_DUP2, stdout.fileno(), 1),
+                                                       (os.POSIX_SPAWN_DUP2, stderr.fileno(), 2)])
+                    _, status, usage = os.wait4(pid, 0)
+                    ms = (time.perf_counter() - start) * 1000
+                    stdout.seek(0)
+                    stderr.seek(0)
+                    sample = dict(wall_ms=ms, user_s=usage.ru_utime, system_s=usage.ru_stime,
+                                  max_rss_bytes=usage.ru_maxrss * (1 if platform.system() == "Darwin" else 1024))
+                    LOG.append(dict(command=command, returncode=os.waitstatus_to_exitcode(status),
+                                    stdout=stdout.read().decode(), stderr=stderr.read().decode(), **sample))
+                    assert status == 0, LOG[-1]
                 if i >= 2:
-                    samples[name].append(dict(wall_ms=ms, time_output=p.stderr.decode()))
+                    samples[name].append(sample)
         rows.append(dict(suite=suite, input=str(source), sha256=sha(source), bytes=source.stat().st_size, samples=samples))
     return rows
 
