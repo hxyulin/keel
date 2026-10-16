@@ -269,13 +269,33 @@ struct BlockData {
     insts: Vec<Inst>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct InstNode {
     data: InstData,
-    results: Vec<Value>,
+    results: ResultRange,
     /// `None` once removed.
     block: Option<Block>,
     loc: Option<SourceLoc>,
+}
+
+/// Append-only pool offsets use usize, with checked addition and no narrowing.
+#[derive(Copy, Clone)]
+struct ResultRange {
+    start: usize,
+    end: usize,
+}
+
+impl ResultRange {
+    fn new(start: usize, len: usize) -> Self {
+        Self {
+            start,
+            end: start.checked_add(len).expect("result pool range overflow"),
+        }
+    }
+
+    fn as_range(self) -> std::ops::Range<usize> {
+        self.start..self.end
+    }
 }
 
 /// Where a new or moved instruction goes.
@@ -287,7 +307,7 @@ pub enum InsertPoint {
     Before(Inst),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Function {
     pub attrs: FunctionAttrs,
     pub name: String,
@@ -295,6 +315,7 @@ pub struct Function {
     blocks: Arena<Block, BlockData>,
     insts: Arena<Inst, InstNode>,
     values: Arena<Value, ValueData>,
+    result_pool: Vec<Value>,
     stack_slots: Arena<StackSlot, StackSlotData>,
     /// Functions this one calls. Keeping their signatures here makes a
     /// function self-contained: result types and verification of calls need
@@ -327,6 +348,55 @@ pub struct Function {
     pub debug_vars: Vec<crate::DebugVar>,
 }
 
+// Preserve the public logical Debug representation, including detached nodes.
+impl fmt::Debug for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct Nodes<'a>(&'a Function);
+        struct Node<'a>(&'a InstNode, &'a [Value]);
+        impl fmt::Debug for Node<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("InstNode")
+                    .field("data", &self.0.data)
+                    .field("results", &self.1)
+                    .field("block", &self.0.block)
+                    .field("loc", &self.0.loc)
+                    .finish()
+            }
+        }
+        impl fmt::Debug for Nodes<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_map()
+                    .entries(
+                        self.0
+                            .insts
+                            .iter()
+                            .map(|(i, n)| (i, Node(n, self.0.inst_results(i)))),
+                    )
+                    .finish()
+            }
+        }
+        f.debug_struct("Function")
+            .field("attrs", &self.attrs)
+            .field("name", &self.name)
+            .field("sig", &self.sig)
+            .field("blocks", &self.blocks)
+            .field("insts", &Nodes(self))
+            .field("values", &self.values)
+            .field("stack_slots", &self.stack_slots)
+            .field("callees", &self.callees)
+            .field("data_symbols", &self.data_symbols)
+            .field("signatures", &self.signatures)
+            .field("layout", &self.layout)
+            .field("personality", &self.personality)
+            .field("local", &self.local)
+            .field("debug_return", &self.debug_return)
+            .field("debug_loc", &self.debug_loc)
+            .field("debug_scopes", &self.debug_scopes)
+            .field("debug_vars", &self.debug_vars)
+            .finish()
+    }
+}
+
 impl Function {
     pub fn new(name: impl Into<String>, sig: Signature) -> Self {
         Self {
@@ -336,6 +406,7 @@ impl Function {
             blocks: Arena::new(),
             insts: Arena::new(),
             values: Arena::new(),
+            result_pool: Vec::new(),
             stack_slots: Arena::new(),
             callees: Arena::new(),
             data_symbols: Arena::new(),
@@ -527,9 +598,21 @@ impl Function {
     /// Inserts an instruction at `at` and creates its result values, typed
     /// from its operands.
     pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
-        let mut result_tys = Vec::new();
+        self.insert_inst_with_scratch(at, data, &mut Vec::new())
+    }
+
+    /// Inserts using caller-owned reusable result-type storage. Type inference
+    /// finishes before any instruction or value is created. Contents from an
+    /// earlier insertion (including a panicking inference) are discarded first.
+    pub fn insert_inst_with_scratch(
+        &mut self,
+        at: InsertPoint,
+        data: InstData,
+        result_tys: &mut Vec<Type>,
+    ) -> Inst {
+        result_tys.clear();
         self.for_each_result_type(&data, |ty| result_tys.push(ty));
-        let inst = self.create_inst(data, &result_tys);
+        let inst = self.create_inst(data, result_tys);
         self.place(inst, at);
         inst
     }
@@ -549,18 +632,30 @@ impl Function {
 
     /// Creates an instruction and its results, outside the layout.
     fn create_inst(&mut self, data: InstData, result_tys: &[Type]) -> Inst {
+        let results = ResultRange::new(self.result_pool.len(), result_tys.len());
+        // Check all handle/index arithmetic before mutating the function.
+        if !result_tys.is_empty() {
+            let last = self
+                .values
+                .len()
+                .checked_add(result_tys.len() - 1)
+                .expect("value index overflow");
+            u32::try_from(last).expect("value index overflow");
+            u32::try_from(result_tys.len() - 1).expect("result index overflow");
+        }
+        self.result_pool.reserve(result_tys.len());
         let inst = self.insts.push(InstNode {
             data,
-            results: Vec::new(),
+            results,
             block: None,
             loc: None,
         });
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
                 ty,
-                def: ValueDef::Result(inst, n as u32),
+                def: ValueDef::Result(inst, u32::try_from(n).expect("result index overflow")),
             });
-            self.insts[inst].results.push(value);
+            self.result_pool.push(value);
         }
         inst
     }
@@ -713,7 +808,7 @@ impl Function {
     }
 
     pub fn inst_results(&self, inst: Inst) -> &[Value] {
-        &self.insts[inst].results
+        &self.result_pool[self.insts[inst].results.as_range()]
     }
 
     /// The block containing `inst`. Panics if it was removed.
@@ -742,7 +837,7 @@ impl Function {
 
     /// The single result of `inst`. Panics if it has none.
     pub fn first_result(&self, inst: Inst) -> Value {
-        self.insts[inst].results[0]
+        self.inst_results(inst)[0]
     }
 
     pub fn value_type(&self, value: Value) -> Type {
@@ -1197,5 +1292,19 @@ block3(v14: i64):
             .collect();
         // jump, brif, load, jump, return
         assert_eq!(pinned, ["inst1", "inst3", "inst7", "inst12", "inst13"]);
+    }
+}
+
+#[cfg(test)]
+mod result_pool_range_tests {
+    use super::ResultRange;
+
+    #[test]
+    fn range_overflow_is_checked() {
+        assert!(std::panic::catch_unwind(|| ResultRange::new(usize::MAX, 1)).is_err());
+        assert_eq!(
+            ResultRange::new(usize::MAX, 0).as_range(),
+            usize::MAX..usize::MAX
+        );
     }
 }

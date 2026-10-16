@@ -103,6 +103,7 @@ pub struct FunctionBuilder<'f> {
     /// The location instructions built from now on get.
     srcloc: Option<SourceLoc>,
     var_types: Vec<Type>,
+    result_tys: Vec<Type>,
     /// SSA state indexed directly by block, with sparse variable definitions.
     blocks: Vec<BlockState>,
     /// Every parameter the builder added, for the final trivial-parameter
@@ -126,6 +127,7 @@ impl<'f> FunctionBuilder<'f> {
             current: None,
             srcloc: None,
             var_types: Vec::new(),
+            result_tys: Vec::new(),
             blocks: Vec::new(),
             added_params: Vec::new(),
             incoming: Vec::new(),
@@ -195,7 +197,9 @@ impl<'f> FunctionBuilder<'f> {
             self.sync_preds();
             self.pending = Some(block);
         }
-        self.func.ins(InsertPoint::End(block)).loc(self.srcloc)
+        self.func
+            .ins_with_scratch(InsertPoint::End(block), &mut self.result_tys)
+            .loc(self.srcloc)
     }
 
     pub fn declare_var(&mut self, ty: Type) -> Variable {

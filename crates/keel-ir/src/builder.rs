@@ -17,6 +17,7 @@ pub struct InstBuilder<'f> {
     func: &'f mut Function,
     at: InsertPoint,
     loc: Option<SourceLoc>,
+    result_tys: Option<&'f mut Vec<Type>>,
 }
 
 impl Function {
@@ -26,6 +27,21 @@ impl Function {
             func: self,
             at,
             loc: None,
+            result_tys: None,
+        }
+    }
+
+    /// A one-instruction builder borrowing reusable result-type scratch.
+    pub fn ins_with_scratch<'f>(
+        &'f mut self,
+        at: InsertPoint,
+        result_tys: &'f mut Vec<Type>,
+    ) -> InstBuilder<'f> {
+        InstBuilder {
+            func: self,
+            at,
+            loc: None,
+            result_tys: Some(result_tys),
         }
     }
 }
@@ -59,15 +75,23 @@ impl InstBuilder<'_> {
 
     /// Inserts any instruction.
     pub fn build(self, data: InstData) -> Inst {
-        let inst = self.func.insert_inst(self.at, data);
+        let inst = match self.result_tys {
+            Some(scratch) => self.func.insert_inst_with_scratch(self.at, data, scratch),
+            None => self.func.insert_inst(self.at, data),
+        };
         self.func.set_inst_loc(inst, self.loc);
         inst
     }
 
     fn value(self, data: InstData) -> Value {
-        let func = self.func;
-        let inst = func.insert_inst(self.at, data);
-        func.set_inst_loc(inst, self.loc);
+        let func = &mut *self.func;
+        let at = self.at;
+        let loc = self.loc;
+        let inst = match self.result_tys {
+            Some(scratch) => func.insert_inst_with_scratch(at, data, scratch),
+            None => func.insert_inst(at, data),
+        };
+        func.set_inst_loc(inst, loc);
         func.first_result(inst)
     }
 
@@ -129,8 +153,12 @@ impl InstBuilder<'_> {
 
     /// The wrapped result and the `i8` overflow flag.
     pub fn overflow(self, op: OverflowOp, a: Value, b: Value) -> (Value, Value) {
-        let func = self.func;
-        let inst = func.insert_inst(self.at, InstData::Overflow { op, args: [a, b] });
+        let func = &mut *self.func;
+        let data = InstData::Overflow { op, args: [a, b] };
+        let inst = match self.result_tys {
+            Some(scratch) => func.insert_inst_with_scratch(self.at, data, scratch),
+            None => func.insert_inst(self.at, data),
+        };
         func.set_inst_loc(inst, self.loc);
         let results = func.inst_results(inst);
         (results[0], results[1])
