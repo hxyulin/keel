@@ -147,16 +147,17 @@ fn remove_unreachable(func: &mut Function) -> bool {
 }
 
 fn merge_blocks(func: &mut Function) -> bool {
+    // Count branch edges, not unique predecessors: duplicate brif/switch
+    // destinations must still prevent a merge. Block indices remain stable
+    // when blocks leave the layout, so this census lasts for this invocation.
+    let mut edges = vec![0u32; func.num_blocks()];
+    for (_, inst) in func.layout_insts() {
+        for dest in func.inst_data(inst).branch_dests() {
+            edges[dest.block.index()] += 1;
+        }
+    }
     let mut changed = false;
     loop {
-        // Count branch edges into each block; a `brif` with both arms to
-        // the same block counts twice, so it is never merged.
-        let mut edges = vec![0u32; func.num_blocks()];
-        for (_, inst) in func.layout_insts() {
-            for dest in func.inst_data(inst).branch_dests() {
-                edges[dest.block.index()] += 1;
-            }
-        }
         let candidate = func.blocks().find_map(|pred| {
             let &term = func.block_insts(pred).last()?;
             match func.inst_data(term) {
@@ -178,6 +179,11 @@ fn merge_blocks(func: &mut Function) -> bool {
             func.replace_all_uses(param, arg);
         }
         func.remove_inst(jump);
+        // This is the only deleted edge. Parameter aliases affect values,
+        // not block destinations, and moving instructions preserves all
+        // their outgoing edges (including edges back to pred). The removed
+        // block cannot have a self-edge: its sole incoming edge was jump.
+        edges[block.index()] -= 1;
         for inst in func.block_insts(block).to_vec() {
             func.move_inst(inst, keel_ir::InsertPoint::End(pred));
         }
