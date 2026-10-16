@@ -1,0 +1,9 @@
+[package]
+name = "keel-llvm"
+description = "Diagnostic textual Keel IR to LLVM IR exporter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }

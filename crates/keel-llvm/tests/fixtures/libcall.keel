@@ -1,0 +1,15 @@
+; Ordinary external strlen is not promised to have libc semantics by Keel.
+decl @strlen(ptr) -> i64
+data @literal = const align 1 { b"hello\0" }
+func @probe(ptr) -> i64 {
+block0(v0: ptr):
+    v1 = call @strlen(v0)
+    v2 = iconst.i64 0
+    return v2
+}
+func @probe_constant() -> i64 {
+block0:
+    v0 = symbol_addr @literal
+    v1 = call @strlen(v0)
+    return v1
+}

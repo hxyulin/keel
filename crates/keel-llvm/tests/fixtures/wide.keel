@@ -1,0 +1,23 @@
+; Native Keel does not support i128 multiply-overflow: use Clang C oracle.
+
+func @overflow_umul_128(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sext.i128 v0
+    v3 = sext.i128 v1
+    v4, v5 = umul_overflow v2, v3
+    v6 = trunc.i64 v4
+    v7 = uext.i64 v5
+    v8 = xor v6, v7
+    return v8
+}
+
+func @overflow_smul_128(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sext.i128 v0
+    v3 = sext.i128 v1
+    v4, v5 = smul_overflow v2, v3
+    v6 = trunc.i64 v4
+    v7 = uext.i64 v5
+    v8 = xor v6, v7
+    return v8
+}

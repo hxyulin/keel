@@ -429,6 +429,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel-llvm"
+version = "0.1.0"
+dependencies = [
+ "keel-ir",
+]
+
+[[package]]
 name = "keel-opt"
 version = "0.1.0"
 dependencies = [
