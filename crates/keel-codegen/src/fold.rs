@@ -140,6 +140,17 @@ pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
 }
 
 pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
+    compare_pairs(func, false)
+}
+
+/// ARM can delay an exact-width integer compare over at most four tiny pure
+/// definitions. Selection must transfer its operand occurrences to the branch;
+/// emission must generate the compare there, after all intervening lowering.
+pub(crate) fn aarch64_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
+    compare_pairs(func, true)
+}
+
+fn compare_pairs(func: &Function, aarch64: bool) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
     // Only zero, one, or multiple raw IR uses matter for compare fusion.
     let mut uses = vec![0u8; func.num_values()];
     let mut candidates = Vec::new();
@@ -159,13 +170,42 @@ pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst,
             if !compare {
                 continue;
             }
-            let Some(&next) = insts.get(i + 1) else {
-                continue;
-            };
-            if let InstData::Brif { cond, .. } = func.inst_data(next) {
-                let result = func.inst_results(inst)[0];
-                if func.resolve(*cond) == result {
-                    candidates.push((result, inst, next));
+            let bounded = aarch64
+                && matches!(*data,
+                InstData::Icmp { args, .. }
+                    if matches!(func.value_type(func.resolve(args[0])), Type::I32 | Type::I64));
+            let location = |inst| func.inst_loc(inst).map(|loc| (loc.file, loc.line));
+            for (gap, &next) in insts[i + 1..]
+                .iter()
+                .take(if bounded { 5 } else { 1 })
+                .enumerate()
+            {
+                if let InstData::Brif { cond, .. } = func.inst_data(next) {
+                    let result = func.inst_results(inst)[0];
+                    // Keep the established adjacent behavior. Nonadjacent
+                    // fusion cannot erase independently located source lines.
+                    if func.resolve(*cond) == result
+                        && (gap == 0 || location(next) == location(inst))
+                    {
+                        candidates.push((result, inst, next));
+                    }
+                    break;
+                }
+                if !bounded
+                    || location(next) != location(inst)
+                    || !matches!(
+                        func.inst_data(next),
+                        InstData::Iconst {
+                            ty: Type::I32 | Type::I64,
+                            ..
+                        } | InstData::StackAddr { .. }
+                            | InstData::Convert {
+                                op: keel_ir::ConvertOp::IntToPtr,
+                                ..
+                            }
+                    )
+                {
+                    break;
                 }
             }
         }
@@ -399,5 +439,105 @@ block2:
         func.replace_all_uses(compares[0], compares[1]);
         assert_eq!(fused_compares(&func), reference_compares(&func));
         assert!(fused_compares(&func).is_empty());
+    }
+
+    fn span_source(ty: &str, gap: &str, compare: &str, edge: &str) -> String {
+        format!(
+            "func @f({ty}, {ty}) -> {ty} {{
+block0(v0: {ty}, v1: {ty}):
+ v2 = {compare} v0, v1
+ {gap}
+ brif v2, block1({edge}), block2
+block1(v20: {ty}):
+ return v20
+block2:
+ return v1
+}}"
+        )
+    }
+
+    #[test]
+    fn arm_bounded_span_transfers_duplicate_uses_to_branch() {
+        let func = function(&span_source("i64", "v3 = iconst.i64 7", "icmp.eq", "v0"));
+        assert!(fused_compare_pairs(&func).is_empty()); // x86 contract unchanged
+        let pairs = aarch64_compare_pairs(&func);
+        assert_eq!(pairs.len(), 1);
+        let (cond, compare, branch) = pairs[0];
+        let mut selection = Selection::default();
+        assert_eq!(
+            selection.fuse_aarch64_compares(&func, |_| vec![]),
+            HashSet::from([cond])
+        );
+        assert!(selection.covered(compare));
+        // One edge argument plus both comparison operand occurrences. The
+        // old comparison no longer reads any operands at allocation time.
+        assert!(selection.operands(&func, compare).is_empty());
+        let leaves = selection.operands(&func, branch);
+        assert_eq!(leaves.len(), 3);
+        assert_eq!(leaves[0], leaves[1]);
+        assert_ne!(leaves[1], leaves[2]);
+
+        let mut aliases = func.clone();
+        aliases.replace_all_uses(leaves[2], leaves[1]);
+        let mut selection = Selection::default();
+        selection.fuse_aarch64_compares(&aliases, |_| vec![]);
+        assert_eq!(selection.operands(&aliases, branch), vec![leaves[1]; 3]);
+    }
+
+    #[test]
+    fn arm_spans_reject_nonwhitelist_work_bounds_and_multiuse_booleans() {
+        for gap in [
+            "v3 = iadd v0, v1",
+            "v3 = udiv v0, v1",
+            "v3 = icmp.ne v0, v1",
+            "v3 = iconst.i64 1\nv4 = iconst.i64 2\nv5 = iconst.i64 3\nv6 = iconst.i64 4\nv7 = iconst.i64 5",
+            "v3 = uext.i64 v2",
+        ] {
+            let func = function(&span_source("i64", gap, "icmp.eq", "v0"));
+            assert!(aarch64_compare_pairs(&func).is_empty(), "{gap}");
+        }
+        for (ty, compare) in [
+            ("i8", "icmp.eq"),
+            ("i16", "icmp.eq"),
+            ("i128", "icmp.eq"),
+            ("f64", "fcmp.eq"),
+        ] {
+            let func = function(&span_source(ty, "v3 = iconst.i64 7", compare, "v0"));
+            assert!(aarch64_compare_pairs(&func).is_empty(), "{ty}");
+        }
+        for n in 1..=4 {
+            let gap = (0..n)
+                .map(|i| format!("v{} = iconst.i64 7", i + 3))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(
+                aarch64_compare_pairs(&function(&span_source("i64", &gap, "icmp.eq", "v0"))).len(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn arm_spans_preserve_explicit_source_lines() {
+        use keel_ir::{SourceFile, SourceLoc};
+        let mut func = function(&span_source("i64", "v3 = iconst.i64 7", "icmp.eq", "v0"));
+        let insts = func.block_insts(func.entry_block().unwrap()).to_vec();
+        let loc = SourceLoc {
+            file: SourceFile::new(0),
+            line: 10,
+            col: 1,
+            scope: None,
+        };
+        for &inst in &insts {
+            func.set_inst_loc(inst, Some(loc));
+        }
+        assert_eq!(aarch64_compare_pairs(&func).len(), 1);
+        for index in [1, 2] {
+            func.set_inst_loc(insts[index], Some(SourceLoc { line: 11, ..loc }));
+            assert!(aarch64_compare_pairs(&func).is_empty());
+            func.set_inst_loc(insts[index], Some(loc));
+        }
+        func.set_inst_loc(insts[1], None);
+        assert!(aarch64_compare_pairs(&func).is_empty());
     }
 }

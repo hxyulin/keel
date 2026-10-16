@@ -128,8 +128,25 @@ impl Selection {
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
     ) -> HashSet<Value> {
+        self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func))
+    }
+
+    pub(crate) fn fuse_aarch64_compares(
+        &mut self,
+        func: &Function,
+        folds: impl Fn(&InstData) -> Vec<Value>,
+    ) -> HashSet<Value> {
+        self.fuse_compare_pairs(func, folds, crate::fold::aarch64_compare_pairs(func))
+    }
+
+    fn fuse_compare_pairs(
+        &mut self,
+        func: &Function,
+        folds: impl Fn(&InstData) -> Vec<Value>,
+        pairs: Vec<(Value, Inst, Inst)>,
+    ) -> HashSet<Value> {
         let mut fused = HashSet::new();
-        for (cond, compare, branch) in crate::fold::fused_compare_pairs(func) {
+        for (cond, compare, branch) in pairs {
             let mut args = self.operands(func, branch);
             let Some(i) = args.iter().position(|&v| v == cond) else {
                 continue;

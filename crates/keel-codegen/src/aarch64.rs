@@ -839,7 +839,7 @@ impl<'a> FunctionCompiler<'a> {
         };
         let fused_compares = {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| {
+            selection.fuse_aarch64_compares(func, |data| {
                 folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
             })
         };
