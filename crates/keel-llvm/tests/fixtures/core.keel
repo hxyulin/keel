@@ -1,0 +1,166 @@
+data @seed = local align 8 { i64 9 }
+data @address = const align 8 { ptr @seed }
+
+decl @helper(i64) -> i64
+
+func @edges(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 11
+    v2 = iconst.i64 22
+    v3 = iconst.i64 33
+    switch v0, block1(v1), [0: block1(v2), 1: block1(v3)]
+block1(v4: i64):
+    return v4
+}
+
+func @parallel(i8) -> i64 {
+block0(v0: i8):
+    v1 = iconst.i64 41
+    v2 = iconst.i64 57
+    brif v0, block1(v1), block1(v2)
+block1(v3: i64):
+    return v3
+}
+
+func @loop(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    jump block1(v1, v1)
+block1(v2: i64, v3: i64):
+    v4 = icmp.ult v2, v0
+    brif v4, block2, block3(v3)
+block2:
+    v5 = iadd v3, v2
+    v6 = iconst.i64 1
+    v7 = iadd v2, v6
+    jump block1(v7, v5)
+block3(v8: i64):
+    return v8
+}
+
+func @shifts(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = shl v0, v1
+    v3 = ushr v0, v1
+    v4 = sshr v0, v1
+    v5 = xor v2, v3
+    v6 = xor v5, v4
+    return v6
+}
+
+func @narrow(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = trunc.i8 v1
+    v4 = shl v2, v1
+    v5 = ushr v2, v3
+    v6 = sshr v2, v3
+    v7 = xor v4, v5
+    v8 = xor v7, v6
+    v9 = uext.i64 v8
+    return v9
+}
+
+func @arithmetic(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    v3 = imul v2, v0
+    v4 = isub v3, v1
+    return v4
+}
+
+func @memory(i64) -> i64 {
+    ss0 = stack_slot 16, align 8
+block0(v0: i64):
+    v1 = stack_addr ss0
+    store volatile align 8 v0, v1
+    v2 = iconst.i64 8
+    v3 = ptradd v1, v2
+    intrinsic memcpy(v3, v1, v2)
+    v4 = load.i64 align 8 v3
+    v5 = call @helper(v4)
+    v6 = symbol_addr @address
+    v7 = load.ptr align 8 v6
+    v8 = load.i64 align 8 v7
+    v9 = iadd v5, v8
+    return v9
+}
+
+func @nan_compare(f64, f64) -> i64 {
+block0(v0: f64, v1: f64):
+    v2 = fcmp.ne v0, v1
+    v3 = fcmp.eq v0, v1
+    v4 = fcmp.lt v0, v1
+    v5 = fcmp.uno v0, v1
+    v6 = uext.i64 v2
+    v7 = uext.i64 v3
+    v8 = uext.i64 v4
+    v9 = uext.i64 v5
+    v10 = iconst.i64 1
+    v11 = iconst.i64 2
+    v12 = iconst.i64 3
+    v13 = shl v7, v10
+    v14 = shl v8, v11
+    v15 = shl v9, v12
+    v16 = or v6, v13
+    v17 = or v16, v14
+    v18 = or v17, v15
+    return v18
+}
+
+func @sat_s32(f64) -> i64 {
+block0(v0: f64):
+    v1 = fptosi.i32 v0
+    v2 = sext.i64 v1
+    return v2
+}
+func @sat_u32(f64) -> i64 {
+block0(v0: f64):
+    v1 = fptoui.i32 v0
+    v2 = uext.i64 v1
+    return v2
+}
+func @sat_s64(f64) -> i64 {
+block0(v0: f64):
+    v1 = fptosi.i64 v0
+    return v1
+}
+func @sat_u64(f64) -> i64 {
+block0(v0: f64):
+    v1 = fptoui.i64 v0
+    return v1
+}
+func @sat_f32_s32(f32) -> i64 {
+block0(v0: f32):
+    v1 = fptosi.i32 v0
+    v2 = sext.i64 v1
+    return v2
+}
+func @sat_f32_u32(f32) -> i64 {
+block0(v0: f32):
+    v1 = fptoui.i32 v0
+    v2 = uext.i64 v1
+    return v2
+}
+func @sat_f32_s64(f32) -> i64 {
+block0(v0: f32):
+    v1 = fptosi.i64 v0
+    return v1
+}
+func @sat_f32_u64(f32) -> i64 {
+block0(v0: f32):
+    v1 = fptoui.i64 v0
+    return v1
+}
+
+func @overflow(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2, v3 = sadd_overflow v0, v1
+    v4, v5 = umul_overflow v0, v1
+    v6 = uext.i64 v3
+    v7 = uext.i64 v5
+    v8 = xor v2, v4
+    v9 = xor v8, v6
+    v10 = xor v9, v7
+    return v10
+}
