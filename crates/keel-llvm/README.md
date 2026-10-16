@@ -18,8 +18,10 @@ clang -Wno-override-module -c output.ll -o output.o
 Use `-` for stdin/stdout. The CLI requires an explicit target profile; it never
 infers an ABI from the host. The initial profile is Apple arm64, LLVM triple
 `arm64-apple-macosx11.0.0`, data layout
-`e-m:o-i64:64-i128:128-n32:64-S128-Fn32` (little endian, 64-bit pointers).
-This layout is checked against local Clang output by the validation script.
+`e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32` (little endian, 64-bit pointers).
+This layout, including Clang's address spaces 270–272, is checked against local
+Clang output for the explicit triple by the validation script. The exporter
+only emits ordinary address-space-zero pointers.
 Custom triples/layouts and other ABIs are rejected. Narrow `i8`/`i16` signature
 extensions deliberately map Keel `sext`/`uext` to LLVM `signext`/`zeroext` on
 parameters, returns and calls; the native C fixture exercises both signed and
@@ -62,6 +64,19 @@ function, block and instruction for unsupported operations.
   nonnull, alignment or fault-freedom contract is inferred from pointer values.
   Definition-only restrict parameter facts added after the initial base may
   be conservatively omitted; they are not translated to LLVM `noalias`.
+
+Ordinary user function declarations, definitions and direct calls carry
+`nobuiltin`: Keel does not assign libc contracts from function names. Explicit
+`llvm.*` intrinsics keep their specified semantics and do not get `nobuiltin`.
+LLVM 21.1 documents this attribute as valid on declarations, definitions and
+call sites; [InferFunctionAttrs](https://github.com/llvm/llvm-project/blob/release/21.x/llvm/lib/Transforms/IPO/InferFunctionAttrs.cpp)
+checks the declaration itself before library-name attribute inference, while
+[CallBase/SimplifyLibCalls](https://github.com/llvm/llvm-project/blob/release/21.x/llvm/lib/Transforms/Utils/SimplifyLibCalls.cpp)
+checks call protection. Declaration protection is needed in addition to call
+protection. No `readonly`, `willreturn` or other libc promise is invented. See
+[LLVM 21.1 function attributes](https://releases.llvm.org/21.1.0/docs/LangRef.html#function-attributes).
+This syntax and behavior are validated with the installed Apple Clang 21;
+compatibility with older LLVM versions is not claimed.
 
 Shifts mask the amount modulo the *left operand's* width, including oversized
 or differently typed amounts. The amount is first zero-extended or truncated
@@ -143,7 +158,31 @@ volatile store, memory copy, direct call, global relocations, FP NaN comparisons
 and saturating conversion boundaries), then Clang C versus unoptimized and
 scalar-optimized Keel through both native Keel and LLVM. It checks generated
 profile layout against Clang and runs `opt` pass traces if available.
-`target/keel-llvm-validation/manifest.json` records every command/output,
+The extended fixtures cover nested stack save/restore inside a loop (including
+16-byte alignment and fixed-slot survival), volatile and unaligned memory,
+overlapping memmove, memset, external data, relocation addends and local
+function addresses. FP checks include exact f32/f64 constant-bit round trips,
+signed-zero minimum/maximum in both operand orders, sign manipulation, rounding
+ties and fused cancellation. Arithmetic checks cover all six overflow ops and
+zero-input bit counts through i128, plus multiple CFG backedges and mixed PHIs.
+The native Keel backend currently rejects i128 multiply-overflow; those two
+exported ops are compared to a Clang C `__builtin_mul_overflow` oracle instead.
+NaN arithmetic payloads with unspecified results are classified, not compared
+as exact bit patterns.
+
+The ordinary-libcall reducer links an external custom `strlen` provider,
+compiled separately with `-fno-builtin`. Keel and exported LLVM at O0/O2 must
+preserve an unused call's side effect and a constant-string call's nonstandard
+return. Optimized IR must retain both calls and avoid inferred library attrs;
+a generated pre-fix negative control must fail. Trap is exercised in subprocesses
+at O0/O2 and must terminate abnormally. Rust tests cover unsupported feature
+families, whole-module buffering, quoted symbols, CLI errors, output preservation
+and temporary-file cleanup on write failure.
+
+Each harness invocation needs a fresh `--out` directory; existing manifests are
+never overwritten. Failed provisional layout/fixture checks are retained under
+`target/keel-llvm-validation-r1-*`, separately from the final committed-source
+run. `target/keel-llvm-validation/manifest.json` records every command/output,
 compiler and exporter binary hashes, source hashes, source revision/tree,
-working-tree status and tool versions. Binary/report artifacts remain ignored.
+working-tree status and tool versions, test executables and every produced artifact hash. Binary/report artifacts remain ignored.
 This is a correctness exercise, not a performance campaign or speed claim.

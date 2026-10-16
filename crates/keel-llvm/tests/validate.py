@@ -7,6 +7,8 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
+import resource
 import shutil
 import subprocess
 
@@ -20,17 +22,19 @@ parser.add_argument("--out", type=pathlib.Path, default=ROOT / "target/keel-llvm
 a = parser.parse_args()
 a.out = a.out.resolve()
 a.out.mkdir(parents=True, exist_ok=True)
+if (a.out / "manifest.json").exists():
+    parser.error("output already contains a manifest; choose a fresh --out to preserve prior evidence")
 records = []
 manifest = {"commands": records, "purpose": "correctness only; no performance measurements"}
 
 
-def run(*cmd):
+def run(*cmd, expected_returncodes=(0,)):
     cmd = [str(c) for c in cmd]
     p = subprocess.run(cmd, cwd=ROOT, capture_output=True)
     entry = {"argv": cmd, "returncode": p.returncode,
              "stdout": p.stdout.decode(errors="replace"), "stderr": p.stderr.decode(errors="replace")}
     records.append(entry)
-    if p.returncode:
+    if p.returncode not in expected_returncodes:
         raise RuntimeError(json.dumps(entry, indent=2))
     return p.stdout
 
@@ -70,13 +74,14 @@ try:
     clang_path = shutil.which(a.clang)
     if clang_path:
         manifest["binaries"][clang_path] = sha(clang_path)
-    source_paths = list(FIXTURES.glob("*")) + list((ROOT / "crates/keel-llvm/src").glob("*.rs"))
-    source_paths += [pathlib.Path(__file__), ROOT / "Cargo.lock", ROOT / "crates/keel-llvm/Cargo.toml"]
+    source_paths = [p for p in (ROOT / "crates/keel-llvm").rglob("*")
+                    if p.is_file() and p.suffix in {".rs", ".py", ".c", ".keel", ".toml", ".md"}]
+    source_paths += [ROOT / "Cargo.lock"]
     manifest["source_sha256"] = {str(p.relative_to(ROOT)): sha(p) for p in sorted(source_paths)}
     profile_check = a.out / "clang-profile.ll"
     run(a.clang, "-target", "arm64-apple-macosx11.0.0", "-S", "-emit-llvm", "-O0",
         FIXTURES / "hot.c", "-o", profile_check)
-    layout = 'target datalayout = "e-m:o-i64:64-i128:128-n32:64-S128-Fn32"'
+    layout = 'target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"'
     if layout not in profile_check.read_text():
         raise AssertionError("installed Clang data layout differs from exporter profile")
     core = FIXTURES / "core.keel"
@@ -92,6 +97,80 @@ try:
     run(a.clang, "-O0", "-Wno-override-module", ll, FIXTURES / "driver.c", "-o", core_o0)
     if run(core_o0) != expected:
         raise AssertionError("core LLVM O0 mismatch")
+    extended = FIXTURES / "extended.keel"
+    extended_ll = export_ir(extended, "extended")
+    extended_asm = a.out / "extended.s"
+    run(a.keel, "compile", "--target", "aarch64-apple-darwin", extended, "-o", extended_asm)
+    extended_expected = execute(extended_asm, FIXTURES / "extended_driver.c", "extended-keel")
+    for level in ["0", "2"]:
+        exe = a.out / ("extended-llvm-O" + level)
+        run(a.clang, "-O" + level, "-Wno-override-module", extended_ll, FIXTURES / "extended_driver.c", "-o", exe)
+        result = run(exe)
+        (a.out / ("extended-llvm-O" + level + ".stdout")).write_bytes(result)
+        if result != extended_expected:
+            raise AssertionError("extended LLVM O" + level + " differs from Keel")
+    wide_ll = export_ir(FIXTURES / "wide.keel", "wide")
+    for level in ["0", "2"]:
+        exe = a.out / ("wide-llvm-O" + level)
+        run(a.clang, "-O" + level, "-Wno-override-module", wide_ll, FIXTURES / "wide_driver.c", "-o", exe)
+        run(exe)
+    manifest["wide_multiply_overflow_oracle"] = "Clang C __builtin_mul_overflow: Keel native backend rejects i128 multiply-overflow"
+    # R1-1: custom ordinary strlen with visible side effects, in a separate
+    # object. No LTO, C builtin folding or body-based inference may hide it.
+    libc_ll = export_ir(FIXTURES / "libcall.keel", "libcall")
+    provider = a.out / "libcall-provider.o"
+    run(a.clang, "-O2", "-fno-builtin", "-c", FIXTURES / "libcall_provider.c", "-o", provider)
+    libc_asm = a.out / "libcall.s"
+    run(a.keel, "compile", "--target", "aarch64-apple-darwin", FIXTURES / "libcall.keel", "-o", libc_asm)
+    libc_outputs = {}
+    for source, kind in [(libc_asm, "keel"), (libc_ll, "llvm")]:
+        for level in ["0", "2"]:
+            exe = a.out / ("libcall-" + kind + "-O" + level)
+            run(a.clang, "-O" + level, "-Wno-override-module", source,
+                provider, FIXTURES / "libcall_driver.c", "-o", exe)
+            libc_outputs[kind + "-O" + level] = run(exe).decode()
+    if len(set(libc_outputs.values())) != 1:
+        raise AssertionError("custom ordinary strlen side-effect mismatch")
+    manifest["ordinary_libcall_outputs"] = libc_outputs
+    optimized_libcall = a.out / "libcall.llvm-O2.ll"
+    run(a.clang, "-O2", "-Wno-override-module", "-S", "-emit-llvm", "-x", "ir", libc_ll, "-o", optimized_libcall)
+    optimized_text = optimized_libcall.read_text()
+    # Clang prints decoded names and usually puts attributes into numbered groups.
+    if len(re.findall(r"(?:tail )?call i64 @strlen\(", optimized_text)) != 2:
+        raise AssertionError("ordinary strlen calls disappeared from optimized LLVM IR")
+    declaration = next(line for line in optimized_text.splitlines() if line.startswith("declare i64 @strlen("))
+    group = re.search(r"#(\d+)", declaration)
+    declaration_attrs = declaration + (next(line for line in optimized_text.splitlines()
+        if line.startswith("attributes #" + group[1] + " =")) if group else "")
+    if "nobuiltin" not in declaration_attrs or re.search(r"memory\(|readonly|willreturn|nounwind", declaration_attrs):
+        raise AssertionError("unexpected libc name-based declaration attributes: " + declaration_attrs)
+    manifest["ordinary_libcall_optimized_declaration"] = declaration_attrs
+    # Negative control recreates the pre-fix exporter output. On the installed
+    # compiler it must demonstrate the forbidden name-based transformation.
+    unprotected = a.out / "libcall-unprotected.ll"
+    unprotected.write_text(libc_ll.read_text().replace(" nobuiltin", ""))
+    control = a.out / "libcall-unprotected-O2"
+    run(a.clang, "-O2", "-Wno-override-module", unprotected, provider, FIXTURES / "libcall_driver.c", "-o", control)
+    run(control, expected_returncodes=(1, 2))
+    manifest["ordinary_libcall_negative_control"] = "pre-fix LLVM O2 failed driver as expected (removed side effect or constant result changed)"
+    control_ir = a.out / "libcall-unprotected-O2.ll"
+    run(a.clang, "-O2", "-Wno-override-module", "-S", "-emit-llvm", unprotected, "-o", control_ir)
+    manifest["ordinary_libcall_negative_control_optimized_ir"] = control_ir.read_text()
+    trap_ll = export_ir(FIXTURES / "trap.keel", "trap")
+    trap_asm = a.out / "trap.s"
+    run(a.keel, "compile", "--target", "aarch64-apple-darwin", FIXTURES / "trap.keel", "-o", trap_asm)
+    # Do not create crash/core artifacts. Restriction applies to this process
+    # and inherited subprocesses, not the shell/user environment.
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    trap_results = {}
+    for source, kind in [(trap_asm, "keel"), (trap_ll, "llvm")]:
+        for level in ["0", "2"]:
+            exe = a.out / ("trap-" + kind + "-O" + level)
+            run(a.clang, "-O" + level, "-Wno-override-module", source, "-o", exe)
+            run(exe, expected_returncodes=tuple(range(-127, 0)))
+            trap_results[kind + "-O" + level] = records[-1]["returncode"]
+    manifest["trap_abnormal_termination"] = trap_results
+
     hot = FIXTURES / "hot.c"
     baseline = execute(hot, FIXTURES / "hot_driver.c", "hot-clang")
     raw = a.out / "hot.raw.keel"
@@ -106,6 +185,21 @@ try:
         run(a.keel, "compile", "--target", "aarch64-apple-darwin", src, "-o", asm)
         if execute(asm, FIXTURES / "hot_driver.c", name + "-keel") != baseline:
             raise AssertionError(name + " Keel differs from Clang C baseline")
+    abi_source = FIXTURES / "abi.c"
+    abi_driver = FIXTURES / "abi_driver.c"
+    abi_expected = execute(abi_source, abi_driver, "abi-clang")
+    abi_ir = a.out / "abi.keel"
+    run(a.keel, "cc", "--emit-ir", "--target", "aarch64-apple-darwin", abi_source, "-o", abi_ir)
+    abi_ll = export_ir(abi_ir, "abi")
+    abi_asm = a.out / "abi.s"
+    run(a.keel, "compile", "--target", "aarch64-apple-darwin", abi_ir, "-o", abi_asm)
+    if execute(abi_asm, abi_driver, "abi-keel") != abi_expected:
+        raise AssertionError("narrow / stack argument Keel ABI differs from Clang")
+    for level in ["0", "2"]:
+        exe = a.out / ("abi-llvm-O" + level)
+        run(a.clang, "-O" + level, "-Wno-override-module", abi_ll, abi_driver, "-o", exe)
+        if run(exe) != abi_expected:
+            raise AssertionError("narrow / stack argument LLVM ABI differs from Clang at O" + level)
     opt = shutil.which("opt")
     if opt:
         manifest["tools"]["opt"] = run(opt, "--version").decode()
@@ -115,5 +209,14 @@ try:
     else:
         manifest["opt"] = "not installed on PATH; no LLVM pass-by-pass trace obtained"
     manifest["result"] = "PASS"
+except BaseException as exc:
+    manifest["result"] = "FAIL"
+    manifest["failure"] = repr(exc)
+    raise
 finally:
+    manifest["artifact_sha256"] = {str(p.relative_to(a.out)): sha(p)
+        for p in sorted(a.out.iterdir()) if p.is_file() and p.name != "manifest.json"}
+    manifest["test_binary_sha256"] = {str(p.relative_to(ROOT)): sha(p)
+        for p in sorted((ROOT / "target/debug/deps").glob("export-*"))
+        if p.is_file() and not p.suffix}
     (a.out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
