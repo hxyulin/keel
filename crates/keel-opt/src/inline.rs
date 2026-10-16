@@ -147,42 +147,99 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
     run_observed(module, None)
 }
 
-fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
+// Build the graph from every definition, including definitions that cannot
+// become templates. A cycle can pass through a noinline, public, tail-calling,
+// or exception-handling function. External and indirect calls add no edges.
+fn recursive_definitions(module: &Module) -> Vec<bool> {
     let definitions: HashMap<_, _> = module
         .functions
         .iter()
-        .map(|f| (f.name.clone(), f))
+        .enumerate()
+        .map(|(index, f)| (f.name.as_str(), index))
         .collect();
-    // Reject every member of a recursive direct-call cycle, not just self calls.
-    let recursive = |name: &str| {
-        let mut seen = HashSet::new();
-        let mut pending = vec![name];
-        while let Some(n) = pending.pop() {
-            if !seen.insert(n) {
-                continue;
-            }
-            if let Some(f) = definitions.get(n) {
-                for (_, i) in f.layout_insts() {
+    let graph: Vec<Vec<usize>> = module
+        .functions
+        .iter()
+        .map(|f| {
+            f.layout_insts()
+                .filter_map(|(_, i)| {
                     let reference = match f.inst_data(i) {
                         InstData::Call { func, .. }
                         | InstData::ReturnCall { func, .. }
-                        | InstData::Invoke { func, .. } => Some(*func),
-                        _ => None,
+                        | InstData::Invoke { func, .. } => *func,
+                        _ => return None,
                     };
-                    if let Some(reference) = reference {
-                        let callee = f.callee(reference).name.as_str();
-                        if callee == name {
-                            return true;
-                        }
-                        if definitions.contains_key(callee) {
-                            pending.push(callee);
-                        }
-                    }
+                    definitions.get(f.callee(reference).name.as_str()).copied()
+                })
+                .collect()
+        })
+        .collect();
+    recursive_members(&graph)
+}
+
+// Iterative Kosaraju traversal: no host recursion, even on deep call chains.
+// Only SCC members are recursive; an acyclic caller reaching a cycle is not.
+fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
+    let n = graph.len();
+    let mut reverse = vec![Vec::new(); n];
+    for (from, tos) in graph.iter().enumerate() {
+        for &to in tos {
+            reverse[to].push(from);
+        }
+    }
+    let mut seen = vec![false; n];
+    let mut order = Vec::with_capacity(n);
+    let mut pending = Vec::new();
+    for root in 0..n {
+        if seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        pending.push((root, 0));
+        while let Some((node, next)) = pending.last_mut() {
+            if let Some(&to) = graph[*node].get(*next) {
+                *next += 1;
+                if !seen[to] {
+                    seen[to] = true;
+                    pending.push((to, 0));
+                }
+            } else {
+                order.push(*node);
+                pending.pop();
+            }
+        }
+    }
+    seen.fill(false);
+    let mut recursive = vec![false; n];
+    let mut pending = Vec::new();
+    let mut component = Vec::new();
+    for root in order.into_iter().rev() {
+        if seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        pending.push(root);
+        component.clear();
+        while let Some(node) = pending.pop() {
+            component.push(node);
+            for &to in &reverse[node] {
+                if !seen[to] {
+                    seen[to] = true;
+                    pending.push(to);
                 }
             }
         }
-        false
-    };
+        if component.len() > 1 || graph[root].contains(&root) {
+            for &node in &component {
+                recursive[node] = true;
+            }
+        }
+    }
+    recursive
+}
+
+fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
+    let recursive = recursive_definitions(module);
     let explicit_definitions = sites.as_ref().map(|_| {
         module
             .functions
@@ -196,14 +253,14 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
     // profitability); the event stream uses these decisions, not a later probe.
     let mut templates = HashMap::new();
     let mut rejected = HashMap::new();
-    for f in &module.functions {
+    for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f);
         let profitability = if legality.is_none() {
             profitability_reason(f)
         } else {
             None
         };
-        let recursion = !f.attrs.noinline && recursive(&f.name);
+        let recursion = !f.attrs.noinline && recursive[index];
         let reason = if f.attrs.noinline {
             Some("noinline")
         } else if recursion {
@@ -644,5 +701,23 @@ mod report_tests {
             *f.inst_data_mut(inst) = call;
             assert_eq!(eligibility_reason(f), Some("callee_calls_returns_twice"));
         }
+    }
+}
+
+#[cfg(test)]
+mod recursion_tests {
+    use super::recursive_members;
+
+    #[test]
+    fn very_deep_graph_does_not_use_the_host_stack() {
+        let n = 100_000;
+        let mut graph: Vec<Vec<_>> = (0..n)
+            .map(|i| if i + 1 < n { vec![i + 1] } else { vec![] })
+            .collect();
+        assert!(recursive_members(&graph).iter().all(|&r| !r));
+        graph[n - 1].push(1);
+        let recursive = recursive_members(&graph);
+        assert!(!recursive[0]);
+        assert!(recursive[1..].iter().all(|&r| r));
     }
 }
