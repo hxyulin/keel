@@ -425,3 +425,64 @@ fn cloning_keeps_external_callee_promises_and_indirect_calls() {
     );
     keel_ir::verify_module(&keel_ir::parse(&m.to_string()).unwrap()).unwrap();
 }
+
+fn detailed_report(source: &str) -> keel_opt::OptimizationReport {
+    let mut module = keel_ir::parse(source).unwrap();
+    let mut plain = module.clone();
+    keel_opt::run_passes(&mut plain, &["inline"]).unwrap();
+    let mut report = keel_opt::OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(
+        &mut module,
+        &["inline"],
+        keel_opt::VectorTarget::Portable,
+        &mut report,
+    )
+    .unwrap();
+    assert_eq!(plain.to_string(), module.to_string());
+    report
+}
+
+#[test]
+fn detailed_reports_identify_each_budget_without_changing_decisions() {
+    for (source, reason, skipped) in [
+        (large_helper(1, "", 1, 140), "caller_call_count_budget", 12),
+        (large_helper(1, "alwaysinline", 1, 140), "caller_call_count_budget", 12),
+        (large_helper(64, "", 1, 32), "caller_instruction_growth_budget", 1),
+        (large_helper(2047, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
+        (large_helper(254, "alwaysinline", 9, 8), "module_instruction_growth_budget", 8),
+        ("func @h() alwaysinline local {\n ss0 = stack_slot 32769, align 1\nblock0:\n return\n}\nfunc @f() {\nblock0:\n call @h()\n call @h()\n return\n}".into(), "caller_stack_growth_budget", 1),
+    ] {
+        let report = detailed_report(&source);
+        let sites = &report.invocations[0].inline_sites;
+        assert_eq!(sites.iter().filter(|s| s.outcome == reason).count(), skipped, "{reason}: {sites:?}");
+        assert!(sites.iter().all(|s| s.outcome == "inlined" || s.outcome == reason));
+    }
+}
+
+#[test]
+fn detailed_profitability_and_legality_rejections_are_specific() {
+    for (source, expected) in [
+        (large_helper(65, "", 1, 1), "profitability_instructions"),
+        (large_helper(129, "inlinehint", 1, 1), "profitability_instructions"),
+        ("func @helper() local {\n ss0 = stack_slot 513, align 1\nblock0:\n return\n}\nfunc @f() {\nblock0:\n call @helper()\n return\n}".into(), "profitability_stack_declaration_bytes"),
+        ("func @helper() alwaysinline local {\n ss0 = stack_slot 65537, align 1\nblock0:\n return\n}\nfunc @f() {\nblock0:\n call @helper()\n return\n}".into(), "callee_hard_stack_declaration_bytes"),
+        ("func @helper(i64, ...) -> i64 local {\nblock0(v0: i64):\n return v0\n}\nfunc @f(i64) -> i64 {\nblock0(v0: i64):\n v1 = call @helper(v0)\n return v1\n}".into(), "variadic_callee"),
+    ] {
+        let report = detailed_report(&source);
+        assert_eq!(report.invocations[0].inline_sites.last().unwrap().outcome, expected);
+    }
+    let mut source = String::from("func @helper() local {\n");
+    for n in 0..9 {
+        source.push_str(&format!("block{n}:\n"));
+        if n < 8 {
+            source.push_str(&format!("jump block{}\n", n + 1));
+        } else {
+            source.push_str("return\n");
+        }
+    }
+    source.push_str("}\nfunc @f() {\nblock0:\n call @helper()\n return\n}");
+    assert_eq!(
+        detailed_report(&source).invocations[0].inline_sites[0].outcome,
+        "profitability_blocks"
+    );
+}

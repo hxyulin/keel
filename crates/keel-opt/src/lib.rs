@@ -21,7 +21,9 @@ mod dce;
 mod gcm;
 mod gvn;
 mod inline;
+mod report;
 pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
+pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod known_bits;
 mod loop_vectorize;
@@ -42,6 +44,15 @@ pub trait Pass: Sync {
     /// Module passes return Some after running; function passes use the default.
     fn run_module(&self, _module: &mut Module) -> Option<bool> {
         None
+    }
+
+    /// Optional module observation hook; default preserves custom-pass dispatch.
+    fn run_module_with_report(
+        &self,
+        module: &mut Module,
+        _sites: &mut Vec<InlineSite>,
+    ) -> Option<bool> {
+        self.run_module(module)
     }
 
     /// Target-aware passes may override this; ordinary passes ignore it.
@@ -328,4 +339,119 @@ pub fn run_pipeline_for_target(
 /// Runs [`DEFAULT_PIPELINE`].
 pub fn optimize(module: &mut Module) -> Result<(), OptError> {
     run_passes(module, DEFAULT_PIPELINE)
+}
+
+/// Opt-in counterpart to `run_passes_for_target`. Partial observations remain
+/// available if a verifier fails; this performs exactly the ordinary checks.
+pub fn run_passes_for_target_with_report(
+    module: &mut Module,
+    names: &[&str],
+    target: VectorTarget,
+    report: &mut OptimizationReport,
+) -> Result<(), OptError> {
+    let passes = names
+        .iter()
+        .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    run_pipeline_for_target_with_report(module, &passes, target, report)
+}
+
+/// Observed custom pipeline; order and verifier policy match the ordinary runner.
+pub fn run_pipeline_for_target_with_report(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    target: VectorTarget,
+    report: &mut OptimizationReport,
+) -> Result<(), OptError> {
+    use std::time::Instant;
+    profiling::scope!("optimization");
+    let mut canonical = vec![false; module.functions.len()];
+    for (pipeline_index, pass) in passes.iter().enumerate() {
+        profiling::scope!("pass", pass.name());
+        let before = IrCounts::module(module);
+        let mut inline_sites = Vec::new();
+        let start = Instant::now();
+        let module_changed = pass.run_module_with_report(module, &mut inline_sites);
+        let pass_ns = start.elapsed().as_nanos();
+        if let Some(changed) = module_changed {
+            canonical.resize(module.functions.len(), false);
+            canonical.fill(false);
+            let start = Instant::now();
+            let result = module.functions.iter().try_for_each(|func| {
+                verify(func).map_err(|errors| OptError::Verifier {
+                    pass: pass.name(),
+                    func: func.name.clone(),
+                    errors,
+                })
+            });
+            let verification_ns = start.elapsed().as_nanos();
+            report.invocations.push(PassObservation {
+                pipeline_index,
+                pass: pass.name(),
+                target,
+                function: None,
+                changed,
+                pass_ns,
+                verification_ns,
+                restoration_ns: 0,
+                restoration_verification_ns: 0,
+                restoration_changed: None,
+                before,
+                after: IrCounts::module(module),
+                inline_sites,
+            });
+            result?;
+            continue;
+        }
+        for (index, func) in module.functions.iter_mut().enumerate() {
+            let before = IrCounts::function(func);
+            let mut restoration_ns = 0;
+            let mut restoration_verification_ns = 0;
+            let mut restoration_changed = None;
+            if pass.requires_canonical_form() && !canonical[index] {
+                let start = Instant::now();
+                restoration_changed = Some(canonicalize::run(func));
+                restoration_ns = start.elapsed().as_nanos();
+                let start = Instant::now();
+                let result = verify(func).map_err(|errors| OptError::Verifier {
+                    pass: "canonicalize",
+                    func: func.name.clone(),
+                    errors,
+                });
+                restoration_verification_ns = start.elapsed().as_nanos();
+                // As in the ordinary runner, a failed restoration stops before
+                // the requested pass. No completed invocation is fabricated.
+                result?;
+                canonical[index] = true;
+            }
+            let start = Instant::now();
+            let changed = pass.run_for_target(func, target);
+            let pass_ns = start.elapsed().as_nanos();
+            canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
+            let start = Instant::now();
+            let result = verify(func).map_err(|errors| OptError::Verifier {
+                pass: pass.name(),
+                func: func.name.clone(),
+                errors,
+            });
+            let verification_ns = start.elapsed().as_nanos();
+            report.invocations.push(PassObservation {
+                pipeline_index,
+                pass: pass.name(),
+                target,
+                function: Some(func.name.clone()),
+                changed,
+                pass_ns,
+                verification_ns,
+                restoration_ns,
+                restoration_verification_ns,
+                restoration_changed,
+                before,
+                after: IrCounts::function(func),
+                inline_sites: Vec::new(),
+            });
+            result?;
+        }
+    }
+    Ok(())
 }
