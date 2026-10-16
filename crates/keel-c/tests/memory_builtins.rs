@@ -186,7 +186,8 @@ fn checked_memory_calls_preserve_bound_and_prototype_checks() {
             .unwrap_err()
             .to_string();
         assert!(
-            error.contains("checked") && error.contains("memory"),
+            error.contains("invalid checked memory builtin prototype")
+                || error.contains("needs a declared checked library function"),
             "{error}"
         );
     }
