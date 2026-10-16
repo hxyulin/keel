@@ -428,6 +428,7 @@ fn cloning_keeps_external_callee_promises_and_indirect_calls() {
 
 fn detailed_report(source: &str) -> keel_opt::OptimizationReport {
     let mut module = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&module).unwrap();
     let mut plain = module.clone();
     keel_opt::run_passes(&mut plain, &["inline"]).unwrap();
     let mut report = keel_opt::OptimizationReport::default();
@@ -439,7 +440,169 @@ fn detailed_report(source: &str) -> keel_opt::OptimizationReport {
     )
     .unwrap();
     assert_eq!(plain.to_string(), module.to_string());
+    keel_ir::verify_module(&module).unwrap();
     report
+}
+
+// This oracle asks whether a nonempty path returns to its starting vertex.
+// It deliberately uses transitive closure rather than SCC traversal.
+fn graph_recursion(edges: &[Vec<usize>]) -> Vec<bool> {
+    let n = edges.len();
+    let mut reach = vec![vec![false; n]; n];
+    for (from, tos) in edges.iter().enumerate() {
+        for &to in tos {
+            reach[from][to] = true;
+        }
+    }
+    for via in 0..n {
+        for from in 0..n {
+            for to in 0..n {
+                reach[from][to] |= reach[from][via] && reach[via][to];
+            }
+        }
+    }
+    (0..n).map(|i| reach[i][i]).collect()
+}
+
+fn graph_source(edges: &[Vec<usize>], attrs: &[&str]) -> String {
+    let mut source = String::new();
+    for (from, tos) in edges.iter().enumerate() {
+        source.push_str(&format!("func @g{from}() {} {{\nblock0:\n", attrs[from]));
+        for to in tos {
+            source.push_str(&format!(" call @g{to}()\n"));
+        }
+        source.push_str(" return\n}\n");
+    }
+    source.push_str("func @probe() {\nblock0:\n");
+    for to in 0..edges.len() {
+        source.push_str(&format!(" call @g{to}()\n"));
+    }
+    source.push_str(" return\n}\n");
+    source
+}
+
+fn check_graph(edges: &[Vec<usize>], attrs: &[&str]) {
+    let report = detailed_report(&graph_source(edges, attrs));
+    let recursive = graph_recursion(edges);
+    let sites: Vec<_> = report.invocations[0]
+        .inline_sites
+        .iter()
+        .filter(|s| s.caller == "probe")
+        .collect();
+    assert_eq!(sites.len(), edges.len());
+    for (i, site) in sites.iter().enumerate() {
+        let expected = if attrs[i].contains("noinline") {
+            "noinline"
+        } else if recursive[i] {
+            "recursive_callee"
+        } else if !attrs[i].contains("local") {
+            "public_definition"
+        } else {
+            "inlined"
+        };
+        assert_eq!(site.callee, format!("g{i}"));
+        assert_eq!(site.outcome, expected, "{edges:?}, {attrs:?}");
+    }
+}
+
+#[test]
+fn recursion_matches_independent_reachability_on_generated_graphs() {
+    // Exhaust all directed graphs on three vertices (including self edges).
+    for bits in 0..1u32 << 9 {
+        let edges: Vec<Vec<_>> = (0..3)
+            .map(|from| {
+                (0..3)
+                    .filter(|to| bits & (1 << (from * 3 + to)) != 0)
+                    .collect()
+            })
+            .collect();
+        check_graph(&edges, &["alwaysinline local"; 3]);
+    }
+    // Larger deterministic graphs exercise shared suffixes and disconnected SCCs.
+    let mut seed = 0x4b65_656cu32;
+    for _ in 0..48 {
+        let edges: Vec<Vec<_>> = (0..9)
+            .map(|_| {
+                (0..9)
+                    .filter(|_| {
+                        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                        seed >> 28 == 0
+                    })
+                    .collect()
+            })
+            .collect();
+        check_graph(&edges, &["local"; 9]);
+    }
+}
+
+#[test]
+fn recursion_includes_ineligible_intermediates_but_not_incoming_callers() {
+    // Diamond/shared suffix, incoming acyclic caller, two-node cycle, self
+    // cycle and disconnected leaf. Duplicate edges must not affect membership.
+    let edges = vec![
+        vec![1, 2, 1],
+        vec![3],
+        vec![3],
+        vec![4],
+        vec![3],
+        vec![5],
+        vec![],
+    ];
+    for intermediate in ["noinline local", "", "local"] {
+        check_graph(
+            &edges,
+            &[
+                "local",
+                "local",
+                "local",
+                "alwaysinline local",
+                intermediate,
+                "local",
+                "local",
+            ],
+        );
+    }
+    check_graph(&[vec![1, 2], vec![3], vec![3], vec![]], &["local"; 4]);
+}
+
+#[test]
+fn recursion_membership_includes_tail_and_invoke_edges() {
+    for (body, attrs, extra) in [
+        (" return_call @a()\n", "local", ""),
+        (
+            " invoke @a(), block1, block2\nblock1:\n return\nblock2:\n v0, v1 = landingpad cleanup\n trap\n",
+            "local personality @personality",
+            "decl @personality()\n",
+        ),
+    ] {
+        let source = format!(
+            "{extra}func @a() alwaysinline local {{\nblock0:\n call @b()\n return\n}}\nfunc @b() {attrs} {{\nblock0:\n{body}}}\nfunc @probe() {{\nblock0:\n call @a()\n return\n}}"
+        );
+        let report = detailed_report(&source);
+        let site = report.invocations[0]
+            .inline_sites
+            .iter()
+            .find(|s| s.caller == "probe")
+            .unwrap();
+        assert_eq!(site.outcome, "recursive_callee");
+    }
+}
+
+#[test]
+fn long_acyclic_chain_uses_frozen_templates() {
+    let n = 2048;
+    let edges: Vec<Vec<_>> = (0..n)
+        .map(|i| if i + 1 < n { vec![i + 1] } else { vec![] })
+        .collect();
+    // Public definitions prevent cloning, while still requiring recursion
+    // analysis. This keeps the test focused on traversing a deep call graph.
+    let report = detailed_report(&graph_source(&edges, &vec![""; n]));
+    assert!(
+        report.invocations[0]
+            .inline_sites
+            .iter()
+            .all(|s| s.outcome == "public_definition")
+    );
 }
 
 #[test]
