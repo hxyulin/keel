@@ -175,6 +175,32 @@ def sample():
             store('samples',r)
     r['end']=snapshot();store('samples',r)
 
+def sample_preprocess():
+    b=ROOT/'target-pp-fp/release/examples/preprocess_linux';r={'start':snapshot(),'binary_sha256':sha(b),'profiles':[]}
+    # Existing perf permissions only. Task-scoped user cycles, attach after
+    # validation and warmup. Two independent 8-second captures per workload.
+    for app,ps in rawinputs().items():
+        for capture in range(2):
+            log=ROOT/'evidence'/f'preprocess-{app}-{capture}.helper.stderr'
+            with log.open('w+') as err:
+                proc=subprocess.Popen([str(b),'sample','100000',app,'/',str(ROOT/'native-pre'/app),*map(str,ps)],stdout=subprocess.DEVNULL,stderr=err)
+                try:
+                    deadline=time.monotonic()+30
+                    while 'ready:' not in log.read_text():
+                        if proc.poll() is not None or time.monotonic()>deadline:raise RuntimeError(log.read_text())
+                        time.sleep(.05)
+                    data=ROOT/'evidence'/f'preprocess-{app}-{capture}.perf.data'
+                    record=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'record','-e','cycles:u','-F','499','-g','--call-graph','fp','-p',str(proc.pid),'-o',data,'--','sleep','8'],env=ENV)
+                    store(f'preprocess-{app}-{capture}-record',record)
+                    run(['sudo','-n','chown',f'{os.getuid()}:{os.getgid()}',data])
+                    decoded=run(['sudo','-n','env','LD_LIBRARY_PATH='+ENV['LD_LIBRARY_PATH'],PERF,'script','-f','--no-inline','-i',data,'-F','comm,pid,tid,time,event,ip,sym,dso,period'],env=ENV)
+                    (data.with_suffix('.script.txt')).write_text(decoded['stdout'])
+                    r['profiles'].append(dict(app=app,capture=capture,record=record,decode_stderr=decoded['stderr'],decode_command=decoded['command'],data_sha256=sha(data)))
+                finally:
+                    proc.terminate();proc.wait(timeout=15)
+            store('preprocess-samples',r)
+    r['end']=snapshot();store('preprocess-samples',r)
+
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('mode',choices=['setup','resident','cli','preprocess','allocations','rss','sample']);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('mode',choices=['setup','resident','cli','preprocess','allocations','rss','sample','sample_preprocess']);a=p.parse_args()
     globals()[a.mode]()
