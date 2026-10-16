@@ -444,6 +444,29 @@ fn detailed_report(source: &str) -> keel_opt::OptimizationReport {
     report
 }
 
+#[test]
+fn byval_copy_cost_admits_sites_up_to_unchanged_budgets() {
+    for (size, site_count, inlined, reason) in [
+        (16, 140, 128, "caller_call_count_budget"),
+        (128, 30, 25, "caller_instruction_growth_budget"),
+    ] {
+        let fields = vec!["i8"; size].join(", ");
+        let mut source = format!(
+            "func @h(ptr byval {{{fields}}}) local {{\nblock0(v0: ptr):\n return\n}}\nfunc @f(ptr) {{\nblock0(v0: ptr):\n"
+        );
+        for _ in 0..site_count {
+            source.push_str(" call @h(v0)\n");
+        }
+        source.push_str(" return\n}\n");
+        // Also verifies that observation leaves the resulting IR identical.
+        let report = detailed_report(&source);
+        let sites = &report.invocations[0].inline_sites;
+        assert_eq!(sites.len(), site_count);
+        assert!(sites[..inlined].iter().all(|s| s.outcome == "inlined"));
+        assert!(sites[inlined..].iter().all(|s| s.outcome == reason));
+    }
+}
+
 // This oracle asks whether a nonempty path returns to its starting vertex.
 // It deliberately uses transitive closure rather than SCC traversal.
 fn graph_recursion(edges: &[Vec<usize>]) -> Vec<bool> {

@@ -40,6 +40,31 @@ const MAX_CALLS: usize = 128;
 const MAX_MODULE_GROWTH: usize = 16_384;
 const HARD_STACK: u64 = 65_536;
 
+fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
+    let mut offset = 0;
+    std::iter::from_fn(move || {
+        let remaining = size - offset;
+        let (bytes, ty) = match remaining {
+            0 => return None,
+            1 => (1, Type::I8),
+            2..=3 => (2, Type::I16),
+            4..=7 => (4, Type::I32),
+            _ => (8, Type::I64),
+        };
+        let chunk = (offset, ty);
+        offset += bytes;
+        Some(chunk)
+    })
+}
+
+fn byval_copy_cost(size: u64) -> usize {
+    // One stack_addr, a load/store per chunk, and an iconst plus two
+    // ptradds for every chunk after the first. Eligibility bounds size to 128.
+    1 + byval_copy_chunks(size)
+        .map(|(offset, _)| if offset == 0 { 2 } else { 5 })
+        .sum::<usize>()
+}
+
 /// Reasons an explicit alwaysinline request could not be honored. No stderr
 /// side effects: embedders can display this report alongside their diagnostics.
 #[derive(Debug, Default)]
@@ -371,7 +396,7 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
                     .params
                     .iter()
                     .map(|p| match &p.purpose {
-                        Purpose::ByVal(l) => l.size() as usize * 5 + 2,
+                        Purpose::ByVal(l) => byval_copy_cost(l.size()),
                         _ => 0,
                     })
                     .sum::<usize>();
@@ -470,18 +495,7 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         if let Purpose::ByVal(layout) = &param.purpose {
             let slot = caller.create_stack_slot(layout.size() as u32, layout.align() as u32);
             let dst = caller.ins(InsertPoint::Before(call)).stack_addr(slot);
-            let mut offset = 0;
-            while offset < layout.size() {
-                let bytes = [8, 4, 2, 1]
-                    .into_iter()
-                    .find(|&n| n <= layout.size() - offset)
-                    .unwrap();
-                let ty = match bytes {
-                    8 => Type::I64,
-                    4 => Type::I32,
-                    2 => Type::I16,
-                    _ => Type::I8,
-                };
+            for (offset, ty) in byval_copy_chunks(layout.size()) {
                 let mut src_at = *arg;
                 let mut dst_at = dst;
                 if offset != 0 {
@@ -493,7 +507,6 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
                 }
                 let value = caller.ins(InsertPoint::Before(call)).load(ty, src_at);
                 caller.ins(InsertPoint::Before(call)).store(value, dst_at);
-                offset += bytes;
             }
             *arg = dst;
         }
@@ -606,6 +619,72 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         },
     );
     caller.set_inst_loc(jump, origin);
+}
+
+#[cfg(test)]
+mod byval_tests {
+    use super::*;
+
+    #[test]
+    fn copy_cost_matches_real_emitted_ir_for_every_supported_size() {
+        for size in 1..=128 {
+            // i8 fields give every byte size without aggregate tail padding.
+            let fields = vec!["i8"; size].join(", ");
+            let mut module = keel_ir::parse(&format!(
+                "func @h(ptr byval {{{fields}}}) local {{\nblock0(v0: ptr):\n return\n}}\nfunc @f(ptr) {{\nblock0(v0: ptr):\n call @h(v0)\n return\n}}"
+            ))
+            .unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            assert!(run(&mut module));
+            keel_ir::verify_module(&module).unwrap();
+            let caller = &module.functions[1];
+            // This block contains only the snapshot and the jump replacing
+            // the call. Count real IR, independently of the chunk iterator.
+            let insts = caller.block_insts(caller.entry_block().unwrap());
+            assert!(matches!(
+                caller.inst_data(*insts.last().unwrap()),
+                InstData::Jump { .. }
+            ));
+            assert_eq!(byval_copy_cost(size as u64), insts.len() - 1, "size {size}");
+            let copied_bytes: u64 = insts
+                .iter()
+                .filter_map(|&inst| match caller.inst_data(inst) {
+                    InstData::Load { .. } => Some(
+                        caller
+                            .value_type(caller.inst_results(inst)[0])
+                            .bytes()
+                            .unwrap() as u64,
+                    ),
+                    _ => None,
+                })
+                .sum();
+            assert_eq!(copied_bytes, size as u64);
+        }
+    }
+
+    #[test]
+    fn copy_chunks_keep_wide_loads_and_odd_tails() {
+        for (size, expected) in [
+            (1, vec![Type::I8]),
+            (7, vec![Type::I32, Type::I16, Type::I8]),
+            (8, vec![Type::I64]),
+            (9, vec![Type::I64, Type::I8]),
+            (15, vec![Type::I64, Type::I32, Type::I16, Type::I8]),
+            (16, vec![Type::I64, Type::I64]),
+            (128, vec![Type::I64; 16]),
+        ] {
+            assert_eq!(
+                byval_copy_chunks(size)
+                    .map(|(_, ty)| ty)
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        // Empty aggregates are rejected by IR verification; preserve the
+        // emitter's stack_addr-only behavior if invoked on an empty layout.
+        assert_eq!(byval_copy_chunks(0).count(), 0);
+        assert_eq!(byval_copy_cost(0), 1);
+    }
 }
 
 #[cfg(test)]
