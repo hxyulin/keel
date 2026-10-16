@@ -1416,3 +1416,16 @@ The [frontend cloning investigation](../docs/c-frontend-cloning.md) rejected the
 scoped expression change and implemented no gain; initializer incidence motivates
 a separate future session. The [final portability validation](../docs/final-portability-validation.md)
 records the focused ownership reruns and inherited round-four workspace evidence.
+
+## Current application runtime profiles versus stock Clang O2 (2026-10-16)
+
+The [current runtime report](../docs/current-app-runtime-2026-10-16.md) measures
+production-equivalent `6e6d2c2` application binaries, with two independent native
+captures of every Lua/QuickJS/SQLite workload for both compilers on MacHost and
+LinuxHost. Separate paired latency runs use stock Clang O2, canonical executable
+paths, two warmups and eleven alternating pairs. It retains correctness checks,
+text parity, matching IR/disassembly, sample-quality limits and five bounded
+compiler recommendations. [Raw evidence and reproduction](reports/current-app-runtime-2026-10-16/README.md)
+include hash manifests and losslessly compressed captures. Historical inliner
+probes above remain historical; no source probes or compiler changes enter this
+matrix.
