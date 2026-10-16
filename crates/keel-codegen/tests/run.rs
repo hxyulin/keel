@@ -283,10 +283,21 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 
 #[test]
 fn compact_frame_storage() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
-    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
-        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+    for program in [
+        "compact_frame",
+        "dyn_alloca",
+        "unwind",
+        "exceptions",
+        "setjmp",
+    ] {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{program}.keel"));
+        for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+            run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+        }
     }
+    #[cfg(feature = "experimental-regalloc")]
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/compact_frame.keel");
     #[cfg(feature = "experimental-regalloc")]
     for allocation in [
         AllocationTier::Local,
