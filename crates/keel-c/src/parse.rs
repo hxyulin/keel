@@ -937,7 +937,9 @@ impl<'a> Parser<'a> {
             self.bind(name, Sym::Global(g));
             g
         } else {
-            let g = self.global(&name, label, d.ty.clone());
+            let g = self
+                .global(&name, label, d.ty.clone())
+                .map_err(|message| Error::new(d.name.as_ref().unwrap().1, message))?;
             let global = &mut self.globals[g];
             global.sugar = d.sugar.clone();
             if spec.storage == Storage::Static {
@@ -975,7 +977,12 @@ impl<'a> Parser<'a> {
 
     /// Finds or adds the file-scope global `name`, merging this
     /// declaration's type into it (a later one may complete an array).
-    fn global(&mut self, name: &str, label: Option<&'a str>, ty: Ty) -> usize {
+    fn global(
+        &mut self,
+        name: &str,
+        label: Option<&'a str>,
+        ty: Ty,
+    ) -> Result<usize, &'static str> {
         let existing = self
             .names
             .get(name)
@@ -984,6 +991,16 @@ impl<'a> Parser<'a> {
                 Sym::Global(g) if *depth == 0 => Some(*g),
                 _ => None,
             });
+        let checked = crate::expr::checked_memory_intrinsic(name)
+            .or_else(|| label.and_then(crate::expr::checked_memory_intrinsic))
+            .or_else(|| {
+                existing.and_then(|g| crate::expr::checked_memory_intrinsic(self.globals[g].symbol))
+            });
+        if let Some(id) = checked
+            && !crate::expr::checked_memory_prototype(id, &ty)
+        {
+            return Err("invalid checked memory builtin prototype");
+        }
         let g = match existing {
             Some(g) => {
                 let global = &mut self.globals[g];
@@ -1027,7 +1044,7 @@ impl<'a> Parser<'a> {
             let name = self.text.intern(name);
             self.bind(name, Sym::Global(g));
         }
-        g
+        Ok(g)
     }
 
     fn declare_function(
@@ -1039,7 +1056,7 @@ impl<'a> Parser<'a> {
         attrs: Attrs,
         file_scope: bool,
     ) -> Result<usize, &'static str> {
-        let g = self.global(name, label, Ty::Func(fty));
+        let g = self.global(name, label, Ty::Func(fty))?;
         if spec.storage == Storage::Static {
             self.globals[g].internal = true;
         }
@@ -2440,13 +2457,13 @@ mod tests {
         p.push_scope();
         p.bind("object", Sym::Local(3));
         p.push_scope();
-        let global = p.global("object", None, INT);
+        let global = p.global("object", None, INT).unwrap();
         assert_eq!(p.lookup("object"), Some(&Sym::Global(global)));
         p.pop_scope();
         assert_eq!(p.lookup("object"), Some(&Sym::Local(3)));
         p.pop_scope();
         assert_eq!(p.lookup("object"), Some(&Sym::Global(global)));
-        assert_eq!(p.global("object", None, INT), global);
+        assert_eq!(p.global("object", None, INT).unwrap(), global);
         assert_eq!(p.globals.len(), 1);
         for depth in 0..6 {
             p.push_scope();

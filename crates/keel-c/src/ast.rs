@@ -6,7 +6,7 @@
 
 use crate::Loc;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
-use keel_ir::{OverflowOp, RmwOp};
+use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 use std::rc::Rc;
 
 pub type LocalId = usize;
@@ -147,6 +147,9 @@ impl BinOp {
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Builtin {
+    /// Explicit C memory builtin; three operands, or four for its checked
+    /// runtime variant. Both return the destination pointer.
+    Memory(Intrinsic),
     Bswap,
     Fabs,
     /// The sign bit of a float, as an `int`: 1 for -0.0 and negative NaNs
