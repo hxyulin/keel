@@ -14,7 +14,7 @@ unsigned long readonly_alias(unsigned long *, unsigned long *, unsigned long);
 unsigned long fault_order(unsigned long *, unsigned long *, unsigned long);
 
 int main(void) {
-    const unsigned long trips[] = {0, 1, 7, 257, 4096};
+    const unsigned long trips[] = {0, 1, 2, 7, 8, 257, 4096};
     for (unsigned j = 0; j < sizeof(trips) / sizeof(trips[0]); ++j) {
         for (unsigned long seed = 0; seed < 16; ++seed) {
             unsigned long p = seed * 123456789UL + 17, q = 99;

@@ -239,3 +239,81 @@ fn nested_loops_are_skipped() {
         optimize(&source).to_string()
     );
 }
+
+#[test]
+fn existing_exit_args_and_multiple_direct_liveouts_preserve_exit_effect_order() {
+    let source = LOOP
+        .replace(" v7 = icmp", " v30 = iadd v6, v5\n v7 = icmp")
+        .replace(
+            " return v12",
+            " v31 = iadd v30, v6\n store v12, v1\n v32 = iadd v31, v12\n return v32",
+        );
+    let m = optimize(&source);
+    let f = &m.functions[0];
+    let entry = f.entry_block().unwrap();
+    let InstData::Brif { dests, .. } = f.inst_data(*f.block_insts(entry).last().unwrap()) else {
+        panic!()
+    };
+    let exit = dests[1].block;
+    assert_eq!(f.block_params(exit).len(), 3);
+    assert_eq!(dests[1].args.len(), 3);
+    assert_eq!(dests[1].args[0], f.block_params(entry)[3]);
+    assert_eq!(dests[1].args[2], f.block_params(entry)[3]);
+    let ops: Vec<_> = f
+        .block_insts(exit)
+        .iter()
+        .map(|&i| match f.inst_data(i) {
+            InstData::Binary { .. } => "add",
+            InstData::Store { .. } => "store",
+            InstData::Return { .. } => "return",
+            _ => "unexpected",
+        })
+        .collect();
+    assert_eq!(ops, ["add", "store", "add", "return"]);
+    for (_, i) in f.layout_insts() {
+        for dest in f.inst_data(i).branch_dests() {
+            if dest.block == exit {
+                assert_eq!(dest.args.len(), 3);
+            }
+        }
+    }
+}
+
+#[test]
+fn constant_offset_disjoint_store_hoists_but_partial_and_wrapped_overlap_do_not() {
+    for (offset, hoists) in [(8, true), (4, false), (-4, false)] {
+        let source = LOOP
+            .replace(" restrict_params(0, 1)", "")
+            .replace(
+                " v4 = iconst.i64 0",
+                &format!(" v30 = iconst.i64 {offset}\n v31 = ptradd v0, v30\n v4 = iconst.i64 0"),
+            )
+            .replace("store v9, v1", "store v9, v31");
+        let before = keel_ir::parse(&source).unwrap();
+        let after = optimize(&source);
+        assert_eq!(
+            load_block(&before) != load_block(&after),
+            hoists,
+            "offset {offset}"
+        );
+    }
+}
+
+#[test]
+fn debug_variable_descriptions_and_escaped_restricted_roots_are_skipped() {
+    let debug = format!(
+        "dtype dt0 = base \"unsigned long\" unsigned 8\n{}",
+        LOOP.replace(
+            "block0(v0:",
+            " ss0 = stack_slot 8, align 8\n dvar \"saved\" dt0 ss0\nblock0(v0:"
+        )
+    );
+    let escape = LOOP.replace(
+        " v4 = iconst.i64 0",
+        " v30 = icmp.eq v0, v1\n v4 = iconst.i64 0",
+    );
+    for source in [debug, escape] {
+        let before = keel_ir::parse(&source).unwrap().to_string();
+        assert_eq!(before, optimize(&source).to_string());
+    }
+}
