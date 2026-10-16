@@ -33,6 +33,7 @@ mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
 mod stack_forward;
+mod small_memory;
 
 /// A replaceable optimization pass over one function.
 /// `run` must report true whenever it mutates the function, including aliases.
@@ -77,6 +78,12 @@ struct BuiltinPass {
     pub description: &'static str,
     pub run: fn(&mut Function) -> bool,
 }
+
+const SMALL_MEMORY: BuiltinPass = BuiltinPass {
+    name: "small-memory",
+    description: "expand ordinary constant memory intrinsics of at most 32 bytes",
+    run: small_memory::run,
+};
 
 const BUILTINS: &[BuiltinPass] = &[
     BuiltinPass {
@@ -170,6 +177,7 @@ impl Pass for BuiltinPass {
 }
 
 pub const PASSES: &[&dyn Pass] = &[
+    &SMALL_MEMORY,
     &BUILTINS[0],
     &BUILTINS[1],
     &BUILTINS[2],
