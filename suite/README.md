@@ -1459,7 +1459,8 @@ python3 -B suite/arm-codegen/run.py \
   --verify-report target/arm-timing-01/report.json
 ```
 
-One variant suffices for baseline validation; Clang O2 is always added. Variant
+`--cases movz` reruns an affected functional fixture plus the control without
+repeating a timing campaign. One variant suffices for baseline validation; Clang O2 is always added. Variant
 paths, exact source/build-feature identities and flags are explicit. `-O` uses
 each binary's actual optimized preset (current Keel includes all selection).
 `["-O", "--isel", "none"]` is an optional same-binary ablation, not an old

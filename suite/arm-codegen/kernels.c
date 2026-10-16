@@ -33,7 +33,7 @@ u64 kernel(const u64 *p, unsigned long n) {
 #elif CASE == 9
         z = ((u32)x & 0x80000001U) + (y ^ 0x8000000000000001ULL);
 #elif CASE == 10
-        z = x + 0x0000000012340000ULL; /* Sparse MOVZ seed. */
+        z = x + 0x0000123400000000ULL; /* Sparse MOVZ seed. */
 #elif CASE == 11
         z = x + 0xffff1234ffffffffULL; /* Negative bit pattern, MOVN seed. */
 #elif CASE == 12

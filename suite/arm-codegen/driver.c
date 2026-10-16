@@ -32,7 +32,7 @@ static U oracle(const U *p, unsigned long n, int id) {
         case 7: s+=bits(x,0x0123456789abcdefULL,0,64); break;
         case 8: s+=bits(x,0x00ff00ff00ff00ffULL,0,64)+bits(y,0x00ff00ff00ff00ffULL,2,64)+bits(x,0x00ff00ff00ff00ffULL,1,64); break;
         case 9: s+=bits(x,0x80000001,0,32)+bits(y,0x8000000000000001ULL,2,64); break;
-        case 10: s+=x+305397760ULL; break;
+        case 10: s+=x+20014547599360ULL; break;
         case 11: s+=x-261456134144001ULL; break;
         case 12:
             s+=bits(x,0x00ff00ff00ff00ffULL,0,64)+bits(y,0x8000000000000001ULL,2,64);

@@ -134,6 +134,7 @@ def main():
     p.add_argument('--config', type=pathlib.Path)
     p.add_argument('--work-dir', type=pathlib.Path)
     p.add_argument('--benchmark', action='store_true')
+    p.add_argument('--cases', help='optional comma-separated functional subset; default all cases')
     p.add_argument('--timing-cases', default='and64,movn-negative')
     p.add_argument('--rounds', type=int, default=6)
     p.add_argument('--target-seconds', type=float, default=0.12)
@@ -168,8 +169,13 @@ def main():
             if key not in v:
                 p.error(f'each variant needs explicit {key}')
     cases = json.loads((HERE/'cases.json').read_text())
+    if args.cases:
+        requested = set(args.cases.split(','))
+        if requested - {c['name'] for c in cases}:
+            p.error('unknown functional case')
+        cases = [c for c in cases if c['name'] in requested or c['id'] == 0]
     selected = args.timing_cases.split(',')
-    if set(selected) - {c['name'] for c in cases if c['id']}:
+    if args.benchmark and set(selected) - {c['name'] for c in cases if c['id']}:
         p.error('unknown timing case')
     variants.append({'name': 'clang-O2', 'compiler': str(clang), 'source_id': command([clang, '--version']),
                      'features': [], 'flags': ['-O2', '-march=armv8-a', '-ffp-contract=off']})
