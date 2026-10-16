@@ -1162,6 +1162,8 @@ fn assign_spill_slots(spilled: &mut [&Interval], locs: &mut [Vec<Option<Loc>>; 2
 #[derive(Default)]
 struct SpillSlots {
     active: Vec<(u32, u32)>,
+    // No owner can expire until start passes this inclusive endpoint.
+    min_end: Option<u32>,
     // Most functions never need more than 64 slots. Keep their occupancy
     // inline and allocate extra words only under greater spill pressure.
     first_occupied: u64,
@@ -1171,21 +1173,26 @@ struct SpillSlots {
 
 impl SpillSlots {
     fn assign(&mut self, start: u32, end: u32) -> u32 {
-        let first = &mut self.first_occupied;
-        let tail = &mut self.occupied_tail;
-        self.active.retain(|&(until, slot)| {
-            if until >= start {
-                true
-            } else {
-                let word = if slot < 64 {
-                    &mut *first
+        if self.min_end.is_some_and(|until| until < start) {
+            let first = &mut self.first_occupied;
+            let tail = &mut self.occupied_tail;
+            let mut min_end: Option<u32> = None;
+            self.active.retain(|&(until, slot)| {
+                if until >= start {
+                    min_end = Some(min_end.map_or(until, |min| min.min(until)));
+                    true
                 } else {
-                    &mut tail[slot as usize / 64 - 1]
-                };
-                *word &= !(1u64 << (slot % 64));
-                false
-            }
-        });
+                    let word = if slot < 64 {
+                        &mut *first
+                    } else {
+                        &mut tail[slot as usize / 64 - 1]
+                    };
+                    *word &= !(1u64 << (slot % 64));
+                    false
+                }
+            });
+            self.min_end = min_end;
+        }
         let slot = if self.first_occupied != u64::MAX {
             let bit = self.first_occupied.trailing_ones();
             self.first_occupied |= 1u64 << bit;
@@ -1203,6 +1210,7 @@ impl SpillSlots {
             (word as u32 + 1) * 64 + bit
         };
         self.active.push((end, slot));
+        self.min_end = Some(self.min_end.map_or(end, |min| min.min(end)));
         self.count = self.count.max(slot + 1);
         slot
     }
@@ -1337,16 +1345,33 @@ mod tests {
         }
     }
 
+    fn check_spill_slots_against_reference(intervals: impl IntoIterator<Item = (u32, u32)>) {
+        let mut slots = SpillSlots::default();
+        let mut reference = Vec::new();
+        let mut count = 0;
+        for (i, (start, end)) in intervals.into_iter().enumerate() {
+            reference.retain(|&(until, _)| until >= start);
+            let expected = (0..)
+                .find(|&slot| reference.iter().all(|&(_, used)| used != slot))
+                .unwrap();
+            reference.push((end, expected));
+            count = count.max(expected + 1);
+            assert_eq!(
+                slots.assign(start, end),
+                expected,
+                "interval {i}: {start}..={end}"
+            );
+            assert_eq!(slots.count, count);
+        }
+    }
+
     #[test]
     fn spill_slots_match_lowest_free_reference() {
         // Include inclusive endpoint collisions, large simultaneous pressure,
         // holes in the free slots, and complete expiration between groups.
         for pattern in 0..8u32 {
-            let mut slots = SpillSlots::default();
-            let mut reference = Vec::new();
-            let mut count = 0;
             let mut start = 0;
-            for i in 0..1024u32 {
+            check_spill_slots_against_reference((0..1024u32).map(|i| {
                 start += match pattern {
                     0 => 0,
                     1 => 1,
@@ -1368,20 +1393,90 @@ mod tests {
                         3 => 1 + i % 128,
                         _ => (i.wrapping_mul(1013904223) >> 17) % 513,
                     };
-                reference.retain(|&(until, _)| until >= start);
-                let expected = (0..)
-                    .find(|&slot| reference.iter().all(|&(_, used)| used != slot))
-                    .unwrap();
-                reference.push((end, expected));
-                count = count.max(expected + 1);
-                assert_eq!(
-                    slots.assign(start, end),
-                    expected,
-                    "pattern {pattern}, interval {i}"
-                );
-                assert_eq!(slots.count, count);
-            }
+                (start, end)
+            }));
         }
+    }
+
+    #[test]
+    fn spill_slots_expiry_boundaries_match_reference() {
+        check_spill_slots_against_reference([
+            (0, 100),
+            (1, 5),     // A new end precedes the previous minimum.
+            (5, 5),     // Equal endpoints still occupy distinct homes.
+            (6, 7),     // Expire both short owners, keeping the long owner.
+            (8, 8),     // Recompute the minimum after partial expiration.
+            (101, 200), // Expire all owners before refilling.
+            (102, 102),
+            (103, 103),
+            (u32::MAX, u32::MAX),
+            (u32::MAX, u32::MAX), // MAX is an endpoint, not an empty sentinel.
+        ]);
+        // The helper's existing behavior also permits starts out of order.
+        check_spill_slots_against_reference([(10, 20), (0, 5), (6, 9), (4, 4), (21, 21)]);
+        // Exercise retained and expired bits in each of three occupancy words.
+        check_spill_slots_against_reference(
+            (0..193)
+                .map(|i| (0, i % 3))
+                .chain((0..193).map(|i| (i / 65 + 1, i / 65 + 2))),
+        );
+    }
+
+    #[test]
+    fn spill_home_pools_preserve_widths_and_i128_halves() {
+        let intervals: Vec<_> = [
+            (0, 0, false, 0, 4),
+            (0, 1, false, 0, 4),
+            (1, 0, true, 0, 1),
+            (2, 0, false, 5, 6),
+            (3, 0, true, 2, 4),
+            (4, 0, true, 4, 5),
+        ]
+        .into_iter()
+        .map(|(value, half, vector, start, end)| Interval {
+            value: Value::new(value),
+            half,
+            ranges: vec![(start, end)],
+            crosses_call: false,
+            float: vector,
+            vector,
+        })
+        .collect();
+        let fast: Vec<_> = intervals
+            .iter()
+            .map(|iv| FastInterval {
+                value: iv.value,
+                half: iv.half,
+                start: iv.start(),
+                end: iv.end(),
+                crosses_call: iv.crosses_call,
+                float: iv.float,
+                vector: iv.vector,
+            })
+            .collect();
+        let mut full_spilled: Vec<_> = intervals.iter().rev().collect();
+        let mut fast_spilled: Vec<_> = fast.iter().rev().collect();
+        let mut full_locs = [vec![None; 5], vec![None; 5]];
+        let mut fast_locs = full_locs.clone();
+        assert_eq!(assign_spill_slots(&mut full_spilled, &mut full_locs), 6);
+        assert_eq!(
+            assign_fast_spill_slots(&mut fast_spilled, &mut fast_locs),
+            6
+        );
+        assert_eq!(full_locs, fast_locs);
+        assert_eq!(
+            full_locs,
+            [
+                vec![
+                    Some(Loc::Stack(0)),
+                    Some(Loc::Stack(2)),
+                    Some(Loc::Stack(0)),
+                    Some(Loc::Stack(2)),
+                    Some(Loc::Stack(4))
+                ],
+                vec![Some(Loc::Stack(1)), None, None, None, None],
+            ]
+        );
     }
 
     #[test]
