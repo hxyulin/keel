@@ -184,7 +184,7 @@ fn extension_equality_excludes_nonmatching_and_ordered_comparisons() {
 #[test]
 fn matching_extensions_preserve_shared_uses_effects_result_and_location() {
     let source = "file f0 = \"comparison.c\"
-decl @effect(i64) -> void
+decl @effect(i64)
 func @f(i8, i8, ptr) -> i8 {
 block0(v0: i8, v1: i8, v2: ptr):
  v3 = uext.i64 v0
@@ -227,7 +227,7 @@ block0(v0: i8, v1: i8, v2: ptr):
         "decl @read() -> i8
 func @f(ptr, i8, i8) -> i8 {
 block0(v0: ptr, v1: i8, v2: i8):
- v3 = load volatile.i8 v0
+ v3 = load.i8 volatile v0
  v4 = call @read()
  v5 = udiv v1, v2
  v6 = uext.i64 v3
@@ -241,7 +241,7 @@ block0(v0: ptr, v1: i8, v2: i8):
     );
     let text = module.to_string();
     for expected in [
-        "load volatile.i8",
+        "load.i8 volatile",
         "call @read()",
         "udiv v1, v2",
         "icmp.ne v3, v4",
