@@ -18,7 +18,7 @@ def main():
     # executables. They were never executed during this compile-time campaign.
     r['input_manifest']['raw']={str(p.relative_to(ROOT)):{'sha256':sha(p),'bytes':p.stat().st_size} for p in (ROOT/'raw').rglob('*') if p.is_file() and p.suffix in ['.c','.h']}
     r['ir_manifest']={str(p.relative_to(ROOT)):sha(p) for p in (ROOT/'evidence/ir').rglob('*.ir')}
-    for target in ['plain','stage','fp','pp-fp','pp-alloc','memory','diagnostic','storage']:
+    for target in ['plain','stage','fp','pp-fp','pp-alloc','memory','diagnostic','storage','initializer-total']:
         td=ROOT/f'target-{target}/release'
         bins=[td/'keel']+list((td/'examples').glob('*'))
         r['binaries'][target]={str(p.relative_to(ROOT)):sha(p) for p in bins if p.is_file() and (p.name in ['profile','resident','resident_memory','profile_allocations','preprocess_linux','preprocess_allocations_linux','keel'])}
@@ -31,7 +31,7 @@ def main():
         dest=p.with_suffix('.raw.txt.gz')
         dest.write_bytes(gzip.compress(x['stdout'].encode(),mtime=0))
         r['perf_loss_audit'][p.name]={'raw_sha256':sha(p),'audit_sha256':sha(dest),'stderr':x['stderr'],'lost_lines':[s for s in x['stdout'].splitlines() if 'PERF_RECORD_LOST' in s or 'LOST_SAMPLES' in s]}
-    r['harness_versions']={'resident':'830a8a8','cli_and_preprocessing_timing':'efd8917','resident_sampling':'5195636','preprocess_sampling':'4cac1ee','initializer_histogram_cli_diagnostics':'c280b9f','storage_counts':'f319b22','preprocess_allocations':'4516e41'}
+    r['harness_versions']={'resident':'830a8a8','cli_and_preprocessing_timing':'efd8917','resident_sampling':'5195636','preprocess_sampling':'4cac1ee','initializer_histogram_cli_diagnostics':'c280b9f','storage_counts':'f319b22','preprocess_allocations':'4516e41','initializer_clone_and_drop':'8b2aff6'}
     r['preprocessor_output_parity']=[]
     for app,ps in rawinputs().items():
         for p in ps:
