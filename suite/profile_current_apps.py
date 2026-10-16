@@ -96,7 +96,7 @@ def prepare(args):
               'test_inputs': {str(p.relative_to(WORK)): sha(p) for base in [tests, quicktests]
                               for p in sorted(base.rglob('*')) if p.is_file()},
               'host': platform.platform(), 'clang': run(['clang', '--version']).stdout.decode(),
-              'environment': dict(os.environ), 'drivers': drivers,
+              'environment': {k: v for k, v in os.environ.items() if k in ['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'LD_LIBRARY_PATH', 'DYLD_LIBRARY_PATH', 'MACOSX_DEPLOYMENT_TARGET', 'OMP_NUM_THREADS', 'MALLOC_CONF', 'GLIBC_TUNABLES']}, 'drivers': drivers,
               'harness_sha256': sha(__file__),
               'dependencies_sha256': {n: sha(ROOT / 'suite' / n) for n in ['profile_app_loops.py', 'measure_passes.py']},
               'cpu_affinity': 2 if not MAC else None,
