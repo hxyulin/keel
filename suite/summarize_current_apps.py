@@ -132,7 +132,7 @@ def resolve_function(root, app, variant, name, locations, mac):
                                'stack_object_bytes': sum(map(int,re.findall(r'= stack_slot (\d+)', section))),
                                'calls': collections.Counter(re.findall(r'\bcall @([^ (]+)', section))})
     return {'symbol': name, 'variant': variant, 'out_of_line_symbol_present': True,
-            'object_from_text_identical_relink_map': object_path, 'source_stem': source_stem, 'linked_start': hex(start), 'symbol_name_instances': [hex(a) for a,b in candidates], 'resolved_instance_weights': {hex(k):v for k,v in instance_weights.items()}, 'selected_instance': 'Most sampled resolved symbol instance; grouped name shares may include other instances.', 'disassembly': str(path), 'static_instructions': len(instructions),
+            'object_from_text_identical_relink_map': object_path, 'source_stem': source_stem, 'linked_start': hex(start), 'symbol_name_instances': [hex(a) for a,b in candidates], 'resolved_instance_weights': {hex(k):v for k,v in instance_weights.items()}, 'selected_instance': 'Most sampled resolved symbol instance; grouped name shares may include other instances.', 'disassembly': str(path), 'disassembly_address_rows': len(instructions),
             'static_call_or_tailjump_targets': dict(calls),
             'stack_access_instruction_count_static': sum(bool(re.search(r'\[(?:sp|x29)[,\]]|\(%(?:rsp|rbp)\)', l)) for l in instructions),
             'prologue': instructions[:24], 'sampled_windows': list(unique.values())[:5], 'matching_keel_ir': ir_matches}
