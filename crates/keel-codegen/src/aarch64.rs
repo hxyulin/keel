@@ -112,6 +112,7 @@ use keel_ir::{
 };
 use std::collections::HashSet;
 use std::fmt::Write;
+mod constant_plan;
 mod native;
 mod output;
 mod vector;
@@ -3802,40 +3803,48 @@ impl<'a> FunctionCompiler<'a> {
         scratch
     }
 
-    /// Loads a constant with `movz` and up to three `movk`s.
+    /// Loads the exact requested width without changing NZCV, including when
+    /// rematerializing between a compare and its branch during parallel copies.
     fn materialize(&mut self, reg: u8, bits: u64, is64: bool) {
+        let plan = constant_plan::Plan::new(bits, is64);
         let class = if is64 { 'x' } else { 'w' };
-        let chunks = if is64 { 4 } else { 2 };
+        let (seed_lane, seed_imm) = plan.seed();
+        let opcode = match (is64, plan.inverted()) {
+            (true, false) => Opcode::MOVZ_64_movewide,
+            (false, false) => Opcode::MOVZ_32_movewide,
+            (true, true) => Opcode::MOVN_64_movewide,
+            (false, true) => Opcode::MOVN_32_movewide,
+        };
+        let mnemonic = if plan.inverted() { "movn" } else { "movz" };
         self.native(
-            if is64 {
-                Opcode::MOVZ_64_movewide
-            } else {
-                Opcode::MOVZ_32_movewide
-            },
+            opcode,
             [
                 (FieldId::Rd, reg.into()),
-                (FieldId::imm16, (bits & 0xffff) as u32),
-                (FieldId::hw, 0),
+                (FieldId::imm16, seed_imm.into()),
+                (FieldId::hw, seed_lane.into()),
             ],
-            |out| write!(out, "movz\t{class}{reg}, #{:#x}", bits & 0xffff),
+            |out| {
+                write!(out, "{mnemonic}\t{class}{reg}, #{seed_imm:#x}")?;
+                if seed_lane != 0 {
+                    write!(out, ", lsl #{}", 16 * seed_lane)?;
+                }
+                Ok(())
+            },
         );
-        for k in 1..chunks {
-            let chunk = (bits >> (16 * k)) & 0xffff;
-            if chunk != 0 {
-                self.native(
-                    if is64 {
-                        Opcode::MOVK_64_movewide
-                    } else {
-                        Opcode::MOVK_32_movewide
-                    },
-                    [
-                        (FieldId::Rd, reg.into()),
-                        (FieldId::imm16, chunk as u32),
-                        (FieldId::hw, k),
-                    ],
-                    |out| write!(out, "movk\t{class}{reg}, #{chunk:#x}, lsl #{}", 16 * k),
-                );
-            }
+        for (lane, imm) in plan.patches() {
+            self.native(
+                if is64 {
+                    Opcode::MOVK_64_movewide
+                } else {
+                    Opcode::MOVK_32_movewide
+                },
+                [
+                    (FieldId::Rd, reg.into()),
+                    (FieldId::imm16, imm.into()),
+                    (FieldId::hw, lane.into()),
+                ],
+                |out| write!(out, "movk\t{class}{reg}, #{imm:#x}, lsl #{}", 16 * lane),
+            );
         }
     }
 
