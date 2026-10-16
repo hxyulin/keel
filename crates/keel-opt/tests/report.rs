@@ -53,6 +53,10 @@ fn direct_sites_record_actual_outcomes_and_categories() {
                 "unsupported_callee_intrinsic",
             ),
         ] {
+            // Conflicting alwaysinline/noinline attributes are invalid IR.
+            if !attrs.is_empty() && expected == "noinline" {
+                continue;
+            }
             let (_, report) = observed(&caller(&helper), &["inline"]);
             let p = &report.invocations[0];
             assert_eq!(p.function, None);
