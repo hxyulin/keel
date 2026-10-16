@@ -7,6 +7,11 @@
 #include <string.h>
 #include <stdint.h>
 
+/* Clang's fortified macros need not declare their external runtime symbols.
+ * Keel preserves checked memory calls only with these explicit prototypes. */
+void *__memcpy_chk(void *, const void *, size_t, size_t);
+void *__memset_chk(void *, int, size_t, size_t);
+
 #pragma pack(push, 4)
 struct pack4 { int a; double d; };
 #pragma pack(pop)
