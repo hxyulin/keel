@@ -1,0 +1,19 @@
+{
+  "clang": "/absolute/path/to/clang",
+  "variants": [
+    {
+      "name": "baseline",
+      "compiler": "/absolute/path/to/frozen-baseline-keel",
+      "source_id": "exact baseline commit; features []; retained binary SHA checked separately",
+      "flags": ["-O"],
+      "features": []
+    },
+    {
+      "name": "candidate",
+      "compiler": "/absolute/path/to/frozen-candidate-keel",
+      "source_id": "exact candidate commit; compiler build feature list",
+      "flags": ["-O"],
+      "features": ["logical-immediate", "constant-planner"]
+    }
+  ]
+}
