@@ -13,7 +13,7 @@ use crate::{
     ValueDef,
 };
 use crate::{DataInit, DataItem, DebugScope, DebugType, DebugTypeData, Module};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -508,13 +508,16 @@ impl Verifier<'_> {
         }
 
         // Position of each instruction within its block, for same-block dominance.
-        let mut position = HashMap::new();
+        // Instruction indices are bounded by the arena size, including removed
+        // instructions. Keep holes distinct from the first position in a block.
+        let mut position = vec![usize::MAX; func.num_insts()];
         for block in func.blocks() {
             for (i, &inst) in func.block_insts(block).iter().enumerate() {
-                position.insert(inst, i);
+                position[inst.index()] = i;
             }
         }
 
+        let mut operands = Vec::new();
         for block in func.blocks() {
             let insts = func.block_insts(block);
             match insts.last() {
@@ -534,14 +537,14 @@ impl Verifier<'_> {
                     self.check_block_call(inst, dest);
                 }
                 // Report each value once, even if it is used several times.
-                let mut operands = Vec::new();
+                operands.clear();
                 func.inst_data(inst).for_each_operand(|v| {
                     let v = func.resolve(v);
                     if !operands.contains(&v) {
                         operands.push(v);
                     }
                 });
-                for value in operands {
+                for &value in &operands {
                     if !func.is_value_defined(value) {
                         self.inst_error(
                             inst,
@@ -1221,7 +1224,7 @@ impl Verifier<'_> {
         }
     }
 
-    fn check_dominance(&mut self, inst: Inst, value: Value, position: &HashMap<Inst, usize>) {
+    fn check_dominance(&mut self, inst: Inst, value: Value, position: &[usize]) {
         let func = self.func;
         let value = func.resolve(value);
         let use_block = func.inst_block(inst);
@@ -1237,7 +1240,12 @@ impl Verifier<'_> {
             ValueDef::Result(def_inst, _) => {
                 let def_block = func.inst_block(def_inst);
                 if def_block == use_block {
-                    position[&def_inst] < position[&inst]
+                    position
+                        .get(def_inst.index())
+                        .zip(position.get(inst.index()))
+                        .is_some_and(|(&def, &use_)| {
+                            def != usize::MAX && use_ != usize::MAX && def < use_
+                        })
                 } else {
                     self.domtree.dominates(def_block, use_block)
                 }
