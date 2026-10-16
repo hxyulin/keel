@@ -39,7 +39,7 @@ pub(crate) fn folded_values(
         let mut folds: Vec<Value> = if selection.matches.contains_key(&inst) {
             vec![]
         } else {
-            let mut folded = folds(data);
+            let mut folded = folds(selection.folded_data(func, inst));
             selection.remaining_folds(func, inst, &mut folded);
             folded
         };

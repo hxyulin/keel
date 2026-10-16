@@ -1,0 +1,82 @@
+; expect: exit 0
+
+decl @scalar_touch(ptr)
+func @scalar_read8(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = iconst.i64 8
+ v2 = ptradd v0, v1
+ v3 = load.i8 v2
+ v4 = sext.i64 v3
+ return v4
+}
+func @scalar_write16(ptr, i16) -> i64 {
+block0(v0: ptr, v1: i16):
+ v2 = iconst.i64 14
+ v3 = ptradd v0, v2
+ store v1, v3
+ v4 = iconst.i64 14
+ v5 = ptradd v0, v4
+ v6 = load.i16 v5
+ v7 = uext.i64 v6
+ return v7
+}
+func @scalar_call(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = iconst.i64 8
+ v2 = ptradd v0, v1
+ call @scalar_touch(v0)
+ v3 = load.i8 v2
+ v4 = sext.i64 v3
+ return v4
+}
+func @scalar_pressure(ptr, ptr, ptr, ptr, ptr, ptr) -> i64 {
+block0(v0: ptr, v1: ptr, v2: ptr, v3: ptr, v4: ptr, v5: ptr):
+ v6 = iconst.i64 8
+ v7 = ptradd v0, v6
+ v8 = ptradd v1, v6
+ v9 = ptradd v2, v6
+ v10 = ptradd v3, v6
+ v11 = ptradd v4, v6
+ v12 = ptradd v5, v6
+ v13 = load.i8 v7
+ v14 = load.i8 v8
+ v15 = load.i8 v9
+ v16 = load.i8 v10
+ v17 = load.i8 v11
+ v18 = load.i8 v12
+ v19 = uext.i64 v13
+ v20 = uext.i64 v14
+ v21 = uext.i64 v15
+ v22 = uext.i64 v16
+ v23 = uext.i64 v17
+ v24 = uext.i64 v18
+ v25 = iadd v19, v20
+ v26 = iadd v21, v22
+ v27 = iadd v23, v24
+ v28 = iadd v25, v26
+ v29 = iadd v28, v27
+ return v29
+}
+func @scalar_bool(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = icmp.slt v0, v1
+ v3 = uext.i32 v2
+ v4 = iconst.i32 0
+ v5 = icmp.eq v3, v4
+ brif v5, block1, block2
+block1:
+ return v0
+block2:
+ return v1
+}
+func @scalar_bool_value(i32) -> i32 {
+block0(v0: i32):
+ v1 = iconst.i32 15
+ v2 = and v0, v1
+ v3 = iconst.i32 0
+ v4 = icmp.eq v2, v3
+ v5 = uext.i32 v4
+ v6 = icmp.eq v5, v3
+ v7 = uext.i32 v6
+ return v7
+}

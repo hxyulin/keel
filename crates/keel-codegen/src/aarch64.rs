@@ -3542,6 +3542,10 @@ impl<'a> FunctionCompiler<'a> {
     /// Emits the compare of `icmp`/`fcmp` `inst`, returning the condition
     /// code that holds when its condition does.
     fn compare(&mut self, inst: Inst) -> &'static str {
+        if let Some(&(source, invert)) = self.selection.conditions.get(&inst) {
+            let cc = self.compare(source);
+            return if invert { invert_cond(cc) } else { cc };
+        }
         match *self.func.inst_data(inst) {
             InstData::Icmp { cond, args } => {
                 let ty = self.ty(args[0]);
@@ -3797,6 +3801,10 @@ impl<'a> FunctionCompiler<'a> {
     fn mem(&mut self, addr: Value, scratch: u8, ty: Type) -> Address {
         if let Some(offset) = folded_offset(self.func, &self.stack_slot_offsets, addr, ty) {
             return Address::offset(self.base, offset);
+        }
+        if let Some(&(base, offset)) = self.selection.addresses.get(&self.func.resolve(addr)) {
+            let base = self.use_reg(base, scratch);
+            return Address::offset(Reg::x(base), offset);
         }
         Address::base(Reg::x(self.use_reg(addr, scratch)))
     }

@@ -282,6 +282,14 @@ fn run_with_timeout(cmd: &mut Command) -> Result<Output, String> {
 }
 
 #[test]
+fn scalar_address_oracle() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/scalar_address.keel");
+    for (pools, optimize, suffix, selection, allocation) in CONFIGS {
+        run_program(&path, &pools, optimize, suffix, selection, &allocation).unwrap();
+    }
+}
+
+#[test]
 fn compact_frame_storage() {
     for program in [
         "compact_frame",

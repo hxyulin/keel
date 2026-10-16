@@ -2,7 +2,9 @@
 //! A cover is local to a block and only consumes single-use, pure nodes.
 //! Shared DAG nodes remain materialized; selected leaves are live at the root.
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
-use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, Type, Value, ValueDef};
+use keel_ir::{
+    BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, Value, ValueDef,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -79,6 +81,10 @@ pub struct Selection {
     constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
     pub matches: HashMap<Inst, Match>,
     covered: Vec<bool>,
+    /// Single-use ptradd results encoded at their original memory consumer.
+    pub(crate) addresses: HashMap<Value, (Value, i64)>,
+    /// An outer zero test uses the original integer compare, optionally inverted.
+    pub(crate) conditions: HashMap<Inst, (Inst, bool)>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
@@ -134,7 +140,7 @@ impl Selection {
             }
             args.remove(i);
             let mut leaves = self.operands(func, compare);
-            let mut folded = folds(func.inst_data(compare));
+            let mut folded = folds(self.folded_data(func, compare));
             self.remaining_folds(func, compare, &mut folded);
             for value in folded {
                 if let Some(i) = leaves.iter().position(|&v| v == value) {
@@ -219,6 +225,14 @@ impl Selection {
         }
     }
 
+    pub(crate) fn folded_data<'a>(&self, func: &'a Function, inst: Inst) -> &'a InstData {
+        let source = self
+            .conditions
+            .get(&inst)
+            .map_or(inst, |&(source, _)| source);
+        func.inst_data(source)
+    }
+
     pub fn covered(&self, inst: Inst) -> bool {
         self.covered.get(inst.index()).copied().unwrap_or(false)
     }
@@ -265,7 +279,7 @@ impl Selection {
             if self.covered(inst) || self.matches.contains_key(&inst) {
                 continue;
             }
-            let mut folded = folds(func.inst_data(inst));
+            let mut folded = folds(self.folded_data(func, inst));
             self.remaining_folds(func, inst, &mut folded);
             if folded.is_empty() {
                 continue;
@@ -323,8 +337,101 @@ impl Selection {
             Vec::new()
         };
         for &block in blocks.iter().rev() {
-            for &inst in func.block_insts(block).iter().rev() {
+            for (end, &inst) in func.block_insts(block).iter().enumerate().rev() {
                 if plan.covered(inst) {
+                    continue;
+                }
+                // A compare produces exactly 0 or 1. Its unsigned extension
+                // and an equality test against zero can use the original
+                // condition. Keep this cover contiguous (constants aside).
+                if let InstData::Icmp {
+                    cond: cc @ (IntCC::Eq | IntCC::Ne),
+                    args,
+                } = *func.inst_data(inst)
+                    && crate::fold::iconst(func, args[1]) == Some(0)
+                    && let ValueDef::Result(convert, _) = func.value_def(func.resolve(args[0]))
+                    && let InstData::Convert {
+                        op: ConvertOp::Uext,
+                        ty,
+                        arg,
+                    } = *func.inst_data(convert)
+                    && matches!(ty, Type::I16 | Type::I32 | Type::I64)
+                    && let ValueDef::Result(compare, _) = func.value_def(func.resolve(arg))
+                    && let InstData::Icmp { args: inputs, .. } = *func.inst_data(compare)
+                    && func.value_type(func.resolve(inputs[0])) != Type::I128
+                    && uses[func.resolve(arg).index()] == 1
+                    && uses[func.resolve(args[0]).index()] == 1
+                    && func.inst_block(compare) == block
+                    && func.inst_block(convert) == block
+                    && !plan.covered(compare)
+                    && !plan.covered(convert)
+                    && !func.is_removed(compare)
+                    && !func.is_removed(convert)
+                {
+                    let insts = func.block_insts(block);
+                    let start = insts[..end].iter().rposition(|&i| i == compare).unwrap();
+                    let local = insts[start..=end].iter().all(|&i| {
+                        (i == compare
+                            || i == convert
+                            || i == inst
+                            || matches!(func.inst_data(i), InstData::Iconst { .. }))
+                            && match (func.inst_loc(i), func.inst_loc(inst)) {
+                                (Some(a), Some(b)) => a.file == b.file && a.line == b.line,
+                                _ => true,
+                            }
+                    });
+                    if local {
+                        plan.conditions.insert(inst, (compare, cc == IntCC::Eq));
+                        plan.set_operands(inst, plan.operands(func, compare));
+                        plan.cover(compare);
+                        plan.cover(convert);
+                    }
+                    continue;
+                }
+                // Keep the effect at its original instruction. Only the pure address
+                // calculation is consumed; atomic operations are deliberately excluded.
+                let memory = match *func.inst_data(inst) {
+                    InstData::Load { ty, addr, .. } => Some((addr, ty)),
+                    InstData::Store { value, addr, .. } => {
+                        Some((addr, func.value_type(func.resolve(value))))
+                    }
+                    _ => None,
+                };
+                if let Some((addr, ty)) = memory {
+                    let addr = func.resolve(addr);
+                    if uses[addr.index()] == 1
+                        && let ValueDef::Result(child, _) = func.value_def(addr)
+                        && func.inst_block(child) == block
+                        && !plan.covered(child)
+                        && !func.is_removed(child)
+                        && let InstData::Binary {
+                            op: BinaryOp::Ptradd,
+                            args,
+                        } = *func.inst_data(child)
+                        && func.value_type(func.resolve(args[1])) == Type::I64
+                        && let Some(offset) = crate::fold::iconst(func, args[1])
+                        && let Some(size) = ty.bytes().filter(|&size| size <= 8)
+                        && match target {
+                            Target::Aarch64 => {
+                                offset >= 0
+                                    && offset % i64::from(size) == 0
+                                    && offset / i64::from(size) < 4096
+                            }
+                            Target::X86 => i32::try_from(offset).is_ok(),
+                        }
+                        && match (func.inst_loc(child), func.inst_loc(inst)) {
+                            (Some(a), Some(b)) => a.file == b.file && a.line == b.line,
+                            _ => true,
+                        }
+                    {
+                        let base = func.resolve(args[0]);
+                        let mut operands = plan.operands(func, inst);
+                        let index = operands.iter().position(|&v| v == addr).unwrap();
+                        operands[index] = base;
+                        plan.set_operands(inst, operands);
+                        plan.addresses.insert(addr, (base, offset));
+                        plan.cover(child);
+                    }
                     continue;
                 }
                 let InstData::Binary { op, args } = *func.inst_data(inst) else {
