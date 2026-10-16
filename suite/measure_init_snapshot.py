@@ -193,6 +193,64 @@ def attribution():
                     r.append(dict(repeat=repeat,app=a,debug=d,variant=v,rows=rows,command=x['command']))
         save('attribution',r)
 
+def provenance():
+    save('tools',{n:{'path':shutil.which(n),'resolved':str(pathlib.Path(shutil.which(n)).resolve()),'sha256':sha(pathlib.Path(shutil.which(n)).resolve())} for n in ['cargo','rustc','clang','python3']})
+    for v in ['baseline','candidate']:
+        t=ROOT/('target-'+v+'-release')
+        save(v+'-fingerprints',{str(p.relative_to(t)):json.loads(p.read_text()) for p in sorted(t.glob('release/.fingerprint/*/*.json'))})
+        save(v+'-size',run(['size',binary(v,'keel'),binary(v)]))
+    save('measurement-host-before',run(['sh','-c','date -u; uptime; ps -eo pid,ppid,pcpu,etime,args --sort=-pcpu | head -25; taskset -pc $$']))
+
+def summarize():
+    def load(n):return json.loads((E/(n+'.json')).read_text())
+    rng=random.Random(71820261016)
+    def stats(pairs):
+        ratios=[100*(c/b-1) for b,c in pairs];n=len(ratios)
+        boot=sorted(statistics.median(rng.choices(ratios,k=n)) for _ in range(20000))
+        return dict(pairs=n,baseline_median_ms=statistics.median(b for b,c in pairs),candidate_median_ms=statistics.median(c for b,c in pairs),paired_median_percent=statistics.median(ratios),bootstrap_95_percent=[boot[499],boot[19499]],paired_percent=ratios)
+    out={'percent_convention':'candidate / baseline - 1; negative is faster','bootstrap':'20000 paired resamples of paired per-round percent changes; percentile 95%; seeds retained','resident':{},'cli':{},'allocation_reconciliation':{}}
+    for label in ['resident','cli']:
+        data=load(label); groups={}
+        for x in data:
+            key=(x['app'],x['debug'],x.get('mode','compile'))
+            value=x['total_ms'] if label=='cli' else sum(y['compile_ms'] for y in x['rows'])
+            groups.setdefault(key,{}).setdefault(x['round'],{})[x['variant']]=value
+        # Aggregate same-round sums before calculating ratios, preserving pairs.
+        for d in ['normal','debug']:
+            for m in (['pre-ir','raw-opt-asm'] if label=='cli' else ['compile']):
+                z={}
+                for (a,debug,mode),rs in list(groups.items()):
+                    if debug==d and mode==m:
+                        for i,vs in rs.items():
+                            for v,value in vs.items():z.setdefault(i,{}).setdefault(v,0);z[i][v]+=value
+                groups[('all',d,m)]=z
+        for key,rs in groups.items():out[label]['/'.join(key)]=stats([(vs['baseline'],vs['candidate']) for i,vs in sorted(rs.items())])
+        if label=='resident':
+            for a in ['lua','quickjs','sqlite','all']:
+                for d in ['normal','debug']:
+                    z={}
+                    for x in data:
+                        if x['debug']==d and (a=='all' or x['app']==a):
+                            z.setdefault(x['round'],{}).setdefault(x['variant'],0);z[x['round']][x['variant']]+=sum(y['module_drop_ms'] for y in x['rows'])
+                    out[label][f'{a}/{d}/module_drop']=stats([(vs['baseline'],vs['candidate']) for _,vs in sorted(z.items())])
+    alloc=load('allocations');attr=load('attribution')
+    for a in ['lua','quickjs','sqlite']:
+        for d in ['normal','debug']:
+            def rows(ds,v,repeat):return next(x['rows'] for x in ds if x['app']==a and x['debug']==d and x['variant']==v and x['repeat']==repeat)
+            ab={v:rows(alloc,v,0) for v in ['baseline','candidate']};at={v:rows(attr,v,0) for v in ab}
+            for v in ab:
+                assert ab[v]==rows(alloc,v,1);assert at[v]==rows(attr,v,1)
+            reconciled=[]
+            for b,c,tb,tc in zip(ab['baseline'],ab['candidate'],at['baseline'],at['candidate']):
+                assert b['path']==c['path']==tb['path']==tc['path']
+                delta={k:b[k]-c[k] for k in ['alloc','realloc','requested_bytes','dealloc']}
+                pred={k:tb['clone_'+k]-tc['clone_'+k] for k in ['alloc','realloc','requested_bytes']}
+                assert all(delta[k]==pred[k] for k in pred),(b['path'],delta,pred)
+                reconciled.append({'path':b['path'],'public_reduction':delta,'clone_reduction':pred})
+            out['allocation_reconciliation'][a+'/'+d]={'baseline':{k:sum(x[k] for x in ab['baseline']) for k in ['alloc','realloc','requested_bytes']},'candidate':{k:sum(x[k] for x in ab['candidate']) for k in ['alloc','realloc','requested_bytes']},'source_baseline':{k:sum(x[k] for x in at['baseline']) for k in at['baseline'][0] if k!='path'},'source_candidate':{k:sum(x[k] for x in at['candidate']) for k in at['candidate'][0] if k!='path'},'per_tu':reconciled}
+    save('summary',out)
+    save('measurement-host-after',run(['sh','-c','date -u; uptime; ps -eo pid,ppid,pcpu,etime,args --sort=-pcpu | head -25']))
+
 if __name__=='__main__':
     try:
         for mode in sys.argv[1:]:globals()[mode]()
