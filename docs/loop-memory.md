@@ -1,10 +1,11 @@
 # Guarded loop memory motion: shape checkpoint
 
-Status: design checkpoint only, 2026-10-17. No `loop-memory` pass is
-implemented or registered, and the default pipeline is unchanged. The
-approved initial subset has no demonstrated activation on the inspected
-retained C-generated IR. Building an inactive pass would not satisfy the
-required realistic C activation gate.
+Status: source implementation checkpoint, 2026-10-17. The named
+`loop-memory` pass is opt-in; the default pipeline is unchanged. Root
+subsequently authorized the bounded initial-guard extension below after
+the original design checkpoint found no campaign activation. Build and
+native validation await an explicit serial lease. Source matching alone
+is not an executed C activation result.
 
 ## Evidence inspected
 
@@ -61,17 +62,16 @@ Restrict proves neither dereferenceability nor nonnull. Debug locations,
 operand dominance, PHIs, ABI and calling conventions must be preserved.
 No store sinking is proposed.
 
-The committed shared-helper checkpoint is
-`9792132a2bce6020b3be8c53045422320bce186a` (not built or independently
-reviewed when announced). Before implementation depends on it, coordinate
-pickup with root and cherry-pick that committed checkpoint. Use
+The shared-helper checkpoint
+`9792132a2bce6020b3be8c53045422320bce186a` was picked as `a8fb901`
+after root coordination (not built or independently reviewed when
+announced). The implementation uses
 `AliasInfo::compute(&Function)` and
 `may_alias(&self, &Function, Value, u64, Value, u64)` with nonzero widths
 and at least one modifying access. Barriers remain the caller's
-responsibility. This design checkpoint neither copies nor duplicates the
-helper's alias rules.
+responsibility. The pass does not duplicate the helper's alias rules.
 
-## Bounded extensions for root to consider
+## Authorized bounded extension
 
 For a realistic guarded C do-while, the smallest structural addition is
 to split its existing entered-loop edge when cleanup has bypassed a
@@ -86,8 +86,37 @@ arguments, and route only the entered case through a dedicated load
 preheader. The existing loop can remain unrotated. Substitute initial
 header arguments simultaneously, prove operand dominance and branch
 equivalence, and reject effectful/trapping header prefixes or observable
-effects before the first body load. This is a recommendation requiring
-root scope coordination, not authorization to broaden the initial pass.
+effects before the first body load. Root authorized exactly this extension, with a bounded return-exit SSA
+repair. The implementation accepts only a header with two predecessors
+(one unconditional external jump and one body back edge), an integer
+comparison involving a unit-step i32/i64 induction variable and an
+invariant bound, at most 16 nontrapping integer header instructions, and a
+single straight-line body of at most 128 instructions. The only cloned
+operations are integer constants, nontrapping integer binary operations,
+and integer comparisons. The original header test remains each iteration.
+The body must have exactly one ordinary load, whose address already
+dominates entry, before any store or other pinned/trapping effect. Later
+ordinary stores must be disjoint according to `AliasInfo`; calls,
+volatile/atomic/lifetime/barrier effects and other traps reject the loop.
+
+The exit must have exactly one incoming edge from the header, end in a
+return, and contain at most 32 instructions. Existing exit parameters and
+arguments are retained. Header values directly used by exit instructions
+get additional typed exit parameters, in deterministic operand traversal
+order. The original header false edge supplies the original values; the
+cloned initial false edge supplies initial arguments or cloned results.
+Only exit instruction operands are rewritten. No global alias or use
+replacement occurs. Header-defined uses elsewhere reject the loop. Exit
+instruction order and effects are unchanged. Moving the load preserves
+its result identity and location; cloned instructions keep their original
+locations/scopes. Functions with stack-variable debug descriptions are
+conservatively skipped.
+
+Whole-function analysis is limited to 512 arena blocks and 8192 laid-out
+instructions, with at most eight loop transformations. CFG, dominance,
+loop depth and alias information are recomputed before each candidate.
+Multiple loads, body block parameters, nested loops and complex exits are
+outside this initial implementation.
 
 ## Remaining acceptance gates
 
@@ -99,8 +128,18 @@ addresses; conditional-body and fault-order fallbacks; aliasing,
 restricted readonly aliases, unknown writes, calls, volatile/atomic,
 barrier, multiple-exit and nested-loop rejection; and both codegen targets.
 
+The dedicated C fixtures are `crates/keel-opt/tests/loop_memory/reload.c`
+and `driver.c`. They cover the audited reload-style recurrence, aliasing
+nonrestrict accesses, legal readonly restrict aliasing, conditional loads,
+and a store-before-fault fallback. The driver includes zero-trip null and
+protected-page inputs, valid trip counts 0/1/7/257/4096 and sixteen seeds.
+Fault-order execution deliberately probes native fault behavior and is
+not a valid-input C equivalence proof. Focused IR tests cover direct
+header-value returns, multiple liveouts, both branch orientations,
+locations, dominance, cleanup and conservative rejections.
+
 No build, native execution, or performance measurement was performed for
-this checkpoint. No validation lease was acquired. Root owns independent
+this source checkpoint. No validation lease was acquired. Root owns independent
 correctness review, integration, later serial runtime/code-size/compile-cost
 gates, and any decision to enable a pass by default. Audited kernel-route
 contrasts are not predicted patch speedups or application gains.
