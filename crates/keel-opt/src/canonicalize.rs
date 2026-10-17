@@ -36,10 +36,10 @@ fn shift(func: &Function, value: Value, expected: BinaryOp) -> Option<(Value, Va
 
 fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {
     for [left, right] in [args, [args[1], args[0]]] {
-        let Some((x, count, l)) = shift(func, left, BinaryOp::Shl) else {
+        let Some((x, _, l)) = shift(func, left, BinaryOp::Shl) else {
             continue;
         };
-        let Some((y, _, r)) = shift(func, right, BinaryOp::Ushr) else {
+        let Some((y, count, r)) = shift(func, right, BinaryOp::Ushr) else {
             continue;
         };
         let width = match func.value_type(x) {
@@ -49,7 +49,7 @@ fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {
         };
         if x == y && l > 0 && l < width && r > 0 && r < width && l + r == width {
             return Some(InstData::Binary {
-                op: BinaryOp::Rotl,
+                op: BinaryOp::Rotr,
                 args: [x, count],
             });
         }

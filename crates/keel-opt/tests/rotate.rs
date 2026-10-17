@@ -32,8 +32,8 @@ fn all_constant_counts_and_commuted_operands() {
                 assert_eq!(
                     f.inst_data(inst),
                     &InstData::Binary {
-                        op: BinaryOp::Rotl,
-                        args: [Value::new(0), Value::new(2)]
+                        op: BinaryOp::Rotr,
+                        args: [Value::new(0), Value::new(4)]
                     }
                 );
                 for x in [
@@ -78,18 +78,18 @@ fn negative_width_count_source_and_shift_cases() {
             (1, width - 1, "ushr", "v1"),
         ] {
             let m = canonical(&source(ty, left, right, op, "v3, v5", rhs));
-            assert!(!m.to_string().contains("rotl"), "{m}");
+            assert!(!m.to_string().contains("rotr"), "{m}");
         }
         if !["i32", "i64"].contains(&ty) {
             assert!(
                 !canonical(&source(ty, 1, width - 1, "ushr", "v3, v5", "v0"))
                     .to_string()
-                    .contains("rotl")
+                    .contains("rotr")
             );
         }
     }
     let dynamic = source("i64", 51, 13, "ushr", "v3, v5", "v0").replace("shl v0, v2", "shl v0, v1");
-    assert!(!canonical(&dynamic).to_string().contains("rotl"));
+    assert!(!canonical(&dynamic).to_string().contains("rotr"));
 }
 
 #[test]
@@ -102,11 +102,11 @@ fn resolves_shift_source_and_constant_aliases_without_publishing_dead_keys() {
     // Restore a complementary count via a new constant already present in IR.
     // This first case must reject two shifts with identical resolved counts.
     keel_opt::run_passes(&mut m, &["canonicalize"]).unwrap();
-    assert!(!m.to_string().contains("rotl"));
+    assert!(!m.to_string().contains("rotr"));
     let mut m = keel_ir::parse(&source("i64", 51, 13, "ushr", "v3, v5", "v1")).unwrap();
     m.functions[0].replace_all_uses(Value::new(1), Value::new(0));
     keel_opt::run_passes(&mut m, &["canonicalize"]).unwrap();
-    assert!(m.to_string().contains("rotl v0, v2"));
+    assert!(m.to_string().contains("rotr v0, v4"));
     assert_eq!(m.functions[0].resolve(Value::new(1)), Value::new(0));
 }
 
@@ -147,8 +147,8 @@ block0(v0: i64, v1: i64):
     assert_eq!(
         f.inst_data(i),
         &InstData::Binary {
-            op: BinaryOp::Rotl,
-            args: [Value::new(0), Value::new(2)]
+            op: BinaryOp::Rotr,
+            args: [Value::new(0), Value::new(4)]
         }
     );
 }

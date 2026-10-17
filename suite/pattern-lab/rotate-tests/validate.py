@@ -31,7 +31,7 @@ def assert_rotate(body, count):
     # Check actual dataflow: rotate takes the first parameter and a literal count.
     params = re.search(r'block0\((v\d+):', body)
     constants = dict(re.findall(r'(v\d+) = iconst\.i(?:32|64) (-?\d+)', body))
-    rotations = re.findall(r'= rotl (v\d+), (v\d+)', body)
+    rotations = re.findall(r'= rotr (v\d+), (v\d+)', body)
     assert any(x == params[1] and constants.get(c) == str(count) for x, c in rotations), body
 
 bridge = Path('suite/pattern-lab/compiler-cases/recurrences.c').read_text()
@@ -76,9 +76,9 @@ for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
         if mode != 'debug':
             b = function(ir, 'bridge_rotate')
             constants = dict(re.findall(r'(v\d+) = iconst.i64 (-?\d+)', b))
-            assert any(constants.get(c) == '51' for _, c in re.findall(r'= rotl (v\d+), (v\d+)', b)), b
+            assert any(constants.get(c) == '13' for _, c in re.findall(r'= rotr (v\d+), (v\d+)', b)), b
             for name, _, _, count in names:
-                assert_rotate(function(ir, name), count)
+                assert_rotate(function(ir, name), (32 if name.startswith("rotate_32_") else 64) - count)
         for negative in ['negative_dynamic', 'negative_different', 'negative_arithmetic']:
             assert not re.search(r'= rot[lr] ', function(ir, negative)), negative
         run(tag + '-asm', [*base, '-o', out / (tag + '.s')])
@@ -88,7 +88,7 @@ for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
             body = asm.split('_bridge_rotate:' if target.startswith('aarch64') else '"bridge_rotate":', 1)[1]
             body = body.split('Lbridge_rotate_end:', 1)[0] if target.startswith('aarch64') else body.split('.size', 1)[0]
             lines = [l for l in body.splitlines() if not l.lstrip().startswith((';', '#'))]
-            pat = r'\bror\s+(x\d+),\s*(x\d+),\s*#13\b' if target.startswith('aarch64') else r'\brol\s+\w+,\s*51\b'
+            pat = r'movz\s+(x\d+),\s*#0xd\b[\s\S]*?\bror\s+(x\d+),\s*\2,\s*\1\b' if target.startswith('aarch64') else r'\bror\s+\w+,\s*13\b'
             assert re.search(pat, '\n'.join(lines)), body
         run(tag + '-object', [*base, '--emit-object', '-o', out / (tag + '.o')])
 (out / 'activation-passed.json').write_text(json.dumps({'all_counts':94,'negative_functions':3,'targets':2,'modes':list(modes),'debug_activation_required':False},indent=2))
