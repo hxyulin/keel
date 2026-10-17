@@ -1,0 +1,10 @@
+file f0 = "lea.c"
+func @debug_gap(i64, ptr) -> i64 cc(c) {
+block0(v0: i64, v1: ptr):
+    v2 = iconst.i64 3 !f0:1:1
+    v3 = iconst.i64 7 !f0:1:1
+    v4 = imul v0, v2 !f0:2:1
+    store v0, v1 !f0:3:1
+    v5 = iadd v4, v3
+    return v5
+}

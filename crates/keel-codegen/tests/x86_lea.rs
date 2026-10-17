@@ -283,3 +283,47 @@ fn native_edges_match_separately_compiled_clang_oracle_with_spills() {
         }
     }
 }
+
+#[test]
+fn located_product_is_not_lost_at_an_unlocated_root() {
+    let original = include_str!("fixtures/debug_unlocated_lea_root.ir");
+    for (child, root, should_select) in [
+        (" !f0:2:1", "", false),
+        (" !f0:2:1", " !f0:2:4", true),
+        (" !f0:2:1", " !f0:3:1", false),
+        ("", " !f0:2:1", true),
+        ("", "", true),
+    ] {
+        for intervening in [true, false] {
+            let mut src = original
+                .replace("imul v0, v2 !f0:2:1", &format!("imul v0, v2{child}"))
+                .replace("iadd v4, v3", &format!("iadd v4, v3{root}"));
+            if !intervening {
+                src = src.replace("    store v0, v1 !f0:3:1\n", "");
+            }
+            assert_eq!(selected(&src), should_select, "{src}");
+            let module = keel_ir::parse(&src).unwrap();
+            let text = compile_with_options(&module, Target::X86_64LinuxGnu, SelectionOptions::ALL)
+                .unwrap();
+            assert_eq!(count(&text, "imul"), usize::from(!should_select), "{text}");
+            if !should_select {
+                // Follow actual emitted .loc state, excluding directives/comments.
+                let mut line = 0;
+                let mut multiply_line = None;
+                for instruction in text.lines().map(str::trim) {
+                    if instruction.starts_with(".loc") {
+                        line = instruction
+                            .split_whitespace()
+                            .nth(2)
+                            .unwrap()
+                            .parse::<u32>()
+                            .unwrap();
+                    } else if instruction.starts_with("imul\t") {
+                        multiply_line = Some(line);
+                    }
+                }
+                assert_eq!(multiply_line, Some(2), "{text}");
+            }
+        }
+    }
+}

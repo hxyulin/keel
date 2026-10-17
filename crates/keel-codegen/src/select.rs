@@ -504,10 +504,13 @@ impl Selection {
                         {
                             continue;
                         }
-                        if let (Some(a), Some(b)) = (func.inst_loc(child), func.inst_loc(inst))
-                            && (a.file != b.file || a.line != b.line)
-                        {
-                            continue;
+                        // An unlocated root inherits the last emitted .loc,
+                        // which may have changed between child and root. Do
+                        // not erase a located child's executable source range.
+                        match (func.inst_loc(child), func.inst_loc(inst)) {
+                            (Some(_), None) => continue,
+                            (Some(a), Some(b)) if a.file != b.file || a.line != b.line => continue,
+                            _ => {}
                         }
                         let InstData::Binary {
                             op: BinaryOp::Imul,
