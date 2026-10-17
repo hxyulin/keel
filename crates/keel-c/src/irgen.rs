@@ -772,6 +772,9 @@ fn constant_elements(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
 
 impl DispatchTable {
     fn for_function(p: &Parser<'_>, def: &FuncDef<'_>) -> Option<Self> {
+        if def.label_addrs.is_empty() {
+            return None;
+        }
         let mut selected = None;
         for stmt in &def.body {
             visit_gotos(stmt, &mut |target| {
