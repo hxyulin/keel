@@ -206,8 +206,13 @@ add propagation before combining. `phi-simplify` also remains opt-in: use
 large application regressions. Pipeline choices and raw measurements are in
 [suite/README.md](suite/README.md#paired-pass-measurements).
 
-Library users can implement `keel_opt::Pass` and use `run_pipeline` (which
-verifies after every pass), or provide an `InstructionSelector` and
+Library users can implement `keel_opt::Pass` and use `run_pipeline`. Repeated
+verification defaults on with debug assertions or the `verify-each` Cargo
+feature, and off in ordinary release builds. Scoped library options and CLI
+`--verify-each` / `--no-verify-each` override that default; initial CLI input
+validation and canonical restoration always run. See the
+[verification policy](docs/optimization-report.md#repeated-verification).
+Library users can also provide an `InstructionSelector` and
 `RegisterAllocator` through `CodegenPipeline`. Target-specific
 `compile_with_pipeline` also accepts restricted register pools for spill
 experiments. Selection produces the instruction plan consumed by the target
