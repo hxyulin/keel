@@ -770,3 +770,29 @@ fn quickjs_dup_value_reducer_uses_the_same_bounded_growth() {
             .all(|s| s.outcome == "caller_instruction_growth_budget")
     );
 }
+
+#[test]
+fn emitted_growth_covers_cfg_shapes_and_multiple_snapshots() {
+    for (source, snapshot_ir, omitted_ir) in [
+        // Multiple returns and multiple return values keep one jump per return.
+        ("func @h(i8, i64) -> (i64, i64) local {\nblock0(v0: i8, v1: i64):\n brif v0, block1, block2\nblock1:\n return v1, v1\nblock2:\n return v1, v1\n}\nfunc @f(i8, i64) -> i64 {\nblock0(v0: i8, v1: i64):\n v2, v3 = call @h(v0, v1)\n v4 = iadd v2, v3\n return v4\n}", 0, 0),
+        // Loop backedges and block parameters add no instructions of their own.
+        ("func @h(i8) local {\nblock0(v0: i8):\n jump block1(v0)\nblock1(v1: i8):\n brif v1, block1(v1), block2\nblock2:\n return\n}\nfunc @f(i8) {\nblock0(v0: i8):\n call @h(v0)\n return\n}", 0, 0),
+        // The frozen estimate counts unreachable instructions conservatively.
+        ("func @h() local {\nblock0:\n return\nblock1:\n return\n}\nfunc @f() {\nblock0:\n call @h()\n return\n}", 0, 1),
+        // A non-returning helper still leaves only the entry jump as glue.
+        ("func @h() noreturn local {\nblock0:\n trap\n}\nfunc @f() {\nblock0:\n call @h()\n trap\n}", 0, 0),
+        // Every byval parameter gets its own snapshot before callee effects.
+        ("func @h(ptr byval {i64}, ptr byval {i64}) local {\nblock0(v0: ptr, v1: ptr):\n v2 = load.i64 v0\n store v2, v1\n return\n}\nfunc @f(ptr) {\nblock0(v0: ptr):\n call @h(v0, v0)\n return\n}", 6, 0),
+    ] {
+        let before = keel_ir::parse(source).unwrap();
+        let estimate = before.functions[0].layout_insts().count() + snapshot_ir;
+        let m = run(source, &["inline"]);
+        assert_eq!(calls(&m, "f"), 0, "{source}");
+        assert_eq!(
+            m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+            estimate - omitted_ir,
+            "{source}",
+        );
+    }
+}
