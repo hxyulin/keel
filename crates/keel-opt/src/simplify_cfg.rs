@@ -157,37 +157,196 @@ fn merge_blocks(func: &mut Function) -> bool {
         }
     }
     let mut changed = false;
-    loop {
-        let candidate = func.blocks().find_map(|pred| {
-            let &term = func.block_insts(pred).last()?;
-            match func.inst_data(term) {
+    // Only the absorbing predecessor acquires a new terminator. Incoming
+    // counts for every surviving block stay unchanged, so earlier rejected
+    // predecessors cannot become candidates. Retry pred before advancing to
+    // preserve the old first-eligible-layout order without restarting a scan.
+    let blocks: Vec<Block> = func.blocks().collect();
+    for pred in blocks {
+        loop {
+            // A block consumed from later in the snapshot has no instructions.
+            let Some(&term) = func.block_insts(pred).last() else {
+                break;
+            };
+            let dest = match func.inst_data(term) {
                 InstData::Jump { dest }
                     if dest.block != pred
                         && edges[dest.block.index()] == 1
                         && Some(dest.block) != func.entry_block() =>
                 {
-                    Some((pred, term, dest.clone()))
+                    dest.clone()
                 }
-                _ => None,
+                _ => break,
+            };
+            let block = dest.block;
+            for (&param, &arg) in func.block_params(block).to_vec().iter().zip(&dest.args) {
+                func.replace_all_uses(param, arg);
             }
-        });
-        let Some((pred, jump, dest)) = candidate else {
-            return changed;
-        };
-        let block = dest.block;
-        for (&param, &arg) in func.block_params(block).to_vec().iter().zip(&dest.args) {
-            func.replace_all_uses(param, arg);
+            func.remove_inst(term);
+            // This is the only deleted edge. Parameter aliases affect values,
+            // not block destinations, and moving instructions preserves all
+            // their outgoing edges (including edges back to pred). The removed
+            // block cannot have a self-edge: its sole incoming edge was jump.
+            edges[block.index()] -= 1;
+            for inst in func.block_insts(block).to_vec() {
+                func.move_inst(inst, keel_ir::InsertPoint::End(pred));
+            }
+            func.remove_block(block);
+            changed = true;
         }
-        func.remove_inst(jump);
-        // This is the only deleted edge. Parameter aliases affect values,
-        // not block destinations, and moving instructions preserves all
-        // their outgoing edges (including edges back to pred). The removed
-        // block cannot have a self-edge: its sole incoming edge was jump.
-        edges[block.index()] -= 1;
-        for inst in func.block_insts(block).to_vec() {
-            func.move_inst(inst, keel_ir::InsertPoint::End(pred));
+    }
+    changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merging_cycle_preserves_entry_and_stops_at_the_new_self_edge() {
+        let mut module = keel_ir::parse(
+            "func @f() {
+block0:
+    jump block1
+block1:
+    v0 = iconst.i64 1
+    jump block2
+block2:
+    v1 = iconst.i64 2
+    jump block1
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let f = &mut module.functions[0];
+        let entry = f.entry_block().unwrap();
+        let entry_jump = f.block_insts(entry)[0];
+        let cycle = f.inst_data(entry_jump).branch_dests()[0].block;
+        let first = f.block_insts(cycle)[0];
+        let other = f.blocks().last().unwrap();
+        let expected = vec![first, f.block_insts(other)[0], f.block_insts(other)[1]];
+        assert!(merge_blocks(f));
+        keel_ir::verify(f).unwrap();
+        assert_eq!(f.blocks().collect::<Vec<_>>(), [entry, cycle]);
+        assert_eq!(f.block_insts(entry), [entry_jump]);
+        assert_eq!(f.inst_data(entry_jump).branch_dests()[0].block, cycle);
+        assert_eq!(f.block_insts(cycle), expected);
+        let term = *f.block_insts(cycle).last().unwrap();
+        assert_eq!(f.inst_data(term).branch_dests()[0].block, cycle);
+        assert!(!merge_blocks(f));
+    }
+
+    #[test]
+    fn merging_snapshot_handles_both_consumed_and_already_visited_blocks() {
+        // No outer cleanup round may repair an incomplete candidate walk.
+        // Every layout permutation includes an earlier rejected return and/or
+        // a later consumed snapshot entry. The entry's brif prevents it from
+        // absorbing the chain, leaving an unchanged prefix on each old rescan.
+        for order in [
+            [1, 2, 3],
+            [1, 3, 2],
+            [2, 1, 3],
+            [2, 3, 1],
+            [3, 1, 2],
+            [3, 2, 1],
+        ] {
+            let mut src = String::from(
+                "func @f(i64, i8) -> i64 {\n\
+                 block0(v0: i64, v1: i8):\n brif v1, block3(v0), block4(v0)\n",
+            );
+            for block in order {
+                src.push_str(match block {
+                    1 => "block1(v2: i64):\n return v2\n",
+                    2 => "block2(v3: i64):\n v4 = iadd v3, v0\n jump block1(v4)\n",
+                    3 => "block3(v5: i64):\n v6 = isub v5, v0\n jump block2(v6)\n",
+                    _ => unreachable!(),
+                });
+            }
+            src.push_str("block4(v7: i64):\n return v7\n}");
+            let mut module = keel_ir::parse(&src).unwrap();
+            keel_ir::verify_module(&module).unwrap();
+            let f = &mut module.functions[0];
+            let entry = f.entry_block().unwrap();
+            let term = *f.block_insts(entry).last().unwrap();
+            let start = f.inst_data(term).branch_dests()[0].block;
+            let other = f.inst_data(term).branch_dests()[1].block;
+            let middle_term = *f.block_insts(start).last().unwrap();
+            let middle = f.inst_data(middle_term).branch_dests()[0].block;
+            let tail_term = *f.block_insts(middle).last().unwrap();
+            let tail = f.inst_data(tail_term).branch_dests()[0].block;
+            let expected = vec![
+                f.block_insts(start)[0],
+                f.block_insts(middle)[0],
+                f.block_insts(tail)[0],
+            ];
+            assert!(merge_blocks(f), "layout {order:?}");
+            keel_ir::verify(f).unwrap();
+            assert_eq!(f.blocks().collect::<Vec<_>>(), [entry, start, other]);
+            assert_eq!(f.block_insts(start), expected);
+            assert!(f.block_insts(middle).is_empty());
+            assert!(f.block_insts(tail).is_empty());
+            assert!(!merge_blocks(f), "layout {order:?} needs another walk");
         }
-        func.remove_block(block);
-        changed = true;
+    }
+
+    #[test]
+    fn merging_refreshes_aliased_arguments_and_preserves_instruction_locations() {
+        let mut module = keel_ir::parse(
+            "func @f(i64) -> i64 {
+block0(v0: i64):
+    v1 = iadd v0, v0
+    jump block2(v1)
+block1(v2: i64):
+    v3 = isub v2, v0
+    return v3
+block2(v4: i64):
+    v5 = iadd v4, v0
+    jump block1(v5)
+}",
+        )
+        .unwrap();
+        module.files.push("cfg-worklist.c".into());
+        let f = &mut module.functions[0];
+        let entry = f.entry_block().unwrap();
+        let first = f.block_insts(entry)[0];
+        let original = f.first_result(first);
+        let arg = f.block_params(entry)[0];
+        // Retain an actual in-memory alias; printing/reparsing loses it.
+        f.replace_all_uses(original, arg);
+        let jump = *f.block_insts(entry).last().unwrap();
+        let middle = f.inst_data(jump).branch_dests()[0].block;
+        let middle_param = f.block_params(middle)[0];
+        let middle_inst = f.block_insts(middle)[0];
+        let jump = *f.block_insts(middle).last().unwrap();
+        let tail = f.inst_data(jump).branch_dests()[0].block;
+        let tail_param = f.block_params(tail)[0];
+        let tail_insts = f.block_insts(tail).to_vec();
+        let expected = vec![first, middle_inst, tail_insts[0], tail_insts[1]];
+        for (line, &inst) in expected.iter().enumerate() {
+            f.set_inst_loc(
+                inst,
+                Some(keel_ir::SourceLoc {
+                    file: keel_ir::SourceFile::new(0),
+                    line: line as u32 + 1,
+                    col: 7,
+                    scope: None,
+                }),
+            );
+        }
+        let locations: Vec<_> = expected.iter().map(|&inst| f.inst_loc(inst)).collect();
+        keel_ir::verify(f).unwrap();
+        assert!(merge_blocks(f));
+        keel_ir::verify(f).unwrap();
+        assert_eq!(f.blocks().collect::<Vec<_>>(), [entry]);
+        assert_eq!(f.block_insts(entry), expected);
+        assert_eq!(f.resolve(original), arg);
+        assert_eq!(f.resolve(middle_param), arg);
+        assert_eq!(f.resolve(tail_param), f.first_result(middle_inst));
+        assert_eq!(
+            expected.iter().map(|&inst| f.inst_loc(inst)).collect::<Vec<_>>(),
+            locations
+        );
+        assert!(!merge_blocks(f));
+        keel_ir::verify_module(&module).unwrap();
     }
 }
