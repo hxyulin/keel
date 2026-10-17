@@ -61,7 +61,10 @@ fn rotate(func: &Function, args: [Value; 2]) -> Option<InstData> {
 /// their worklist can restore the form after discovering new constants.
 pub(crate) fn normalize(func: &Function, data: &mut InstData) {
     data.for_each_operand_mut(|v| *v = func.resolve(*v));
-    if let InstData::Binary { op: BinaryOp::Or, args } = *data
+    if let InstData::Binary {
+        op: BinaryOp::Or,
+        args,
+    } = *data
         && let Some(rotated) = rotate(func, args)
     {
         *data = rotated;

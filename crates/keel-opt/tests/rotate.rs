@@ -1,15 +1,19 @@
 use keel_ir::{BinaryOp, EntityRef, InstData, Value};
 
 fn source(ty: &str, left: i64, right: i64, op: &str, operands: &str, rhs: &str) -> String {
-    format!("func @f({ty}, {ty}) -> {ty} {{\nblock0(v0: {ty}, v1: {ty}):\n v2 = iconst.{ty} {left}\n v3 = shl v0, v2\n v4 = iconst.{ty} {right}\n v5 = {op} {rhs}, v4\n v6 = or {operands}\n return v6\n}}")
+    format!(
+        "func @f({ty}, {ty}) -> {ty} {{\nblock0(v0: {ty}, v1: {ty}):\n v2 = iconst.{ty} {left}\n v3 = shl v0, v2\n v4 = iconst.{ty} {right}\n v5 = {op} {rhs}, v4\n v6 = or {operands}\n return v6\n}}"
+    )
 }
 
 fn canonical(source: &str) -> keel_ir::Module {
     let mut m = keel_ir::parse(source).unwrap();
     keel_opt::run_passes(&mut m, &["canonicalize"]).unwrap();
-    assert!(!keel_opt::find_pass("canonicalize")
-        .unwrap()
-        .run(&mut m.functions[0]));
+    assert!(
+        !keel_opt::find_pass("canonicalize")
+            .unwrap()
+            .run(&mut m.functions[0])
+    );
     m
 }
 
@@ -104,4 +108,47 @@ fn resolves_shift_source_and_constant_aliases_without_publishing_dead_keys() {
     keel_opt::run_passes(&mut m, &["canonicalize"]).unwrap();
     assert!(m.to_string().contains("rotl v0, v2"));
     assert_eq!(m.functions[0].resolve(Value::new(1)), Value::new(0));
+}
+
+#[test]
+fn alias_definitions_and_source_locations_survive_in_memory() {
+    let s = "func @f(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+ v2 = iconst.i64 51
+ v3 = shl v1, v2
+ v4 = iconst.i64 13
+ v5 = ushr v0, v4
+ v7 = iconst.i64 7
+ v8 = iconst.i64 51
+ v9 = shl v0, v8
+ v6 = or v3, v5
+ return v6
+}";
+    let mut m = keel_ir::parse(s).unwrap();
+    let f = &mut m.functions[0];
+    f.replace_all_uses(Value::new(3), Value::new(9));
+    f.replace_all_uses(Value::new(8), Value::new(2));
+    let before: Vec<_> = f
+        .layout_insts()
+        .map(|(_, i)| (i, f.inst_loc(i), f.inst_results(i).to_vec()))
+        .collect();
+    keel_opt::run_passes(&mut m, &["canonicalize"]).unwrap();
+    let f = &m.functions[0];
+    for (i, loc, results) in before {
+        assert_eq!(f.inst_loc(i), loc);
+        assert_eq!(f.inst_results(i), results);
+    }
+    assert_eq!(f.resolve(Value::new(3)), Value::new(9));
+    let i = f
+        .layout_insts()
+        .find(|(_, i)| f.inst_results(*i).contains(&Value::new(6)))
+        .unwrap()
+        .1;
+    assert_eq!(
+        f.inst_data(i),
+        &InstData::Binary {
+            op: BinaryOp::Rotl,
+            args: [Value::new(0), Value::new(2)]
+        }
+    );
 }
