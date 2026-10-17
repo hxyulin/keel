@@ -3421,6 +3421,11 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Icmp { cond, args } => {
                 let ty = self.ty(args[0]);
                 let a = self.use_reg(args[0], S0);
+                if let Some(&addr) = self.selection.compare_memory.get(&inst) {
+                    let at = self.mem(addr, S1, ty);
+                    self.emit(Opcode::Cmp, [asm_arg(&reg(a, ty)), asm_arg(&at)]);
+                    return cond_code(cond);
+                }
                 let b = match folded_imm(self.func, self.func.inst_data(inst)) {
                     Some((_, k)) => asm_arg(&k),
                     None => asm_arg(&reg(self.use_reg(args[1], S1), ty)),
