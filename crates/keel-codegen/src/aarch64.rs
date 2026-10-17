@@ -1912,9 +1912,7 @@ impl<'a> FunctionCompiler<'a> {
                     {
                         BrifTest::Flags(invert_cond(self.compare(compare)))
                     }
-                    _ if !self.has_inline_asm
-                        && matches!(self.ty(cond), Type::I32 | Type::I64) =>
-                    {
+                    _ if !self.has_inline_asm && matches!(self.ty(cond), Type::I32 | Type::I64) => {
                         let c = self.use_reg(cond, S0);
                         BrifTest::Zero(reg(c, self.ty(cond)))
                     }
