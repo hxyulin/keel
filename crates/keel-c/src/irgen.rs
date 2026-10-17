@@ -404,6 +404,7 @@ impl<'p> Gen<'p> {
             .iter()
             .map(|p| b.append_block_param(entry, p.ty))
             .collect();
+        let dispatch_table = DispatchTable::for_function(self.p, def);
         let mut fg = FnGen {
             g: self,
             b,
@@ -415,6 +416,7 @@ impl<'p> Gen<'p> {
             continues: Vec::new(),
             labels: HashMap::new(),
             dispatch: None,
+            dispatch_table,
             cases: Vec::new(),
             terminated: false,
             scopes: Vec::new(),
@@ -725,6 +727,220 @@ enum Place {
     },
 }
 
+/// A bounded fusion of `goto *constant_table[index]` into the existing
+/// shared switch. Numeric label values and ordinary table uses never change.
+struct DispatchTable {
+    global: usize,
+    labels: Vec<usize>,
+}
+
+/// Deliberately accept only the parser's ordinary pointer-array subscript.
+/// In particular, do not strip casts, commute pointer arithmetic, or infer
+/// equivalence after modular multiplication by the element size.
+fn dispatch_index<'e, 'a>(target: &'e Expr<'a>) -> Option<(usize, &'e Expr<'a>)> {
+    let ExprKind::Deref(address) = &target.kind else {
+        return None;
+    };
+    let ExprKind::PtrAdd(base, index, 8) = &address.kind else {
+        return None;
+    };
+    let ExprKind::Addr(array) = &base.kind else {
+        return None;
+    };
+    let ExprKind::Global(global) = array.kind else {
+        return None;
+    };
+    if !matches!(target.ty, Ty::Ptr(_)) || !matches!(index.ty, Ty::Int(IntKind::Long)) {
+        return None;
+    }
+    Some((global, index))
+}
+
+impl DispatchTable {
+    fn for_function(p: &Parser<'_>, def: &FuncDef<'_>) -> Option<Self> {
+        let mut selected = None;
+        for stmt in &def.body {
+            visit_gotos(stmt, &mut |target| {
+                let (global, _) = dispatch_index(target)?;
+                if target.sugar.is_volatile(&p.typedefs) {
+                    return None;
+                }
+                if selected.is_some_and(|previous| previous != global) {
+                    return None;
+                }
+                selected = Some(global);
+                Some(())
+            })?;
+        }
+        let global = selected?;
+        let object = &p.globals[global];
+        if !object.internal
+            || !object.defined
+            || !object.is_const
+            || object.thread_local
+            || object.sugar.is_volatile(&p.typedefs)
+        {
+            return None;
+        }
+        let Ty::Array(element, Some(len)) = &object.ty else {
+            return None;
+        };
+        if !matches!(element.as_ref(), Ty::Ptr(_))
+            || *len == 0
+            || *len > 4096
+            || *len > 2 * def.label_addrs.len() as u64
+        {
+            return None;
+        }
+        let mut labels = vec![0; *len as usize];
+        for item in &object.init.as_ref()?.items {
+            let InitItem::Expr {
+                offset,
+                expr,
+                bits: None,
+            } = item
+            else {
+                return None;
+            };
+            if offset % 8 != 0 || offset / 8 >= *len || !matches!(expr.ty, Ty::Ptr(_)) {
+                return None;
+            }
+            let Const::Int(label) = eval(expr)? else {
+                return None;
+            };
+            let label = usize::try_from(label).ok()?;
+            if label > def.label_addrs.len() {
+                return None;
+            }
+            // Match data(): zero-fill first, then apply flattened writes in
+            // order, including repeated and designated initializers.
+            labels[*offset as usize / 8] = label;
+        }
+        Some(Self { global, labels })
+    }
+}
+
+/// Inspect every evaluated expression as well as statement bodies: GNU
+/// statement expressions can contain indirect gotos even inside an index.
+/// Returning None rejects fusion for the entire function.
+fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+    match stmt {
+        Stmt::Expr(e) | Stmt::Return(Some(e), _) => visit_goto_expr(e, f)?,
+        Stmt::GotoIndirect(e) => {
+            f(e)?;
+            visit_goto_expr(e, f)?;
+        }
+        Stmt::Init(_, init, _) => visit_goto_init(init, f)?,
+        Stmt::Block(stmts) | Stmt::Scoped(_, stmts) => {
+            for stmt in stmts {
+                visit_gotos(stmt, f)?;
+            }
+        }
+        Stmt::If(e, yes, no) => {
+            visit_goto_expr(e, f)?;
+            visit_gotos(yes, f)?;
+            if let Some(no) = no {
+                visit_gotos(no, f)?;
+            }
+        }
+        Stmt::While(e, body) | Stmt::DoWhile(body, e) | Stmt::Switch { cond: e, body, .. } => {
+            visit_goto_expr(e, f)?;
+            visit_gotos(body, f)?;
+        }
+        Stmt::For {
+            init,
+            cond,
+            step,
+            body,
+        } => {
+            if let Some(init) = init {
+                visit_gotos(init, f)?;
+            }
+            if let Some(cond) = cond {
+                visit_goto_expr(cond, f)?;
+            }
+            if let Some(step) = step {
+                visit_goto_expr(step, f)?;
+            }
+            visit_gotos(body, f)?;
+        }
+        Stmt::Declare(_)
+        | Stmt::Case(_)
+        | Stmt::Break
+        | Stmt::Continue
+        | Stmt::Return(None, _)
+        | Stmt::Goto(_)
+        | Stmt::Label(_) => {}
+    }
+    Some(())
+}
+
+fn visit_goto_init(init: &Init<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+    for item in &init.items {
+        if let InitItem::Expr { expr, .. } = item {
+            visit_goto_expr(expr, f)?;
+        }
+    }
+    Some(())
+}
+
+fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
+    match &e.kind {
+        ExprKind::Unary(_, a)
+        | ExprKind::Cast(a)
+        | ExprKind::Deref(a)
+        | ExprKind::Addr(a)
+        | ExprKind::VaStart(a)
+        | ExprKind::VaArg(a)
+        | ExprKind::IncDec { lhs: a, .. }
+        | ExprKind::Member { base: a, .. } => visit_goto_expr(a, f)?,
+        ExprKind::Binary(_, a, b)
+        | ExprKind::PtrAdd(a, b, _)
+        | ExprKind::PtrDiff(a, b, _)
+        | ExprKind::LogAnd(a, b)
+        | ExprKind::LogOr(a, b)
+        | ExprKind::Assign(a, b)
+        | ExprKind::Comma(a, b)
+        | ExprKind::OpAssign { lhs: a, rhs: b, .. }
+        | ExprKind::PtrOpAssign { lhs: a, rhs: b, .. } => {
+            visit_goto_expr(a, f)?;
+            visit_goto_expr(b, f)?;
+        }
+        ExprKind::Cond(a, b, c) => {
+            visit_goto_expr(a, f)?;
+            visit_goto_expr(b, f)?;
+            visit_goto_expr(c, f)?;
+        }
+        ExprKind::Call(callee, args) => {
+            visit_goto_expr(callee, f)?;
+            for arg in args {
+                visit_goto_expr(arg, f)?;
+            }
+        }
+        ExprKind::Builtin(_, args) => {
+            for arg in args {
+                visit_goto_expr(arg, f)?;
+            }
+        }
+        ExprKind::CompoundLit(_, init) => visit_goto_init(init, f)?,
+        ExprKind::StmtExpr { stmts, value, .. } => {
+            for stmt in stmts {
+                visit_gotos(stmt, f)?;
+            }
+            if let Some(value) = value {
+                visit_goto_expr(value, f)?;
+            }
+        }
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Str(_)
+        | ExprKind::LabelAddr(_)
+        | ExprKind::Local(_)
+        | ExprKind::Global(_) => {}
+    }
+    Some(())
+}
+
 struct FnGen<'g, 'p, 'f> {
     g: &'g mut Gen<'p>,
     b: FunctionBuilder<'f>,
@@ -739,6 +955,8 @@ struct FnGen<'g, 'p, 'f> {
     /// All computed gotos share one switch, with the label number as its
     /// first parameter. Leave it unsealed until every dispatch edge exists.
     dispatch: Option<Block>,
+    /// Optional immutable-table fusion; every indirect goto uses this table.
+    dispatch_table: Option<DispatchTable>,
     /// The case blocks of the switches being built.
     cases: Vec<Vec<Block>>,
     /// The current block ends in a terminator; code that follows goes in a
@@ -1041,8 +1259,18 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Stmt::GotoIndirect(target) => {
                 self.ensure_block();
                 self.set_loc(target.loc);
-                let p = self.val(target)?;
-                let n = self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, p);
+                let n = if let Some(table) = &self.dispatch_table {
+                    let (global, index) = dispatch_index(target).expect("preflighted dispatch");
+                    debug_assert_eq!(global, table.global);
+                    // Keep the numeric table available, including in debug info.
+                    self.g.use_global(global);
+                    // PtrAdd's index is already a long. Its evaluation (including
+                    // assignments and pc++) stays at the original goto location.
+                    self.val(index)?
+                } else {
+                    let p = self.val(target)?;
+                    self.b.ins().convert(ConvertOp::PtrToInt, Type::I64, p)
+                };
                 let dispatch = match self.dispatch {
                     Some(block) => block,
                     None => {
@@ -1075,15 +1303,31 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             block,
             args: Vec::new(),
         };
-        let table = self
-            .def
-            .label_addrs
-            .iter()
-            .enumerate()
-            .map(|(i, label)| (i as i64 + 1, call(self.label_block(label))))
-            .collect();
-        // A value other than an address-taken label is undefined.
+        // Keep one shared merge and one switch, whether its key is a numeric
+        // label token or an index into a proven immutable table.
+        let labels: Vec<(i64, &'p str)> = match &self.dispatch_table {
+            Some(table) => table
+                .labels
+                .iter()
+                .enumerate()
+                .filter(|(_, label)| **label != 0)
+                .map(|(i, &label)| (i as i64, self.def.label_addrs[label - 1]))
+                .collect(),
+            None => self
+                .def
+                .label_addrs
+                .iter()
+                .enumerate()
+                .map(|(i, &label)| (i as i64 + 1, label))
+                .collect(),
+        };
+        // Zero entries and invalid tokens still trap. An out-of-bounds table
+        // access has no defined C behavior; the fused default also traps.
         let nowhere = self.new_block();
+        let table = labels
+            .into_iter()
+            .map(|(key, label)| (key, call(self.label_block(label))))
+            .collect();
         self.b.ins().switch(n, call(nowhere), table);
         self.b.seal_block(nowhere);
         self.switch_to(nowhere);
