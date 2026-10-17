@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "id": "x86-more-udiv10",
+  "arch": "x86_64",
+  "description": "state = state / 10 + 0x9e3779b97f4a7c15 modulo 2^64",
+  "category": "latency",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/x86-more-udiv10-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/x86-more-udiv10-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/more-udiv10.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 1,
+  "mask": 0,
+  "seeds": [
+    0,
+    1,
+    9,
+    10,
+    11,
+    127,
+    128,
+    255,
+    256,
+    9223372036854775807,
+    9223372036854775808,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 1,
+  "work_unit": "state_update",
+  "notes": [
+    "Baseline AMD64 System V/Darwin caller-saved leaf ABI; zero iterations returns seed without data access.",
+    "All state arithmetic wraps modulo 2^64; actual loop work feeds the returned state.",
+    "Unsigned division: high64(state*0xcccccccccccccccd)>>3 equals floor(state/10) over the full uint64 range.",
+    "RDX is dividend high half/remainder or product high half; data and mask are unused.",
+    "MCA contains the actual straight-line body only, including result moves; entry, constant setup, loop control and return are excluded. Constants and mask are assumed ready; body flags are discarded by loop control. No model fidelity or performance win is claimed."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/x86-more-udiv10-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/x86-more-udiv10-candidate.s"
+    }
+  }
+}

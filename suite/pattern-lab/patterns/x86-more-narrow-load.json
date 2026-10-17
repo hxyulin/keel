@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "id": "x86-more-narrow-load",
+  "arch": "x86_64",
+  "description": "state=data[(state>>8)&mask]&255",
+  "category": "memory",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/x86-more-narrow-load-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/x86-more-narrow-load-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/more-narrow-load.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 256,
+  "mask": 255,
+  "seeds": [
+    0,
+    1,
+    9,
+    10,
+    11,
+    127,
+    128,
+    255,
+    256,
+    9223372036854775807,
+    9223372036854775808,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 1,
+  "work_unit": "low_byte_load",
+  "notes": [
+    "Baseline AMD64 System V/Darwin caller-saved leaf ABI; zero iterations returns seed without data access.",
+    "All state arithmetic wraps modulo 2^64; actual loop work feeds the returned state.",
+    "Little-endian ordinary allocated memory only; no volatile, atomic or concurrent-memory equivalence.",
+    "Both variants index (state>>8)&mask with an 8-byte stride; 256 words and mask 255 bound the full 64-bit load to bytes 0..2047.",
+    "MOVZBL to ESI zero-extends the full RSI state. Oracle reads warm the same allocation before kernel timing.",
+    "MCA contains the actual straight-line body only, including result moves; entry, constant setup, loop control and return are excluded. Constants and mask are assumed ready; body flags are discarded by loop control. No model fidelity or performance win is claimed."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/x86-more-narrow-load-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/x86-more-narrow-load-candidate.s"
+    }
+  }
+}
