@@ -26,7 +26,7 @@ def main(argv=None):
             c.add_argument('--timer',choices=('monotonic','tsc'),default='monotonic')
             c.add_argument('--target-ms',type=int,default=100)
             c.add_argument('--pilot-iterations',type=int,default=100000)
-            c.add_argument('--max-iterations',type=int,default=100000000)
+            c.add_argument('--max-iterations',type=int,default=1000000000)
             c.add_argument('--cycles',type=int,default=2,help='complete permutation cycles, 2..10')
     v=sub.add_parser('verify'); v.add_argument('output',type=Path)
     a=p.parse_args(argv)
@@ -47,8 +47,8 @@ def main(argv=None):
         if not 1<=a.timeout<=60 or not 1<=a.budget<=600: raise LabError('timeout/budget out of bounds')
         if a.command=='bench':
             if not a.execute: raise LabError('bench requires explicit --execute')
-            if not 1<=a.pilot_iterations<=a.max_iterations<=100000000 or not 100<=a.target_ms<=250 or not 2<=a.cycles<=10:
-                raise LabError('benchmark bounds: 1 <= pilot <= max <= 100000000, target 100..250 ms, cycles 2..10')
+            if not 1<=a.pilot_iterations<=a.max_iterations<=1000000000 or not 100<=a.target_ms<=250 or not 2<=a.cycles<=10:
+                raise LabError('benchmark bounds: 1 <= pilot <= max <= 1000000000, target 100..250 ms, cycles 2..10')
         r=Runner(a.output,a.timeout,a.budget)
         write(r.output/'selection.json',{'manifests':[str(x) for x,_ in selected],'command':a.command})
         evidence=build(r,ROOT,selected,a.clang)

@@ -54,10 +54,12 @@ class Runner:
                 rec['status']='timeout'
             except OSError as e:
                 rec['status']='launch_failed'; rec['error']=str(e)
+        rec['stdout_sha256']=digest(rec['stdout'])
+        rec['stderr_sha256']=digest(rec['stderr'])
         write(str(stem)+'.json',rec)
         if rec.get('returncode')!=0 and not allow_failure:
             raise LabError(f'command failed: {rec}; logs retained')
-        text=Path(rec['stdout']).read_text(errors='replace')[:2*1024*1024]
+        with open(rec['stdout'],'rb') as f: text=f.read(2*1024*1024).decode(errors='replace')
         return rec,text
 
 def executable(name):
@@ -66,18 +68,13 @@ def executable(name):
     return str(Path(p).resolve())
 
 def build(r, root, selected, clang):
-    cc=executable(clang)
-    _,version=r.run([cc,'--version'])
-    if 'clang' not in version.lower(): raise LabError('selected compiler is not Clang')
-    evidence={'compiler':{'path':cc,'sha256':digest(cc),'version':version},'host':{'arch':hostarch(),'platform':platform.platform(),'uname':list(platform.uname())},'flags':FLAGS,'patterns':[],'inputs':{},'artifacts':{}}
+    evidence={'compiler':{'status':'unused'},'host':{'arch':hostarch(),'platform':platform.platform(),'uname':list(platform.uname())},'flags':FLAGS,'patterns':[],'inputs':{},'artifacts':{}}
     for p in sorted(root.glob('lab/*.py'))+list(root.glob('run.py'))+list(root.glob('driver.c'))+list(root.glob('manifest.schema.json')):
         evidence['inputs'][str(p.resolve())]=digest(p)
     # Git provenance is diagnostic; hashes are the replay/mutation boundary.
     for arg,key in [(['rev-parse','HEAD'],'commit'),(['rev-parse','HEAD^{tree}'],'tree'),(['status','--porcelain'],'dirty')]:
         _,v=r.run(['git','-C',str(root),*arg],allow_failure=True); evidence[key]=v.strip()
-    driver=r.output/'driver.o'
-    r.run([cc,*FLAGS,'-std=c11','-c',root/'driver.c','-o',driver])
-    evidence['artifacts'][str(driver)]=digest(driver)
+    driver=None
     dis=shutil.which('otool') if platform.system()=='Darwin' else (shutil.which('llvm-objdump') or shutil.which('objdump'))
     evidence['disassembler']={'status':'available' if dis else 'unsupported','path':dis,'reason':None if dis else 'no otool/objdump found'}
     if dis:
@@ -91,6 +88,14 @@ def build(r, root, selected, clang):
         evidence['patterns'].append(row)
         if m['arch']!=hostarch():
             row['status']='unsupported'; row['reason']='manifest arch differs from native host'; continue
+        if driver is None:
+            cc=executable(clang)
+            _,version=r.run([cc,'--version'])
+            if 'clang' not in version.lower(): raise LabError('selected compiler is not Clang')
+            evidence['compiler']={'status':'available','path':cc,'sha256':digest(cc),'version':version}
+            driver=r.output/'driver.o'
+            r.run([cc,*FLAGS,'-std=c11','-c',root/'driver.c','-o',driver])
+            evidence['artifacts'][str(driver)]=digest(driver)
         row['status']='built'
         oracle=r.output/f"{m['id']}-oracle.o"
         r.run([cc,*FLAGS,'-std=c11','-c',source(root,m['oracle']['source']),'-o',oracle])
@@ -137,7 +142,10 @@ def check(r, evidence):
     return cases
 
 def fingerprints(evidence):
-    return {**evidence['inputs'],**evidence['artifacts'],evidence['compiler']['path']:evidence['compiler']['sha256']}
+    files={**evidence['inputs'],**evidence['artifacts']}
+    for tool in (evidence['compiler'],evidence.get('disassembler',{})):
+        if tool.get('path') and tool.get('sha256'): files[tool['path']]=tool['sha256']
+    return files
 
 def verify_record(record):
     errors=[]
