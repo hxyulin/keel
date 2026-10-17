@@ -9,11 +9,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from lab.manifest import LabError, U64, load
-from lab.engine import Runner, build, check, digest, invoke, seal, verify_record, hostarch
+from lab.engine import Runner, build, check, digest, invoke, seal, verify_record, hostarch, bench
 from lab.stats import schedule, summarize, common_iterations
 
 # Keep generated evidence in ignored directories; retain failures and fixes.
@@ -72,6 +74,23 @@ class Protocol(unittest.TestCase):
         self.assertEqual(common_iterations(samples,100000000,10000000),10000000)
         with self.assertRaises(LabError): common_iterations(samples,100000000,9999999)
         with self.assertRaises(LabError): common_iterations([{'iterations':1,'wall_ns':0}],100,100)
+    def test_campaign_uses_one_pilot_fixed_counts_and_no_reruns(self):
+        d=Path(tempfile.mkdtemp(prefix='mock-campaign-',dir=TEST_ROOT))
+        r=Runner(d/'out')
+        evidence={'inputs':{},'artifacts':{},'compiler':{'status':'unused'},'patterns':[{'id':'mock','status':'checked','manifest':{'id':'mock','seeds':[0],'work_per_iteration':4,'work_unit':'add'},'variants':{v:{'binary':v} for v in ('a','b')}}]}
+        args=SimpleNamespace(timer='monotonic',target_ms=100,pilot_iterations=10,max_iterations=1000,cycles=2)
+        calls=[]
+        def sample(r,binary,m,n,seed,timer):
+            calls.append((binary,n))
+            return {'status':'ok','iterations':n,'seed':seed,'checksum':seed,'oracle':seed,'wall_ns':n*1000000,'elapsed':n*1000000*(1 if binary=='a' else 2),'unit':'ns'}
+        with patch('lab.engine.invoke',side_effect=sample): bench(r,evidence,args)
+        self.assertEqual(calls[:2],[('a',10),('b',10)])
+        self.assertEqual(len(calls),14) # 2 pilots + 4 warmups + 8 samples
+        self.assertTrue(all(n==100 for _,n in calls[2:]))
+        self.assertEqual(json.loads((r.output/'mock-fixed.json').read_text())['orders'],[['a','b'],['b','a'],['a','b'],['b','a']])
+        self.assertEqual(len(json.loads((r.output/'mock-samples.json').read_text())),4)
+        self.assertTrue((r.output/'frozen.json').exists())
+
     def test_subprocess_timeout_and_log_retention(self):
         d=Path(tempfile.mkdtemp(prefix='timeout-',dir=TEST_ROOT)); r=Runner(d/'out',timeout=.05)
         with self.assertRaises(LabError): r.run([sys.executable,'-c','import time; print("before",flush=True); time.sleep(5)'])

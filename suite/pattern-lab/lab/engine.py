@@ -6,6 +6,7 @@ import platform
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from .manifest import LabError, source
@@ -74,6 +75,12 @@ def build(r, root, selected, clang):
     # Git provenance is diagnostic; hashes are the replay/mutation boundary.
     for arg,key in [(['rev-parse','HEAD'],'commit'),(['rev-parse','HEAD^{tree}'],'tree'),(['status','--porcelain'],'dirty')]:
         _,v=r.run(['git','-C',str(root),*arg],allow_failure=True); evidence[key]=v.strip()
+    # Optional adapter stays behind its standalone CLI boundary. Discovery
+    # probes versions/help only; it never runs MCA or instruction benchmarks.
+    if (root/'tools.py').is_file():
+        evidence['inputs'][str((root/'tools.py').resolve())]=digest(root/'tools.py')
+        rec,_=r.run([sys.executable,'-B',root/'tools.py','discover','--output',r.output/'tools-discovery.json'],allow_failure=True)
+        evidence['optional_tools']={'command':rec,'report':str(r.output/'tools-discovery.json'),'status':'recorded' if rec.get('returncode')==0 else 'discovery_failed'}
     driver=None
     dis=shutil.which('otool') if platform.system()=='Darwin' else (shutil.which('llvm-objdump') or shutil.which('objdump'))
     evidence['disassembler']={'status':'available' if dis else 'unsupported','path':dis,'reason':None if dis else 'no otool/objdump found'}
