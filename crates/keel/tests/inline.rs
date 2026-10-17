@@ -15,14 +15,31 @@ unsigned long check(unsigned x) {
  return r.a+r.b+p.a+count+a+b+partial(0x123456789abcdef0ul,(unsigned short)x)+local(x);
 }
 unsigned long copies(Pair p) { Pair r=modify(p,&p);return r.a+3*r.b+5*p.a+7*p.b; }
+static inline Pair dup_value(Pair p) {
+ if ((unsigned)p.b >= 4294967285u) (*(unsigned *)p.a)++;
+ return p;
+}
+unsigned long dup_check(unsigned tag, unsigned initial) {
+ unsigned count=initial;
+ Pair p={(unsigned long)&count,tag}, r;
+ r=dup_value(p); r=dup_value(r); r=dup_value(r); r=dup_value(r);
+ return count+r.b+(r.a==(unsigned long)&count);
+}
 "#;
 const HARNESS: &str = r#"
 #include <stdint.h>
 typedef struct { unsigned long a,b; } Pair;
 extern unsigned long check(unsigned);
 extern unsigned long copies(Pair);
+extern unsigned long dup_check(unsigned, unsigned);
 static unsigned choose(unsigned x){return (x&1)?x+3:x^17;}
 int main(void){
+ unsigned tags[]={0,3,4294967284u,4294967285u,4294967295u};
+ unsigned initials[]={0,4294967294u};
+ for(unsigned i=0;i<5;i++)for(unsigned j=0;j<2;j++){
+  unsigned expected=initials[j]+(tags[i]>=4294967285u?4u:0u);
+  if(dup_check(tags[i],initials[j])!=(unsigned long)expected+tags[i]+1ul)return 3;
+ }
  for(unsigned i=0;i<10000;i++){
   unsigned x=i*393241u;
   unsigned long partial=(0x123456789abcdef0ul&~0xffff0000ul)|((unsigned long)(unsigned short)x<<16);
@@ -102,6 +119,16 @@ fn native_inline_preserves_aggregate_copies_side_effects_and_partial_stores() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("source.c"), SOURCE).unwrap();
     fs::write(dir.join("harness.c"), HARNESS).unwrap();
+    // Run the identical observable oracle against an independent C compiler.
+    command(Command::new("clang").current_dir(&dir).args([
+        "-O2",
+        "-fno-strict-aliasing",
+        "source.c",
+        "harness.c",
+        "-o",
+        "reference",
+    ]));
+    command(&mut Command::new(dir.join("reference")));
     for mode in [vec![], vec!["--regalloc", "fast"], vec!["--isel", "all"]] {
         let mut args = vec!["cc", "-O", "--emit-object", "source.c", "-o", "source.o"];
         args.extend(mode);
@@ -116,4 +143,66 @@ fn native_inline_preserves_aggregate_copies_side_effects_and_partial_stores() {
         command(&mut Command::new(dir.join("test")));
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+// Requires the retained canonical preprocessed input, supplied explicitly by
+// the coordinator under a correctness lease. This tests real first-pass
+// activation rather than rerunning inline on already-optimized textual IR.
+#[test]
+#[ignore = "requires KEEL_INLINE_RETAINED_QUICKJS and a correctness lease"]
+fn retained_quickjs_hot_helper_activation() {
+    let path = std::env::var("KEEL_INLINE_RETAINED_QUICKJS").unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    let mut module = keel_c::compile(
+        &source,
+        &path,
+        keel_c::Options {
+            debug_info: false,
+            target: keel_ir::Target::Aarch64AppleDarwin,
+        },
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let before: Vec<_> = module
+        .functions
+        .iter()
+        .map(|f| f.layout_insts().count())
+        .collect();
+    let mut report = keel_opt::OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(
+        &mut module,
+        &["inline"],
+        keel_opt::VectorTarget::Aarch64Neon,
+        &mut report,
+    )
+    .unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let sites = &report.invocations[0].inline_sites;
+    let dup: Vec<_> = sites
+        .iter()
+        .filter(|s| s.caller == "JS_CallInternal" && s.callee == "JS_DupValue")
+        .collect();
+    assert_eq!(dup.len(), 62, "expected the retained first-pass workload");
+    let inlined = dup.iter().filter(|s| s.outcome == "inlined").count();
+    assert!(
+        inlined > 26,
+        "must improve on the retained baseline's 26 sites: {inlined}"
+    );
+    assert_eq!(
+        sites
+            .iter()
+            .filter(|s| s.caller == "JS_CallInternal"
+                && s.callee == "JS_FreeValue"
+                && s.outcome == "recursive_callee")
+            .count(),
+        58
+    );
+    let mut total_growth = 0;
+    for (f, old) in module.functions.iter().zip(before) {
+        let growth = f.layout_insts().count() - old;
+        assert!(growth <= 2048, "caller {} grew by {growth}", f.name);
+        total_growth += growth;
+    }
+    assert!(total_growth <= 16384, "module grew by {total_growth}");
+    eprintln!("retained JS_CallInternal/JS_DupValue inlined={inlined}/62; growth={total_growth}");
 }
