@@ -1,10 +1,10 @@
 # Legal ordinary load narrowing: bounded source checkpoint
 
-This checkpoint implements only an opt-in private-stack subset. It does **not**
-activate on the actual C compiler bridge. No build, compiler invocation, assembler,
-native execution, remote access, correctness run, or timing was authorized or run.
-Root must obtain independent source review and grant correctness execution before
-these source tests can establish any validation result.
+This implements only an opt-in private-stack subset. It does **not** activate on
+the actual C compiler bridge. The initial source-only checkpoint was followed by
+an explicit root-granted MacHost correctness lease. The validation results below
+come from that lease; MacHost was explicitly released after all owned jobs exited.
+Root owns final acceptance and integration. No timing or LinuxHost access occurred.
 
 ## Audited contracts
 
@@ -94,17 +94,18 @@ loop or application speedup, and supply no legality proof.
 Owned source is `crates/keel-opt/src/load_narrow.rs`, its dedicated tests in
 `crates/keel-opt/tests/load_narrow/mod.rs`, and this document. Tests are included
 as unit tests to exercise direct in-memory alias states. The separate registration
-patch adds only `mod load_narrow;` and `&load_narrow::LoadNarrow` to `PASSES` in
+commit adds only `mod load_narrow;` and `&load_narrow::LoadNarrow` to `PASSES` in
 shared `lib.rs`; it changes no indexed builtins or default pipelines. Root owns
-reconciliation with the sign-extension worker. Until that patch is applied, the
-new module and its tests are deliberately unregistered and uncompiled.
+reconciliation with the sign-extension worker. `cargo test -p keel-opt --lib
+load_narrow` discovers all eleven dedicated tests through the module's explicit
+`#[path]`; no new Cargo test target is needed.
 
 Source tests cover offsets 0/1/8/16, commuted masks, identical alignment/flags,
 load/mask source lines and instruction order, output verification, idempotence,
 missing `notrap`, unknown pointers/target, volatile/atomic/lifetime effects,
 out-of-bounds original widths, shared loads, wrong masks/types, escaped addresses,
 debug homes and direct in-memory aliases. A retained bridge-IR test asserts
-unsupported behavior on both explicit targets. These tests are **NOT RUN**.
+unsupported behavior on both explicit targets.
 
 After independent source review and an explicit root host lease, acceptance must
 include compiling the separate registration, running these and relevant optimizer
@@ -115,3 +116,52 @@ writes, selected/debug modes, and aliases. Protected-boundary native faults are
 only relevant to the rejected generic potentially-faulting load: confirm the
 original wide access remains; never feed a false `notrap` promise to such a test.
 No performance claim or default activation follows from correctness acceptance.
+
+## Retained correctness validation
+
+Source `1690c16126ce9af662b5226ff2a677da72100cff` contains the rule and unit
+tests. Separate registration `d50d422e61d461bce91a5f2e4b24a5bc2c69bce8`
+was followed by the diagnostic-only golden update
+`1c2cab1ff7859970fd26ff94cb1d770fa84c9571`. Dedicated object/native fixtures
+and runner were committed as `37bfe7f3a46532eb6f65a5bae4e922001bdee160`.
+Production code did not change after registration.
+
+An initially cold private target directory and serial `-j2` builds were used:
+
+- Focused load-narrow unit tests: 11 passed, including direct aliases, flags,
+  positions, locations, full allocation bounds, and fallback cases.
+- Full `keel-ir` / `keel-opt` gates: 299 passed after the expected unknown-pass
+  diagnostic golden was updated to include the registered name. The original
+  failed run and exact mismatch are retained; no optimizer result was blessed.
+- Full `keel` CLI gate: 46 passed. Existing ignored tests remained ignored.
+- `tests/load_narrow/validate.py`: five known private-stack functions activate
+  from load.i64 to load.i8/uext before emission on both targets. The functions
+  cover offsets 0, 1, 8, 16 and a store between the load and mask. Missing-notrap,
+  debugger-home and generic-pointer functions remain unchanged. The actual C
+  bridge's entire optimized IR remains identical with or without the new pass.
+- Both-target text, direct objects and independent Clang-assembled objects pass
+  in the baseline/full selection by fast/full allocation matrix. The full/full
+  configurations also use `-g`. Native object headers are checked for each target;
+  emitted assembly contains the expected byte-access instructions.
+- MacHost ARM64 native: all eight direct/assembled routes passed, each with 8,393
+  direct comparisons against a separately compiled Clang `-O0 -fno-lto` oracle
+  and two protected-boundary fault checks. All 256 low bytes with four high-bit
+  patterns, unaligned offsets, intervening writes, debugger fallback, bounded C
+  bridge inputs, and null-pointer zero-count bridge calls are covered. The
+  generic wide load and the independent unaligned-wide oracle both fault when
+  their eight-byte access crosses into a protected page; no false notrap promise
+  is used. Total: 67,144 comparisons and 16 expected faults.
+
+These are finite correctness checks. Native x86 was **not run**; both-target
+object checks do not substitute for x86 execution. No generated-loop/application
+timing, benchmark, generic activation, or default expansion is claimed.
+
+The CLI binary was built at the registration checkpoint and is unchanged by the
+later test-only commits. Its SHA-256 is
+`e279548ca927d77c225909a3cb3a81e46a22f8f8a383022d153c77799a45ccdd`.
+Exact source trees, tool identities, argv, timestamps, test/native hashes, original
+failure and output streams are retained under ROOT
+`suite/reports/pattern-opt-20261017/load-narrow`. The durable coordination record
+is ROOT `.git/keel-coordination/pattern-opt-load-narrow-20261017.json`. Repeating
+the native runner requires a new explicit correctness lease and a fresh output
+directory; it is intentionally excluded from automatic Cargo test execution.
