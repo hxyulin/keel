@@ -1,10 +1,13 @@
 //! Byte-aware forwarding in nonescaping fixed stack objects. Only integer
 //! loads up to 64 bits are reconstructed, and only from bytes stored earlier
-//! in the same block. This handles the union temporaries exposed by inlining
-//! aggregate helpers without assuming that arbitrary pointers cannot alias.
+//! in the same block. Exact-type uniquely written pieces can also be forwarded
+//! across blocks when their store dominates the load. This handles the union
+//! temporaries exposed by inlining aggregate helpers without assuming that
+//! arbitrary pointers cannot alias.
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
 };
+use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use std::collections::{HashMap, HashSet};
 
 pub fn run(func: &mut Function) -> bool {
@@ -53,7 +56,9 @@ pub fn run(func: &mut Function) -> bool {
                 | keel_ir::Intrinsic::StackRestore
                 | keel_ir::Intrinsic::StackSave
         ),
-        InstData::Call { func: callee, .. } => func.callee(*callee).sig.returns_twice,
+        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
+            func.callee(*callee).sig.returns_twice
+        }
         InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
         _ => false,
     }) {
@@ -91,12 +96,58 @@ pub fn run(func: &mut Function) -> bool {
             }
         });
     }
+    // Count all writers, including writes in unreachable blocks and writes
+    // of a different type. A cross-block fact is eligible only if every byte
+    // in its range has exactly one syntactic writer in the whole function.
+    // This avoids phi nodes and iterative memory dataflow at joins/loops.
+    let mut writers = HashMap::<(StackSlot, usize), usize>::new();
+    let mut stores = Vec::new();
+    for block in func.blocks() {
+        for (position, &inst) in func.block_insts(block).iter().enumerate() {
+            if let InstData::Store { addr, value, .. } = *func.inst_data(inst)
+                && let Some(&(slot, offset)) = addresses.get(&func.resolve(addr))
+                && !escaped.contains(&slot)
+            {
+                let value = func.resolve(value);
+                let ty = func.value_type(value);
+                let width = ty.bytes().unwrap_or(8) as usize;
+                for n in offset..offset + width {
+                    *writers.entry((slot, n)).or_default() += 1;
+                }
+                stores.push(((slot, offset, ty), (block, position, value), width));
+            }
+        }
+    }
+    let unique: HashMap<_, _> = stores
+        .into_iter()
+        .filter(|&((slot, offset, _), _, width)| {
+            (offset..offset + width).all(|n| writers[&(slot, n)] == 1)
+        })
+        .map(|(key, fact, _)| (key, fact))
+        .collect();
+    // Avoid building dominance for functions with only local candidates.
+    let cross_block = func.blocks().any(|block| {
+        func.block_insts(block).iter().any(|&inst| {
+            if let InstData::Load { addr, ty, .. } = *func.inst_data(inst)
+                && let Some(&(slot, offset)) = addresses.get(&func.resolve(addr))
+                && let Some(&(store_block, _, _)) = unique.get(&(slot, offset, ty))
+            {
+                store_block != block
+            } else {
+                false
+            }
+        })
+    });
+    let dominators = cross_block.then(|| {
+        let cfg = ControlFlowGraph::compute(func);
+        DominatorTree::compute(func, &cfg)
+    });
     let mut changed = false;
     let mut remaining_loads = HashSet::new();
     for block in func.blocks().collect::<Vec<_>>() {
         let mut bytes: HashMap<(StackSlot, usize), (Value, usize)> = HashMap::new();
         let mut exact: HashMap<(StackSlot, usize, Type), Value> = HashMap::new();
-        for inst in func.block_insts(block).to_vec() {
+        for (position, inst) in func.block_insts(block).to_vec().into_iter().enumerate() {
             match *func.inst_data(inst) {
                 InstData::Store { addr, value, .. } => {
                     let Some(&(slot, offset)) = addresses.get(&func.resolve(addr)) else {
@@ -127,10 +178,25 @@ pub fn run(func: &mut Function) -> bool {
                     let Some(&(slot, offset)) = addresses.get(&func.resolve(addr)) else {
                         continue;
                     };
-                    if escaped.contains(&slot) {
+                    // A live instruction may already have an aliased result
+                    // in an in-memory Function. Never overwrite that alias.
+                    if escaped.contains(&slot)
+                        || func.resolve(func.first_result(inst)) != func.first_result(inst)
+                    {
+                        remaining_loads.insert(slot);
                         continue;
                     }
-                    let forwarded = exact.get(&(slot, offset, ty)).copied().or_else(|| {
+                    let global = unique.get(&(slot, offset, ty)).and_then(
+                        |&(store_block, store_position, value)| {
+                            let dominates = if store_block == block {
+                                store_position < position
+                            } else {
+                                dominators.as_ref()?.dominates(store_block, block)
+                            };
+                            dominates.then_some(value)
+                        },
+                    );
+                    let forwarded = exact.get(&(slot, offset, ty)).copied().or(global).or_else(|| {
                         let width = integer_width(ty)?;
                         let parts = (0..width)
                             .map(|n| bytes.get(&(slot, offset + n)).copied())
@@ -237,4 +303,34 @@ fn reconstruct(f: &mut Function, at: Inst, ty: Type, parts: &[(Value, usize)]) -
         start = end;
     }
     result.unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use keel_ir::InstData;
+
+    #[test]
+    fn aliased_live_load_result_is_not_overwritten() {
+        let mut m = keel_ir::parse("func @f(i64, i64) -> i64 {
+     ss0 = stack_slot 8, align 8
+    block0(v0: i64, v1: i64):
+     v2 = stack_addr ss0
+     store v0, v2
+     jump block1
+    block1:
+     v3 = load.i64 v2
+     return v3
+    }").unwrap();
+        let f = &mut m.functions[0];
+        let load = f.layout_insts().find_map(|(_, i)| {
+            matches!(f.inst_data(i), InstData::Load { .. }).then_some(i)
+        }).unwrap();
+        let result = f.first_result(load);
+        let replacement = f.block_params(f.entry_block().unwrap())[1];
+        f.replace_all_uses(result, replacement);
+        // Such in-memory states need not pass verification. Preserve the alias
+        // exactly, rather than installing the stored value over its definition.
+        super::run(&mut m.functions[0]);
+        assert_eq!(m.functions[0].resolve(result), replacement);
+    }
 }
