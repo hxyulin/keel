@@ -18,6 +18,10 @@ terminator; previously rejected surviving predecessors remain ineligible.
 Removed snapshot entries have empty instruction lists and must be skipped.
 This preserves the original first-eligible-layout merge sequence, including
 backward layout edges, without a second census or membership searches.
+Candidate checks become bounded by the snapshot length plus successful merges.
+The snapshot adds one allocation proportional to live blocks; instruction
+movement, alias resolution and layout removal retain their existing costs.
+This is not a claim that the entire merge operation becomes linear.
 
 Keep the entry-block exclusion, self-merge exclusion, parameter alias order,
 instruction movement and debug locations unchanged. Refresh the absorbing
