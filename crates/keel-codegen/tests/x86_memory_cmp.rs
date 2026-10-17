@@ -195,6 +195,99 @@ fn aliases_preserve_address_uses_and_never_cover_a_dead_definition() {
     assert!(!plan.covered(insts[0]));
 }
 
+#[test]
+fn resolved_operand_aliases_and_aliased_comparison_definition() {
+    let src = source("ult")
+        .replace("@f(ptr, i64)", "@f(ptr, i64, ptr)")
+        .replace("v1: i64):", "v1: i64, v10: ptr):");
+    let mut m = module(&src);
+    let f = &mut m.functions[0];
+    let b = f.blocks().next().unwrap();
+    let params = f.block_params(b).to_vec();
+    f.replace_all_uses(params[0], params[2]);
+    keel_ir::verify_module(&m).unwrap();
+    for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+        assert_eq!(
+            memory_compares(&compile(&m, SelectionTier::Full, alloc, &SPILLED)),
+            1
+        );
+    }
+    // The raw RHS names an Alias but resolves to the single live load result.
+    let src = source("ult")
+        .replace("v2 = load", "v10 = iconst.i64 7\n v2 = load")
+        .replace("icmp.ult v1, v2", "icmp.ult v1, v10");
+    let mut m = module(&src);
+    let f = &mut m.functions[0];
+    let b = f.blocks().next().unwrap();
+    let insts = f.block_insts(b).to_vec();
+    f.replace_all_uses(f.inst_results(insts[0])[0], f.inst_results(insts[1])[0]);
+    keel_ir::verify_module(&m).unwrap();
+    for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+        assert_eq!(
+            memory_compares(&compile(&m, SelectionTier::Full, alloc, &SPILLED)),
+            1
+        );
+    }
+    let src = source("ult")
+        .replace("@f(ptr, i64)", "@f(ptr, i64, i8)")
+        .replace("v1: i64):", "v1: i64, v10: i8):");
+    let mut m = module(&src);
+    let f = &mut m.functions[0];
+    let b = f.blocks().next().unwrap();
+    let insts = f.block_insts(b).to_vec();
+    f.replace_all_uses(f.inst_results(insts[1])[0], f.block_params(b)[2]);
+    keel_ir::verify_module(&m).unwrap();
+    let f = &m.functions[0];
+    let plan =
+        Selection::compute_with_options(f, SelectTarget::X86, keel_codegen::SelectionOptions::ALL);
+    assert!(
+        !plan.covered(insts[0]),
+        "retained aliased compare cannot own a new cover"
+    );
+    for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+        compile(&m, SelectionTier::Full, alloc, &SPILLED);
+    }
+}
+
+#[test]
+fn whole_function_debug_metadata_and_covered_condition_chain_fall_back() {
+    let src = source("ult");
+    for src in [
+        format!(
+            "file f0 = \"memory.c\"\n{}",
+            src.replace("{\nblock0", "{\n dloc f0:1:1\nblock0")
+        ),
+        format!(
+            "file f0 = \"memory.c\"\ndtype dt0 = base \"int\" signed 4\n{}",
+            src.replace(
+                "{\nblock0",
+                "{\n ss0 = stack_slot 4, align 4\n dvar \"x\" dt0 ss0\nblock0"
+            )
+        ),
+        format!(
+            "file f0 = \"memory.c\"\n{}",
+            src.replace("iconst.i64 17", "iconst.i64 17 !f0:9:1")
+        ),
+        src.replace(
+            "brif v3",
+            "v10 = uext.i64 v3\n v11 = iconst.i64 0\n v12 = icmp.ne v10, v11\n brif v12",
+        ),
+    ] {
+        let m = module(&src);
+        let f = &m.functions[0];
+        let b = f.blocks().next().unwrap();
+        let plan = Selection::compute_with_options(
+            f,
+            SelectTarget::X86,
+            keel_codegen::SelectionOptions::ALL,
+        );
+        assert!(!plan.covered(f.block_insts(b)[0]), "{src}");
+        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+            compile(&m, SelectionTier::Full, alloc, &SPILLED);
+        }
+    }
+}
+
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[test]
 fn native_unsigned_signed_and_boundaries_match_independent_clang_oracle() {
@@ -250,6 +343,11 @@ fn native_unsigned_signed_and_boundaries_match_independent_clang_oracle() {
         (
             SelectionTier::Full,
             AllocationTier::Full,
+            &keel_codegen::x86_64::REGISTERS,
+        ),
+        (
+            SelectionTier::Full,
+            AllocationTier::Fast,
             &keel_codegen::x86_64::REGISTERS,
         ),
         (SelectionTier::Full, AllocationTier::Fast, &SPILLED),
