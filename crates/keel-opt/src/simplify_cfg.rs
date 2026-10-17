@@ -203,30 +203,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn merging_entry_cycle_stops_at_the_new_self_edge() {
+    fn merging_cycle_preserves_entry_and_stops_at_the_new_self_edge() {
         let mut module = keel_ir::parse(
             "func @f() {
 block0:
-    v0 = iconst.i64 1
     jump block1
 block1:
+    v0 = iconst.i64 1
+    jump block2
+block2:
     v1 = iconst.i64 2
-    jump block0
+    jump block1
 }",
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
         let f = &mut module.functions[0];
         let entry = f.entry_block().unwrap();
-        let first = f.block_insts(entry)[0];
+        let entry_jump = f.block_insts(entry)[0];
+        let cycle = f.inst_data(entry_jump).branch_dests()[0].block;
+        let first = f.block_insts(cycle)[0];
         let other = f.blocks().last().unwrap();
         let expected = vec![first, f.block_insts(other)[0], f.block_insts(other)[1]];
         assert!(merge_blocks(f));
         keel_ir::verify(f).unwrap();
-        assert_eq!(f.blocks().collect::<Vec<_>>(), [entry]);
-        assert_eq!(f.block_insts(entry), expected);
-        let term = *f.block_insts(entry).last().unwrap();
-        assert_eq!(f.inst_data(term).branch_dests()[0].block, entry);
+        assert_eq!(f.blocks().collect::<Vec<_>>(), [entry, cycle]);
+        assert_eq!(f.block_insts(entry), [entry_jump]);
+        assert_eq!(f.inst_data(entry_jump).branch_dests()[0].block, cycle);
+        assert_eq!(f.block_insts(cycle), expected);
+        let term = *f.block_insts(cycle).last().unwrap();
+        assert_eq!(f.inst_data(term).branch_dests()[0].block, cycle);
         assert!(!merge_blocks(f));
     }
 
