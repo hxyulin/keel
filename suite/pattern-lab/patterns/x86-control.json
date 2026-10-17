@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "x86-control",
+  "arch": "x86_64",
+  "description": "Identical kernels for measurement variability diagnostics.",
+  "category": "control",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/x86-control-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/x86-control-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/control.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 1,
+  "mask": 0,
+  "seeds": [
+    0,
+    1,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 1,
+  "work_unit": "unit_increment",
+  "notes": [
+    "Sources are byte-identical; includes one dependent add and loop control per iteration.",
+    "Do not subtract control timings from other patterns."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/x86-control-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/x86-control-candidate.s"
+    }
+  }
+}

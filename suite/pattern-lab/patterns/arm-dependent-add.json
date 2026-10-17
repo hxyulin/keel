@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "id": "arm-dependent-add",
+  "arch": "aarch64",
+  "description": "Single dependent modular accumulator, two unit increments per iteration.",
+  "category": "latency",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/arm-dependent-add-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/arm-dependent-add-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/dependent-add.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 1,
+  "mask": 0,
+  "seeds": [
+    0,
+    1,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 2,
+  "work_unit": "unit_increment",
+  "notes": [
+    "All arithmetic wraps modulo 2^64; data and mask are unused.",
+    "Loop/call and final-combine overhead remain in native timings; MCA extract excludes them.",
+    "Return seed+2*iterations."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/arm-dependent-add-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/arm-dependent-add-candidate.s"
+    }
+  }
+}

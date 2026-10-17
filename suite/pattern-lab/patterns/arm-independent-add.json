@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "id": "arm-independent-add",
+  "arch": "aarch64",
+  "description": "Four independent modular accumulators, two unit increments each per iteration.",
+  "category": "throughput",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/arm-independent-add-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/arm-independent-add-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/independent-add.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 1,
+  "mask": 0,
+  "seeds": [
+    0,
+    1,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 8,
+  "work_unit": "unit_increment",
+  "notes": [
+    "All arithmetic wraps modulo 2^64; data and mask are unused.",
+    "Loop/call and final-combine overhead remain in native timings; MCA extract excludes them.",
+    "Initial accumulators seed+j; return sum(acc)-3*seed-6."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/arm-independent-add-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/arm-independent-add-candidate.s"
+    }
+  }
+}
