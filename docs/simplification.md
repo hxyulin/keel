@@ -57,9 +57,10 @@ that the transforming pass did not touch.
 tracks whether the form is established and restores it immediately before a
 requesting pass when necessary. Any pass reporting a change invalidates the
 form conservatively unless `produces_canonical_form()` promises it on exit.
-A pass reporting no change must not mutate the function. Restoration is
-profiled and verified as canonicalization, including in explicit/custom
-pipelines. `instcombine` is the first consumer and also uses the same payload
+A pass reporting no change must not mutate the function. Restoration always
+runs when required, including in explicit/custom pipelines. It is profiled as
+canonicalization and verified according to the repeated-verification policy
+(see [optimization observations](optimization-report.md#repeated-verification)). `instcombine` is the first consumer and also uses the same payload
 normalizer within its worklist as new facts appear during its execution.
 Direct calls to `Pass::run` bypass manager prerequisites; callers needing the
 entry contract should use `run_pipeline` or `run_passes`.
