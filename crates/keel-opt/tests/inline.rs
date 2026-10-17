@@ -672,3 +672,36 @@ fn detailed_profitability_and_legality_rejections_are_specific() {
         "profitability_blocks"
     );
 }
+
+// Growth is the increase in layout instructions, before any cleanup pass.
+// The entry jump replaces the call; return-to-jump rewrites are one-for-one.
+#[test]
+fn growth_budget_counts_emitted_instructions_at_the_boundary() {
+    let source = large_helper(64, "", 1, 33);
+    let before = keel_ir::parse(&source).unwrap();
+    let m = run(&source, &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+    assert_eq!(
+        m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+        2048,
+    );
+    // The same limit applies even to an explicit alwaysinline request.
+    let m = run(&large_helper(2048, "alwaysinline", 1, 2), &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+    let m = run(&large_helper(2049, "alwaysinline", 1, 1), &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+}
+
+#[test]
+fn module_growth_budget_remains_bounded_before_cleanup() {
+    let source = large_helper(256, "alwaysinline", 9, 8);
+    let before = keel_ir::parse(&source).unwrap();
+    let before_count: usize = before.functions.iter().map(|f| f.layout_insts().count()).sum();
+    let m = run(&source, &["inline"]);
+    let after_count: usize = m.functions.iter().map(|f| f.layout_insts().count()).sum();
+    assert_eq!(after_count - before_count, 16384);
+    for n in 0..8 {
+        assert_eq!(calls(&m, &format!("f{n}")), 0);
+    }
+    assert_eq!(calls(&m, "f8"), 8);
+}

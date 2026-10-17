@@ -2,6 +2,8 @@
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. The module budget is consumed in
 //! layout order. ABI by-value arguments get a fresh snapshot.
+//! Instruction growth bounds the increase in layout instructions before cleanup;
+//! the removed call pays for the jump entering the cloned body.
 use crate::{InlineSite, Pass};
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
