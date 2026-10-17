@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
+import time
 import subprocess
 import sys
 import tempfile
@@ -136,6 +138,57 @@ class Protocol(unittest.TestCase):
         self.assertEqual(verify_record(record)[0]['status'],'changed'); p.unlink()
         self.assertEqual(verify_record(record)[0]['status'],'missing')
 
+@unittest.skipUnless(os.name=='posix','POSIX process group and signals required')
+class Cancellation(unittest.TestCase):
+    def interrupted_parent(self, sig, cli):
+        d=Path(tempfile.mkdtemp(prefix='interrupt-',dir=TEST_ROOT))
+        pidfile=d/'child.pid'; output=d/'out'
+        child='import os,time; from pathlib import Path; Path('+repr(str(pidfile))+').write_text(str(os.getpid())); print("partial output",flush=True); time.sleep(20)'
+        if cli:
+            code='import importlib.util,sys; spec=importlib.util.spec_from_file_location("lab_cli",'+repr(str(ROOT/'run.py'))+'); mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)\n'
+            code+='def fake_build(r,*args): r.run([sys.executable,"-c",'+repr(child)+'])\n'
+            code+='mod.build=fake_build\nraise SystemExit(mod.main(["check",'+repr(str(ROOT/'patterns/arm-control.json'))+',"--output",'+repr(str(output))+']))\n'
+        else:
+            code='import sys; from lab.engine import Runner; Runner('+repr(str(output))+',timeout=10).run([sys.executable,"-c",'+repr(child)+'])\n'
+        script=d/'reducer.py'; script.write_text('import sys; sys.dont_write_bytecode=True; sys.path.insert(0,'+repr(str(ROOT))+')\n'+code)
+        parent=None; child_pid=None
+        with open(d/'parent.stdout','xb') as out,open(d/'parent.stderr','xb') as err:
+            try:
+                parent=subprocess.Popen([sys.executable,'-B',str(script)],stdout=out,stderr=err,start_new_session=True)
+                deadline=time.monotonic()+5
+                while not pidfile.exists() and time.monotonic()<deadline:
+                    if parent.poll() is not None: break
+                    time.sleep(.01)
+                self.assertTrue(pidfile.exists(),(d/'parent.stderr').read_text())
+                child_pid=int(pidfile.read_text())
+                os.kill(parent.pid,sig)
+                rc=parent.wait(timeout=8)
+                self.assertEqual(rc,(130 if sig==signal.SIGINT else 143) if cli else -signal.SIGINT)
+                with self.assertRaises(ProcessLookupError): os.kill(child_pid,0)
+                with self.assertRaises(ProcessLookupError): os.killpg(child_pid,0)
+                command=json.loads((output/'command-00000.json').read_text())
+                self.assertEqual(command['status'],'interrupted')
+                self.assertIn('reaped',command['cleanup'])
+                for stream in ('stdout','stderr'):
+                    self.assertEqual(command[stream+'_sha256'],digest(command[stream]))
+                self.assertIn('partial output',Path(command['stdout']).read_text())
+                if cli:
+                    self.assertEqual(json.loads((output/'failure.json').read_text())['status'],'cancelled')
+                    self.assertFalse(verify_record(json.loads((output/'integrity.json').read_text())))
+                (d/'result.json').write_text(json.dumps({'parent_returncode':rc,'child_alive_after_parent_exit':False,'owned_group_gone':True,'command_status':command['status'],'cli':cli,'signal':sig},indent=2))
+            finally:
+                if parent and parent.poll() is None:
+                    os.killpg(parent.pid,signal.SIGKILL); parent.wait(timeout=5)
+                if child_pid:
+                    try: os.killpg(child_pid,signal.SIGKILL)
+                    except ProcessLookupError: pass
+    def test_reviewer_interrupt_reducer_child_and_logs(self):
+        self.interrupted_parent(signal.SIGINT,False)
+    def test_cli_sigint_cancels_and_seals(self):
+        self.interrupted_parent(signal.SIGINT,True)
+    def test_cli_sigterm_cancels_and_seals(self):
+        self.interrupted_parent(signal.SIGTERM,True)
+
 @unittest.skipUnless(shutil.which('clang') and hostarch() in ('aarch64','x86_64'),'native Clang required')
 class Native(unittest.TestCase):
     def test_driver_wrap_zero_checksum_failure_and_unsupported_timer(self):
@@ -157,7 +210,17 @@ class Native(unittest.TestCase):
             rec,text=r.run([binary,'0','0','1','0','tsc'],allow_failure=True)
             self.assertEqual(rec['returncode'],3); self.assertEqual(json.loads(text)['status'],'unsupported')
         seal(r,evidence)
-        self.assertFalse(verify_record(json.loads((r.output/'integrity.json').read_text())))
+        integrity=json.loads((r.output/'integrity.json').read_text())
+        self.assertFalse(verify_record(integrity))
+        for tool in (evidence['compiler'],evidence['disassembler']):
+            for name,expected in tool_fingerprints(tool).items():
+                self.assertEqual(integrity[name],expected)
+                self.assertEqual(evidence['inputs'][name],expected)
+        compiler=evidence['compiler']
+        if compiler.get('resolver'):
+            self.assertNotEqual(compiler['path'],compiler['requested']['path'])
+            self.assertEqual(compiler['identity_scope'],'actual executable resolved by xcrun; invoked directly')
+            self.assertTrue(all(c['argv'][0]==compiler['path'] for c in r.commands if '-c' in c['argv'] or '-fno-lto' in c['argv']))
         # Separate, intentionally wrong oracle: the native driver must fail.
         (root/'oracle.c').write_text(oracle.replace('s+n*2','s+n*2+1'))
         bad=Runner(root/'bad'); be=build(bad,root,[(mp,m)],'clang')

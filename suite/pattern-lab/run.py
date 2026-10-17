@@ -6,11 +6,12 @@ import argparse
 import json
 from pathlib import Path
 from lab.manifest import LabError, load
+from lab.cancel import TerminationRequested, ignore_cancellation, signal_handlers, raise_cancel
 from lab.engine import Runner, build, check, bench, seal, write, verify_record, hostarch
 
 ROOT=Path(__file__).resolve().parent
 
-def main(argv=None):
+def _main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest='command',required=True)
     for cmd in ('list','check','bench'):
@@ -62,12 +63,27 @@ def main(argv=None):
         seal(r,evidence)
         print(json.dumps({'status':status,'native_patterns':native,'unsupported_patterns':len(selected)-native,'output':str(r.output)}))
         return 0 if native else 3
+    except KeyboardInterrupt as e:
+        code=143 if isinstance(e,TerminationRequested) else 130
+        with ignore_cancellation():
+            if r:
+                evidence=evidence or r.evidence
+                write(r.output/'failure.json',{'status':'cancelled','signal':'SIGTERM' if code==143 else 'SIGINT','exit_code':code})
+                if evidence and not (r.output/'build.json').exists(): write(r.output/'build.json',evidence)
+                if not (r.output/'integrity.json').exists(): seal(r,evidence)
+            print('campaign cancelled',file=sys.stderr)
+        return code
     except (LabError,OSError,ValueError) as e:
         if r:
+            evidence=evidence or r.evidence
             write(r.output/'failure.json',{'status':'failed','error':str(e)})
             if evidence and not (r.output/'build.json').exists(): write(r.output/'build.json',evidence)
             seal(r,evidence)
         print(str(e),file=sys.stderr); return 1
+
+def main(argv=None):
+    with signal_handlers(raise_cancel):
+        return _main(argv)
 
 if __name__=='__main__':
     raise SystemExit(main())

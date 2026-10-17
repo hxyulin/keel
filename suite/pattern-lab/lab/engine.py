@@ -10,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from .manifest import LabError, source
+from .cancel import TerminationRequested, defer_spawn_cancellation, ignore_cancellation
 from .stats import schedule, summarize, common_iterations
 
 FLAGS=['-O2','-fno-lto','-Wall','-Wextra','-Werror']
@@ -33,32 +34,52 @@ class Runner:
         self.timeout=timeout
         self.deadline=time.monotonic()+budget
         self.commands=[]
+        self.evidence=None
     def run(self, argv, allow_failure=False):
         if time.monotonic()>=self.deadline: raise LabError('campaign deadline exceeded')
         argv=[str(x) for x in argv]
         n=len(self.commands); stem=self.output/f'command-{n:05}'
         rec={'argv':argv,'timeout_seconds':min(self.timeout,self.deadline-time.monotonic()),'stdout':str(stem)+'.stdout','stderr':str(stem)+'.stderr'}
         self.commands.append(rec)
-        with open(rec['stdout'],'xb') as out, open(rec['stderr'],'xb') as err:
-            try:
-                p=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=err,shell=False,start_new_session=(os.name=='posix'))
-                try:
-                    rec['returncode']=p.wait(timeout=rec['timeout_seconds'])
-                except subprocess.TimeoutExpired:
-                    if os.name=='posix':
-                        try: os.killpg(p.pid,signal.SIGKILL)
-                        except ProcessLookupError: pass
-                    else: p.kill()
-                    p.wait()
-                    raise
-            except subprocess.TimeoutExpired:
-                rec['status']='timeout'
-            except OSError as e:
-                rec['status']='launch_failed'; rec['error']=str(e)
-        rec['stdout_sha256']=digest(rec['stdout'])
-        rec['stderr_sha256']=digest(rec['stderr'])
-        write(str(stem)+'.json',rec)
-        if rec.get('returncode')!=0 and not allow_failure:
+        p=None
+        try:
+            with open(rec['stdout'],'xb') as out, open(rec['stderr'],'xb') as err:
+                with defer_spawn_cancellation():
+                    p=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=err,shell=False,start_new_session=(os.name=='posix'))
+                rec['pid']=p.pid
+                rec['returncode']=p.wait(timeout=rec['timeout_seconds'])
+        except subprocess.TimeoutExpired:
+            rec['status']='timeout'
+        except OSError as e:
+            rec['status']='launch_failed'; rec['error']=str(e)
+        except BaseException as e:
+            rec['status']='interrupted' if isinstance(e,KeyboardInterrupt) else 'exceptional_exit'
+            rec['exception']=type(e).__name__
+            if isinstance(e,KeyboardInterrupt):
+                rec['signal']='SIGTERM' if isinstance(e,TerminationRequested) else 'SIGINT'
+            raise
+        finally:
+            with ignore_cancellation():
+                if p is not None and 'returncode' not in rec:
+                    rec['pid']=p.pid
+                    # The new session belongs to this Popen only. Kill the group
+                    # even if the leader exited, so its remaining children stop.
+                    try:
+                        if os.name=='posix': os.killpg(p.pid,signal.SIGKILL)
+                        else: p.kill()
+                    except ProcessLookupError:
+                        pass
+                    except OSError as e:
+                        rec['cleanup_error']=str(e)
+                    try:
+                        rec['returncode']=p.wait(timeout=5)
+                        rec['cleanup']='owned process group killed; child reaped' if os.name=='posix' else 'child killed and reaped'
+                    except subprocess.TimeoutExpired:
+                        rec['cleanup_error']='child not reaped within five seconds after kill'
+                for stream in ('stdout','stderr'):
+                    if Path(rec[stream]).is_file(): rec[stream+'_sha256']=digest(rec[stream])
+                write(str(stem)+'.json',rec)
+        if (rec.get('returncode')!=0 or rec.get('status')) and not allow_failure:
             raise LabError(f'command failed: {rec}; logs retained')
         with open(rec['stdout'],'rb') as f: text=f.read(2*1024*1024).decode(errors='replace')
         return rec,text
@@ -108,6 +129,7 @@ def tool_fingerprints(tool):
 
 def build(r, root, selected, clang):
     evidence={'compiler':{'status':'unused'},'host':{'arch':hostarch(),'platform':platform.platform(),'uname':list(platform.uname())},'flags':FLAGS,'patterns':[],'inputs':{},'artifacts':{}}
+    r.evidence=evidence
     for p in sorted(root.glob('lab/*.py'))+list(root.glob('run.py'))+list(root.glob('driver.c'))+list(root.glob('manifest.schema.json')):
         evidence['inputs'][str(p.resolve())]=digest(p)
     # Git provenance is diagnostic; hashes are the replay/mutation boundary.
