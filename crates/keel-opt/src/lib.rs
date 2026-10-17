@@ -6,9 +6,10 @@
 //! (CFG, dominators) themselves; there is no analysis cache until one is
 //! needed.
 //!
-//! The pass manager runs the verifier after every pass. The IR is valid
-//! between passes, always: a pass that breaks an invariant is caught at the
-//! pass that broke it, not three passes later in codegen.
+//! Passes must preserve valid IR regardless of verification policy. Repeated
+//! checks after passes and canonical restoration default on with debug assertions
+//! or the `verify-each` feature. Scoped options can override that default.
+//! Callers must validate input modules before optimization; the CLI always does.
 
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
@@ -35,8 +36,8 @@ mod memory_forward;
 mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
-mod stack_forward;
 mod small_memory;
+mod stack_forward;
 
 /// A replaceable optimization pass over one function.
 /// `run` must report true whenever it mutates the function, including aliases.
@@ -201,6 +202,56 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::Inline,
 ];
 
+/// Controls repeated checks after passes and canonical restoration only.
+/// Does not change pass correctness requirements or canonical restoration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum VerificationPolicy {
+    /// Enabled with debug assertions or the `verify-each` Cargo feature.
+    #[default]
+    Default,
+    Enabled,
+    Disabled,
+}
+impl VerificationPolicy {
+    pub const fn enabled(self) -> bool {
+        match self {
+            Self::Default => cfg!(debug_assertions) || cfg!(feature = "verify-each"),
+            Self::Enabled => true,
+            Self::Disabled => false,
+        }
+    }
+}
+
+/// Scoped optimizer configuration. Input must already be validated, in all modes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OptimizeOptions {
+    pub verification: VerificationPolicy,
+}
+
+fn verify_after(func: &Function, pass: &'static str, enabled: bool) -> Result<(), OptError> {
+    if enabled {
+        verify(func).map_err(|errors| OptError::Verifier {
+            pass,
+            func: func.name.clone(),
+            errors,
+        })?;
+    }
+    Ok(())
+}
+
+// Disabled checks return exact zero without starting a verification timer.
+fn observe_verification(
+    enabled: bool,
+    check: impl FnOnce() -> Result<(), OptError>,
+) -> (Result<(), OptError>, u128) {
+    if !enabled {
+        return (Ok(()), 0);
+    }
+    let start = std::time::Instant::now();
+    let result = check();
+    (result, start.elapsed().as_nanos())
+}
+
 /// Independent optimizer effort; Full adds value numbering, code motion, and
 /// bounded direct-call inlining, small memory expansion, private stack forwarding,
 /// and guarded loop vectorization.
@@ -294,25 +345,46 @@ pub fn run_passes_for_target(
     names: &[&str],
     target: VectorTarget,
 ) -> Result<(), OptError> {
+    run_passes_for_target_with_options(module, names, target, OptimizeOptions::default())
+}
+
+/// Named pipeline with a scoped repeated-verification policy.
+pub fn run_passes_for_target_with_options(
+    module: &mut Module,
+    names: &[&str],
+    target: VectorTarget,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     let passes = names
         .iter()
         .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_for_target(module, &passes, target)
+    run_pipeline_for_target_with_options(module, &passes, target, options)
 }
 
 /// Runs custom or built-in passes, restoring declared canonical entry
-/// requirements and verifying the IR after each pass and restoration.
+/// requirements and applying the default repeated-verification policy.
 pub fn run_pipeline(module: &mut Module, passes: &[&dyn Pass]) -> Result<(), OptError> {
     run_pipeline_for_target(module, passes, VectorTarget::Portable)
 }
 
-/// Runs a custom pipeline with target SIMD capabilities and per-pass verification.
+/// Runs a custom pipeline with target SIMD capabilities and default verification.
 pub fn run_pipeline_for_target(
     module: &mut Module,
     passes: &[&dyn Pass],
     target: VectorTarget,
 ) -> Result<(), OptError> {
+    run_pipeline_for_target_with_options(module, passes, target, OptimizeOptions::default())
+}
+
+/// Custom pipeline with scoped options; canonical restoration always runs.
+pub fn run_pipeline_for_target_with_options(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    target: VectorTarget,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
+    let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
     let mut canonical = vec![false; module.functions.len()];
     for pass in passes {
@@ -321,31 +393,19 @@ pub fn run_pipeline_for_target(
             canonical.resize(module.functions.len(), false);
             canonical.fill(false);
             for func in &module.functions {
-                verify(func).map_err(|errors| OptError::Verifier {
-                    pass: pass.name(),
-                    func: func.name.clone(),
-                    errors,
-                })?;
+                verify_after(func, pass.name(), verification_enabled)?;
             }
             continue;
         }
         for (index, func) in module.functions.iter_mut().enumerate() {
             if pass.requires_canonical_form() && !canonical[index] {
                 canonicalize::run(func);
-                verify(func).map_err(|errors| OptError::Verifier {
-                    pass: "canonicalize",
-                    func: func.name.clone(),
-                    errors,
-                })?;
+                verify_after(func, "canonicalize", verification_enabled)?;
                 canonical[index] = true;
             }
             let changed = pass.run_for_target(func, target);
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
-            verify(func).map_err(|errors| OptError::Verifier {
-                pass: pass.name(),
-                func: func.name.clone(),
-                errors,
-            })?;
+            verify_after(func, pass.name(), verification_enabled)?;
         }
     }
     Ok(())
@@ -364,11 +424,28 @@ pub fn run_passes_for_target_with_report(
     target: VectorTarget,
     report: &mut OptimizationReport,
 ) -> Result<(), OptError> {
+    run_passes_for_target_with_report_and_options(
+        module,
+        names,
+        target,
+        report,
+        OptimizeOptions::default(),
+    )
+}
+
+/// Observed named pipeline with scoped options, matching the ordinary runner.
+pub fn run_passes_for_target_with_report_and_options(
+    module: &mut Module,
+    names: &[&str],
+    target: VectorTarget,
+    report: &mut OptimizationReport,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
     let passes = names
         .iter()
         .map(|&name| find_pass(name).ok_or_else(|| OptError::UnknownPass(name.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
-    run_pipeline_for_target_with_report(module, &passes, target, report)
+    run_pipeline_for_target_with_report_and_options(module, &passes, target, report, options)
 }
 
 /// Observed custom pipeline; order and verifier policy match the ordinary runner.
@@ -378,6 +455,25 @@ pub fn run_pipeline_for_target_with_report(
     target: VectorTarget,
     report: &mut OptimizationReport,
 ) -> Result<(), OptError> {
+    run_pipeline_for_target_with_report_and_options(
+        module,
+        passes,
+        target,
+        report,
+        OptimizeOptions::default(),
+    )
+}
+
+/// Observed custom pipeline with scoped options. Each observation records its
+/// policy so a report may contain invocations from multiple pipeline calls.
+pub fn run_pipeline_for_target_with_report_and_options(
+    module: &mut Module,
+    passes: &[&dyn Pass],
+    target: VectorTarget,
+    report: &mut OptimizationReport,
+    options: OptimizeOptions,
+) -> Result<(), OptError> {
+    let verification_enabled = options.verification.enabled();
     use std::time::Instant;
     profiling::scope!("optimization");
     let mut canonical = vec![false; module.functions.len()];
@@ -391,15 +487,12 @@ pub fn run_pipeline_for_target_with_report(
         if let Some(changed) = module_changed {
             canonical.resize(module.functions.len(), false);
             canonical.fill(false);
-            let start = Instant::now();
-            let result = module.functions.iter().try_for_each(|func| {
-                verify(func).map_err(|errors| OptError::Verifier {
-                    pass: pass.name(),
-                    func: func.name.clone(),
-                    errors,
-                })
+            let (result, verification_ns) = observe_verification(verification_enabled, || {
+                module
+                    .functions
+                    .iter()
+                    .try_for_each(|func| verify_after(func, pass.name(), verification_enabled))
             });
-            let verification_ns = start.elapsed().as_nanos();
             report.invocations.push(PassObservation {
                 pipeline_index,
                 pass: pass.name(),
@@ -407,6 +500,7 @@ pub fn run_pipeline_for_target_with_report(
                 function: None,
                 changed,
                 pass_ns,
+                verification_enabled,
                 verification_ns,
                 restoration_ns: 0,
                 restoration_verification_ns: 0,
@@ -427,13 +521,10 @@ pub fn run_pipeline_for_target_with_report(
                 let start = Instant::now();
                 restoration_changed = Some(canonicalize::run(func));
                 restoration_ns = start.elapsed().as_nanos();
-                let start = Instant::now();
-                let result = verify(func).map_err(|errors| OptError::Verifier {
-                    pass: "canonicalize",
-                    func: func.name.clone(),
-                    errors,
+                let (result, ns) = observe_verification(verification_enabled, || {
+                    verify_after(func, "canonicalize", verification_enabled)
                 });
-                restoration_verification_ns = start.elapsed().as_nanos();
+                restoration_verification_ns = ns;
                 // As in the ordinary runner, a failed restoration stops before
                 // the requested pass. No completed invocation is fabricated.
                 result?;
@@ -443,13 +534,9 @@ pub fn run_pipeline_for_target_with_report(
             let changed = pass.run_for_target(func, target);
             let pass_ns = start.elapsed().as_nanos();
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
-            let start = Instant::now();
-            let result = verify(func).map_err(|errors| OptError::Verifier {
-                pass: pass.name(),
-                func: func.name.clone(),
-                errors,
+            let (result, verification_ns) = observe_verification(verification_enabled, || {
+                verify_after(func, pass.name(), verification_enabled)
             });
-            let verification_ns = start.elapsed().as_nanos();
             report.invocations.push(PassObservation {
                 pipeline_index,
                 pass: pass.name(),
@@ -457,6 +544,7 @@ pub fn run_pipeline_for_target_with_report(
                 function: Some(func.name.clone()),
                 changed,
                 pass_ns,
+                verification_enabled,
                 verification_ns,
                 restoration_ns,
                 restoration_verification_ns,

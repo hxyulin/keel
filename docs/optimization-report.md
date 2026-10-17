@@ -23,18 +23,42 @@ entry points and the explicit-request-only `InlineReport` API remain available,
 including its legacy broad reason strings. Custom module passes can override
 `Pass::run_module_with_report`; its default dispatches to `run_module` once.
 
-## Schema version 1
+## Repeated verification
+
+The CLI always validates the initial input module, including with no optimization
+passes. Canonical restoration always runs when required. Repeated checks after
+passes and restoration default on when debug assertions are enabled, and off in
+ordinary release builds. The `verify-each` Cargo feature on `keel-opt` (forwarded
+by `keel`) forces the default on, including development release builds.
+`--verify-each` and `--no-verify-each` explicitly override the build default for
+`compile`, `cc`, and `opt`, independently of optimization tier, pass selection,
+and reporting. Contradictory flags are rejected in either order; repeating the
+same flag is accepted. Disabling checks never relaxes a pass's correctness contract.
+
+Library callers must supply validated input modules, as before. Scoped
+`OptimizeOptions { verification: VerificationPolicy::Enabled }` or `Disabled`
+can be passed to `run_passes_for_target_with_options` and
+`run_pipeline_for_target_with_options`; the observed counterparts end in
+`_with_report_and_options`. `VerificationPolicy::Default` and legacy entrypoints
+use the build default. There is no process-global state or environment override.
+
+## Schema version 2
 
 The JSON root contains `schema_version` and `invocations`. Invocation order is
 pipeline order, then module function layout order for function passes. Repeated
 passes have distinct zero-based `pipeline_index` values. Each invocation has
 `pass`, `target` (vector capability: portable/aarch64-neon/x86-sse2), `scope`
 (module/function), nullable `function`, and the pass's actual `changed` return.
-The target field is not an ISA tuning or native CPU claim.
+The target field is not an ISA tuning or native CPU claim. Each invocation's
+`verification_enabled` records the resolved repeated-verification policy, also
+when reports accumulate calls with different policies. An empty pipeline has no
+invocations or repeated checks to describe.
 
 `pass_ns` measures only pass dispatch/execution (including inliner event
 collection when enabled). `verification_ns` separately measures the existing
-post-pass verification. `restoration_ns` and `restoration_verification_ns`
+post-pass verification when enabled. Disabled `verification_ns` and
+`restoration_verification_ns` are exactly zero: no verification timer is started.
+Initial CLI input validation is outside this report. `restoration_ns` and `restoration_verification_ns`
 separate required canonicalization and its verification from the named pass.
 `restoration_changed` is null when no restoration ran, otherwise its actual
 boolean result. Thus a pass can report `changed: false` while its entry

@@ -37,7 +37,7 @@ const USAGE: &str = "usage:
   keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]
   keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-  keel compile|cc|opt [--opt-report <new-report.json>] <input> [-o <output>]
+  keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
   keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
@@ -49,6 +49,9 @@ const USAGE: &str = "usage:
   -O enables full IR optimization and all target selection passes.
   --isel / --isel-tier override -O selection in either order; last selector wins.
   --opt-tier controls IR optimization; -p overrides its pipeline in either order.
+  Repeated verification defaults on with debug assertions or feature verify-each.
+  --verify-each / --no-verify-each override this; contradictory flags are rejected.
+  Initial input verification and canonical restoration always run.
   Input files must remain unchanged during parsing.";
 
 fn main() -> ExitCode {
@@ -71,6 +74,7 @@ struct Options {
     output: Option<String>,
     opt_report: Option<String>,
     optimization: keel_opt::OptimizationTier,
+    verification: keel_opt::VerificationPolicy,
     allocation: keel_codegen::regalloc::AllocationTier,
     selection: keel_codegen::SelectionOptions,
     #[cfg(feature = "experimental-regalloc")]
@@ -92,17 +96,29 @@ struct Options {
 }
 
 impl Options {
+    fn optimizer_options(&self) -> keel_opt::OptimizeOptions {
+        keel_opt::OptimizeOptions {
+            verification: self.verification,
+        }
+    }
+
     /// Explicit pipelines override tier presets, independently of flag order.
     fn optimize(&self, module: &mut Module) -> Result<(), keel_opt::OptError> {
         match &self.passes {
             Some(names) => {
                 let names: Vec<_> = names.iter().map(String::as_str).collect();
-                keel_opt::run_passes_for_target(module, &names, self.vector_target())
+                keel_opt::run_passes_for_target_with_options(
+                    module,
+                    &names,
+                    self.vector_target(),
+                    self.optimizer_options(),
+                )
             }
-            None => keel_opt::run_passes_for_target(
+            None => keel_opt::run_passes_for_target_with_options(
                 module,
                 self.optimization.pipeline(),
                 self.vector_target(),
+                self.optimizer_options(),
             ),
         }
     }
@@ -126,12 +142,23 @@ impl Options {
         target: keel_opt::VectorTarget,
     ) -> Result<(), String> {
         let Some(path) = &self.opt_report else {
-            return keel_opt::run_passes_for_target(module, names, target)
-                .map_err(|e| e.to_string());
+            return keel_opt::run_passes_for_target_with_options(
+                module,
+                names,
+                target,
+                self.optimizer_options(),
+            )
+            .map_err(|e| e.to_string());
         };
         let mut report = keel_opt::OptimizationReport::default();
-        keel_opt::run_passes_for_target_with_report(module, names, target, &mut report)
-            .map_err(|e| e.to_string())?;
+        keel_opt::run_passes_for_target_with_report_and_options(
+            module,
+            names,
+            target,
+            &mut report,
+            self.optimizer_options(),
+        )
+        .map_err(|e| e.to_string())?;
         // Never overwrite an input, output, previous report, symlink, or device.
         // Path conflicts are checked before compilation; create_new also guards races.
         use std::io::Write;
@@ -264,6 +291,21 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             }
             "-E" => opts.preprocess_only = true,
             "-o" => opts.output = Some(args.next().ok_or("`-o` needs a file")?.clone()),
+            "--verify-each" | "--no-verify-each" => {
+                let policy = if flag == "--verify-each" {
+                    keel_opt::VerificationPolicy::Enabled
+                } else {
+                    keel_opt::VerificationPolicy::Disabled
+                };
+                if opts.verification != keel_opt::VerificationPolicy::Default
+                    && opts.verification != policy
+                {
+                    return Err(
+                        "`--verify-each` and `--no-verify-each` are mutually exclusive".into(),
+                    );
+                }
+                opts.verification = policy;
+            }
             "--opt-report" => {
                 let path = args.next().ok_or("`--opt-report` needs a file")?;
                 if path.is_empty() || path == "-" {
@@ -489,6 +531,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--emit-object",
                     "--isel",
                     "--opt-report",
+                    "--verify-each",
+                    "--no-verify-each",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -524,6 +568,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
                     "--emit-object",
                     "--isel",
                     "--opt-report",
+                    "--verify-each",
+                    "--no-verify-each",
                     "--opt-tier",
                     "--regalloc",
                     "--remat",
@@ -597,7 +643,16 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "opt" => {
             let opts = parse_options(
                 rest,
-                &["-o", "-p", "--opt-tier", "-O", "--target", "--opt-report"],
+                &[
+                    "-o",
+                    "-p",
+                    "--opt-tier",
+                    "-O",
+                    "--target",
+                    "--opt-report",
+                    "--verify-each",
+                    "--no-verify-each",
+                ],
             )?;
             let (input, mut module) = load(&opts)?;
             let target = if opts.target.is_some() {
@@ -725,8 +780,41 @@ mod tests {
                 "--isel-tier",
                 "--isel",
                 "--regalloc",
+                "--verify-each",
+                "--no-verify-each",
             ],
         )
+    }
+
+    #[test]
+    fn verification_flags_override_build_default_independently_of_tiers() {
+        use keel_opt::VerificationPolicy::{Default, Disabled, Enabled};
+        assert_eq!(options(&[]).unwrap().verification, Default);
+        for (flag, expected) in [("--verify-each", Enabled), ("--no-verify-each", Disabled)] {
+            for flags in [
+                vec![flag, "-O"],
+                vec!["--opt-tier", "none", flag],
+                vec![flag, flag],
+            ] {
+                let opts = options(&flags).unwrap();
+                assert_eq!(opts.verification, expected);
+                assert_eq!(
+                    opts.optimizer_options().verification.enabled(),
+                    expected == Enabled
+                );
+            }
+        }
+        for flags in [
+            ["--verify-each", "--no-verify-each"],
+            ["--no-verify-each", "--verify-each"],
+        ] {
+            assert!(
+                options(&flags)
+                    .err()
+                    .unwrap()
+                    .contains("mutually exclusive")
+            );
+        }
     }
 
     #[test]

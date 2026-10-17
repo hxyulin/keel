@@ -65,9 +65,9 @@ fn reports_are_explicit_and_do_not_change_stdout_or_named_output() {
         assert_eq!(plain.stdout, output.stdout);
         assert_eq!(plain.stderr, output.stderr);
         let report = fs::read_to_string(dir.join(&name)).unwrap();
-        assert!(report.starts_with("{\"schema_version\":1,\"invocations\":["));
+        assert!(report.starts_with("{\"schema_version\":2,\"invocations\":["));
         if n == 4 {
-            assert_eq!(report, "{\"schema_version\":1,\"invocations\":[]}\n");
+            assert_eq!(report, "{\"schema_version\":2,\"invocations\":[]}\n");
         }
         fs::remove_file(dir.join(&name)).unwrap();
         observed.extend(["-o", "out"]);

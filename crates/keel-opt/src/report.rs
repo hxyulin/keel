@@ -91,6 +91,9 @@ pub struct PassObservation {
     pub function: Option<String>,
     pub changed: bool,
     pub pass_ns: u128,
+    /// Whether repeated verification was enabled for this invocation.
+    pub verification_enabled: bool,
+    /// Exact zero when disabled; excludes timer overhead for skipped checks.
     pub verification_ns: u128,
     pub restoration_ns: u128,
     pub restoration_verification_ns: u128,
@@ -126,7 +129,7 @@ fn quoted(s: &str) -> String {
 impl OptimizationReport {
     /// Stable field/event order. Only timing values are nondeterministic.
     pub fn to_json(&self) -> String {
-        let mut out = String::from("{\"schema_version\":1,\"invocations\":[");
+        let mut out = String::from("{\"schema_version\":2,\"invocations\":[");
         for (n, p) in self.invocations.iter().enumerate() {
             if n != 0 {
                 out.push(',');
@@ -136,7 +139,7 @@ impl OptimizationReport {
                 crate::VectorTarget::Aarch64Neon => "aarch64-neon",
                 crate::VectorTarget::X86Sse2 => "x86-sse2",
             };
-            write!(out, "{{\"pipeline_index\":{},\"pass\":{},\"target\":{},\"scope\":{},\"function\":{},\"changed\":{},\"pass_ns\":{},\"verification_ns\":{},\"restoration_ns\":{},\"restoration_verification_ns\":{},\"restoration_changed\":{},\"before\":{},\"after\":{},\"inline_sites\":[", p.pipeline_index, quoted(p.pass), quoted(target), quoted(if p.function.is_some() { "function" } else { "module" }), p.function.as_deref().map(quoted).unwrap_or_else(|| "null".into()), p.changed, p.pass_ns, p.verification_ns, p.restoration_ns, p.restoration_verification_ns, p.restoration_changed.map(|v| v.to_string()).unwrap_or_else(|| "null".into()), p.before.json(), p.after.json()).unwrap();
+            write!(out, "{{\"pipeline_index\":{},\"pass\":{},\"target\":{},\"scope\":{},\"function\":{},\"changed\":{},\"pass_ns\":{},\"verification_enabled\":{},\"verification_ns\":{},\"restoration_ns\":{},\"restoration_verification_ns\":{},\"restoration_changed\":{},\"before\":{},\"after\":{},\"inline_sites\":[", p.pipeline_index, quoted(p.pass), quoted(target), quoted(if p.function.is_some() { "function" } else { "module" }), p.function.as_deref().map(quoted).unwrap_or_else(|| "null".into()), p.changed, p.pass_ns, p.verification_enabled, p.verification_ns, p.restoration_ns, p.restoration_verification_ns, p.restoration_changed.map(|v| v.to_string()).unwrap_or_else(|| "null".into()), p.before.json(), p.after.json()).unwrap();
             for (i, site) in p.inline_sites.iter().enumerate() {
                 if i != 0 {
                     out.push(',');

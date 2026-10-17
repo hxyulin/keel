@@ -117,7 +117,7 @@ fn changed_false_is_separate_from_canonical_restoration() {
     assert_eq!(report.invocations[1].restoration_changed, None);
     assert_eq!(report.invocations[1].restoration_ns, 0);
     let json = report.to_json();
-    assert!(json.starts_with("{\"schema_version\":1,\"invocations\":["));
+    assert!(json.starts_with("{\"schema_version\":2,\"invocations\":["));
     assert!(json.contains("\"target\":\"x86-sse2\""));
     assert!(!json.contains("frame_bytes"));
 }
@@ -142,12 +142,22 @@ fn errors_match_and_stop_pipeline_without_extra_passes() {
     let mut plain = keel_ir::parse(source).unwrap();
     let mut observed = plain.clone();
     let mut report = OptimizationReport::default();
-    let expected = keel_opt::run_pipeline(&mut plain, &[&Break, &Noop]).unwrap_err();
-    let error = keel_opt::run_pipeline_for_target_with_report(
+    let options = keel_opt::OptimizeOptions {
+        verification: keel_opt::VerificationPolicy::Enabled,
+    };
+    let expected = keel_opt::run_pipeline_for_target_with_options(
+        &mut plain,
+        &[&Break, &Noop],
+        VectorTarget::Portable,
+        options,
+    )
+    .unwrap_err();
+    let error = keel_opt::run_pipeline_for_target_with_report_and_options(
         &mut observed,
         &[&Break, &Noop],
         VectorTarget::Portable,
         &mut report,
+        options,
     )
     .unwrap_err();
     assert_eq!(expected.to_string(), error.to_string());
