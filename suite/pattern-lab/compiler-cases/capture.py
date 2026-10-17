@@ -3,7 +3,6 @@
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 import platform
 import re
@@ -35,8 +34,9 @@ def instructions(assembly, symbol):
     closed. This parses Keel GAS syntax, including Mach-O underscore prefixes.
     """
     lines = assembly.splitlines()
+    label = r'(?:_?' + re.escape(symbol) + r'|"_?' + re.escape(symbol) + r'")'
     starts = [i for i, line in enumerate(lines)
-              if re.fullmatch(r'\s*_?' + re.escape(symbol) + r':\s*(?://.*)?', line)]
+              if re.fullmatch(r'\s*' + label + r':\s*(?://.*)?', line)]
     if len(starts) != 1:
         raise ValueError('missing/duplicate function label: ' + symbol)
     body = []
@@ -127,7 +127,8 @@ def capture(args):
               'identity_sha256': digest(identity_path), 'compiler': str(compiler),
               'provenance_caveat': 'Build provenance supplied by caller; binary hash verified',
               'host': platform.uname()._asdict(), 'source': str(source),
-              'source_sha256': digest(source), 'git': git_state(),
+              'source_sha256': digest(source), 'capture_script_sha256': digest(Path(__file__)),
+              'git': git_state(),
               'protocol': {'timeout_seconds': args.timeout, 'total_seconds': 180,
                            'order': 'target, raw/optimized, IR/assembly',
                            'native_execution': False}, 'commands': [], 'shapes': []}
@@ -153,10 +154,9 @@ def capture(args):
                               'kind': kind, 'artifact': str(artifact)}
                     report['commands'].append(record)
                     remaining = 180 - (time.monotonic() - started)
-                    if remaining <= 0:
-                        record['failure'] = 'total deadline exhausted'
-                        continue
                     try:
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(argv, 0)
                         proc = subprocess.run(argv, stdin=subprocess.DEVNULL,
                                               capture_output=True,
                                               timeout=min(args.timeout, remaining))
@@ -164,7 +164,8 @@ def capture(args):
                         record['returncode'] = proc.returncode
                     except subprocess.TimeoutExpired as exc:
                         stdout, stderr = exc.stdout or b'', exc.stderr or b''
-                        record['failure'] = 'timeout; direct compiler child reaped by subprocess.run'
+                        record['failure'] = ('total deadline exhausted; command not started' if remaining <= 0
+                                             else 'timeout; direct compiler child reaped by subprocess.run')
                     except OSError as exc:
                         stdout, stderr = b'', b''
                         record['failure'] = str(exc)

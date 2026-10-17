@@ -105,6 +105,8 @@ bridge_madd:
   imul rax, 3
 .cfi_endproc
 '''
+        for quoted in [source, source.replace('bridge_rotate:', '"bridge_rotate":')]:
+            self.assertEqual(bridge.shape(quoted, 'rotate', bridge.TARGETS[1])['status'], 'supported')
         result = bridge.shape(source, 'rotate', bridge.TARGETS[1])
         self.assertEqual(result['evidence'], ['ror rax, 13'])
         self.assertEqual(result['instruction_count'], 3)
