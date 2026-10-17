@@ -119,6 +119,43 @@ bridge_madd:
         with self.assertRaises(ValueError):
             bridge.instructions(source + source, 'bridge_rotate')
 
+    def test_real_arm_comments_and_local_labels(self):
+        assembly = """_bridge_rotate:
+Lbridge_rotate_begin:
+    ; regalloc: v0=x9 v1=x10
+    .cfi_startproc
+Lbridge_rotate_block0:
+    ; v0 = iconst.i64 13
+    ror x1, x1, #13
+    ret
+Lbridge_rotate_end:
+    .cfi_endproc
+"""
+        result = bridge.shape(assembly, 'rotate', bridge.TARGETS[0])
+        self.assertEqual(result['status'], 'supported')
+        self.assertEqual(result['instructions'], ['ror x1, x1, #13', 'ret'])
+
+    def test_unknown_labels_cannot_supply_shape_evidence(self):
+        for label in ('other_function', '"other_function"', '.other_function',
+                      'Lother_function_block0', 'Lbridge_rotateimposter_block0'):
+            assembly = 'bridge_rotate:\nret\n' + label + ':\nror rax, 13\n.cfi_endproc\n'
+            result = bridge.shape(assembly, 'rotate', bridge.TARGETS[1])
+            self.assertEqual(result['status'], 'unsupported', label)
+            self.assertEqual(result['evidence'], [])
+            self.assertIn('unknown nonlocal label', result['reason'])
+
+    def test_rotate_exact_immediates_intel_att_and_arm(self):
+        for insn in ('ror rax, 13', 'ror rax, 0xd', 'rorq $13, %rax',
+                     'rorq $0xd, %r13', 'ror r13, 13'):
+            self.assertEqual(self.observed('rotate', insn, False)['status'], 'supported', insn)
+        for insn in ('ror r13, 7', 'ror rax, 113', 'ror rax, 0x1d',
+                     'ror r13, cl', 'rorq $7, %r13', 'rorq $113, %rax',
+                     'rorq $0x1d, %rax', 'ror rax, -13', 'rorq $-13, %rax'):
+            self.assertEqual(self.observed('rotate', insn, False)['status'], 'alternative', insn)
+        for insn in ('ror x1, x1, #113', 'ror x13, x13, #7'):
+            self.assertEqual(self.observed('rotate', insn)['status'], 'alternative')
+        self.assertEqual(self.observed('rotate', 'ror x1, x1, #0xd')['status'], 'supported')
+
     def test_intel_and_att_candidate_forms(self):
         for family, insn in [('madd', 'lea rax, [rsi + rsi*2 + 7]'),
                              ('madd', 'leaq 7(%rsi,%rsi,2), %rax'),

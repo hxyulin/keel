@@ -69,7 +69,10 @@ fire. Raw instruction lines and complete assembly are retained for independent
 review. For example UMULH/MUL alone does not prove correct division magic;
 CSEL/CMOV alone does not establish the exact measured selection. Loop branches
 alone cannot establish the branch-select baseline; an unrecognized x86 branch
-form remains alternative. ARM ROR needs immediate 13. Canonical rotate,
+form remains alternative. ARM and x86 ROR need an exact immediate operand 13 (decimal or hex),
+with Intel/AT&T operand order distinguished. Keel ARM semicolon IR comments
+are excluded from instructions. Local `.L...` and `L<function>_...` labels
+are recognized; unknown nonlocal labels fail closed before directive handling. Canonical rotate,
 constant division and sign extension may already optimize before the nominal
 selection tier; inspect retained IR and operands before assigning a cause.
 The parser targets Keel GAS output and recognizes a small Intel/AT&T vocabulary;

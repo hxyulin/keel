@@ -41,12 +41,23 @@ def instructions(assembly, symbol):
         raise ValueError('missing/duplicate function label: ' + symbol)
     body = []
     for line in lines[starts[0] + 1:]:
-        line = line.split('//', 1)[0].split('# ', 1)[0].strip()
+        line = line.split('//', 1)[0].split(';', 1)[0].split('# ', 1)[0].strip()
         if re.match(r'\.(?:cfi_endproc|size|globl|global)\b', line):
             break
-        if not line or line.startswith('.') or line.endswith(':'):
+        if not line:
             continue
-        # An unknown nonlocal label cannot silently merge two functions.
+        # Check labels before directives: .L labels are local, whereas an
+        # unknown external label (even with a leading dot) must fail closed.
+        if line.endswith(':'):
+            label = line[:-1]
+            if label.startswith('"') and label.endswith('"'):
+                label = label[1:-1]
+            if (re.fullmatch(r'\.L[A-Za-z0-9_.$]+', label) or
+                    re.fullmatch(r'L' + re.escape(symbol) + r'_[A-Za-z0-9_.$]+', label)):
+                continue
+            raise ValueError('unknown nonlocal label: ' + line)
+        if line.startswith('.'):
+            continue
         if ':' in line or not re.match(r'^[a-z][a-z0-9.]*\s*', line):
             raise ValueError('unknown assembly line: ' + line)
         body.append(line.lower())
@@ -55,6 +66,29 @@ def instructions(assembly, symbol):
     if not body:
         raise ValueError('empty function: ' + symbol)
     return body
+
+
+def rotate13(instruction, arm):
+    """Exact immediate operand, not a register name or a numeric substring."""
+    parts = instruction.split(None, 1)
+    if len(parts) != 2 or parts[0] not in (('ror',) if arm else ('ror', 'rorq')):
+        return False
+    operands = [operand.strip() for operand in parts[1].split(',')]
+    if arm:
+        if len(operands) != 3 or not operands[-1].startswith('#'):
+            return False
+        token = operands[-1][1:]
+    elif '%' in parts[1]:  # AT&T: immediate first, prefixed by $.
+        if len(operands) != 2 or not operands[0].startswith('$'):
+            return False
+        token = operands[0][1:]
+    else:  # Keel Intel: destination first, immediate second.
+        if len(operands) != 2:
+            return False
+        token = operands[1]
+    if not re.fullmatch(r'(?:0x[0-9a-f]+|[0-9]+)', token):
+        return False
+    return int(token, 16 if token.startswith('0x') else 10) == 13
 
 
 def shape(assembly, family, target):
@@ -72,7 +106,6 @@ def shape(assembly, family, target):
     arm = target == TARGETS[0]
     candidates = {
         'madd': r'^madd\b' if arm else r'^lea[q]?\b.*(?:\*\s*2|,\s*2\))',
-        'rotate': r'^ror\b.*#13\b' if arm else r'^ror[q]?\b.*(?:13|0xd)\b',
         'udiv10': r'^umulh\b' if arm else r'^mul[q]?\b',
         'branch-select': r'^csel\b' if arm else r'^cmov[a-z]*\b',
         'sext8': r'^sxtb\b' if arm else r'^movs(?:bq|x)\b.*(?:byte|\b[a-z]+l\b)',
@@ -86,7 +119,8 @@ def shape(assembly, family, target):
         'sext8': r'^asr\b.*#56\b' if arm else r'^sar[q]?\b.*56\b',
         'narrow-load': r'^and\b.*#(?:255|0xff)\b' if arm else r'^and[q]?\b.*(?:255|0xff)\b',
     }
-    candidate = [s for s in body if re.search(candidates[family], s)]
+    candidate = [s for s in body if (rotate13(s, arm) if family == 'rotate'
+                                    else re.search(candidates[family], s))]
     baseline = [s for s in body if re.search(baselines[family], s)]
     return {'status': 'supported' if candidate else 'missed' if baseline else 'alternative',
             'evidence': candidate or baseline, 'instructions': body,
