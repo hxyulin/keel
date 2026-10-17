@@ -1333,7 +1333,17 @@ compared against Clang.
   the label's number in its function (from 1), and every `goto *p` jumps
   to one shared dispatch block, passing that number as a block argument.
   Its `switch` over the labels whose address is taken becomes one jump
-  table. Locals merge through SSA parameters at dispatch. Sharing avoids
+  table. When every computed goto in a function is a direct subscript of
+  the same immutable, nonvolatile pointer table, the frontend can instead
+  switch on the evaluated subscript and map each entry to its label. This
+  removes the numeric-label lookup without changing label values, ordinary
+  table uses, or the shared SSA merge. The table must have an exact supported
+  constant layout, at most 4096 entries and at most twice as many entries as
+  address-taken labels. Duplicate/designated writes and implicit zeros retain
+  their initializer semantics; zero destinations trap. Copied, mutable,
+  volatile, mixed-table and computed-offset dispatch retains the numeric
+  lowering for the whole function.
+  Locals merge through SSA parameters at dispatch. Sharing avoids
   duplicating the table and its edge copies at every site: QuickJS and Lua
   otherwise spend far more code on dispatch than on their handlers. The
   dispatch block is emitted after the body, before sealing all blocks, so
@@ -1341,7 +1351,9 @@ compared against Clang.
   label of the same function, where a number is as good as an address;
   and being constants, the numbers can fill static dispatch tables, and
   `&&a - &&b` offsets work. An indirect branch in the IR would need edge
-  copies for block parameters on every possible target at once.
+  copies for block parameters on every possible target at once. Table
+  fusion retains shared-state moves/stores and the backend's checked
+  indexed branch; it does not provide direct threaded dispatch.
 - **Atomics.** `_Atomic(T)` is a type of its own (`Ty::Atomic`), for
   integers and pointers: the one place a value is read from an object
   (`rvalue`) makes reading one an atomic load, and assignment, `+=` and
