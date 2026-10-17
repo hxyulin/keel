@@ -1,0 +1,103 @@
+file f0 = "load-narrow-cases.c"
+dtype dt0 = base "unsigned long long" unsigned 8
+
+func @stack_o0(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 0
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 notrap v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_o1(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 1
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 notrap v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_o8(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 8
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 align 8 notrap v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_o16(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 16
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 notrap v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_write(i64, i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64, v7: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 1
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 notrap v3 !f0:10:1
+ store v7, v3 !f0:11:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_mayfault(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 0
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64  v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @stack_debug(i64) -> i64 cc(c) {
+ ss0 = stack_slot 32, align 8
+ dvar "home" dt0 ss0
+block0(v0: i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 0
+ v3 = ptradd v1, v2
+ store v0, v3
+ v4 = load.i64 notrap v3 !f0:10:1
+ v5 = iconst.i64 255
+ v6 = and v4, v5 !f0:12:1
+ return v6
+}
+
+func @generic_load(ptr) -> i64 cc(c) {
+block0(v0: ptr):
+ v1 = load.i64 v0
+ v2 = iconst.i64 255
+ v3 = and v1, v2
+ return v3
+}
