@@ -148,3 +148,9 @@ opcodes, object format, unwind data, linked ABI behavior, or machine execution.
 Independent review and harness native checks are required before any benchmark.
 Native reports must retain source/object/binary identities and unsupported
 architecture/tool statuses; source test success alone is not native correctness.
+
+## Additional coverage
+
+See [COVERAGE.md](COVERAGE.md) for the six shared recurrences behind the twelve
+`arm-more-*` / `x86-more-*` fixtures, their exact seeds, semantic proofs and
+measurement limits.

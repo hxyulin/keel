@@ -10,10 +10,17 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 U64 = (1 << 64) - 1
+LEGACY_IDS = {
+    "arm-address-load", "arm-dependent-add", "arm-independent-add", "arm-control",
+    "x86-dependent-add", "x86-independent-add", "x86-control",
+}
 
 
 def manifests():
-    return [json.loads(p.read_text()) for p in sorted((ROOT / "patterns").glob("*.json"))]
+    # These unchanged source proofs describe exactly the original seven fixtures.
+    # General parser/contract checks for every manifest live in test_more_patterns.
+    return [json.loads((ROOT / "patterns" / f"{name}.json").read_text())
+            for name in sorted(LEGACY_IDS)]
 
 
 def body(source):
