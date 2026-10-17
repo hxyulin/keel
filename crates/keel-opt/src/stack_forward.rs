@@ -56,7 +56,9 @@ pub fn run(func: &mut Function) -> bool {
                 | keel_ir::Intrinsic::StackRestore
                 | keel_ir::Intrinsic::StackSave
         ),
-        InstData::Call { func: callee, .. } => func.callee(*callee).sig.returns_twice,
+        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
+            func.callee(*callee).sig.returns_twice
+        }
         InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
         _ => false,
     }) {

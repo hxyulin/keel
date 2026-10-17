@@ -318,3 +318,78 @@ fn retained_quickjs_ss493_exact_reload_activation() {
     keel_opt::run_passes(&mut m, &["stack-forward"]).unwrap();
     assert_eq!(pieces(&m.functions[0]), (0, 1, 2));
 }
+
+#[test]
+fn returns_twice_invoke_keeps_memory_across_nonlocal_resumption() {
+    // R1-P2-1: CFG dominance omits save/restore nonlocal resumption edges.
+    // Keep the reviewer's full loop reducer, not just a straight-line call.
+    let mut m = keel_ir::parse(r#"decl @save(ptr) -> i32 returns_twice
+decl @restore(ptr)
+decl @personality()
+func @f(ptr) -> i64 personality @personality {
+ ss0 = stack_slot 8, align 8
+block0(v0: ptr):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 1
+ v3 = iconst.i64 2
+ jump block1(v2)
+block1(v4: i64):
+ store v4, v1
+ v5 = icmp.eq v4, v2
+ brif v5, block2, block4
+block2:
+ v6 = invoke @save(v0), block3, block5
+block3:
+ v7 = load.i64 v1
+ brif v6, block6, block1(v3)
+block4:
+ call @restore(v0)
+ trap
+block5:
+ v8, v9 = landingpad cleanup
+ trap
+block6:
+ return v7
+}
+"#).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let before = m.to_string();
+    keel_opt::run_passes(&mut m, &["stack-forward"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(before, m.to_string());
+    assert_eq!(loads(&m), 1);
+}
+
+#[test]
+fn direct_and_indirect_calls_use_declared_returns_twice_signature() {
+    for indirect in [false, true] {
+        for twice in [false, true] {
+            let attrs = if twice { "returns_twice" } else { "" };
+            let call = if indirect {
+                format!("call_indirect v0() : () {attrs}")
+            } else {
+                "call @effect()".to_owned()
+            };
+            let mut m = keel_ir::parse(&format!("decl @effect() {attrs}
+func @f(ptr, i64) -> i64 {{
+ ss0 = stack_slot 8, align 8
+block0(v0: ptr, v1: i64):
+ v2 = stack_addr ss0
+ store v1, v2
+ {call}
+ jump block1
+block1:
+ v3 = load.i64 v2
+ return v3
+}}" )).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            let before = m.to_string();
+            keel_opt::run_passes(&mut m, &["stack-forward"]).unwrap();
+            if twice {
+                assert_eq!(before, m.to_string());
+            } else {
+                assert_eq!(loads(&m), 0);
+            }
+        }
+    }
+}

@@ -83,3 +83,30 @@ performance grant; do not infer frame savings from removed loads.
 Independent source review and root combined validation are required. Any
 broader lifetime/provenance/aggregate ABI proposal returns to root as a design
 checkpoint. No nested workers, pushes, installs or unrelated cleanup.
+
+## R1-P2-1 response: returns-twice invoke
+
+Independent R1 requested changes on c90c802: the global bailout recognized
+Call and CallIndirect, but omitted Invoke. Its nonlocal resumption is outside
+ordinary CFG dominance. The original full finding and reducer remain in ROOT
+`suite/reports/aggregate-temporaries-20261017/review-r1/`; report SHA256 is
+65e925d656c4063752ca4487c4627e108b65e0f38ee1ef0c8eb889b85eeabbf1.
+
+On the exact c90c802 LinuxHost compiler, the reviewer's reducer parsed and verified,
+then stack-forward removed its private load and store and changed the return
+to the stored SSA value. This structurally reproduces the reported unsafe
+transformation; it does not claim native wrong-output reproduction.
+
+The bounded correction groups Invoke with Call in the existing whole-function
+returns-twice bailout. The full reducer regression requires unchanged IR.
+Additional direct/indirect tests preserve memory for signatures marked
+returns_twice and retain existing private-stack forwarding for ordinary calls.
+
+Audit: returns_twice belongs to Signature, separate from FunctionAttrs. The
+parser imports the declaration signature for Call and Invoke, and parses the
+explicit CallIndirect signature. Invoke has a direct FuncRef; there is no
+indirect Invoke instruction to infer here. The unknown indirect target follows
+its explicit signature contract, exactly as before; this fix adds no arbitrary
+ABI/nonlocal-return assumption or new call policy. x86 currently rejects Invoke;
+no unsupported native Invoke run is used as an acceptance gate. Fresh root
+source review and final-head correctness checks remain required.
