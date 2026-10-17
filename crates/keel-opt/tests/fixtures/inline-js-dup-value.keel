@@ -1,0 +1,28 @@
+; QuickJS helper from the retained 2026-10-17 optimized inspection IR.
+; This is a reducer; whole-application activation is tested separately.
+func @JS_DupValue(ptr sret [2 x i64], ptr, ptr byval [2 x i64]) cc(c) inlinehint local {
+    ss0 = stack_slot 16, align 8
+block0(v0: ptr, v1: ptr, v2: ptr):
+    v3 = iconst.i64 8
+    v4 = ptradd v2, v3
+    v5 = load.i64 v4
+    v6 = trunc.i32 v5
+    v7 = iconst.i32 4294967285
+    v8 = icmp.uge v6, v7
+    brif v8, block1, block3
+block1:
+    v9 = load.ptr v2
+    v10 = load.i32 v9
+    v11 = iconst.i32 1
+    v12 = iadd v10, v11
+    store v12, v9
+    jump block3
+block3:
+    v13 = load.i64 v2
+    store v13, v0
+    v19 = iconst.i64 8
+    v17 = ptradd v0, v19
+    v18 = load.i64 v4
+    store v18, v17
+    return
+}

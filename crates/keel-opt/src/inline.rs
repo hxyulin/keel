@@ -2,6 +2,8 @@
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. The module budget is consumed in
 //! layout order. ABI by-value arguments get a fresh snapshot.
+//! Instruction growth bounds the increase in layout instructions before cleanup;
+//! the removed call pays for the jump entering the cloned body.
 use crate::{InlineSite, Pass};
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
@@ -388,9 +390,12 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
                 continue;
             }
             let callee = &templates[&decl.name];
-            // Account for the CFG glue, byval loads/stores, and all cloned IR.
+            // Bound net layout growth before cleanup. The entry jump replaces
+            // the removed call; each cloned return becomes one jump. The
+            // continuation only receives moved instructions and parameters.
+            // Counting all callee instructions also covers unreachable blocks
+            // that the dominator traversal may omit. Snapshot IR is additional.
             let cost = callee.layout_insts().count()
-                + 2
                 + callee
                     .sig
                     .params
@@ -635,9 +640,15 @@ mod byval_tests {
             ))
             .unwrap();
             keel_ir::verify_module(&module).unwrap();
+            let before = module.functions[1].layout_insts().count();
             assert!(run(&mut module));
             keel_ir::verify_module(&module).unwrap();
             let caller = &module.functions[1];
+            assert_eq!(
+                caller.layout_insts().count() - before,
+                1 + byval_copy_cost(size as u64),
+                "net growth for size {size}",
+            );
             // This block contains only the snapshot and the jump replacing
             // the call. Count real IR, independently of the chunk iterator.
             let insts = caller.block_insts(caller.entry_block().unwrap());

@@ -275,8 +275,8 @@ fn inline_policies_at_instruction_thresholds() {
         (129, "alwaysinline", 0),
         (1, "noinline", 1),
         (1, "inlinehint noinline", 1),
-        (2046, "alwaysinline", 0),
-        (2047, "alwaysinline", 1),
+        (2048, "alwaysinline", 0),
+        (2049, "alwaysinline", 1),
     ] {
         let m = run(&large_helper(insts, attrs, 1, 1), &["inline"]);
         assert_eq!(calls(&m, "f0"), remaining, "{insts} {attrs}");
@@ -633,8 +633,8 @@ fn detailed_reports_identify_each_budget_without_changing_decisions() {
     for (source, reason, skipped) in [
         (large_helper(1, "", 1, 140), "caller_call_count_budget", 12),
         (large_helper(1, "alwaysinline", 1, 140), "caller_call_count_budget", 12),
-        (large_helper(64, "", 1, 32), "caller_instruction_growth_budget", 1),
-        (large_helper(2047, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
+        (large_helper(64, "", 1, 33), "caller_instruction_growth_budget", 1),
+        (large_helper(2049, "alwaysinline", 1, 1), "caller_instruction_growth_budget", 1),
         (large_helper(254, "alwaysinline", 9, 8), "module_instruction_growth_budget", 8),
         ("func @h() alwaysinline local {\n ss0 = stack_slot 32769, align 1\nblock0:\n return\n}\nfunc @f() {\nblock0:\n call @h()\n call @h()\n return\n}".into(), "caller_stack_growth_budget", 1),
     ] {
@@ -671,4 +671,128 @@ fn detailed_profitability_and_legality_rejections_are_specific() {
         detailed_report(&source).invocations[0].inline_sites[0].outcome,
         "profitability_blocks"
     );
+}
+
+// Growth is the increase in layout instructions, before any cleanup pass.
+// The entry jump replaces the call; return-to-jump rewrites are one-for-one.
+#[test]
+fn growth_budget_counts_emitted_instructions_at_the_boundary() {
+    let source = large_helper(64, "", 1, 33);
+    let before = keel_ir::parse(&source).unwrap();
+    let m = run(&source, &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+    assert_eq!(
+        m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+        2048,
+    );
+    // The same limit applies even to an explicit alwaysinline request.
+    let m = run(&large_helper(2048, "alwaysinline", 1, 2), &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+    let m = run(&large_helper(2049, "alwaysinline", 1, 1), &["inline"]);
+    assert_eq!(calls(&m, "f0"), 1);
+}
+
+#[test]
+fn module_growth_budget_remains_bounded_before_cleanup() {
+    let source = large_helper(256, "alwaysinline", 9, 8);
+    let before = keel_ir::parse(&source).unwrap();
+    let before_count: usize = before.functions.iter().map(|f| f.layout_insts().count()).sum();
+    let m = run(&source, &["inline"]);
+    let after_count: usize = m.functions.iter().map(|f| f.layout_insts().count()).sum();
+    assert_eq!(after_count - before_count, 16384);
+    for n in 0..8 {
+        assert_eq!(calls(&m, &format!("f{n}")), 0);
+    }
+    assert_eq!(calls(&m, "f8"), 8);
+}
+
+#[test]
+fn direct_api_aliases_and_restrict_contracts_stay_local_to_the_callee() {
+    let mut m = keel_ir::parse("func @h(i64, i64) -> i64 local {\nblock0(v0: i64, v1: i64):\n v2 = iadd v0, v1\n return v2\n}\nfunc @f(i64, i64) -> i64 {\nblock0(v0: i64, v1: i64):\n v2 = call @h(v0, v1)\n return v2\n}").unwrap();
+    // Mutate the Function API directly: printing/reparsing would erase aliases.
+    let h = &mut m.functions[0];
+    let params = h.block_params(h.entry_block().unwrap()).to_vec();
+    h.replace_all_uses(params[0], params[1]);
+    let add = h.layout_insts().next().unwrap().1;
+    h.replace_all_uses(h.first_result(add), params[1]);
+    h.remove_inst(add);
+    let f = &mut m.functions[1];
+    let params = f.block_params(f.entry_block().unwrap()).to_vec();
+    f.replace_all_uses(params[0], params[1]);
+    keel_ir::verify_module(&m).unwrap();
+    assert!(keel_opt::inline_with_report(&mut m).changed);
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(calls(&m, "f"), 0);
+    keel_opt::run_passes(&mut m, &["simplify-cfg", "dce"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    let f = &m.functions[1];
+    let ret = f.layout_insts().last().unwrap().1;
+    let InstData::Return { args } = f.inst_data(ret) else {
+        panic!("missing return")
+    };
+    assert_eq!(f.resolve(args[0]), f.resolve(params[1]));
+
+    let mut m = keel_ir::parse("func @h(ptr, ptr) local {\nblock0(v0: ptr, v1: ptr):\n v2 = load.i64 v0\n store v2, v1\n return\n}\nfunc @f(ptr, ptr) {\nblock0(v0: ptr, v1: ptr):\n call @h(v0, v1)\n return\n}").unwrap();
+    m.functions[0].restrict_params = vec![0];
+    keel_ir::verify_module(&m).unwrap();
+    assert!(keel_opt::inline_with_report(&mut m).changed);
+    keel_ir::verify_module(&m).unwrap();
+    assert!(m.functions[1].restrict_params.is_empty());
+    assert_eq!(m.functions[0].restrict_params, vec![0]);
+}
+
+#[test]
+fn quickjs_dup_value_reducer_uses_the_same_bounded_growth() {
+    let mut source = include_str!("fixtures/inline-js-dup-value.keel").to_owned();
+    source.push_str("func @f(ptr, ptr, ptr) {\nblock0(v0: ptr, v1: ptr, v2: ptr):\n");
+    for _ in 0..80 {
+        source.push_str(" call @JS_DupValue(v0, v1, v2)\n");
+    }
+    source.push_str(" return\n}\n");
+    let before = keel_ir::parse(&source).unwrap();
+    let helper_insts = before.functions[0].layout_insts().count();
+    assert_eq!(helper_insts, 20);
+    let m = run(&source, &["inline"]);
+    // A 16-byte byval snapshot emits 8 instructions. At 28 instructions per
+    // expansion, 73 fit; the old 30-instruction estimate admitted only 68.
+    assert_eq!(calls(&m, "f"), 7);
+    assert_eq!(
+        m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+        2044,
+    );
+    assert_eq!(m.functions[1].num_stack_slots(), 146);
+    let report = detailed_report(&source);
+    let sites = &report.invocations[0].inline_sites;
+    assert!(sites[..73].iter().all(|s| s.outcome == "inlined"));
+    assert!(
+        sites[73..]
+            .iter()
+            .all(|s| s.outcome == "caller_instruction_growth_budget")
+    );
+}
+
+#[test]
+fn emitted_growth_covers_cfg_shapes_and_multiple_snapshots() {
+    for (source, snapshot_ir, omitted_ir) in [
+        // Multiple returns and multiple return values keep one jump per return.
+        ("func @h(i8, i64) -> (i64, i64) local {\nblock0(v0: i8, v1: i64):\n brif v0, block1, block2\nblock1:\n return v1, v1\nblock2:\n return v1, v1\n}\nfunc @f(i8, i64) -> i64 {\nblock0(v0: i8, v1: i64):\n v2, v3 = call @h(v0, v1)\n v4 = iadd v2, v3\n return v4\n}", 0, 0),
+        // Loop backedges and block parameters add no instructions of their own.
+        ("func @h(i8) local {\nblock0(v0: i8):\n jump block1(v0)\nblock1(v1: i8):\n brif v1, block1(v1), block2\nblock2:\n return\n}\nfunc @f(i8) {\nblock0(v0: i8):\n call @h(v0)\n return\n}", 0, 0),
+        // The frozen estimate counts unreachable instructions conservatively.
+        ("func @h() local {\nblock0:\n return\nblock1:\n return\n}\nfunc @f() {\nblock0:\n call @h()\n return\n}", 0, 1),
+        // A non-returning helper still leaves only the entry jump as glue.
+        ("func @h() noreturn local {\nblock0:\n trap\n}\nfunc @f() {\nblock0:\n call @h()\n trap\n}", 0, 0),
+        // Every byval parameter gets its own snapshot before callee effects.
+        ("func @h(ptr byval {i64}, ptr byval {i64}) local {\nblock0(v0: ptr, v1: ptr):\n v2 = load.i64 v0\n store v2, v1\n return\n}\nfunc @f(ptr) {\nblock0(v0: ptr):\n call @h(v0, v0)\n return\n}", 6, 0),
+    ] {
+        let before = keel_ir::parse(source).unwrap();
+        let estimate = before.functions[0].layout_insts().count() + snapshot_ir;
+        let m = run(source, &["inline"]);
+        assert_eq!(calls(&m, "f"), 0, "{source}");
+        assert_eq!(
+            m.functions[1].layout_insts().count() - before.functions[1].layout_insts().count(),
+            estimate - omitted_ir,
+            "{source}",
+        );
+    }
 }
