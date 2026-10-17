@@ -29,7 +29,11 @@ fn source(bits: u32, reverse: bool, edges: bool) -> String {
         )
     } else {
         (
-            "", "", "", "", "",
+            "",
+            "",
+            "",
+            "",
+            "",
             "v3 = iconst.i64 37\n return v3",
             "v4 = iconst.i64 91\n return v4",
         )
@@ -51,12 +55,11 @@ fn compile_module(
         allocator: &allocation,
     };
     let text = keel_codegen::aarch64::compile_with_pipeline(module, pools, &pipeline).unwrap();
-    let program = keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline)
-        .unwrap();
+    let program =
+        keel_codegen::aarch64::compile_program_with_pipeline(module, pools, &pipeline).unwrap();
     if !module.functions.iter().any(|func| {
-        func.layout_insts().any(|(_, i)| {
-            matches!(func.inst_data(i), keel_ir::InstData::InlineAsm { .. })
-        })
+        func.layout_insts()
+            .any(|(_, i)| matches!(func.inst_data(i), keel_ir::InstData::InlineAsm { .. }))
     }) {
         assert_eq!(program.stats().text_bytes, 0, "no opaque text fallback");
     }
@@ -80,12 +83,15 @@ fn full_width_truth_edges_and_spills_use_register_branches_in_all_tiers() {
     for bits in [32, 64] {
         for reverse in [false, true] {
             for edges in [false, true] {
-                for tier in [SelectionTier::Baseline, SelectionTier::Trees, SelectionTier::Full] {
+                for tier in [
+                    SelectionTier::Baseline,
+                    SelectionTier::Trees,
+                    SelectionTier::Full,
+                ] {
                     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
                         for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
-                            let (text, _) = compile(
-                                &source(bits, reverse, edges), tier, allocation, pools,
-                            );
+                            let (text, _) =
+                                compile(&source(bits, reverse, edges), tier, allocation, pools);
                             let width = if bits == 32 { 'w' } else { 'x' };
                             assert!(text.contains(&format!("\tcbz\t{width}")), "{text}");
                             assert!(!text.contains("\tcmp\t"), "{text}");
@@ -95,9 +101,8 @@ fn full_width_truth_edges_and_spills_use_register_branches_in_all_tiers() {
                             } else {
                                 let target = if reverse { "block1" } else { "block2" };
                                 assert!(
-                                    text.lines().any(|l| {
-                                        l.contains("\tcbz\t") && l.ends_with(target)
-                                    }),
+                                    text.lines()
+                                        .any(|l| { l.contains("\tcbz\t") && l.ends_with(target) }),
                                     "{text}"
                                 );
                             }
@@ -144,7 +149,7 @@ fn comparisons_and_materialized_booleans_keep_existing_flags_path() {
     }
     // An extra use prevents compare fusion. Its i8 result is intentionally
     // left on the masked truth-test path even though CSET defines 0/1.
-    let src = "func @f(i32, i32) -> i8 {\nblock0(v0: i32, v1: i32):\n v2 = icmp.eq v0, v1\n brif v2, block1, block2\nblock1:\n return v2\nblock2:\n return v2\n}";
+    let src = "func @f(i32, i32) -> i8 uext {\nblock0(v0: i32, v1: i32):\n v2 = icmp.eq v0, v1\n brif v2, block1, block2\nblock1:\n return v2\nblock2:\n return v2\n}";
     let (text, _) = compile(src, SelectionTier::Full, AllocationTier::Full, &SPILLED);
     assert!(text.contains("\tcset\t"), "{text}");
     assert!(text.contains("\ttst\t"), "{text}");
@@ -167,16 +172,23 @@ fn successor_inline_assembly_keeps_old_flags_even_without_cc_clobber() {
 
 #[test]
 fn aliases_locations_and_call_result_use_the_original_truth_width() {
-    let src = "file f0 = \"zero.keel\"\nextern @poll() -> i32\nfunc @f() -> i64 {\nblock0:\n v0 = call @poll()\n v1 = iconst.i32 1\n brif v1, block1, block2 !f0:8:3\nblock1:\n v2 = iconst.i64 37\n return v2\nblock2:\n v3 = iconst.i64 91\n return v3\n}";
+    let src = "file f0 = \"zero.keel\"\ndecl @poll() -> i32\nfunc @f() -> i64 {\nblock0:\n v0 = call @poll()\n v1 = iconst.i32 1\n brif v1, block1, block2 !f0:8:3\nblock1:\n v2 = iconst.i64 37\n return v2\nblock2:\n v3 = iconst.i64 91\n return v3\n}";
     let mut module = keel_ir::parse(src).unwrap();
     let func = &mut module.functions[0];
-    let results: Vec<_> = func.layout_insts().filter_map(|(_, i)| {
-        matches!(
-            func.inst_data(i),
-            keel_ir::InstData::Call { .. }
-                | keel_ir::InstData::Iconst { ty: keel_ir::Type::I32, .. }
-        ).then(|| func.inst_results(i)[0])
-    }).collect();
+    let results: Vec<_> = func
+        .layout_insts()
+        .filter_map(|(_, i)| {
+            matches!(
+                func.inst_data(i),
+                keel_ir::InstData::Call { .. }
+                    | keel_ir::InstData::Iconst {
+                        ty: keel_ir::Type::I32,
+                        ..
+                    }
+            )
+            .then(|| func.inst_results(i)[0])
+        })
+        .collect();
     func.replace_all_uses(results[1], results[0]);
     let (text, _) = compile_module(&module, SelectionTier::Full, AllocationTier::Full, &SPILLED);
     assert!(text.contains("\tbl\t_poll"), "{text}");
@@ -195,14 +207,19 @@ fn native_truth_values_match_independent_clang_oracle() {
         for reverse in [false, true] {
             for edges in [false, true] {
                 src += &source(bits, reverse, edges).replace(
-                    "@f(", &format!("@f{bits}_{}_{}(", reverse as u8, edges as u8),
+                    "@f(",
+                    &format!("@f{bits}_{}_{}(", reverse as u8, edges as u8),
                 );
             }
         }
     }
     let dir = std::env::temp_dir().join(format!("keel-arm-zero-{}", std::process::id()));
     fs::create_dir(&dir).unwrap();
-    fs::write(dir.join("oracle.c"), include_str!("fixtures/arm_zero_branches.c")).unwrap();
+    fs::write(
+        dir.join("oracle.c"),
+        include_str!("fixtures/arm_zero_branches.c"),
+    )
+    .unwrap();
     for allocation in [AllocationTier::Fast, AllocationTier::Full] {
         for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
             let (_, object) = compile(&src, SelectionTier::Full, allocation, pools);
@@ -214,7 +231,9 @@ fn native_truth_values_match_independent_clang_oracle() {
                     .arg(dir.join("test.o"))
                     .arg("-o")
                     .arg(dir.join("test"))
-                    .status().unwrap().success()
+                    .status()
+                    .unwrap()
+                    .success()
             );
             assert!(Command::new(dir.join("test")).status().unwrap().success());
         }
