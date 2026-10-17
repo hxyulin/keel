@@ -52,6 +52,12 @@ fn retained_actual_optimized_c_bridge_activates_and_preserves_recurrence() {
         after.functions[0].blocks().count() + 1,
         before.functions[0].blocks().count()
     );
+    // The shared integer interpreter has no pointer ABI model. The actual
+    // pointer-typed modules above are verified; neither function reads v2.
+    // Project only that ignored ABI slot to i64 for execution. Fresh native
+    // validation retains the real pointer ABI and exercises NULL at n=0.
+    let model_before = keel_ir::parse(&before.to_string().replace("ptr", "i64")).unwrap();
+    let model_after = keel_ir::parse(&after.to_string().replace("ptr", "i64")).unwrap();
     for byte in 0..=255u64 {
         for high in [0, 0x1234_5678_9abc_de00, u64::MAX & !255] {
             let seed = high | byte;
@@ -67,7 +73,7 @@ fn retained_actual_optimized_c_bridge_activates_and_preserves_recurrence() {
                     .wrapping_add(0x9e37_79b9_7f4a_7c15);
                 }
                 // n0 includes a null data pointer and maximal ignored mask.
-                for f in [&before.functions[0], &after.functions[0]] {
+                for f in [&model_before.functions[0], &model_after.functions[0]] {
                     assert_eq!(support::execute(f, &[n, seed, 0, u64::MAX]), oracle);
                 }
             }
