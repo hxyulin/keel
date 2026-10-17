@@ -552,6 +552,13 @@ const MAX_FRAME_SIZE: usize = (1 << 24) - 16;
 /// beyond this could not reach.
 const MAX_STACK_ARGS: u32 = 4080;
 
+/// The predicate for taking a Brif's false edge. Keep fused comparisons on
+/// NZCV; ordinary full-width integer truth tests can branch on the register.
+enum BrifTest {
+    Flags(&'static str),
+    Zero(Reg),
+}
+
 struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
@@ -566,6 +573,9 @@ struct FunctionCompiler<'a> {
     /// itself is never computed.
     folded_values: HashSet<Value>,
     fused_compares: HashSet<Value>,
+    /// Inline assembly has no declared flag inputs. Preserve the old NZCV
+    /// definitions throughout such functions, including across block edges.
+    has_inline_asm: bool,
     /// Offset from `sp` of the area where calls put copies of big structs
     /// passed by value.
     copy_base: usize,
@@ -792,10 +802,12 @@ impl<'a> FunctionCompiler<'a> {
         // prologue, and never allocated, so no value lives in one across
         // the assembly.
         let (mut asm_saved, mut asm_float_saved) = (Vec::new(), Vec::new());
+        let mut has_inline_asm = false;
         for (_, inst) in func.layout_insts() {
             let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
                 continue;
             };
+            has_inline_asm = true;
             let at = |message: String| err(format!("`{}`: {message}", func.display_inst(inst)));
             let regs = asm_regs(asm).map_err(at)?;
             asm_text(func, asm, args, &regs).map_err(at)?;
@@ -918,6 +930,7 @@ impl<'a> FunctionCompiler<'a> {
             allocation_index: None,
             folded_values,
             fused_compares,
+            has_inline_asm,
             selection,
             stack_slot_offsets,
             copy_base,
@@ -1891,29 +1904,35 @@ impl<'a> FunctionCompiler<'a> {
                 cond,
                 dests: [then_dest, else_dest],
             } => {
-                // `b.eq` to the else-branch when the condition is zero, or
-                // when a fused compare's condition does not hold.
-                let not = match func.value_def(func.resolve(cond)) {
+                // Take the same false edge, with the same landing pads and
+                // edge copies, whether testing a register or a comparison.
+                let test = match func.value_def(func.resolve(cond)) {
                     ValueDef::Result(compare, _)
                         if self.fused_compares.contains(&func.resolve(cond)) =>
                     {
-                        invert_cond(self.compare(compare))
+                        BrifTest::Flags(invert_cond(self.compare(compare)))
+                    }
+                    _ if !self.has_inline_asm
+                        && matches!(self.ty(cond), Type::I32 | Type::I64) =>
+                    {
+                        let c = self.use_reg(cond, S0);
+                        BrifTest::Zero(reg(c, self.ty(cond)))
                     }
                     _ => {
                         self.test_value(cond);
-                        "eq"
+                        BrifTest::Flags("eq")
                     }
                 };
                 // Block arguments are copied on the edge, so a branch with
                 // else-arguments needs its own landing pad. The copies only
                 // move data, so the flags survive them.
                 if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
-                    self.conditional(not, self.label(else_dest.block));
+                    self.brif_false(&test, self.label(else_dest.block));
                     self.block_args(&then_dest, 0);
                     self.branch_unless_next(then_dest.block);
                 } else {
                     let pad = format!("L{}_{inst}_else", func.name);
-                    self.conditional(not, pad.clone());
+                    self.brif_false(&test, pad.clone());
                     self.block_args(&then_dest, 0);
                     self.out.branch(false, self.label(then_dest.block));
                     self.out.label(pad.clone());
@@ -4196,6 +4215,12 @@ impl<'a> FunctionCompiler<'a> {
             condition: native::condition(condition) as u8,
             target,
         });
+    }
+    fn brif_false(&mut self, test: &BrifTest, target: String) {
+        match test {
+            BrifTest::Flags(condition) => self.conditional(condition, target),
+            BrifTest::Zero(register) => self.compare_branch(*register, false, target),
+        }
     }
     fn compare_branch(&mut self, r: Reg, nonzero: bool, target: String) {
         self.out.symbolic(Symbolic::Compare {
