@@ -113,12 +113,21 @@ fn retained_actual_bridge_ir_selects_only_in_tree_modes_and_both_targets_assembl
                         },
                     )
                     .unwrap();
-                    let object = keel_asm::assemble_program_object(
-                        &program,
-                        keel_asm::TargetFeatures::default(),
-                    )
-                    .unwrap();
-                    assert_eq!(object, keel_asm::assemble_object(&text).unwrap());
+                    let (object, parsed) = match target {
+                        Target::Aarch64AppleDarwin => (
+                            keel_asm::assemble_program_object(
+                                &program,
+                                keel_asm::TargetFeatures::default(),
+                            )
+                            .unwrap(),
+                            keel_asm::assemble_object(&text).unwrap(),
+                        ),
+                        Target::X86_64LinuxGnu => (
+                            keel_asm::x86::assemble_program_object(&program).unwrap(),
+                            keel_asm::x86::assemble_object(&text).unwrap(),
+                        ),
+                    };
+                    assert_eq!(object, parsed);
                 }
             }
         }
@@ -143,4 +152,134 @@ fn aliases_resolve_leaves_and_never_publish_a_dead_root() {
     f.replace_all_uses(result, params[1]);
     let plan = Selection::compute_with_options(&f, SelectTarget::X86, SelectionOptions::ALL);
     assert!(!plan.matches.contains_key(&insts[3]));
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn native_edges_match_separately_compiled_clang_oracle_with_spills() {
+    use keel_codegen::regalloc::{AllocationTier, Pools};
+    use std::{fs, process::Command};
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("x86-lea-oracle");
+    fs::create_dir_all(&dir).unwrap();
+    let mut ir = String::new();
+    let mut oracle = String::from("#include <stdint.h>\n");
+    let mut driver = String::from("#include <stdint.h>\n#include <stdio.h>\n");
+    let mut calls = String::new();
+    let mut index = 0;
+    for (ty, cty) in [("i32", "uint32_t"), ("i64", "uint64_t")] {
+        for (factor, displacement, shared) in [
+            (3, -2147483648i64, false),
+            (3, -1, false),
+            (3, 0, false),
+            (3, 7, false),
+            (3, 2147483647, false),
+            (3, 2147483648, false),
+            (3, -2147483649, false),
+            (5, 7, false),
+            (9, 7, false),
+            (3, 7, true),
+        ] {
+            let name = format!("edge{index}");
+            let mut src = source(ty, factor, displacement).replace("@f(", &format!("@{name}("));
+            if shared {
+                src = src.replace("return v4", "v5 = iadd v4, v2\n return v5");
+            }
+            // Check activation/fallback before emitting any native object.
+            assert_eq!(
+                selected(&src),
+                factor == 3 && !shared && (ty == "i32" || i32::try_from(displacement).is_ok())
+            );
+            ir.push_str(&src);
+            ir.push('\n');
+            oracle.push_str(&format!("{cty} ref{index}({cty} x) {{ {cty} p=x*({cty}){factor}ULL; return ({cty})(p+({cty})({displacement}LL){}); }}\n", if shared { "+p" } else { "" }));
+            driver.push_str(&format!(
+                "extern {cty} {name}({cty}); extern {cty} ref{index}({cty});\n"
+            ));
+            calls.push_str(&format!("{{ uint64_t a={name}(({cty})x), b=ref{index}(({cty})x); printf(\"{name} %llu %llu %llu\\n\",(unsigned long long)x,(unsigned long long)a,(unsigned long long)b); if(a!=b) return 1; ++checks; }}\n"));
+            index += 1;
+        }
+    }
+    // An SSA compare stays live across the fused arithmetic; no flag assumption.
+    ir.push_str("func @live(i64, i64) -> i64 {\nblock0(v0: i64, v6: i64):\n v7 = icmp.ult v0, v6\n v1 = iconst.i64 3\n v2 = imul v0, v1\n v3 = iconst.i64 7\n v4 = iadd v2, v3\n v5 = select v7, v4, v6\n return v5\n}\n");
+    oracle.push_str("uint64_t reflive(uint64_t x,uint64_t y) { return x<y ? x*3ULL+7ULL : y; }\n");
+    driver.push_str("extern uint64_t live(uint64_t,uint64_t), reflive(uint64_t,uint64_t);\n");
+    driver.push_str("int main(void) { unsigned checks=0; const uint64_t edges[]={0,1,2,127,128,255,256,2147483647ULL,2147483648ULL,4294967295ULL,4294967296ULL,9223372036854775807ULL,9223372036854775808ULL,18446744073709551614ULL,18446744073709551615ULL}; for(unsigned i=0;i<79;i++){ uint64_t x=i<15?edges[i]:0x9e3779b97f4a7c15ULL*(i-14);\n");
+    driver.push_str(&calls);
+    driver.push_str("for(unsigned j=0;j<15;j++){uint64_t y=edges[j],a=live(x,y),b=reflive(x,y);printf(\"live %llu %llu %llu %llu\\n\",(unsigned long long)x,(unsigned long long)y,(unsigned long long)a,(unsigned long long)b);if(a!=b)return 2;++checks;} } printf(\"PASS checks=%u\\n\",checks);return 0;}\n");
+    fs::write(dir.join("oracle.c"), oracle).unwrap();
+    fs::write(dir.join("driver.c"), driver).unwrap();
+    fs::write(dir.join("suite.ir"), &ir).unwrap();
+    let run = |command: &mut Command, stem: &str| {
+        let out = command.output().unwrap();
+        fs::write(dir.join(format!("{stem}.stdout")), &out.stdout).unwrap();
+        fs::write(dir.join(format!("{stem}.stderr")), &out.stderr).unwrap();
+        assert!(out.status.success(), "{command:?}: {out:?}");
+        out
+    };
+    run(
+        Command::new("clang")
+            .args(["-O0", "-fno-lto", "-c"])
+            .arg(dir.join("oracle.c"))
+            .arg("-o")
+            .arg(dir.join("oracle.o")),
+        "oracle-compile",
+    );
+    let module = keel_ir::parse(&ir).unwrap();
+    keel_ir::verify_module(&module).unwrap();
+    let tiny = Pools {
+        caller_saved: &[6, 7],
+        callee_saved: &[3, 12],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    let spilled = Pools {
+        caller_saved: &[],
+        callee_saved: &[],
+        float_caller_saved: &[],
+        float_callee_saved: &[],
+    };
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for (pool_name, pools) in [
+            ("normal", &keel_codegen::x86_64::REGISTERS),
+            ("tiny", &tiny),
+            ("spilled", &spilled),
+        ] {
+            for bits in 0..8 {
+                let options = SelectionOptions {
+                    trees: bits & 1 != 0,
+                    folded_operands: bits & 2 != 0,
+                    register_hints: bits & 4 != 0,
+                };
+                let name = format!("{allocation:?}-{pool_name}-{bits}");
+                let selector = keel_codegen::OptionsSelector(options);
+                let pipeline = keel_codegen::CodegenPipeline {
+                    selector: &selector,
+                    allocator: &allocation,
+                };
+                let text =
+                    keel_codegen::x86_64::compile_with_pipeline(&module, pools, &pipeline).unwrap();
+                let program =
+                    keel_codegen::x86_64::compile_program_with_pipeline(&module, pools, &pipeline)
+                        .unwrap();
+                let object = keel_asm::x86::assemble_program_object(&program).unwrap();
+                assert_eq!(object, keel_asm::x86::assemble_object(&text).unwrap());
+                fs::write(dir.join(format!("{name}.s")), text).unwrap();
+                let obj = dir.join(format!("{name}.o"));
+                fs::write(&obj, object).unwrap();
+                let exe = dir.join(&name);
+                run(
+                    Command::new("clang")
+                        .args(["-O0", "-fno-lto"])
+                        .arg(dir.join("driver.c"))
+                        .arg(dir.join("oracle.o"))
+                        .arg(obj)
+                        .arg("-o")
+                        .arg(&exe),
+                    &format!("{name}-link"),
+                );
+                let out = run(&mut Command::new(&exe), &name);
+                assert!(String::from_utf8_lossy(&out.stdout).ends_with("PASS checks=2765\n"));
+            }
+        }
+    }
 }
