@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "id": "arm-more-narrow-load",
+  "arch": "aarch64",
+  "description": "state=data[(state>>8)&mask]&255",
+  "category": "memory",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/arm-more-narrow-load-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/arm-more-narrow-load-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/more-narrow-load.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 256,
+  "mask": 255,
+  "seeds": [
+    0,
+    1,
+    9,
+    10,
+    11,
+    127,
+    128,
+    255,
+    256,
+    9223372036854775807,
+    9223372036854775808,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 1,
+  "work_unit": "low_byte_load",
+  "notes": [
+    "All arithmetic wraps modulo 2^64; zero iterations return seed without data access.",
+    "Work counts one semantic update or load per iteration, not executed instructions. Actual loop work determines the returned state.",
+    "Little-endian only: a zero-extending byte load at the same word address equals the low byte of an ordinary 64-bit load.",
+    "Allocated ordinary memory only; no volatile, atomic or concurrent-memory equivalence. All 64-bit accesses are within allocation; the oracle warms data.",
+    "LDRB cannot use an index scaled by eight, so candidate forms the address with ADD before loading.",
+    "Index is (state >> 8) & mask, scaled by eight; mask 255 and 256 words bound the final 8-byte load to offsets 2040..2047. Data pointer and mask remain unchanged."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/arm-more-narrow-load-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/arm-more-narrow-load-candidate.s"
+    }
+  }
+}

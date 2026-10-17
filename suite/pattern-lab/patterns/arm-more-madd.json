@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "id": "arm-more-madd",
+  "arch": "aarch64",
+  "description": "state = state * 3 + 7 modulo 2^64",
+  "category": "latency",
+  "variants": [
+    {
+      "id": "baseline",
+      "source": "asm/arm-more-madd-baseline.S",
+      "symbol": "pattern_kernel"
+    },
+    {
+      "id": "candidate",
+      "source": "asm/arm-more-madd-candidate.S",
+      "symbol": "pattern_kernel"
+    }
+  ],
+  "oracle": {
+    "source": "oracles/more-madd.c",
+    "symbol": "pattern_oracle"
+  },
+  "data_words": 1,
+  "mask": 0,
+  "seeds": [
+    0,
+    1,
+    9,
+    10,
+    11,
+    127,
+    128,
+    255,
+    256,
+    9223372036854775807,
+    9223372036854775808,
+    18446744073709551615
+  ],
+  "correctness_iterations": [
+    0,
+    1,
+    2,
+    17,
+    257
+  ],
+  "work_per_iteration": 1,
+  "work_unit": "state_update",
+  "notes": [
+    "All arithmetic wraps modulo 2^64; zero iterations return seed without data access.",
+    "Work counts one semantic update or load per iteration, not executed instructions. Actual loop work determines the returned state.",
+    "MUL then ADD versus MADD, with registers holding 3 and 7 initialized before the loop.",
+    "Data and mask are unused. Constant setup is outside the loop; MCA assumes constants already materialized."
+  ],
+  "mca": {
+    "baseline": {
+      "source": "mca/arm-more-madd-baseline.s"
+    },
+    "candidate": {
+      "source": "mca/arm-more-madd-candidate.s"
+    }
+  }
+}
