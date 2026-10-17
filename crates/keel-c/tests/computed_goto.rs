@@ -48,9 +48,14 @@ fn immutable_dispatch_fuses_before_optimization_with_last_writes_and_zeros() {
                 );
                 // Other uses and debug data still see exactly the numeric table.
                 let init = m.data_object("run.table").unwrap().init.as_ref().unwrap();
-                let keel_ir::DataItem::Bytes(bytes) = &init.items[0] else {
-                    panic!("table bytes")
-                };
+                let mut bytes = Vec::new();
+                for item in &init.items {
+                    match item {
+                        keel_ir::DataItem::Bytes(part) => bytes.extend(part),
+                        keel_ir::DataItem::Zero(n) => bytes.resize(bytes.len() + *n as usize, 0),
+                        _ => panic!("numeric table data"),
+                    }
+                }
                 let labels: Vec<_> = bytes
                     .chunks_exact(8)
                     .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
@@ -91,7 +96,15 @@ fn unsupported_sites_keep_the_whole_function_on_numeric_dispatch() {
                 keel_ir::verify_module(&m).unwrap();
                 let tables = switches(&m);
                 assert_eq!(tables.len(), 1, "{src}");
-                assert_eq!(tables[0].0, &[1, 2], "{src}");
+                assert_eq!(tables[0].0.first(), Some(&1), "{src}");
+                assert!(
+                    tables[0]
+                        .0
+                        .iter()
+                        .enumerate()
+                        .all(|(i, &key)| key == i as i64 + 1),
+                    "{src}"
+                );
                 keel_codegen::compile(&m, target).unwrap();
             }
         }

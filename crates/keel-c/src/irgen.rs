@@ -756,6 +756,20 @@ fn dispatch_index<'e, 'a>(target: &'e Expr<'a>) -> Option<(usize, &'e Expr<'a>)>
     Some((global, index))
 }
 
+// Global::is_const describes emitted data, and currently loses the pointer
+// qualifier for arrays. Prove source immutability from the retained type shape
+// instead; never mistake const pointees for const pointer elements.
+fn constant_elements(sugar: &Sugar, defs: &[TypedefDef<'_>]) -> bool {
+    match sugar {
+        Sugar::Const(_) => true,
+        Sugar::Array(inner) | Sugar::Restrict(inner) | Sugar::Volatile(inner) => {
+            constant_elements(inner, defs)
+        }
+        Sugar::Typedef(i) => constant_elements(&defs[*i].sugar, defs),
+        _ => false,
+    }
+}
+
 impl DispatchTable {
     fn for_function(p: &Parser<'_>, def: &FuncDef<'_>) -> Option<Self> {
         let mut selected = None;
@@ -776,7 +790,7 @@ impl DispatchTable {
         let object = &p.globals[global];
         if !object.internal
             || !object.defined
-            || !object.is_const
+            || !constant_elements(&object.sugar, &p.typedefs)
             || object.thread_local
             || object.sugar.is_volatile(&p.typedefs)
         {
