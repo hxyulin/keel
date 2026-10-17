@@ -120,6 +120,30 @@ class MoreMath(unittest.TestCase):
         for family, seed, expected in examples:
             self.assertEqual(source_oracle(family, 1, seed, arrays[0], 255), expected)
 
+    def test_modular_madd_rotate_and_select_transformations(self):
+        # Low-half signed IMUL and unsigned MUL have identical low 64 bits:
+        # replacing a signed representative n by n-2^64 changes 3*n by a
+        # multiple of 2^64. LEA computes 7+n+2*n in the same modular ring.
+        self.assertEqual((3 * (1 << 64)) & U64, 0)
+        rng = random.Random(64)
+        states = SEEDS + [1 << bit for bit in range(64)]
+        states += [rng.getrandbits(64) for _ in range(512)]
+        for state in states:
+            signed = state if state < 1 << 63 else state - (1 << 64)
+            self.assertEqual((3 * signed + 7) & U64, (7 + state + 2 * state) & U64)
+            self.assertEqual((3 * signed + 7) & U64, reference('madd', 1, state, None, 0))
+            low, high = state >> 13, (state << 51) & U64
+            # Disjoint bit ranges prove OR equals the rotated permutation;
+            # one-hot states above exercise every input/output bit position.
+            self.assertEqual(low & high, 0)
+            self.assertEqual((low | high) ^ SALT, reference('rotate', 1, state, None, 0))
+            for bit in [0, 1]:
+                branch = (state + (3 if bit else 5)) & U64
+                three, five = (state + 3) & U64, (state + 5) & U64
+                self.assertEqual(branch, three if bit != 0 else five)
+                data = [bit] * 256
+                self.assertEqual(branch, reference('branch-select', 1, state, data, 255))
+
     def test_divide10_exact_algebra_entire_uint64_domain(self):
         # B=2^67, M=(B+2)/10. n=10q+r, 0<=r<=9.
         # n*M=q*B + (2q+r*M). Thus floor(n*M/B)=q if remainder
@@ -186,12 +210,106 @@ class MoreMath(unittest.TestCase):
             self.assertEqual(set(m.get('mca', {})), set() if family == 'branch-select' else {'baseline', 'candidate'})
 
 
+# These exact instruction sequences bind the independent arithmetic proofs to
+# actual live state, scratch registers, load width/address and branch polarity.
+# Any edit requires renewing that correspondence, rather than silently accepting
+# a different instruction with a familiar mnemonic.
+ARM_BODIES = {
+    ('madd', 'baseline'): 'mul x4, x1, x5; add x1, x4, x6',
+    ('madd', 'candidate'): 'madd x1, x1, x5, x6',
+    ('rotate', 'baseline'): 'lsr x4, x1, #13; lsl x5, x1, #51; orr x1, x4, x5; eor x1, x1, x6',
+    ('rotate', 'candidate'): 'ror x1, x1, #13; eor x1, x1, x6',
+    ('udiv10', 'baseline'): 'udiv x1, x1, x5; add x1, x1, x6',
+    ('udiv10', 'candidate'): 'umulh x1, x1, x7; lsr x1, x1, #3; add x1, x1, x6',
+    ('sext8', 'baseline'): 'lsl x1, x1, #56; asr x1, x1, #56; add x1, x1, x6',
+    ('sext8', 'candidate'): 'sxtb x1, w1; add x1, x1, x6',
+    ('branch-select', 'baseline'): 'lsr x4, x1, #8; and x4, x4, x3; ldr x4, [x2, x4, lsl #3]; tbz x4, #0, L_zero; add x1, x1, #3; b L_update_done; L_zero:; add x1, x1, #5; L_update_done:',
+    ('branch-select', 'candidate'): 'lsr x4, x1, #8; and x4, x4, x3; ldr x4, [x2, x4, lsl #3]; tst x4, #1; add x5, x1, #3; add x6, x1, #5; csel x1, x5, x6, ne',
+    ('narrow-load', 'baseline'): 'lsr x4, x1, #8; and x4, x4, x3; ldr x1, [x2, x4, lsl #3]; and x1, x1, #255',
+    ('narrow-load', 'candidate'): 'lsr x4, x1, #8; and x4, x4, x3; add x4, x2, x4, lsl #3; ldrb w1, [x4]',
+}
+X86_BODIES = {
+    ('madd', 'baseline'): 'imulq $3, %rsi, %rsi; addq $7, %rsi',
+    ('madd', 'candidate'): 'leaq 7(%rsi,%rsi,2), %rsi',
+    ('rotate', 'baseline'): 'movq %rsi, %rax; shrq $13, %rsi; shlq $51, %rax; orq %rax, %rsi; xorq %r8, %rsi',
+    ('rotate', 'candidate'): 'rorq $13, %rsi; xorq %r8, %rsi',
+    ('udiv10', 'baseline'): 'movq %rsi, %rax; xorq %rdx, %rdx; divq %r9; movq %rax, %rsi; addq %r8, %rsi',
+    ('udiv10', 'candidate'): 'movq %rsi, %rax; mulq %r9; shrq $3, %rdx; movq %rdx, %rsi; addq %r8, %rsi',
+    ('sext8', 'baseline'): 'shlq $56, %rsi; sarq $56, %rsi; addq %r8, %rsi',
+    ('sext8', 'candidate'): 'movsbq %sil, %rsi; addq %r8, %rsi',
+    ('branch-select', 'baseline'): 'movq %rsi, %rax; shrq $8, %rax; andq %rcx, %rax; movq (%rdx,%rax,8), %r8; testq $1, %r8; jz L_even; leaq 3(%rsi), %rsi; jmp L_selected; L_even:; leaq 5(%rsi), %rsi; L_selected:',
+    ('branch-select', 'candidate'): 'movq %rsi, %rax; shrq $8, %rax; andq %rcx, %rax; movq (%rdx,%rax,8), %r8; leaq 3(%rsi), %r9; leaq 5(%rsi), %rsi; testq $1, %r8; cmovnzq %r9, %rsi',
+    ('narrow-load', 'baseline'): 'movq %rsi, %rax; shrq $8, %rax; andq %rcx, %rax; movq (%rdx,%rax,8), %rsi; andq $255, %rsi',
+    ('narrow-load', 'candidate'): 'movq %rsi, %rax; shrq $8, %rax; andq %rcx, %rax; movzbl (%rdx,%rax,8), %esi',
+}
+
+
+def setup_constants(lines, arm):
+    """Evaluate only constant setup; unrecognized instructions fail closed."""
+    values = {}
+    for line in lines:
+        if arm:
+            match = re.fullmatch(r'(mov|movz|movk) (x[567]), #(0x[0-9a-f]+|[0-9]+)(?:, lsl #(16|32|48))?', line)
+            if not match:
+                raise AssertionError('unexpected setup: ' + line)
+            op, reg, value, shift = match.groups()
+            value, shift = int(value, 0), int(shift or 0)
+            if op == 'movk':
+                values[reg] = (values[reg] & ~(65535 << shift)) | (value << shift)
+            else:
+                if reg in values or shift:
+                    raise AssertionError('unexpected constant replacement')
+                values[reg] = value
+        else:
+            match = re.fullmatch(r'mov(?:abs)?q \$(0x[0-9a-f]+|[0-9]+), (%r[89])', line)
+            if not match:
+                raise AssertionError('unexpected setup: ' + line)
+            value, reg = match.groups()
+            if reg in values:
+                raise AssertionError('unexpected constant replacement')
+            values[reg] = int(value, 0)
+    return values
+
+
 class MoreSources(unittest.TestCase):
     def cases(self):
         cases = [m for m in loaded() if '-more-' in m['id']]
         if not cases:
             self.skipTest('PENDING committed architecture sources')
         return cases
+
+    def test_precise_live_transformations_and_constant_setup(self):
+        for m in self.cases():
+            family = m['id'].split('-more-', 1)[1]
+            arm = m['arch'] == 'aarch64'
+            for variant in m['variants']:
+                with self.subTest(pattern=m['id'], variant=variant['id']):
+                    src = (ROOT / variant['source']).read_text()
+                    function = src.split('KERNEL:\n.cfi_startproc\n', 1)[1].split('.cfi_endproc', 1)[0]
+                    before, after = function.split('L_loop:\n', 1)
+                    lines = [line.strip() for line in before.splitlines()]
+                    guard = ['cbz x0, L_done'] if arm else ['testq %rdi, %rdi', 'jz L_done']
+                    self.assertEqual(lines[:len(guard)], guard)
+                    constants = setup_constants(lines[len(guard):], arm)
+                    if arm:
+                        expected = {'x5': 3, 'x6': 7} if family == 'madd' else {}
+                        if family in ('rotate', 'udiv10', 'sext8'):
+                            expected['x6'] = SALT
+                        if family == 'udiv10':
+                            expected.update(x5=10, x7=0xcccccccccccccccd)
+                    else:
+                        expected = {'%r8': SALT} if family in ('rotate', 'udiv10', 'sext8') else {}
+                        if family == 'udiv10':
+                            expected['%r9'] = 10 if variant['id'] == 'baseline' else 0xcccccccccccccccd
+                    self.assertEqual(constants, expected)
+                    counter = '    subs x0, x0, #1' if arm else '    subq $1, %rdi'
+                    instructions, tail = after.split(counter, 1)
+                    bodies = ARM_BODIES if arm else X86_BODIES
+                    self.assertEqual([line.strip() for line in instructions.splitlines()],
+                                     bodies[family, variant['id']].split('; '))
+                    expected_tail = ('\n    b.ne L_loop\nL_done:\n    mov x0, x1\n    ret\n' if arm else
+                                     '\n    jnz L_loop\nL_done:\n    movq %rsi, %rax\n    ret\n')
+                    self.assertEqual(tail, expected_tail)
 
     def test_actual_source_guards_leaf_registers_and_mca_correspondence(self):
         for m in self.cases():
