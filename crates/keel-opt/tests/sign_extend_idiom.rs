@@ -43,7 +43,7 @@ fn unchanged(source: &str) {
 #[test]
 fn retained_actual_optimized_c_bridge_activates_and_preserves_recurrence() {
     let before = keel_ir::parse(BRIDGE).unwrap();
-    let after = apply(BRIDGE);
+    let mut after = apply(BRIDGE);
     assert_eq!(
         conversions(&after),
         [(ConvertOp::Trunc, Type::I8), (ConvertOp::Sext, Type::I64)]
@@ -79,7 +79,9 @@ fn retained_actual_optimized_c_bridge_activates_and_preserves_recurrence() {
             }
         }
     }
-    assert_eq!(apply(&after.to_string()).to_string(), after.to_string());
+    let once = after.to_string();
+    keel_opt::run_passes(&mut after, &["sign-extend-idiom"]).unwrap();
+    assert_eq!(after.to_string(), once);
 }
 
 #[test]
