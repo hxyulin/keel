@@ -36,6 +36,7 @@ mod memory_forward;
 mod phi_simplify;
 mod sccp;
 mod simplify_cfg;
+mod sign_extend_idiom;
 mod small_memory;
 mod stack_forward;
 
@@ -182,6 +183,7 @@ impl Pass for BuiltinPass {
 
 pub const PASSES: &[&dyn Pass] = &[
     &SMALL_MEMORY,
+    &sign_extend_idiom::SignExtendIdiom,
     &BUILTINS[0],
     &BUILTINS[1],
     &BUILTINS[2],
