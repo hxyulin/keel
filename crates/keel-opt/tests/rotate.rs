@@ -118,16 +118,16 @@ block0(v0: i64, v1: i64):
  v3 = shl v1, v2
  v4 = iconst.i64 13
  v5 = ushr v0, v4
- v7 = iconst.i64 7
- v8 = iconst.i64 51
- v9 = shl v0, v8
- v6 = or v3, v5
- return v6
+ v6 = iconst.i64 7
+ v7 = iconst.i64 51
+ v8 = shl v0, v7
+ v9 = or v3, v5
+ return v9
 }";
     let mut m = keel_ir::parse(s).unwrap();
     let f = &mut m.functions[0];
-    f.replace_all_uses(Value::new(3), Value::new(9));
-    f.replace_all_uses(Value::new(8), Value::new(2));
+    f.replace_all_uses(Value::new(3), Value::new(8));
+    f.replace_all_uses(Value::new(7), Value::new(2));
     let before: Vec<_> = f
         .layout_insts()
         .map(|(_, i)| (i, f.inst_loc(i), f.inst_results(i).to_vec()))
@@ -138,10 +138,10 @@ block0(v0: i64, v1: i64):
         assert_eq!(f.inst_loc(i), loc);
         assert_eq!(f.inst_results(i), results);
     }
-    assert_eq!(f.resolve(Value::new(3)), Value::new(9));
+    assert_eq!(f.resolve(Value::new(3)), Value::new(8));
     let i = f
         .layout_insts()
-        .find(|(_, i)| f.inst_results(*i).contains(&Value::new(6)))
+        .find(|(_, i)| f.inst_results(*i).contains(&Value::new(9)))
         .unwrap()
         .1;
     assert_eq!(
