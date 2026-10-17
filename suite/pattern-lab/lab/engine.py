@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -39,8 +40,16 @@ class Runner:
         self.commands.append(rec)
         with open(rec['stdout'],'xb') as out, open(rec['stderr'],'xb') as err:
             try:
-                p=subprocess.run(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=err,timeout=rec['timeout_seconds'],shell=False)
-                rec['returncode']=p.returncode
+                p=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=out,stderr=err,shell=False,start_new_session=(os.name=='posix'))
+                try:
+                    rec['returncode']=p.wait(timeout=rec['timeout_seconds'])
+                except subprocess.TimeoutExpired:
+                    if os.name=='posix':
+                        try: os.killpg(p.pid,signal.SIGKILL)
+                        except ProcessLookupError: pass
+                    else: p.kill()
+                    p.wait()
+                    raise
             except subprocess.TimeoutExpired:
                 rec['status']='timeout'
             except OSError as e:
@@ -124,6 +133,7 @@ def check(r, evidence):
                     cases.append({'pattern':m['id'],'variant':v,**s})
         row['status']='checked'
     write(r.output/'correctness.json',cases)
+    if verify_record(fingerprints(evidence)): raise LabError('mutation during build/check')
     return cases
 
 def fingerprints(evidence):
