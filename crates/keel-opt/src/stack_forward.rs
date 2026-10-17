@@ -5,9 +5,9 @@
 //! temporaries exposed by inlining aggregate helpers without assuming that
 //! arbitrary pointers cannot alias.
 use keel_ir::{
-    BinaryOp, ControlFlowGraph, ConvertOp, DominatorTree, Function, InsertPoint, Inst, InstData,
-    StackSlot, Type, Value, ValueDef,
+    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
 };
+use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use std::collections::{HashMap, HashSet};
 
 pub fn run(func: &mut Function) -> bool {
