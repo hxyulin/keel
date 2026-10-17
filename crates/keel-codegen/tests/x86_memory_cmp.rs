@@ -317,10 +317,10 @@ fn native_unsigned_signed_and_boundaries_match_independent_clang_oracle() {
     {
         ir.push_str(&source(cc).replace("@f(", &format!("@f{index}(")));
         oracle.push_str(&format!("uint64_t o{index}(const uint64_t*p,uint64_t x){{return x+(({})x {op} ({})*p?17:91);}}\n", if signed {"int64_t"}else{"uint64_t"}, if signed {"int64_t"}else{"uint64_t"}));
-        driver.push_str(&format!("extern uint64_t f{index}(const uint64_t*,uint64_t);extern uint64_t o{index}(const uint64_t*,uint64_t);\n"));
+        driver.push_str(&format!("extern uint64_t f{index}(const void*,uint64_t);extern uint64_t o{index}(const uint64_t*,uint64_t);\n"));
         checks.push_str(&format!("assert(f{index}(p,x)==o{index}(p,x));"));
     }
-    driver.push_str(&format!("int main(void){{uint64_t a[]={{0,1,2,0x7fffffffffffffffULL,0x8000000000000000ULL,UINT64_MAX}};for(unsigned i=0;i<6;i++)for(unsigned j=0;j<6;j++){{uint64_t*p=&a[i],x=a[j];{checks}}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);uint64_t*p=(uint64_t*)(m+n-8);*p=UINT64_MAX;assert(mprotect(m+n,n,PROT_NONE)==0);for(unsigned j=0;j<6;j++){{uint64_t x=a[j];{checks}}}pid_t c=fork();assert(c>=0);if(!c){{(void)f0((uint64_t*)(m+n-7),0);_exit(0);}}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);assert(munmap(m,2*n)==0);return 0;}}\n"));
+    driver.push_str(&format!("int main(void){{uint64_t a[]={{0,1,2,0x7fffffffffffffffULL,0x8000000000000000ULL,UINT64_MAX}};for(unsigned i=0;i<6;i++)for(unsigned j=0;j<6;j++){{uint64_t*p=&a[i],x=a[j];{checks}}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);uint64_t*p=(uint64_t*)(m+n-8);*p=UINT64_MAX;assert(mprotect(m+n,n,PROT_NONE)==0);for(unsigned j=0;j<6;j++){{uint64_t x=a[j];{checks}}}pid_t c=fork();assert(c>=0);if(!c){{(void)f0(m+n-7,0);_exit(0);}}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);assert(munmap(m,2*n)==0);return 0;}}\n"));
     fs::write(dir.join("oracle.c"), oracle).unwrap();
     fs::write(dir.join("driver.c"), driver).unwrap();
     assert!(
