@@ -22,6 +22,10 @@ pub enum Machine {
     ShiftOr,
     ShiftXor,
     Lea,
+    /// X86-only modular x * 3 + signed disp32, with one allocated input.
+    LeaMul3 {
+        displacement: i32,
+    },
     /// AArch64-only, exact-width unsigned bitfield extraction.
     Ubfx {
         lsb: u8,
@@ -463,6 +467,87 @@ impl Selection {
                 let ty = func.value_type(func.resolve(args[0]));
                 if !matches!(ty, Type::I32 | Type::I64 | Type::Ptr) {
                     continue;
+                }
+                // The measured x86 recurrence is x * 3 + 7. Keep this
+                // deliberately bounded to factor three: one LEA reads one live
+                // input and replaces a single-use product plus constant add.
+                if target == Target::X86
+                    && op == BinaryOp::Iadd
+                    && matches!(ty, Type::I32 | Type::I64)
+                    // An aliased dead definition can still be in the layout.
+                    && func.inst_results(inst).first().is_some_and(|&v| func.resolve(v) == v)
+                {
+                    for side in [0, 1] {
+                        let product = func.resolve(args[side]);
+                        if uses[product.index()] != 1 {
+                            continue;
+                        }
+                        let Some(offset) = crate::fold::iconst(func, args[1 - side]) else {
+                            continue;
+                        };
+                        // A 32-bit LEA keeps the low 32 result bits; a 64-bit
+                        // LEA sign-extends disp32. Normalize only the i32 case.
+                        let offset = if ty == Type::I32 {
+                            i64::from(offset as i32)
+                        } else {
+                            offset
+                        };
+                        let Ok(displacement) = i32::try_from(offset) else {
+                            continue;
+                        };
+                        let ValueDef::Result(child, _) = func.value_def(product) else {
+                            continue;
+                        };
+                        if func.is_removed(child)
+                            || func.inst_block(child) != block
+                            || plan.covered(child)
+                        {
+                            continue;
+                        }
+                        if let (Some(a), Some(b)) = (func.inst_loc(child), func.inst_loc(inst))
+                            && (a.file != b.file || a.line != b.line)
+                        {
+                            continue;
+                        }
+                        let InstData::Binary {
+                            op: BinaryOp::Imul,
+                            args: inputs,
+                        } = *func.inst_data(child)
+                        else {
+                            continue;
+                        };
+                        for constant_side in [1, 0] {
+                            let Some(factor) = crate::fold::iconst(func, inputs[constant_side])
+                            else {
+                                continue;
+                            };
+                            let factor = if ty == Type::I32 {
+                                i64::from(factor as i32)
+                            } else {
+                                factor
+                            };
+                            let input = func.resolve(inputs[1 - constant_side]);
+                            if factor != 3 || func.value_type(input) != ty {
+                                continue;
+                            }
+                            plan.cover(child);
+                            plan.matches.insert(
+                                inst,
+                                Match {
+                                    machine: Machine::LeaMul3 { displacement },
+                                    args: vec![input],
+                                    shift: 1,
+                                },
+                            );
+                            break;
+                        }
+                        if plan.matches.contains_key(&inst) {
+                            break;
+                        }
+                    }
+                    if plan.matches.contains_key(&inst) {
+                        continue;
+                    }
                 }
                 // ARM unsigned extraction consumes only a single-use shift.
                 // Masks wider than the remaining field deliberately fall back.

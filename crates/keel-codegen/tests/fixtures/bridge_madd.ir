@@ -1,0 +1,18 @@
+func @bridge_madd(i64, i64, ptr, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: ptr, v3: i64):
+    jump block1(v0, v1)
+block1(v4: i64, v7: i64):
+    v5 = iconst.i64 0
+    v6 = icmp.ne v4, v5
+    brif v6, block2, block3
+block2:
+    v8 = iconst.i64 3
+    v9 = imul v7, v8
+    v10 = iconst.i64 7
+    v11 = iadd v9, v10
+    v12 = iconst.i64 1
+    v13 = isub v4, v12
+    jump block1(v13, v11)
+block3:
+    return v7
+}

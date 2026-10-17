@@ -913,6 +913,17 @@ impl<'a> FunctionCompiler<'a> {
     fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
         let ty = self.ty(matched.args[0]);
         let a = self.use_reg(matched.args[0], S0);
+        // Reuse the same register for both address terms, including a single
+        // reload when the input spills. LEA itself neither reads nor sets flags.
+        if let crate::select::Machine::LeaMul3 { displacement } = matched.machine {
+            let mut at = memory(r64(a), i128::from(displacement));
+            at.index = Some(r64(a));
+            at.scale = 2;
+            let d = self.def_reg(result);
+            self.emit(Opcode::Lea, [asm_arg(&wide(d, ty)), asm_arg(&at)]);
+            self.def_done(result, d);
+            return;
+        }
         let b = self.use_reg(matched.args[1], S1);
         let d = self.def_reg(result);
         self.emit(
