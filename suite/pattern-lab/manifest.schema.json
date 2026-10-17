@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keel.local/pattern-lab/manifest.schema.json",
+  "title": "Keel pattern lab manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "arch",
+    "description",
+    "category",
+    "variants",
+    "oracle",
+    "data_words",
+    "mask",
+    "seeds",
+    "correctness_iterations",
+    "work_per_iteration",
+    "work_unit",
+    "notes"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/id"
+    },
+    "arch": {
+      "enum": [
+        "aarch64",
+        "x86_64"
+      ]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "category": {
+      "enum": [
+        "latency",
+        "throughput",
+        "memory",
+        "control"
+      ]
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/variant"
+      }
+    },
+    "oracle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "symbol"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "symbol": {
+          "const": "pattern_oracle"
+        }
+      }
+    },
+    "data_words": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1048576
+    },
+    "mask": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "seeds": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615
+      }
+    },
+    "correctness_iterations": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 18446744073709551615
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": 0
+          }
+        },
+        {
+          "contains": {
+            "const": 1
+          }
+        },
+        {
+          "contains": {
+            "const": 2
+          }
+        },
+        {
+          "contains": {
+            "const": 17
+          }
+        },
+        {
+          "contains": {
+            "const": 257
+          }
+        }
+      ]
+    },
+    "work_per_iteration": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "work_unit": {
+      "type": "string",
+      "minLength": 1
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mca": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "source": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Existing regular file relative to suite/pattern-lab; runtime checks resolved containment, including symlinks."
+    },
+    "variant": {
+      "type": "object",
+      "required": [
+        "id",
+        "source",
+        "symbol"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "symbol": {
+          "const": "pattern_kernel"
+        }
+      }
+    }
+  },
+  "$comment": "Runtime additionally checks mask < data_words, unique variant IDs, mca variant keys, path containment/existence, whitespace-only text and JSON duplicate keys. JSON integers must not pass through floating-point parsers. Fixture-specific stride/allocation obligations are defined by fixture tests and oracle."
+}
