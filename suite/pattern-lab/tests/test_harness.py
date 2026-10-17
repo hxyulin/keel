@@ -15,7 +15,7 @@ sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from lab.manifest import LabError, U64, load
-from lab.engine import Runner, build, check, digest, invoke, seal, verify_record, hostarch, bench
+from lab.engine import Runner, build, check, digest, invoke, seal, verify_record, hostarch, bench, resolve_tool, tool_fingerprints
 from lab.stats import schedule, summarize, common_iterations
 
 # Keep generated evidence in ignored directories; retain failures and fixes.
@@ -48,6 +48,32 @@ class Inputs(unittest.TestCase):
     def test_duplicate_json_key(self):
         p=self.root/'bad.json'; p.write_text('{"schema":1,"schema":1}')
         with self.assertRaises(LabError): load(p,self.root)
+
+class ToolIdentity(unittest.TestCase):
+    def test_apple_launcher_resolves_and_seals_delegate(self):
+        d=Path(tempfile.mkdtemp(prefix='tool-resolution-',dir=TEST_ROOT))
+        launcher=d/'clang-launcher'; actual=d/'installed-clang'; resolver=d/'xcrun'
+        for p,body in [(launcher,'raise SystemExit("launcher must not run")'),(actual,'print("clang fake selected compiler")'),(resolver,'import sys; assert sys.argv[1:]==["--no-cache","--find","clang"]; print('+repr(str(actual))+')')]:
+            p.write_text('#!'+sys.executable+'\n'+body+'\n'); p.chmod(0o755)
+        r=Runner(d/'out')
+        with patch('lab.engine.platform.system',return_value='Darwin'), patch('lab.engine.APPLE_LAUNCHERS',{str(launcher):'clang'}), patch('lab.engine.XCRUN',str(resolver)):
+            tool=resolve_tool(r,str(launcher))
+        self.assertEqual(tool['path'],str(actual))
+        self.assertEqual(tool['requested']['path'],str(launcher))
+        hashes=tool_fingerprints(tool)
+        for p in (launcher,actual,resolver): self.assertEqual(hashes[str(p)],digest(p))
+        rec,text=r.run([tool['path'],'--version'])
+        self.assertIn('clang fake selected compiler',text)
+        actual.write_text(actual.read_text()+'# changed\n')
+        self.assertEqual(verify_record(hashes),[{'path':str(actual),'status':'changed'}])
+    def test_explicit_selection_is_not_redirected_or_guessed(self):
+        d=Path(tempfile.mkdtemp(prefix='tool-explicit-',dir=TEST_ROOT)); selected=d/'custom-clang'
+        selected.write_text('#!'+sys.executable+'\nprint("clang custom")\n'); selected.chmod(0o755)
+        r=Runner(d/'out')
+        with patch('lab.engine.platform.system',return_value='Darwin'):
+            tool=resolve_tool(r,str(selected))
+        self.assertEqual(tool['path'],str(selected)); self.assertNotIn('resolver',tool)
+        self.assertEqual(r.commands,[])
 
 class Protocol(unittest.TestCase):
     def test_balanced_pairs_and_all_permutations(self):

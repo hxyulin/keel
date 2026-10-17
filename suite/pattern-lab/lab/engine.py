@@ -68,6 +68,44 @@ def executable(name):
     if not p: raise LabError(f'executable unavailable: {name}')
     return str(Path(p).resolve())
 
+# Resolve only Apple's documented system launchers. Explicit custom executables
+# retain their identity; arbitrary wrappers cannot be inferred from --version.
+APPLE_LAUNCHERS={'/usr/bin/clang':'clang','/usr/bin/clang++':'clang++','/usr/bin/otool':'otool'}
+XCRUN='/usr/bin/xcrun'
+
+def identity(path):
+    p=Path(path).resolve()
+    if not p.is_file() or not os.access(p,os.X_OK):
+        raise LabError(f'tool is not a regular executable: {p}')
+    return {'path':str(p),'sha256':digest(p)}
+
+def resolve_tool(r, requested):
+    selected=executable(requested)
+    requested_identity=identity(selected)
+    result={**requested_identity,'status':'available','requested':{'argument':str(requested),**requested_identity},'identity_scope':'selected executable; arbitrary wrapper delegation is not inferred'}
+    if platform.system()=='Darwin' and selected in APPLE_LAUNCHERS:
+        resolver=identity(XCRUN)
+        # Snapshot the selection environment, disable xcrun's lookup cache, and
+        # invoke the result directly so later developer-selection changes cannot
+        # redirect subsequent compiler/disassembler commands.
+        selection={k:os.environ.get(k) for k in ('DEVELOPER_DIR','TOOLCHAINS','SDKROOT')}
+        rec,text=r.run([resolver['path'],'--no-cache','--find',APPLE_LAUNCHERS[selected]],allow_failure=True)
+        result['resolver']={**resolver,'selection_environment':selection,'command':rec}
+        if rec.get('returncode')!=0 or len(text.strip().splitlines())!=1 or not Path(text.strip()).is_absolute():
+            raise LabError(f'could not resolve Apple tool launcher: {selected}; resolver logs retained')
+        actual=identity(text.strip())
+        if actual['path'] in APPLE_LAUNCHERS or actual['path']==selected:
+            raise LabError(f'Apple tool resolution returned a launcher: {actual["path"]}')
+        result.update(actual)
+        result['identity_scope']='actual executable resolved by xcrun; invoked directly'
+    return result
+
+def tool_fingerprints(tool):
+    files={}
+    for record in (tool,tool.get('requested',{}),tool.get('resolver',{})):
+        if record.get('path') and record.get('sha256'): files[record['path']]=record['sha256']
+    return files
+
 def build(r, root, selected, clang):
     evidence={'compiler':{'status':'unused'},'host':{'arch':hostarch(),'platform':platform.platform(),'uname':list(platform.uname())},'flags':FLAGS,'patterns':[],'inputs':{},'artifacts':{}}
     for p in sorted(root.glob('lab/*.py'))+list(root.glob('run.py'))+list(root.glob('driver.c'))+list(root.glob('manifest.schema.json')):
@@ -85,8 +123,16 @@ def build(r, root, selected, clang):
     dis=shutil.which('otool') if platform.system()=='Darwin' else (shutil.which('llvm-objdump') or shutil.which('objdump'))
     evidence['disassembler']={'status':'available' if dis else 'unsupported','path':dis,'reason':None if dis else 'no otool/objdump found'}
     if dis:
-        evidence['disassembler']['sha256']=digest(Path(dis).resolve())
-        r.run([dis,'--version'] if platform.system()!='Darwin' else [dis,'-h'],allow_failure=True)
+        try:
+            evidence['disassembler']=resolve_tool(r,dis)
+            dis=evidence['disassembler']['path']
+            rec,version=r.run([dis,'--version'] if platform.system()!='Darwin' else [dis,'-h'],allow_failure=True)
+            evidence['disassembler'].update(version_probe=rec,version_output=version)
+            evidence['inputs'].update(tool_fingerprints(evidence['disassembler']))
+        except LabError as e:
+            evidence['disassembler']={'status':'unresolved','requested':identity(dis),'reason':str(e)}
+            evidence['inputs'].update(tool_fingerprints(evidence['disassembler']))
+            dis=None
     for path,m in selected:
         mp=str(path.resolve()); evidence['inputs'][mp]=digest(path)
         for s in [m['oracle'],*m['variants'],*m.get('mca',{}).values()]:
@@ -96,10 +142,12 @@ def build(r, root, selected, clang):
         if m['arch']!=hostarch():
             row['status']='unsupported'; row['reason']='manifest arch differs from native host'; continue
         if driver is None:
-            cc=executable(clang)
+            compiler=resolve_tool(r,clang)
+            cc=compiler['path']
             _,version=r.run([cc,'--version'])
             if 'clang' not in version.lower(): raise LabError('selected compiler is not Clang')
-            evidence['compiler']={'status':'available','path':cc,'sha256':digest(cc),'version':version}
+            evidence['compiler']={**compiler,'version':version}
+            evidence['inputs'].update(tool_fingerprints(evidence['compiler']))
             driver=r.output/'driver.o'
             r.run([cc,*FLAGS,'-std=c11','-c',root/'driver.c','-o',driver])
             evidence['artifacts'][str(driver)]=digest(driver)
@@ -151,7 +199,7 @@ def check(r, evidence):
 def fingerprints(evidence):
     files={**evidence['inputs'],**evidence['artifacts']}
     for tool in (evidence['compiler'],evidence.get('disassembler',{})):
-        if tool.get('path') and tool.get('sha256'): files[tool['path']]=tool['sha256']
+        files.update(tool_fingerprints(tool))
     return files
 
 def verify_record(record):
