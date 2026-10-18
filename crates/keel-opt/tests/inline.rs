@@ -823,13 +823,14 @@ fn explicit_aggregate_reserve_bounds_and_measured_growth() {
     keel_ir::verify_module(&candidate).unwrap();
     let reserves: Vec<_> = report.invocations[0].inline_sites.iter()
         .filter(|s| s.outcome == "experimental_reserve_inlined").collect();
-    assert_eq!(reserves.len(), 32);
+    assert_eq!(reserves.len(), 8);
     assert!(reserves.iter().all(|s| s.experimental_net_growth == Some(6)));
-    for n in 0..4 { assert_eq!(calls(&candidate, &format!("caller{n}")), 2); }
+    assert_eq!(calls(&candidate, "caller0"), 2);
+    assert_eq!(calls(&candidate, "caller1"), 10);
     assert_eq!(calls(&candidate, "caller4"), 10); // module reserve exhausted
     let delta: usize = candidate.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>()
         - ordinary.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>();
-    assert_eq!(delta, 32*6);
+    assert_eq!(delta, 8*6);
     assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"inline-aggregate-reserve"));
 }
 
@@ -843,4 +844,25 @@ fn reserve_never_waives_noinline_or_nonaggregate_growth() {
     let normal = run(&source, &["inline"]);
     let candidate = run(&source, &["inline-aggregate-reserve"]);
     assert_eq!(normal.to_string(), candidate.to_string());
+}
+
+#[test]
+fn reserve_rejects_oversize_stack_nonleaf_and_missing_byval() {
+    let base = reserve_fixture(1, "");
+    let cases = [
+        base.replace("ptr byval {i64}", "ptr"),
+        base.replace(" v2 = load.i64 v1", " v9 = iconst.i64 1\n v10 = call @helper(v9)\n v2 = load.i64 v1"),
+        base.replace("local {\nblock0(v0: ptr", "local {\n ss0 = stack_slot 57, align 1\nblock0(v0: ptr"),
+        base.replace(" v2 = load.i64 v1", &(0..27).map(|n| format!(" v{} = iconst.i64 1\n", n+10)).collect::<String>()).replace(" store v2, v0", " v2 = load.i64 v1\n store v2, v0"),
+    ];
+    for source in cases {
+        let normal = run(&source, &["inline"]);
+        let candidate = run(&source, &["inline-aggregate-reserve"]);
+        assert_eq!(normal.to_string(), candidate.to_string());
+    }
+    // Inclusive boundary: body29 + byval3 =32, new slot56 + snapshot8 =64.
+    let source = base.replace("local {\nblock0(v0: ptr", "local {\n ss0 = stack_slot 56, align 1\nblock0(v0: ptr")
+        .replace(" v2 = load.i64 v1", &format!("{} v2 = load.i64 v1", (0..26).map(|n| format!(" v{} = iconst.i64 1\n", n+10)).collect::<String>()));
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(calls(&candidate, "caller0"), 2);
 }

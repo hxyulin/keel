@@ -63,7 +63,7 @@ impl Pass for InlineAggregateReserve {
 
 const RESERVE_SITE_GROWTH: usize = 32;
 const RESERVE_CALLER_SITES: usize = 8;
-const RESERVE_MODULE_SITES: usize = 32;
+const RESERVE_MODULE_SITES: usize = 8;
 
 // A bounded structural domain, not a profitability or hotness prediction.
 // All ordinary eligibility/signature/recursion checks run first.
@@ -494,7 +494,7 @@ fn run_observed_policy(
             };
             // Reserve cannot bypass call-count, stack, legality or profitability.
             // Ordinary growth ledgers retain their exact original limits. Reserve
-            // sites have separate worst-case 8*32/caller and 32*32/module bounds.
+            // sites have separate worst-case 8*32/caller and 8*32/module bounds.
             let use_reserve = experimental
                 && matches!(
                     budget,

@@ -36,8 +36,8 @@ mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
-mod sign_extend_idiom;
 mod simplify_cfg;
+mod sign_extend_idiom;
 mod small_memory;
 mod stack_forward;
 

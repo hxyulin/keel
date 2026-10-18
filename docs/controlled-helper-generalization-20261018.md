@@ -15,8 +15,8 @@ restrict, debug and multiple-result contracts still apply. Intrinsics and calls
 are excluded from the reserve domain. Default successful sites use the normal
 ledgers. Only an instruction-budget failure can use the reserve.
 
-The separate reserve allows at most eight sites/caller and 32/module: worst-case
-256 extra layout instructions/caller and 1024/module, beyond ordinary 2048/16384.
+The separate reserve allows at most eight sites/caller and eight/module: worst-case
+256 extra layout instructions/caller and 256/module, beyond ordinary 2048/16384.
 These are explicit experimental hard bounds, not a refund or blanket increase to
 production caps. Shared 128-call and 65536-byte new-stack limits still apply.
 Every actual reserve delta is measured immediately after cloning, checked <= its
@@ -52,3 +52,10 @@ measured growth, per-caller/module finite exhaustion, explicit-only registration
 noinline and nonaggregate negative controls. Actual Linux application activation,
 codegen/native oracles, full portable checks, current compile cost and runtime
 remain distinct gates; no benchmark of identical binaries is permitted.
+
+Initial b85922f source used a 32-site module ceiling. The fresh actual activation
+probe observed 32 additional expansions across14callers (992 instructions).
+Before codegen/native/timing, the global ceiling was reduced to one eight-site
+batch (256 instructions) to keep this application experiment narrow. This is an
+explicit source refinement, not a favorable runtime selection or a claim that
+eight sites are profitable. Initial source/activation receipts remain retained.
