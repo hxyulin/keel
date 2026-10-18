@@ -796,3 +796,73 @@ fn emitted_growth_covers_cfg_shapes_and_multiple_snapshots() {
         );
     }
 }
+
+
+// Exhaust the ordinary ledger with a scalar helper, then exercise the reserve
+// using arbitrary names. This tests actual cloning and measured layout growth.
+fn reserve_fixture(callers: usize, attrs: &str) -> String {
+    let scalar = large_helper(64, "", 0, 0);
+    let mut source = format!("{scalar}func @aggregate(ptr sret {{i64}}, ptr byval {{i64}}) {attrs} local {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.i64 v1\n store v2, v0\n return\n}}\n");
+    for n in 0..callers {
+        source.push_str(&format!("func @caller{n}(ptr, ptr, i64) {{\nblock0(v0: ptr, v1: ptr, v2: i64):\n"));
+        for i in 0..32 { source.push_str(&format!(" v{} = call @helper(v2)\n", i+3)); }
+        for _ in 0..10 { source.push_str(" call @aggregate(v0, v1)\n"); }
+        source.push_str(" return\n}\n");
+    }
+    source
+}
+
+#[test]
+fn explicit_aggregate_reserve_bounds_and_measured_growth() {
+    let source = reserve_fixture(6, "");
+    let ordinary = run(&source, &["inline"]);
+    assert_eq!(calls(&ordinary, "caller0"), 10);
+    let mut candidate = keel_ir::parse(&source).unwrap();
+    let mut report = keel_opt::OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(&mut candidate, &["inline-aggregate-reserve"], keel_opt::VectorTarget::Portable, &mut report).unwrap();
+    keel_ir::verify_module(&candidate).unwrap();
+    let reserves: Vec<_> = report.invocations[0].inline_sites.iter()
+        .filter(|s| s.outcome == "experimental_reserve_inlined").collect();
+    assert_eq!(reserves.len(), 8);
+    assert!(reserves.iter().all(|s| s.experimental_net_growth == Some(6)));
+    assert_eq!(calls(&candidate, "caller0"), 2);
+    assert_eq!(calls(&candidate, "caller1"), 10);
+    assert_eq!(calls(&candidate, "caller4"), 10); // module reserve exhausted
+    let delta: usize = candidate.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>()
+        - ordinary.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>();
+    assert_eq!(delta, 8*6);
+    assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"inline-aggregate-reserve"));
+}
+
+#[test]
+fn reserve_never_waives_noinline_or_nonaggregate_growth() {
+    let source = reserve_fixture(1, "noinline");
+    let normal = run(&source, &["inline"]);
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(normal.to_string(), candidate.to_string());
+    let source = large_helper(64, "", 1, 40);
+    let normal = run(&source, &["inline"]);
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(normal.to_string(), candidate.to_string());
+}
+
+#[test]
+fn reserve_rejects_oversize_stack_nonleaf_and_missing_byval() {
+    let base = reserve_fixture(1, "");
+    let cases = [
+        base.replace("ptr byval {i64}", "ptr"),
+        base.replace(" v2 = load.i64 v1", " v9 = iconst.i64 1\n v10 = call @helper(v9)\n v2 = load.i64 v1"),
+        base.replace("local {\nblock0(v0: ptr", "local {\n ss0 = stack_slot 57, align 1\nblock0(v0: ptr"),
+        base.replace(" v2 = load.i64 v1", &(0..27).map(|n| format!(" v{} = iconst.i64 1\n", n+10)).collect::<String>()).replace(" store v2, v0", " v2 = load.i64 v1\n store v2, v0"),
+    ];
+    for source in cases {
+        let normal = run(&source, &["inline"]);
+        let candidate = run(&source, &["inline-aggregate-reserve"]);
+        assert_eq!(normal.to_string(), candidate.to_string());
+    }
+    // Inclusive boundary: body29 + byval3 =32, new slot56 + snapshot8 =64.
+    let source = base.replace("local {\nblock0(v0: ptr", "local {\n ss0 = stack_slot 56, align 1\nblock0(v0: ptr")
+        .replace(" v2 = load.i64 v1", &format!("{} v2 = load.i64 v1", (0..26).map(|n| format!(" v{} = iconst.i64 1\n", n+10)).collect::<String>()));
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(calls(&candidate, "caller0"), 2);
+}

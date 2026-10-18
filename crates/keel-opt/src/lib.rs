@@ -204,6 +204,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &inline::Inline,
+    &inline::InlineAggregateReserve,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

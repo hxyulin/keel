@@ -34,6 +34,59 @@ impl Pass for Inline {
         Some(run_observed(module, Some(sites)).changed)
     }
 }
+/// Explicit research pass. Never included in an optimization tier.
+/// Uses the ordinary clone implementation and legality checks; only a separate
+/// small aggregate-leaf instruction reserve differs. No cleanup or alias-map
+/// reconstruction is performed as part of admission.
+pub struct InlineAggregateReserve;
+impl Pass for InlineAggregateReserve {
+    fn name(&self) -> &'static str {
+        "inline-aggregate-reserve"
+    }
+    fn description(&self) -> &'static str {
+        "experimental bounded aggregate-leaf inlining reserve"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(run_observed_policy(module, None, true).changed)
+    }
+    fn run_module_with_report(
+        &self,
+        module: &mut Module,
+        sites: &mut Vec<InlineSite>,
+    ) -> Option<bool> {
+        Some(run_observed_policy(module, Some(sites), true).changed)
+    }
+}
+
+const RESERVE_SITE_GROWTH: usize = 32;
+const RESERVE_CALLER_SITES: usize = 8;
+const RESERVE_MODULE_SITES: usize = 8;
+
+// A bounded structural domain, not a profitability or hotness prediction.
+// All ordinary eligibility/signature/recursion checks run first.
+fn aggregate_leaf(f: &Function, cost: usize, stack_cost: u64) -> bool {
+    cost <= RESERVE_SITE_GROWTH
+        && stack_cost <= 64
+        && f.blocks().count() <= 4
+        && f.sig
+            .params
+            .iter()
+            .any(|p| matches!(p.purpose, Purpose::Sret(_)))
+        && f.sig
+            .params
+            .iter()
+            .any(|p| matches!(&p.purpose, Purpose::ByVal(l) if l.size() <= 16))
+        && !f.layout_insts().any(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Intrinsic { .. }
+            )
+        })
+}
+
 const MAX_INSTS: usize = 64;
 const MAX_BLOCKS: usize = 8;
 const MAX_STACK: u64 = 512;
@@ -265,7 +318,15 @@ fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
     recursive
 }
 
-fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
+fn run_observed(module: &mut Module, sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
+    run_observed_policy(module, sites, false)
+}
+
+fn run_observed_policy(
+    module: &mut Module,
+    mut sites: Option<&mut Vec<InlineSite>>,
+    experimental: bool,
+) -> InlineReport {
     let recursive = recursive_definitions(module);
     let explicit_definitions = sites.as_ref().map(|_| {
         module
@@ -303,6 +364,7 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
     }
     let mut report = InlineReport::default();
     let mut module_growth = 0;
+    let mut module_reserve_sites = 0;
     for caller in &mut module.functions {
         let calls: Vec<_> = caller
             .layout_insts()
@@ -315,6 +377,7 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
             })
             .collect();
         let mut growth = 0;
+        let mut reserve_sites = 0;
         let mut count = 0;
         let mut stack_growth = 0;
         for call in calls {
@@ -429,7 +492,20 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
             } else {
                 None
             };
-            if let Some(detail) = budget {
+            // Reserve cannot bypass call-count, stack, legality or profitability.
+            // Ordinary growth ledgers retain their exact original limits. Reserve
+            // sites have separate worst-case 8*32/caller and 8*32/module bounds.
+            let use_reserve = experimental
+                && matches!(
+                    budget,
+                    Some("caller_instruction_growth_budget" | "module_instruction_growth_budget")
+                )
+                && count < MAX_CALLS
+                && stack_growth + stack_cost <= HARD_STACK
+                && reserve_sites < RESERVE_CALLER_SITES
+                && module_reserve_sites < RESERVE_MODULE_SITES
+                && aggregate_leaf(callee, cost, stack_cost);
+            if let Some(detail) = budget.filter(|_| !use_reserve) {
                 if let Some(sites) = sites.as_deref_mut() {
                     sites.push(InlineSite::new(
                         caller,
@@ -458,13 +534,37 @@ fn run_observed(module: &mut Module, mut sites: Option<&mut Vec<InlineSite>>) ->
                     &callee.name,
                     call,
                     requested,
-                    "inlined",
+                    if use_reserve {
+                        "experimental_reserve_inlined"
+                    } else {
+                        "inlined"
+                    },
                 ));
             }
+            let before = use_reserve.then(|| caller.layout_insts().count());
             inline_call(caller, call, callee);
-            growth += cost;
+            if let Some(before) = before {
+                // Fail compilation before codegen on an accounting violation.
+                // No recoverable post-mutation fallback or artifact is allowed.
+                let actual_net_growth = caller
+                    .layout_insts()
+                    .count()
+                    .checked_sub(before)
+                    .expect("reserve inlining unexpectedly shrank layout");
+                assert!(
+                    actual_net_growth <= cost && cost <= RESERVE_SITE_GROWTH,
+                    "reserve emitted net growth exceeds conservative preflight"
+                );
+                if let Some(site) = sites.as_deref_mut().and_then(|s| s.last_mut()) {
+                    site.experimental_net_growth = Some(actual_net_growth);
+                }
+                reserve_sites += 1;
+                module_reserve_sites += 1;
+            } else {
+                growth += cost;
+                module_growth += cost;
+            }
             count += 1;
-            module_growth += cost;
             stack_growth += stack_cost;
             report.changed = true;
         }
