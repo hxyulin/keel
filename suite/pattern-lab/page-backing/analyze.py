@@ -15,6 +15,13 @@ def percentile(values,q):
 def analyze(output):
     protocol=json.loads(output.joinpath('protocol.json').read_text());cfg=protocol['config']
     records=[json.loads(x) for x in output.joinpath('raw.jsonl').read_text().splitlines()]
+    sets=[]
+    for group in range(cfg['groups']):
+        pair=[p for p in protocol['placements'] if p['group']==group]
+        assert len(pair)==2 and {p['order'] for p in pair}=={'sorted','shuffled'}
+        assert set(pair[0]['pfns'])==set(pair[1]['pfns'])
+        assert all(not set(pair[0]['pfns'])&previous for previous in sets)
+        sets.append(set(pair[0]['pfns']))
     rows=[r for r in records if r['kind']=='result']
     assert records[-1]['kind']=='release' and records[-1]['status']=='COMPLETE' and records[-1]['owned_jobs']==0
     assert not any(r['kind']=='failure' for r in records)

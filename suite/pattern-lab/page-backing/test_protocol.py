@@ -3,11 +3,15 @@ import importlib.util
 import os
 import pathlib
 import struct
+import json
+import tempfile
 import unittest
 
 path=pathlib.Path(__file__).with_name('run.py')
 spec=importlib.util.spec_from_file_location('page_backing_runner',path)
 runner=importlib.util.module_from_spec(spec);spec.loader.exec_module(runner)
+analysis_spec=importlib.util.spec_from_file_location('page_backing_analysis',path.with_name('analyze.py'))
+analysis=importlib.util.module_from_spec(analysis_spec);analysis_spec.loader.exec_module(analysis)
 
 class Protocol(unittest.TestCase):
     def test_physical_sets_are_disjoint_and_orders_share_frames(self):
@@ -60,5 +64,31 @@ class Protocol(unittest.TestCase):
         try:
             with self.assertRaises(ValueError):runner.read_ready(r,1)
         finally:os.close(r)
+
+    def test_known_effect_replayed_and_changed_frame_rejected(self):
+        config=dict(workloads=[dict(id='known',expected=dict(sha256='a'*64))],arms=['A','B','N'],groups=2,blocks=6,repetitions=1,seed=42,cpu=0,uid=1000)
+        placements=[dict(group=g,order=order,pfns=[pfn]) for g,pfn in [(0,101),(1,202)] for order in ['sorted','shuffled']]
+        order=runner.schedule(1,4,config['arms'],6,42)
+        rows=[]
+        def row(w,p,arm,block,phase):
+            return dict(kind='result',w=w,placement=p,arm=arm,block=block,phase=phase,group=placements[p]['group'],order=placements[p]['order'],wall_ns=1100000 if arm=='N' else 1000000,rc=0,stdout_sha256='a'*64,stderr_sha256=runner.digest(b''),settings=dict(policy=0,nice=0,affinity=[0]),uids=[1000]*4,pagemap_entries=[(1<<63)|placements[p]['pfns'][0]],code_length=4096)
+        for p in range(4):
+            for arm in config['arms']:rows.append(row(0,p,arm,-1,'gate'))
+        for block,cells in enumerate(order):
+            for w,p,arm in cells:rows.append(row(w,p,arm,block,'warmup' if block<2 else 'measured'))
+        rows.append(dict(kind='release',status='COMPLETE',owned_jobs=0))
+        with tempfile.TemporaryDirectory() as directory:
+            output=pathlib.Path(directory)
+            output.joinpath('protocol.json').write_text(json.dumps(dict(config=config,placements=placements,schedule=order,check_only=False,estimand='test')))
+            def save():output.joinpath('raw.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
+            save();result=analysis.analyze(output)
+            effect=result['workloads']['known']
+            self.assertTrue(effect['controls_adequate'])
+            self.assertAlmostEqual(effect['estimates']['control']['ratio'],1)
+            self.assertAlmostEqual(effect['estimates']['optimized']['ratio'],1.1)
+            for endpoint in effect['estimates']['optimized']['conditional_95ci']:self.assertAlmostEqual(endpoint,1.1)
+            rows[0]['pagemap_entries']=[(1<<63)|999]
+            save()
+            with self.assertRaises(AssertionError):analysis.analyze(output)
 
 if __name__=='__main__':unittest.main()
