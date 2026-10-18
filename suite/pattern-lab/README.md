@@ -1,5 +1,11 @@
 # Keel pattern lab
 
+Whole-application timings can depend strongly on executable physical page
+backing even when code bytes and virtual addresses match. See
+[the observed behavior and comparison requirements](../../docs/executable-page-backing.md).
+Affinity, tmpfs, and repeated launches of one inode alone do not establish
+placement-independent compiler performance.
+
 This download-free laboratory compares native assembly patterns against independent C oracles. Python 3.10+ standard library and native Clang are required for checks; listing needs only Python. It does not change Keel compiler behavior. First review the fixture semantics in `PATTERNS.md` and the strict version-one `manifest.schema.json`.
 
 ```sh
