@@ -36,8 +36,8 @@ mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
-mod simplify_cfg;
 mod sign_extend_idiom;
+mod simplify_cfg;
 mod small_memory;
 mod stack_forward;
 
@@ -204,6 +204,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &inline::Inline,
+    &inline::InlineAggregateReserve,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

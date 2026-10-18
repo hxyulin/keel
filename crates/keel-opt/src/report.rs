@@ -58,6 +58,8 @@ pub struct InlineSite {
     pub category: &'static str,
     /// `inlined`, or the first failed check in actual decision order.
     pub outcome: &'static str,
+    /// Measured pre-cleanup layout delta, only for explicit reserve commits.
+    pub experimental_net_growth: Option<usize>,
 }
 impl InlineSite {
     pub(crate) fn new(
@@ -77,6 +79,7 @@ impl InlineSite {
                 "ordinary"
             },
             outcome,
+            experimental_net_growth: None,
         }
     }
 }
@@ -154,6 +157,10 @@ impl OptimizationReport {
                     quoted(site.outcome)
                 )
                 .unwrap();
+                if let Some(growth) = site.experimental_net_growth {
+                    out.pop(); // append optional field before closing object
+                    write!(out, ",\"experimental_net_growth\":{growth}}}").unwrap();
+                }
             }
             out.push_str("]}");
         }

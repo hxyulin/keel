@@ -796,3 +796,51 @@ fn emitted_growth_covers_cfg_shapes_and_multiple_snapshots() {
         );
     }
 }
+
+
+// Exhaust the ordinary ledger with a scalar helper, then exercise the reserve
+// using arbitrary names. This tests actual cloning and measured layout growth.
+fn reserve_fixture(callers: usize, attrs: &str) -> String {
+    let scalar = large_helper(64, "", 0, 0);
+    let mut source = format!("{scalar}func @aggregate(ptr sret {{i64}}, ptr byval {{i64}}) {attrs} local {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.i64 v1\n store v2, v0\n return\n}}\n");
+    for n in 0..callers {
+        source.push_str(&format!("func @caller{n}(ptr, ptr, i64) {{\nblock0(v0: ptr, v1: ptr, v2: i64):\n"));
+        for i in 0..32 { source.push_str(&format!(" v{} = call @helper(v2)\n", i+3)); }
+        for _ in 0..10 { source.push_str(" call @aggregate(v0, v1)\n"); }
+        source.push_str(" return\n}\n");
+    }
+    source
+}
+
+#[test]
+fn explicit_aggregate_reserve_bounds_and_measured_growth() {
+    let source = reserve_fixture(6, "");
+    let ordinary = run(&source, &["inline"]);
+    assert_eq!(calls(&ordinary, "caller0"), 10);
+    let mut candidate = keel_ir::parse(&source).unwrap();
+    let mut report = keel_opt::OptimizationReport::default();
+    keel_opt::run_passes_for_target_with_report(&mut candidate, &["inline-aggregate-reserve"], keel_opt::VectorTarget::Portable, &mut report).unwrap();
+    keel_ir::verify_module(&candidate).unwrap();
+    let reserves: Vec<_> = report.invocations[0].inline_sites.iter()
+        .filter(|s| s.outcome == "experimental_reserve_inlined").collect();
+    assert_eq!(reserves.len(), 32);
+    assert!(reserves.iter().all(|s| s.experimental_net_growth == Some(6)));
+    for n in 0..4 { assert_eq!(calls(&candidate, &format!("caller{n}")), 2); }
+    assert_eq!(calls(&candidate, "caller4"), 10); // module reserve exhausted
+    let delta: usize = candidate.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>()
+        - ordinary.functions.iter().map(|f| f.layout_insts().count()).sum::<usize>();
+    assert_eq!(delta, 32*6);
+    assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"inline-aggregate-reserve"));
+}
+
+#[test]
+fn reserve_never_waives_noinline_or_nonaggregate_growth() {
+    let source = reserve_fixture(1, "noinline");
+    let normal = run(&source, &["inline"]);
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(normal.to_string(), candidate.to_string());
+    let source = large_helper(64, "", 1, 40);
+    let normal = run(&source, &["inline"]);
+    let candidate = run(&source, &["inline-aggregate-reserve"]);
+    assert_eq!(normal.to_string(), candidate.to_string());
+}
