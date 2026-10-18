@@ -59,3 +59,39 @@ Before codegen/native/timing, the global ceiling was reduced to one eight-site
 batch (256 instructions) to keep this application experiment narrow. This is an
 explicit source refinement, not a favorable runtime selection or a claim that
 eight sites are profitable. Initial source/activation receipts remain retained.
+
+## Using the opt-in pass
+
+Replace the first `inline` in the full pipeline, keeping a single inlining
+invocation:
+
+```sh
+keel cc -p inline-aggregate-reserve,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,loop-vectorize input.c -o output.s
+```
+
+The default `-O` pipeline still uses ordinary `inline`.
+
+## Reviewed evidence and integration scope
+
+The 2026-10-18 Linux QuickJS experiment expanded eight sites in `JS_CallInternal`,
+including the original manual candidate, with net 248 pre-cleanup instructions.
+The canonical helper stayed unchanged. Linked caller code shrank from 91,188 to
+91,008 bytes, while its fixed frame grew from 5,416 to 5,480 bytes. Independent
+source and data reviews qualified the bounded implementation, 2.4 million native
+oracle comparisons, application checks, and the linked-code accounting.
+
+Under the fixed executable-page-backing protocol, eight physical sets and two
+assignments per set gave candidate/baseline elapsed ratios of 0.8527 for fib,
+0.8876 for sort, and 0.9960 for string. Conditional 95% intervals were
+[0.8209, 0.8884], [0.8778, 0.8953], and [0.9928, 0.9990], respectively.
+Identical-binary controls passed. All placements were retained, including one
+fib placement with ratio 1.0877. Independent replay confirmed the raw outputs,
+page mappings, schedule, statistics, and all 1,440 checks/launches.
+
+These are finite results from one host, session, and allocated page pool. String
+has a small effect and the three comparisons are uncorrected. The experiment
+combines cloning, ABI staging, cleanup, layout, and allocation effects; it does
+not isolate call overhead or establish ordinary deployment performance.
+Integration exposes the reviewed pass for explicit use. Shipping compile cost,
+held-out applications, and transfer across hosts remain open; the pass is not
+enabled in any optimization tier.

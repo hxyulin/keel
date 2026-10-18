@@ -206,6 +206,11 @@ add propagation before combining. `phi-simplify` also remains opt-in: use
 large application regressions. Pipeline choices and raw measurements are in
 [suite/README.md](suite/README.md#paired-pass-measurements).
 
+The experimental [`inline-aggregate-reserve`](docs/controlled-helper-generalization-20261018.md)
+pass can replace `inline` once in an explicit pipeline to allow a bounded extra
+batch of small aggregate helper expansions. It is opt-in; `-O` keeps the ordinary
+inlining budgets.
+
 Library users can implement `keel_opt::Pass` and use `run_pipeline`. Repeated
 verification defaults on with debug assertions or the `verify-each` Cargo
 feature, and off in ordinary release builds. Scoped library options and CLI
