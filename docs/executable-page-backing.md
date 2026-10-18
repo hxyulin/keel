@@ -60,9 +60,31 @@ sets, not declarations that every address in those ranges is occupied or slow.
    application execution, not whole-process startup or ordinary deployment with
    randomized layout. Report those limits and keep observer runs separate.
 
-The controlled harness must first pass its identical-byte controls. The existing
-null-rematerialization results remain unresolved until that happens; the page
-investigation does not authorize enabling the optimization by default.
+The controlled harness must first pass its identical-byte controls. The page
+investigation does not authorize enabling an optimization by default.
+
+## Controlled retest
+
+The fixed-backing harness in `suite/pattern-lab/page-backing/` passed all eight
+workloads' predefined identical-byte control tolerances on LinuxHost. The full run
+used eight disjoint retained physical frame sets, both sorted and shuffled
+assignments, and six balanced measured blocks: 3,456 correct launches including
+gates and warmups. Every launch checked its own code bytes, physical frames,
+virtual address, credentials, scheduling and output.
+
+Null rematerialization showed favorable finite results on Lua string (2.38%
+less wall time), QuickJS string (0.90%), Lua float (0.69%) and SQLite (0.53%).
+Lua fib/sort and QuickJS fib/sort were inconclusive. In particular, QuickJS fib
+varied from a ratio of 0.833 to 1.469 across frame-set/assignment estimates;
+passing identical-byte controls does not make different code placement-neutral.
+
+These are warm-page, fixed-virtual-layout, post-loader application measurements,
+with intervals conditional on the sampled sets and timing blocks. They exclude
+loader preparation, use a private preload helper, and have no multiple-comparison
+correction. They establish a useful controlled comparison, not ordinary
+deployment performance or a general default-setting win. Compiler defaults remain
+unchanged. Full estimates, raw data and limitations are retained in
+`suite/reports/runtime-next-20261018/fixed-backing-retest-r1/`.
 
 ## Evidence and references
 
