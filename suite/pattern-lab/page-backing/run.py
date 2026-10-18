@@ -272,8 +272,9 @@ def main():
                 completed+=1
             except BaseException:
                 if child is not None:
-                    try:os.killpg(child.pid,signal.SIGKILL)
-                    except ProcessLookupError:pass
+                    if child.poll() is None:
+                        try:os.killpg(child.pid,signal.SIGKILL)
+                        except ProcessLookupError:pass
                     try:stdout,stderr=child.communicate(timeout=5)
                     except subprocess.TimeoutExpired:raise RuntimeError('owned process failed to reap')
                     output.joinpath('failed.stdout').write_bytes(stdout);output.joinpath('failed.stderr').write_bytes(stderr)
