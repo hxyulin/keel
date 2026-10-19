@@ -22,7 +22,7 @@ fn symbols(bytes: &[u8]) -> Result<Symbols> {
         }
         let name = s.name().map_err(|e| e.to_string())?.to_owned();
         if s.is_undefined() {
-            if !s.is_weak() {
+            if !s.is_weak() && !super::linker_owned(&name) {
                 out.required.insert(name);
             }
         } else {
@@ -97,6 +97,11 @@ pub(super) fn prepare<'a>(
                             ));
                         }
                         return Ok(());
+                    }
+                    if let Some(name) = library.required.iter().find(|n| super::linker_owned(n)) {
+                        return Err(format!(
+                            "shared library requires reserved linker-owned symbol `{name}`"
+                        ));
                     }
                     required.extend(library.required.iter().cloned());
                     for name in library.exports.keys() {

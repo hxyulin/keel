@@ -11,6 +11,9 @@ const ARRAYS: [(&str, u32, u64, u64); 3] = [
 ];
 
 fn group(name: &str) -> Option<usize> {
+    if name == ".tm_clone_table" {
+        return Some(5);
+    }
     if name == ".init" {
         return Some(0);
     }
@@ -61,6 +64,15 @@ pub(super) fn validate(
         }
         return Ok(false);
     };
+    if g == 5 {
+        if kind != 1 || flags != 3 || size != 0 || alignment != 8 || entsize != 0 {
+            return Err(
+                ".tm_clone_table currently requires empty writable PROGBITS with alignment 8"
+                    .into(),
+            );
+        }
+        return Ok(true);
+    }
     if g < 2 {
         if kind != 1 || flags != 6 || entsize != 0 {
             return Err(format!("{name} requires executable, read-only PROGBITS"));
@@ -88,7 +100,7 @@ pub(super) fn order(sections: &[Section], permissions: u32, bss: bool) -> Vec<us
         .filter(|(_, s)| s.permissions() == permissions && s.bss == bss)
         .map(|(i, _)| i)
         .collect();
-    let mut seen = [false; 5];
+    let mut seen = [false; 6];
     let mut result = Vec::with_capacity(indices.len());
     for &i in &indices {
         if let Some(g) = group(&sections[i].name) {
@@ -101,7 +113,7 @@ pub(super) fn order(sections: &[Section], permissions: u32, bss: bool) -> Vec<us
                 .copied()
                 .filter(|&j| group(&sections[j].name) == Some(g))
                 .collect();
-            if g >= 2 {
+            if (2..5).contains(&g) {
                 // Validated before layout; stable ties preserve input order.
                 members.sort_by_key(|&j| {
                     priority(&sections[j].name, g).expect("validated lifecycle priority")

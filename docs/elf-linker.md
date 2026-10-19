@@ -75,6 +75,30 @@ Unsupported allocated sections, flags, relocations and native options are
 errors. Nonallocated metadata is omitted. This is not a general GNU ld
 replacement or a static-libc linker.
 
+## Linker-owned anchors and CRT clone-table bounds
+
+Undefined global `_GLOBAL_OFFSET_TABLE_` declarations resolve to Keel's `.got`
+anchor, including declarations without relocations. For dynamic output,
+`_DYNAMIC` resolves to the generated `.dynamic` section. These names do not
+cause archive extraction or DSO import lookup and appear as hidden symbols in
+`.symtab`, not exported dynamic symbols. Selected input definitions of either
+reserved name are rejected. A strong `_DYNAMIC` reference requires dynamic
+output; an undefined weak reference in static output remains zero. A shared
+library requiring either hidden executable anchor is explicitly rejected when
+its interface is selected; existing same-SONAME interface deduplication still
+keeps the first equivalent export interface.
+Supported absolute/GOTPCREL references use the normal relocation checks;
+this does not enable unsupported GOT-base relocation families such as
+`R_X86_64_GOTPC32`. The address anchor does not establish the conventional
+reserved GOT-entry protocol (such as GOT[0] pointing to `_DYNAMIC`), lazy PLT
+binding, or general GOT ABI compatibility.
+
+Empty writable PROGBITS `.tm_clone_table` contributions with alignment eight
+are grouped together while retaining their input symbol identities. This keeps
+CRT list/end bounds equal despite intervening arrays or data. Nonempty clone
+tables and other clone-table layouts remain explicit errors. These foundations
+alone do not establish installed CRT or full compiler-driver compatibility.
+
 ## Executable initialization and termination
 
 Dynamically linked output advertises executable `.preinit_array`, `.init_array`

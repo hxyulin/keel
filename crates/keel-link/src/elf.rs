@@ -16,6 +16,10 @@ const BASE: u64 = 0x400000;
 const PAGE: u64 = 4096;
 const LIMIT: u64 = 512 * 1024 * 1024;
 
+fn linker_owned(name: &str) -> bool {
+    matches!(name, "_GLOBAL_OFFSET_TABLE_" | "_DYNAMIC")
+}
+
 pub struct Options {
     pub entry: String,
     pub interpreter: String,
@@ -125,6 +129,9 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     if options.entry.is_empty() || options.entry.contains('\0') {
         return Err("invalid entry symbol".into());
     }
+    if linker_owned(&options.entry) {
+        return Err("a linker-owned symbol cannot be the entry point".into());
+    }
     let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
     let mut sections = Vec::new();
     let mut units = Vec::new();
@@ -178,7 +185,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 }
                 let kind = raw.sh_type(file.endian());
                 let lifecycle = lifecycle::validate(
-                    &name, kind, sh_flags, section.size(), section.align(),
+                    &name,
+                    kind,
+                    sh_flags,
+                    section.size(),
+                    section.align(),
                     raw.sh_entsize(file.endian()),
                 )?;
                 let frame = name == ".eh_frame" || kind == object::elf::SHT_X86_64_UNWIND;
@@ -210,15 +221,17 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
                 }
                 let bss = section.kind() == object::SectionKind::UninitializedData;
-                if !lifecycle && !matches!(
-                    section.kind(),
-                    object::SectionKind::Text
-                        | object::SectionKind::Data
-                        | object::SectionKind::ReadOnlyData
-                        | object::SectionKind::ReadOnlyString
-                        | object::SectionKind::UninitializedData
-                        | object::SectionKind::Elf(object::elf::SHT_X86_64_UNWIND)
-                ) {
+                if !lifecycle
+                    && !matches!(
+                        section.kind(),
+                        object::SectionKind::Text
+                            | object::SectionKind::Data
+                            | object::SectionKind::ReadOnlyData
+                            | object::SectionKind::ReadOnlyString
+                            | object::SectionKind::UninitializedData
+                            | object::SectionKind::Elf(object::elf::SHT_X86_64_UNWIND)
+                    )
+                {
                     return Err(format!(
                         "unsupported allocated section {name} ({:?})",
                         section.kind()
@@ -339,6 +352,12 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             if !s.global() || s.rank() == 0 {
                 continue;
             }
+            if linker_owned(&s.name) {
+                return Err(format!(
+                    "{}: input defines reserved linker-owned symbol `{}`",
+                    u.name, s.name
+                ));
+            }
             if s.section == SymbolSection::Common {
                 align(0, s.value.max(1))?;
                 let c = commons.entry(s.name.clone()).or_insert((0, 1));
@@ -389,6 +408,15 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         for s in u.symbols.values() {
             if !s.global() || s.section != SymbolSection::Undefined || globals.contains_key(&s.name)
             {
+                continue;
+            }
+            if linker_owned(&s.name) {
+                if s.name == "_DYNAMIC" && libraries.is_empty() && !s.weak() {
+                    return Err(format!(
+                        "{}: `_DYNAMIC` requires dynamically linked output",
+                        u.name
+                    ));
+                }
                 continue;
             }
             let export = libraries
@@ -555,11 +583,20 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             });
         }
     }
+    let mut linker_symbols = BTreeMap::from([("_GLOBAL_OFFSET_TABLE_", got_section)]);
+    if let Some(d) = &dynamic {
+        linker_symbols.insert("_DYNAMIC", d.table);
+    }
     let address = |ui: usize, si: usize| -> Result<u64> {
         let (ui, si) = canonical(ui, si)?;
         let s = &units[ui].symbols[&si];
         match s.section {
             SymbolSection::Absolute => Ok(s.value),
+            SymbolSection::Undefined
+                if s.global() && linker_symbols.contains_key(s.name.as_str()) =>
+            {
+                Ok(BASE + sections[linker_symbols[s.name.as_str()]].offset)
+            }
             SymbolSection::Undefined if s.weak() => Ok(0),
             SymbolSection::Common => {
                 let (section, offset) = common_locations
@@ -741,6 +778,25 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             16,
             common_sizes.get(name).copied().unwrap_or(s.size),
         );
+        symbols.extend_from_slice(&record);
+    }
+    for (name, &index) in &linker_symbols {
+        if !units.iter().any(|u| {
+            u.symbols
+                .values()
+                .any(|s| s.global() && s.section == SymbolSection::Undefined && s.name == *name)
+        }) {
+            continue;
+        }
+        if index + 1 >= 0xff00 {
+            return Err("too many output sections".into());
+        }
+        let mut record = [0u8; 24];
+        put32(&mut record, 0, string(&mut strings, name));
+        record[4] = 0x11; // GLOBAL OBJECT, hidden and absent from .dynsym.
+        record[5] = 2;
+        put16(&mut record, 6, (index + 1) as u16);
+        put64(&mut record, 8, BASE + sections[index].offset);
         symbols.extend_from_slice(&record);
     }
     let str_index = headers.len() + 1;
