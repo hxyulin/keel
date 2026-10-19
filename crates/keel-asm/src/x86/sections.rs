@@ -9,6 +9,8 @@ pub(super) struct Declaration {
     pub nobits: bool,
     pub entry_size: u64,
     pub group: Option<String>,
+    pub section_type: Option<u32>,
+    pub unique: Option<u64>,
 }
 
 pub(super) fn validate(
@@ -21,7 +23,7 @@ pub(super) fn validate(
     if name.is_empty() || name.contains('\0') {
         return Err("invalid ELF section name".into());
     }
-    if flags & !0x637 != 0 {
+    if flags & !0x8000_0637 != 0 {
         return Err("unsupported ELF section flags".into());
     }
     if flags & 0x20 != 0 && flags & 0x10 == 0 {
@@ -49,12 +51,14 @@ fn has_prefix(name: &str, prefix: &str) -> bool {
 }
 
 /// The flags LLVM MC infers from a section name. It ORs them into explicit
-/// flags too. Names needing SHT_INIT_ARRAY/SHT_NOTE-style types are not inferred.
+/// flags too. Array types use the same prefix test as their allocation flags.
 pub(super) fn default_flags(name: &str) -> u64 {
     if has_prefix(name, ".rodata") || name == ".rodata1" {
         2
     } else if has_prefix(name, ".text") || matches!(name, ".init" | ".fini") {
         6
+    } else if array_type(name).is_some() {
+        3
     } else if has_prefix(name, ".data") || name == ".data1" || has_prefix(name, ".bss") {
         3
     } else if has_prefix(name, ".tdata") || has_prefix(name, ".tbss") {
@@ -67,6 +71,16 @@ pub(super) fn default_flags(name: &str) -> u64 {
 /// LLVM MC makes `.bss`/`.tbss` sections NOBITS unless a type is given.
 pub(super) fn default_nobits(name: &str) -> bool {
     has_prefix(name, ".bss") || has_prefix(name, ".tbss")
+}
+
+fn array_type(name: &str) -> Option<u32> {
+    [
+        (".init_array", 14),
+        (".fini_array", 15),
+        (".preinit_array", 16),
+    ]
+    .into_iter()
+    .find_map(|(prefix, kind)| has_prefix(name, prefix).then_some(kind))
 }
 
 pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
@@ -99,10 +113,37 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
         flags = Some(f | default_flags(&name));
     }
     let mut nobits = default_nobits(&name);
+    let mut section_type = array_type(&name);
     if let Some(t) = parts.get(2) {
         match *t {
-            "@progbits" | "%progbits" => nobits = false,
-            "@nobits" | "%nobits" => nobits = true,
+            "@progbits" | "%progbits" => {
+                nobits = false;
+                section_type = Some(1);
+            }
+            "@nobits" | "%nobits" => {
+                nobits = true;
+                section_type = Some(8);
+            }
+            "@init_array" | "%init_array" => {
+                nobits = false;
+                section_type = Some(14);
+            }
+            "@fini_array" | "%fini_array" => {
+                nobits = false;
+                section_type = Some(15);
+            }
+            "@preinit_array" | "%preinit_array" => {
+                nobits = false;
+                section_type = Some(16);
+            }
+            "@unwind" | "%unwind" => {
+                nobits = false;
+                section_type = Some(0x7000_0001);
+            }
+            "@note" | "%note" => {
+                nobits = false;
+                section_type = Some(7);
+            }
             _ => return Err(format!("unsupported section type `{t}`")),
         }
     }
@@ -142,6 +183,14 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
     } else {
         None
     };
+    let unique = if parts.get(next) == Some(&"unique") {
+        next += 1;
+        let id = parts.get(next).ok_or("missing unique section id")?;
+        next += 1;
+        Some(u64::try_from(x86::integer(id)?).map_err(|_| "invalid unique section id")?)
+    } else {
+        None
+    };
     if parts.len() > next {
         return Err(
             "unexpected section arguments (entry sizes require M; COMDAT requires G)".into(),
@@ -157,6 +206,8 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
         nobits,
         entry_size,
         group,
+        section_type,
+        unique,
     })
 }
 
@@ -178,8 +229,14 @@ pub(super) fn finalize(
     sections: &[Section],
     groups: &BTreeMap<String, Vec<usize>>,
     synthetic_signatures: &BTreeSet<String>,
+    addrsig: Option<&[String]>,
 ) -> Result<(), String> {
-    if groups.is_empty() && sections.iter().all(|s| s.entry_size == 0) {
+    if groups.is_empty()
+        && sections
+            .iter()
+            .all(|s| s.entry_size == 0 && matches!(s.section_type, 1 | 8))
+        && addrsig.is_none()
+    {
         return Ok(());
     }
     let shoff = u64_at(bytes, 40) as usize;
@@ -200,6 +257,8 @@ pub(super) fn finalize(
     }
     for (s, &i) in sections.iter().zip(&indices) {
         put64(bytes, shoff + 64 * i + 56, s.entry_size);
+        bytes[shoff + 64 * i + 4..shoff + 64 * i + 8]
+            .copy_from_slice(&s.section_type.to_le_bytes());
     }
     let group_headers: Vec<_> = (1..count)
         .filter(|&i| u32_at(bytes, shoff + 64 * i + 4) == 17)
@@ -259,6 +318,45 @@ pub(super) fn finalize(
         }
         put64(bytes, header + 24, offset);
         put64(bytes, header + 32, (entries.len() * 4) as u64);
+    }
+    if let Some(names) = addrsig {
+        let symtab_index = (1..count)
+            .find(|&i| u32_at(bytes, shoff + 64 * i + 4) == 2)
+            .ok_or("missing symbol table for address signatures")?;
+        let symtab = shoff + 64 * symtab_index;
+        let strings_header = shoff + 64 * u32_at(bytes, symtab + 40) as usize;
+        let strings = u64_at(bytes, strings_header + 24) as usize;
+        let symbol_offset = u64_at(bytes, symtab + 24) as usize;
+        let symbol_count = u64_at(bytes, symtab + 32) as usize / 24;
+        let mut symbols = BTreeMap::new();
+        for i in 1..symbol_count {
+            let start = strings + u32_at(bytes, symbol_offset + i * 24) as usize;
+            let len = bytes[start..]
+                .iter()
+                .position(|&b| b == 0)
+                .ok_or("invalid ELF symbol name")?;
+            symbols.insert(bytes[start..start + len].to_vec(), i);
+        }
+        let mut payload = Vec::new();
+        let mut seen = BTreeSet::new();
+        for name in names {
+            if let Some(&index) = symbols.get(name.as_bytes()) {
+                if seen.insert(index) {
+                    super::metadata::leb(&mut payload, index as i128, false)?;
+                }
+            }
+        }
+        let index = sections
+            .iter()
+            .position(|s| s.name == ".llvm_addrsig")
+            .ok_or("missing address signature section")?;
+        let header = shoff + 64 * indices[index];
+        let start = bytes.len();
+        bytes.extend(payload);
+        put64(bytes, header + 24, start as u64);
+        let size = (bytes.len() - start) as u64;
+        put64(bytes, header + 32, size);
+        bytes[header + 40..header + 44].copy_from_slice(&(symtab_index as u32).to_le_bytes());
     }
     Ok(())
 }

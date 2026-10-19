@@ -1,5 +1,6 @@
 //! Native x86-64 ELF assembler. Intel/AT&T source is parsed once into `keel-asm-ir`.
 //! Parsed items are laid out until optimistic short branches fit their final layout.
+mod dwarf;
 mod encode;
 mod metadata;
 mod sections;
@@ -22,6 +23,8 @@ struct Section {
     nobits: bool,
     entry_size: u64,
     group: Option<String>,
+    section_type: u32,
+    unique: Option<u64>,
     align: u64,
     data: Vec<u8>,
     size: u64,
@@ -31,6 +34,7 @@ struct Sym {
     section: Option<usize>,
     value: u64,
     global: bool,
+    local: bool,
     weak: bool,
     hidden: bool,
     kind: SymbolKind,
@@ -45,6 +49,7 @@ impl Default for Sym {
             section: None,
             value: 0,
             global: false,
+            local: false,
             weak: false,
             hidden: false,
             kind: SymbolKind::Unknown,
@@ -53,6 +58,11 @@ impl Default for Sym {
             common: None,
         }
     }
+}
+enum AlignFill {
+    Default,
+    Byte(u8),
+    Nop,
 }
 struct Fix {
     section: usize,
@@ -70,8 +80,13 @@ struct Assembler {
     current: usize,
     cfi: Option<metadata::Frame>,
     frames: Vec<metadata::Frame>,
-    files: BTreeMap<u32, Vec<u8>>,
-    locations: Vec<metadata::Location>,
+    debug: dwarf::Debug,
+    source_files: Vec<Vec<u8>>,
+    addrsig: Option<Vec<String>>,
+    leb_widths: Vec<usize>,
+    lebs: Vec<(usize, u64, Expression, bool, usize)>,
+    pref_powers: Vec<u32>,
+    prefs: Vec<(usize, u64, u64, u32, String, usize)>,
 }
 
 /// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
@@ -330,10 +345,20 @@ fn assemble_items_inner<const PROFILE: bool>(
 ) -> Result<Vec<u8>, Error> {
     // Start optimistically short, then only widen. Alignment (especially max-skip)
     // is not monotonic: recheck *every* remaining short branch after each layout.
-    // At least one branch widens per retry, so this terminates without cycles.
+    // Branches only widen. Variable-size directives may need extra passes;
+    // diagnose a cyclic directive layout without capping branch relaxation.
+    let mut leb_widths = Vec::new();
+    let mut pref_powers = Vec::new();
+    // Brent's cycle detector retains one directive state, not a history per
+    // pass. A branch widening changes the transition function, so reset it.
+    let mut checkpoint = None;
+    let (mut period, mut distance) = (1usize, 0usize);
+    let mut variable_work = 0usize;
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
+        a.leb_widths = leb_widths.clone();
+        a.pref_powers = pref_powers.clone();
         let mut branches = Vec::new();
         let mut run = 0;
         for (index, entry) in items.entries.iter().enumerate() {
@@ -392,12 +417,93 @@ fn assemble_items_inner<const PROFILE: bool>(
             profile.widened.push(changed);
         }
         let start = PROFILE.then(std::time::Instant::now);
-        if changed == 0 {
+        let mut variable_changed = false;
+        let mut pending_leb_error = None;
+        for (i, (section, offset, expression, signed, line)) in a.lebs.iter().enumerate() {
+            let (sec, value) = a.eval(expression, 0).map_err(|e| Error::new(*line, e))?;
+            if sec.is_some() {
+                return Err(Error::new(
+                    *line,
+                    "LEB128 requires an absolute same-section difference",
+                ));
+            }
+            let mut bytes = Vec::new();
+            let width = a.leb_widths.get(i).copied().unwrap_or(1);
+            if leb_widths.len() <= i {
+                leb_widths.resize(i + 1, 1);
+            }
+            // Unsigned values may be provisionally negative while another
+            // directive or branch still changes layout. Keep this width until
+            // the layout is stable before reporting the domain error.
+            if let Err(e) = metadata::leb(&mut bytes, value, *signed) {
+                pending_leb_error.get_or_insert_with(|| Error::new(*line, e));
+                continue;
+            }
+            leb_widths[i] = bytes.len();
+            if width != bytes.len() {
+                variable_changed = true;
+            } else {
+                let at = *offset as usize;
+                a.sections[*section].data[at..at + width].copy_from_slice(&bytes);
+            }
+        }
+        for (i, (section, start, padding, preferred, end, line)) in a.prefs.iter().enumerate() {
+            let (sec, value) = a.eval_symbol(end, 0).map_err(|e| Error::new(*line, e))?;
+            if sec != Some(*section) || value < i128::from(start + padding) {
+                return Err(Error::new(
+                    *line,
+                    ".prefalign end must follow its body in the same section",
+                ));
+            }
+            let size = u64::try_from(value - i128::from(start + padding))
+                .map_err(|_| Error::new(*line, ".prefalign body too large"))?;
+            let power = size
+                .min(1u64 << preferred)
+                .next_power_of_two()
+                .trailing_zeros();
+            if pref_powers.len() <= i {
+                pref_powers.resize(i + 1, 0);
+            }
+            pref_powers[i] = power;
+            variable_changed |= a.pref_powers.get(i).copied().unwrap_or(0) != power;
+        }
+        if changed == 0 && !variable_changed {
+            if let Some(e) = pending_leb_error {
+                return Err(e);
+            }
             let object = a.object()?;
             if let Some(start) = start {
                 profile.object_ms = start.elapsed().as_secs_f64() * 1000.0;
             }
             return Ok(object);
+        }
+        if changed != 0 {
+            checkpoint = None;
+            period = 1;
+            distance = 0;
+        } else if variable_changed {
+            // Bound repeated layout work explicitly, rather than treating a
+            // pass count as proof of a cycle. Ordinary fixed layouts pay none
+            // of this state-storage cost. This permits long acyclic chains.
+            variable_work = variable_work.saturating_add(items.entries.len());
+            if variable_work > 100_000_000 {
+                return Err(Error::new(
+                    0,
+                    "variable-length directive layout resource limit (100 million item visits)",
+                ));
+            }
+            distance += 1;
+            if checkpoint
+                .as_ref()
+                .is_some_and(|(lebs, prefs)| lebs == &leb_widths && prefs == &pref_powers)
+            {
+                return Err(Error::new(0, "cyclic variable-length directive layout"));
+            }
+            if checkpoint.is_none() || distance == period {
+                checkpoint = Some((leb_widths.clone(), pref_powers.clone()));
+                period = period.saturating_mul(2);
+                distance = 0;
+            }
         }
         drop(a);
         if let Some(start) = start {
@@ -461,17 +567,39 @@ impl Assembler {
         entry_size: u64,
         group: Option<String>,
     ) -> Result<(), String> {
+        self.section_full(name, flags, nobits, entry_size, group, None, None)
+    }
+    fn section_full(
+        &mut self,
+        name: &str,
+        flags: Option<u64>,
+        nobits: bool,
+        entry_size: u64,
+        group: Option<String>,
+        section_type: Option<u32>,
+        unique: Option<u64>,
+    ) -> Result<(), String> {
         let nobits = nobits || matches!(name, ".bss" | ".tbss");
+        let section_type = section_type.unwrap_or(if nobits {
+            8
+        } else if name == ".eh_frame" {
+            0x7000_0001
+        } else {
+            1
+        });
         if let Some(i) = self
             .sections
             .iter()
-            .position(|s| s.name == name && s.group == group)
+            .position(|s| s.name == name && s.group == group && s.unique == unique)
         {
             let s = &self.sections[i];
             // A bare .section name switches back without redeclaring attributes.
-            if flags
-                .is_some_and(|f| f != s.flags || nobits != s.nobits || entry_size != s.entry_size)
-            {
+            if flags.is_some_and(|f| {
+                f != s.flags
+                    || nobits != s.nobits
+                    || entry_size != s.entry_size
+                    || section_type != s.section_type
+            }) {
                 return Err(format!("conflicting section attributes for {name}"));
             }
             self.current = i;
@@ -486,11 +614,28 @@ impl Assembler {
             nobits,
             entry_size,
             group,
+            section_type,
+            unique,
             align: 1,
             data: Vec::new(),
             size: 0,
         });
         Ok(())
+    }
+    // Explicit data in executable sections can contain instructions. Padding
+    // uses the raw byte/fill helpers so it does not consume a pending .loc.
+    fn data_location(&mut self, size: u64) {
+        if size != 0 && self.sections[self.current].flags & 4 != 0 {
+            self.debug.emit(self.current, self.offset());
+        }
+    }
+    fn data_bytes(&mut self, data: &[u8]) -> Result<(), String> {
+        self.data_location(data.len() as u64);
+        self.bytes(data)
+    }
+    fn data_zero(&mut self, size: u64, fill: u8) -> Result<(), String> {
+        self.data_location(size);
+        self.zero(size, fill)
     }
     fn bytes(&mut self, data: &[u8]) -> Result<(), String> {
         let s = &mut self.sections[self.current];
@@ -535,6 +680,7 @@ impl Assembler {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
         }
+        self.debug.emit(self.current, self.offset());
         self.bytes(bytes)
     }
     fn instruction(
@@ -546,6 +692,7 @@ impl Assembler {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
         }
+        self.debug.emit(self.current, self.offset());
         // Intel operands known to be absolute at this point are constants.
         // Forward references remain symbolic, including later absolute aliases.
         let mut folded: Option<x86::Instruction> = None;
@@ -605,6 +752,7 @@ impl Assembler {
         Ok(expression)
     }
     fn integer(&mut self, width: u8, mut address: Address, line: usize) -> Result<(), String> {
+        self.data_location(u64::from(width));
         address.expression = self.capture_dot(address.expression)?;
         if address.expression.add.is_none() && address.expression.subtract.is_none() {
             return self.bytes(&address.expression.constant.to_le_bytes()[..width as usize]);
@@ -689,30 +837,21 @@ impl Assembler {
                 self.section(name, Some(flags), nobits)
             }
             Directive::File { index, path } => {
-                if *index == 0 || self.files.insert(*index, path.clone()).is_some() {
-                    return Err("invalid or duplicate file index".into());
-                }
-                Ok(())
+                self.debug.file(*index, None, path.clone(), None, None)
             }
             Directive::Loc {
                 file,
                 line,
                 column,
                 prologue_end,
-            } => {
-                if !self.files.contains_key(file) {
-                    return Err("location references undeclared file".into());
-                }
-                self.locations.push(metadata::Location {
-                    section: self.current,
-                    offset: self.offset(),
-                    file: *file,
-                    line: u64::from(*line),
-                    column: u64::from(*column),
-                    prologue_end: *prologue_end,
-                });
-                Ok(())
-            }
+            } => self.debug.loc(
+                self.current,
+                self.offset(),
+                &format!(
+                    "{file} {line} {column}{}",
+                    if *prologue_end { " prologue_end" } else { "" }
+                ),
+            ),
             Directive::Cfi(cfi) => metadata::shared_cfi(self, cfi),
             Directive::ZeroFill {
                 symbol,
@@ -730,14 +869,11 @@ impl Assembler {
                 self.current = old;
                 Ok(())
             }
-            Directive::Global(s) => {
-                self.symbols.entry(s.clone()).or_default().global = true;
-                Ok(())
-            }
-            Directive::Bytes(b) => self.bytes(b),
+            Directive::Global(s) => self.global(s),
+            Directive::Bytes(b) => self.data_bytes(b),
             Directive::CString(b) => {
-                self.bytes(b)?;
-                self.bytes(&[0])
+                self.data_bytes(b)?;
+                self.data_bytes(&[0])
             }
             Directive::Integer {
                 width,
@@ -751,16 +887,14 @@ impl Assembler {
                 },
                 line,
             ),
-            Directive::Space(n) => self.zero(*n, 0),
+            Directive::Space(n) => self.data_zero(*n, 0),
             Directive::Align(n) => self.align(u32::from(*n), None),
             Directive::Set { name, expression } => {
                 let e = self.capture_dot(expression.clone())?;
                 self.set(name, e)
             }
-            Directive::Leb { signed, expression }
-                if expression.add.is_none() && expression.subtract.is_none() =>
-            {
-                self.leb(expression.constant, *signed)
+            Directive::Leb { signed, expression } => {
+                self.leb_expression(expression.clone(), *signed, line)
             }
             _ => Err(format!(
                 "unsupported shared directive for ELF: {d:?}; use ELF text spelling"
@@ -768,9 +902,9 @@ impl Assembler {
         }
     }
     fn align(&mut self, power: u32, max: Option<u64>) -> Result<(), String> {
-        self.align_fill(power, max, None)
+        self.align_fill(power, max, AlignFill::Default)
     }
-    fn align_fill(&mut self, power: u32, max: Option<u64>, fill: Option<u8>) -> Result<(), String> {
+    fn align_fill(&mut self, power: u32, max: Option<u64>, fill: AlignFill) -> Result<(), String> {
         if power > 30 {
             return Err("alignment exceeds 2^30".into());
         }
@@ -778,14 +912,55 @@ impl Assembler {
         let n = self.offset().wrapping_neg() & (align - 1);
         let section = &mut self.sections[self.current];
         section.align = section.align.max(align);
-        let fill = fill.unwrap_or(if !section.nobits && section.flags & 4 != 0 {
-            0x90
-        } else {
-            0
-        });
+        let nops = match fill {
+            AlignFill::Default => !section.nobits && section.flags & 4 != 0,
+            AlignFill::Nop => true,
+            AlignFill::Byte(_) => false,
+        };
         if max.is_none_or(|m| n <= m) {
-            self.zero(n, fill)?
+            if nops {
+                self.nops(n)?;
+            } else {
+                self.zero(
+                    n,
+                    match fill {
+                        AlignFill::Byte(byte) => byte,
+                        _ => 0,
+                    },
+                )?;
+            }
         }
+        Ok(())
+    }
+    fn nops(&mut self, mut n: u64) -> Result<(), String> {
+        // LLVM's generic x86-64 backend uses NOPs of at most ten bytes.
+        const NOPS: [&[u8]; 11] = [
+            &[],
+            &[0x90],
+            &[0x66, 0x90],
+            &[0x0f, 0x1f, 0x00],
+            &[0x0f, 0x1f, 0x40, 0x00],
+            &[0x0f, 0x1f, 0x44, 0x00, 0x00],
+            &[0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00],
+            &[0x0f, 0x1f, 0x80, 0, 0, 0, 0],
+            &[0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0],
+            &[0x66, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0],
+            &[0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0],
+        ];
+        while n > 0 {
+            let size = n.min(10) as usize;
+            self.bytes(NOPS[size])?;
+            n -= size as u64;
+        }
+        Ok(())
+    }
+    fn global(&mut self, name: &str) -> Result<(), String> {
+        let s = self.symbols.entry(name.into()).or_default();
+        if s.weak {
+            return Err("weak symbol changed binding to global".into());
+        }
+        s.local = false;
+        s.global = true;
         Ok(())
     }
     fn set(&mut self, name: &str, e: Expression) -> Result<(), String> {
@@ -800,6 +975,20 @@ impl Assembler {
         let mut b = Vec::new();
         metadata::leb(&mut b, n, signed)?;
         self.bytes(&b)
+    }
+    fn leb_expression(&mut self, e: Expression, signed: bool, line: usize) -> Result<(), String> {
+        self.data_location(1);
+        if e.add.is_none() && e.subtract.is_none() {
+            return self.leb(e.constant, signed);
+        }
+        if self.sections[self.current].nobits {
+            return Err("symbolic LEB128 in NOBITS section".into());
+        }
+        let e = self.capture_dot(e)?;
+        let width = self.leb_widths.get(self.lebs.len()).copied().unwrap_or(1);
+        self.lebs
+            .push((self.current, self.offset(), e, signed, line));
+        self.zero(width as u64, 0)
     }
     fn directive(&mut self, s: &str, line: usize) -> Result<(), String> {
         let assignment = x86::split_inline(s, '=');
@@ -823,26 +1012,39 @@ impl Assembler {
             ".text" | ".data" | ".bss" if args.is_empty() => self.section(op, None, op == ".bss"),
             ".section" => {
                 let section = sections::parse(&parts)?;
-                self.section_metadata(
+                self.section_full(
                     &section.name,
                     section.flags,
                     section.nobits,
                     section.entry_size,
                     section.group,
+                    section.section_type,
+                    section.unique,
                 )
             }
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {
                     let name = x86::symbol(name)?;
+                    if matches!(op, ".globl" | ".global") {
+                        self.global(&name)?;
+                        continue;
+                    }
                     let s = self.symbols.entry(name).or_default();
                     match op {
-                        ".local" => s.global = false,
+                        ".local" => {
+                            if s.weak || s.global || s.common.is_some() {
+                                return Err("symbol changed binding to local".into());
+                            }
+                            s.global = false;
+                            s.local = true;
+                        }
                         ".hidden" => s.hidden = true,
                         ".weak" => {
                             s.weak = true;
+                            s.local = false;
                             s.global = true
                         }
-                        _ => s.global = true,
+                        _ => unreachable!(),
                     }
                 }
                 Ok(())
@@ -886,8 +1088,12 @@ impl Assembler {
                 }
                 sym.common = Some((size, align));
                 sym.kind = SymbolKind::Data;
-                sym.global = op == ".comm";
-                if op == ".lcomm" {
+                let local = sym.local || op == ".lcomm";
+                if local && sym.weak {
+                    return Err("weak local common symbols are unsupported".into());
+                }
+                sym.global = !local;
+                if local {
                     let old = self.current;
                     self.section(".bss", None, true)?;
                     self.align(align.trailing_zeros(), None)?;
@@ -919,7 +1125,7 @@ impl Assembler {
                     .filter(|s| !s.is_empty())
                     .map(|s| x86::integer(s).map(|n| n as u8))
                     .transpose()?;
-                self.align_fill(power, max, fill)
+                self.align_fill(power, max, fill.map_or(AlignFill::Default, AlignFill::Byte))
             }
             ".byte" | ".short" | ".word" | ".long" | ".int" | ".quad" => {
                 let width = match op {
@@ -950,73 +1156,82 @@ impl Assembler {
                 }
                 let n = num(parts[0])?;
                 let fill = parts.get(1).map(|s| num(s)).transpose()?.unwrap_or(0);
-                self.zero(n, u8::try_from(fill).map_err(|_| "fill exceeds a byte")?)
+                self.data_zero(n, u8::try_from(fill).map_err(|_| "fill exceeds a byte")?)
             }
             ".ascii" | ".asciz" | ".string" => {
                 for p in parts {
-                    self.bytes(&x86::unquote(p)?)?;
+                    self.data_bytes(&x86::unquote(p)?)?;
                     if op != ".ascii" {
-                        self.bytes(&[0])?
+                        self.data_bytes(&[0])?
                     }
                 }
                 Ok(())
             }
             ".uleb128" | ".sleb128" => {
                 for p in parts {
-                    self.leb(x86::integer(p)?, op == ".sleb128")?
+                    let address = x86::address(p)?;
+                    if address.modifier != Modifier::None {
+                        return Err("LEB128 relocation modifiers are unsupported".into());
+                    }
+                    self.leb_expression(address.expression, op == ".sleb128", line)?
                 }
                 Ok(())
             }
-            ".file" => {
-                let (index, path) = args
-                    .split_once(char::is_whitespace)
-                    .ok_or(".file requires an index and quoted path")?;
-                let index = u32::try_from(num(index)?).map_err(|_| "file index too large")?;
-                if index == 0 {
-                    return Err(".file 0 (DWARF 5 line tables) is unsupported on x86 ELF".into());
+            ".file" if args.starts_with('"') => {
+                let file = x86::unquote(args)?;
+                if file.contains(&0) {
+                    return Err("file name contains NUL".into());
                 }
-                // One quoted path only: a directory string or DWARF 5 `md5`/
-                // `source` operand must not be folded into the name.
-                let path = path.trim();
-                let mut escaped = false;
-                let end = path
-                    .bytes()
-                    .enumerate()
-                    .skip(1)
-                    .find(|&(_, b)| {
-                        let close = b == b'"' && !escaped;
-                        escaped = b == b'\\' && !escaped;
-                        close
-                    })
-                    .map(|(i, _)| i);
-                if path.starts_with('"') && end.is_some_and(|end| end + 1 != path.len()) {
-                    return Err(
-                        "x86 .file accepts one quoted path; directory, md5 and source operands are unsupported"
-                            .into(),
-                    );
-                }
-                if self.files.insert(index, x86::unquote(path)?).is_some() {
-                    return Err("invalid or duplicate .file index".into());
-                }
+                self.source_files.push(file);
                 Ok(())
             }
-            ".loc" => {
-                let p: Vec<_> = args.split_whitespace().collect();
-                if p.len() < 3 || p.len() > 4 || p.get(3).is_some_and(|s| *s != "prologue_end") {
-                    return Err("unsupported .loc operands".into());
+            ".file" => self.debug.parse_file(args),
+            ".loc" => self.debug.loc(self.current, self.offset(), args),
+            ".ident" => {
+                let value = x86::unquote(args)?;
+                let old = self.current;
+                self.section_metadata(".comment", Some(0x30), false, 1, None)?;
+                if self.offset() == 0 {
+                    self.bytes(&[0])?;
                 }
-                let file = num(p[0])? as u32;
-                if !self.files.contains_key(&file) {
-                    return Err(".loc references undeclared file".into());
+                self.bytes(&value)?;
+                self.bytes(&[0])?;
+                self.current = old;
+                Ok(())
+            }
+            ".addrsig" if args.is_empty() => {
+                self.addrsig.get_or_insert_with(Vec::new);
+                Ok(())
+            }
+            ".addrsig_sym" => {
+                let name = x86::symbol(args)?;
+                self.addrsig.get_or_insert_with(Vec::new).push(name);
+                Ok(())
+            }
+            ".prefalign" if parts.len() == 3 => {
+                let preferred = u32::try_from(num(parts[0])?).map_err(|_| "alignment too large")?;
+                if preferred > 30 {
+                    return Err("alignment exceeds 2^30".into());
                 }
-                self.locations.push(metadata::Location {
-                    section: self.current,
-                    offset: self.offset(),
-                    file,
-                    line: num(p[1])?,
-                    column: num(p[2])?,
-                    prologue_end: p.len() == 4,
-                });
+                let end = x86::symbol(parts[1])?;
+                let fill = if parts[2] == "nop" {
+                    AlignFill::Nop
+                } else {
+                    AlignFill::Byte(
+                        u8::try_from(num(parts[2])?).map_err(|_| "fill exceeds a byte")?,
+                    )
+                };
+                let power = self.pref_powers.get(self.prefs.len()).copied().unwrap_or(0);
+                let start = self.offset();
+                self.align_fill(power, None, fill)?;
+                self.prefs.push((
+                    self.current,
+                    start,
+                    self.offset() - start,
+                    preferred,
+                    end,
+                    line,
+                ));
                 Ok(())
             }
             ".cfi_startproc"
@@ -1027,7 +1242,10 @@ impl Assembler {
             | ".cfi_offset"
             | ".cfi_restore"
             | ".cfi_remember_state"
-            | ".cfi_restore_state" => metadata::cfi(self, op, args),
+            | ".cfi_restore_state"
+            | ".cfi_adjust_cfa_offset"
+            | ".cfi_personality"
+            | ".cfi_lsda" => metadata::cfi(self, op, args),
             _ => Err(format!("unsupported ELF directive `{op}`")),
         }
     }
@@ -1065,12 +1283,44 @@ impl Assembler {
         }
         Ok((section, value))
     }
+    fn symbol_attributes(&self, name: &str, depth: usize) -> (SymbolKind, Option<&Expression>) {
+        let Some(s) = self.symbols.get(name) else {
+            return (SymbolKind::Unknown, None);
+        };
+        let inherited = if depth < 64 {
+            s.alias
+                .as_deref()
+                .filter(|e| e.subtract.is_none())
+                .and_then(|e| e.add.as_deref())
+                .map(|n| self.symbol_attributes(n, depth + 1))
+                .unwrap_or((SymbolKind::Unknown, None))
+        } else {
+            (SymbolKind::Unknown, None)
+        };
+        (
+            if s.kind == SymbolKind::Unknown {
+                inherited.0
+            } else {
+                s.kind
+            },
+            s.size.as_deref().or(inherited.1),
+        )
+    }
     fn finish(mut self) -> Result<Vec<u8>, Error> {
         let err = |s: String| Error::new(0, s);
         // Ensure even undefined references receive symbol table entries.
         for f in &self.fixes {
             if let Some(n) = &f.address.expression.add {
+                let section = self.sections.iter().position(|s| s.name == *n);
                 let sym = self.symbols.entry(n.clone()).or_default();
+                if sym.section.is_none()
+                    && sym.alias.is_none()
+                    && sym.common.is_none()
+                    && let Some(i) = section
+                {
+                    sym.section = Some(i);
+                    sym.kind = SymbolKind::Section;
+                }
                 if matches!(
                     f.address.modifier,
                     Modifier::TpOff | Modifier::GotTpOff | Modifier::DtpOff
@@ -1117,6 +1367,9 @@ impl Assembler {
             self.symbols.entry(signature.clone()).or_default();
         }
         let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        for file in &self.source_files {
+            object.add_file_symbol(file.clone());
+        }
         let mut sections = Vec::new();
         for s in &self.sections {
             let kind = if s.nobits {
@@ -1144,7 +1397,6 @@ impl Assembler {
             }
             sections.push(id);
         }
-        let has_merge_sections = self.sections.iter().any(|s| s.flags & 0x10 != 0);
         let identity: BTreeSet<_> = self
             .fixes
             .iter()
@@ -1163,12 +1415,11 @@ impl Assembler {
                                 self.eval_symbol(name, 0)
                                     .is_ok_and(|(section, _)| section == Some(f.section))
                             });
-                let merge_target = has_merge_sections
-                    && f.address.expression.add.as_deref().is_some_and(|name| {
-                        self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
-                            section.is_some_and(|i| self.sections[i].flags & 0x10 != 0)
-                        })
-                    });
+                let merge_target = f.address.expression.add.as_deref().is_some_and(|name| {
+                    self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
+                        section.is_some_and(|i| self.sections[i].flags & 0x12 == 0x12)
+                    })
+                });
                 merge_target
                     || f.address.modifier != Modifier::None
                     || pc_relative
@@ -1179,12 +1430,22 @@ impl Assembler {
             })
             .filter_map(|f| f.address.expression.add.as_deref())
             .collect();
-        let mut omitted = BTreeSet::new();
+        let mut retained = identity.clone();
+        if let Some(names) = &self.addrsig {
+            retained.extend(names.iter().map(String::as_str));
+        }
         let mut symbols = BTreeMap::new();
         // Lookup order is irrelevant during layout; ELF symbol order is stable.
         let mut entries: Vec<_> = self.symbols.iter().collect();
         entries.sort_unstable_by_key(|(name, _)| *name);
         for (name, s) in entries {
+            if s.kind == SymbolKind::Section {
+                symbols.insert(
+                    name.clone(),
+                    object.section_symbol(sections[s.section.unwrap()]),
+                );
+                continue;
+            }
             let (section, value) = if s.alias.is_some() {
                 let (sec, value) = self.eval_symbol(name, 0).map_err(err)?;
                 (
@@ -1194,7 +1455,8 @@ impl Assembler {
             } else {
                 (s.section, s.value)
             };
-            let size = if let Some(e) = &s.size {
+            let (kind, size_expression) = self.symbol_attributes(name, 0);
+            let size = if let Some(e) = size_expression {
                 let (sec, n) = self.eval(e, 0).map_err(err)?;
                 if sec.is_some() {
                     return Err(err("symbol size must be absolute".into()));
@@ -1203,7 +1465,7 @@ impl Assembler {
             } else {
                 0
             };
-            let tls = s.kind == SymbolKind::Tls
+            let tls = kind == SymbolKind::Tls
                 || section.is_some_and(|i| self.sections[i].flags & 0x400 != 0);
             if name.starts_with(".L")
                 && !s.global
@@ -1211,12 +1473,11 @@ impl Assembler {
                 && !s.hidden
                 && s.common.is_none()
                 && !tls
-                && !identity.contains(name.as_str())
+                && !retained.contains(name.as_str())
                 && !groups.contains_key(name)
                 && (section.is_some() || s.alias.is_some())
                 && self.local_symbol(name, 0)
             {
-                omitted.insert(name.clone());
                 continue;
             }
             let synthetic = synthetic_signatures.contains(name);
@@ -1225,8 +1486,8 @@ impl Assembler {
                 name: name.as_bytes().to_vec(),
                 value,
                 size,
-                kind: if tls { SymbolKind::Tls } else { s.kind },
-                scope: if s.global || undefined {
+                kind: if tls { SymbolKind::Tls } else { kind },
+                scope: if s.global || s.weak || undefined {
                     SymbolScope::Linkage
                 } else {
                     SymbolScope::Compilation
@@ -1250,7 +1511,7 @@ impl Assembler {
                         | (if tls {
                             6
                         } else {
-                            match s.kind {
+                            match kind {
                                 SymbolKind::Text => 2,
                                 SymbolKind::Data => 1,
                                 _ => 0,
@@ -1260,6 +1521,10 @@ impl Assembler {
                 },
             };
             let id = if let Some((size, align)) = s.common {
+                // ELF common symbols store alignment in st_value. The writer's
+                // add_common_symbol API only applies `align` for Mach-O BSS.
+                let mut symbol = symbol;
+                symbol.value = align;
                 object.add_common_symbol(symbol, size, align)
             } else {
                 object.add_symbol(symbol)
@@ -1330,8 +1595,9 @@ impl Assembler {
                 addend += i128::from(f.offset) - value;
             }
             // Relocations against section-relative aliases use their underlying section symbol.
-            let symbol = if (omitted.contains(&name) || self.symbols[&name].alias.is_some())
-                && !identity.contains(name.as_str())
+            let debug_reference = self.sections[f.section].name.starts_with(".debug_");
+            let symbol = if defined.is_some()
+                && (debug_reference || !identity.contains(name.as_str()))
                 && f.address.modifier == Modifier::None
                 && self.local_symbol(&name, 0)
                 && self.symbols[&name].kind != SymbolKind::Tls
@@ -1371,8 +1637,14 @@ impl Assembler {
             }
         }
         let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
-        sections::finalize(&mut bytes, &self.sections, &groups, &synthetic_signatures)
-            .map_err(err)?;
+        sections::finalize(
+            &mut bytes,
+            &self.sections,
+            &groups,
+            &synthetic_signatures,
+            self.addrsig.as_deref(),
+        )
+        .map_err(err)?;
         Ok(bytes)
     }
 }

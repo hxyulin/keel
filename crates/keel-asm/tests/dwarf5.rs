@@ -592,10 +592,11 @@ fn malformed_dwarf5_directives_are_diagnosed() {
 }
 
 #[test]
-fn x86_elf_rejects_dwarf5_file_forms() {
+fn x86_elf_accepts_directory_and_dwarf5_root_but_requires_root_for_extensions() {
+    for source in [".file 0 \"/w\" \"a.c\"", ".file 1 \"/w\" \"a.c\""] {
+        keel_asm::x86::assemble_object(source).unwrap();
+    }
     for source in [
-        ".file 0 \"/w\" \"a.c\"",
-        ".file 1 \"/w\" \"a.c\"",
         ".file 1 \"a\\\".c\" source \"x\"",
         ".file 1 \"a.c\" md5 0x00112233445566778899aabbccddeeff",
         ".file 1 \"a.c\" source \"x\"",

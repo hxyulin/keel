@@ -11,14 +11,10 @@ pub(super) struct Frame {
     last: u64,
     code: Vec<u8>,
     state_depth: usize,
-}
-pub(super) struct Location {
-    pub section: usize,
-    pub offset: u64,
-    pub file: u32,
-    pub line: u64,
-    pub column: u64,
-    pub prologue_end: bool,
+    cfa_offset: i128,
+    saved_offsets: Vec<i128>,
+    personality: Option<String>,
+    lsda: Option<String>,
 }
 pub(super) fn leb(out: &mut Vec<u8>, mut n: i128, signed: bool) -> Result<(), String> {
     if !signed && n < 0 {
@@ -40,6 +36,7 @@ pub(super) fn leb(out: &mut Vec<u8>, mut n: i128, signed: bool) -> Result<(), St
     Ok(())
 }
 fn dwarf_register(s: &str) -> Result<u8, String> {
+    let s = s.strip_prefix('%').unwrap_or(s);
     if let Some(r) = x86::Register::parse(s) {
         if r.class != RegisterClass::Gpr {
             return Err("CFI requires general registers or DWARF numbers".into());
@@ -61,6 +58,10 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
             last: at,
             code: Vec::new(),
             state_depth: 0,
+            cfa_offset: 8,
+            saved_offsets: Vec::new(),
+            personality: None,
+            lsda: None,
         });
         return Ok(());
     }
@@ -85,7 +86,8 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
                 return Err("invalid .cfi_def_cfa_offset".into());
             }
             f.code.push(0x0e);
-            leb(&mut f.code, x86::integer(args)?, false)?
+            f.cfa_offset = x86::integer(args)?;
+            leb(&mut f.code, f.cfa_offset, false)?
         }
         ".cfi_def_cfa_register" => {
             if p.len() != 1 {
@@ -97,7 +99,8 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
         ".cfi_def_cfa" if p.len() == 2 => {
             f.code.push(0x0c);
             leb(&mut f.code, dwarf_register(p[0])?.into(), false)?;
-            leb(&mut f.code, x86::integer(p[1])?, false)?
+            f.cfa_offset = x86::integer(p[1])?;
+            leb(&mut f.code, f.cfa_offset, false)?
         }
         ".cfi_offset" if p.len() == 2 => {
             let reg = dwarf_register(p[0])?;
@@ -122,13 +125,39 @@ pub(super) fn cfi(a: &mut Assembler, op: &str, args: &str) -> Result<(), String>
                 leb(&mut f.code, reg.into(), false)?
             }
         }
+        ".cfi_adjust_cfa_offset" if p.len() == 1 => {
+            f.cfa_offset = f
+                .cfa_offset
+                .checked_add(x86::integer(args)?)
+                .ok_or("CFA offset overflow")?;
+            f.code.push(0x0e);
+            leb(&mut f.code, f.cfa_offset, false)?;
+        }
+        ".cfi_personality" | ".cfi_lsda" if p.len() == 2 => {
+            let personality = op == ".cfi_personality";
+            let expected = if personality { 155 } else { 27 };
+            if x86::integer(p[0])? != expected {
+                return Err(format!("{op} currently requires encoding {expected}"));
+            }
+            let name = x86::symbol(p[1])?;
+            let slot = if personality {
+                &mut f.personality
+            } else {
+                &mut f.lsda
+            };
+            if slot.replace(name).is_some() {
+                return Err(format!("duplicate {op}"));
+            }
+        }
         ".cfi_remember_state" if args.is_empty() => {
             f.code.push(0x0a);
-            f.state_depth += 1
+            f.state_depth += 1;
+            f.saved_offsets.push(f.cfa_offset);
         }
         ".cfi_restore_state" if args.is_empty() && f.state_depth > 0 => {
             f.code.push(0x0b);
-            f.state_depth -= 1
+            f.state_depth -= 1;
+            f.cfa_offset = f.saved_offsets.pop().unwrap();
         }
         _ => return Err(format!("unsupported CFI directive/operands {op} {args}")),
     }
@@ -161,23 +190,64 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
         if a.offset() != 0 {
             return Err("generated CFI conflicts with explicit .eh_frame data".into());
         }
-        // CIE: version 1, zR, code alignment 1, data alignment -8,
-        // return register RIP, PC-relative signed 32-bit FDE pointers.
-        let mut bytes = vec![
-            0, 0, 0, 0, 0, 0, 0, 0, 1, b'z', b'R', 0, 1, 0x78, 16, 1, 0x1b, 0x0c, 7, 8, 0x90, 1,
-        ];
-        while !bytes.len().is_multiple_of(8) {
-            bytes.push(0)
-        }
-        let len = bytes.len() - 4;
-        u32_at(&mut bytes, 0, len)?;
-        a.bytes(&bytes)?;
-        for f in std::mem::take(&mut a.frames) {
+        // CIEs are shared only when personality and LSDA augmentation agree.
+        let mut cies = std::collections::BTreeMap::new();
+        let mut frames = std::mem::take(&mut a.frames);
+        frames.sort_by(|a, b| {
+            (&a.personality, a.lsda.is_some()).cmp(&(&b.personality, b.lsda.is_some()))
+        });
+        let count = frames.len();
+        for (index, f) in frames.into_iter().enumerate() {
+            let key = (f.personality.clone(), f.lsda.is_some());
+            let cie = if let Some(&cie) = cies.get(&key) {
+                cie
+            } else {
+                let cie = a.offset();
+                let mut bytes = vec![0; 8];
+                bytes.extend([1, b'z']);
+                if f.personality.is_some() {
+                    bytes.push(b'P');
+                }
+                if f.lsda.is_some() {
+                    bytes.push(b'L');
+                }
+                bytes.extend([b'R', 0, 1, 0x78, 16]);
+                bytes.push(
+                    1 + if f.personality.is_some() { 5 } else { 0 } + u8::from(f.lsda.is_some()),
+                );
+                if let Some(name) = &f.personality {
+                    bytes.push(0x9b); // indirect pcrel sdata4
+                    a.fixes.push(Fix {
+                        section: a.current,
+                        offset: cie + bytes.len() as u64,
+                        width: 4,
+                        address: Address {
+                            expression: Expression::symbol(name.clone()),
+                            modifier: Modifier::None,
+                        },
+                        kind: 2,
+                        line: 0,
+                    });
+                    bytes.extend([0; 4]);
+                }
+                if f.lsda.is_some() {
+                    bytes.push(0x1b);
+                }
+                bytes.extend([0x1b, 0x0c, 7, 8, 0x90, 1]);
+                while !bytes.len().is_multiple_of(8) {
+                    bytes.push(0);
+                }
+                let len = bytes.len() - 4;
+                u32_at(&mut bytes, 0, len)?;
+                a.bytes(&bytes)?;
+                cies.insert(key, cie);
+                cie
+            };
             let start = a.offset();
             let name = symbol(a, f.section, f.start);
             let mut b = vec![0; 4];
             b.extend(
-                u32::try_from(start + 4)
+                u32::try_from(start + 4 - cie)
                     .map_err(|_| "CIE offset too large")?
                     .to_le_bytes(),
             );
@@ -187,9 +257,24 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                     .map_err(|_| "CFI function too large")?
                     .to_le_bytes(),
             );
-            b.push(0);
+            b.push(if f.lsda.is_some() { 4 } else { 0 });
+            if let Some(name) = f.lsda {
+                a.fixes.push(Fix {
+                    section: a.current,
+                    offset: start + b.len() as u64,
+                    width: 4,
+                    address: Address {
+                        expression: Expression::symbol(name),
+                        modifier: Modifier::None,
+                    },
+                    kind: 2,
+                    line: 0,
+                });
+                b.extend([0; 4]);
+            }
             b.extend(f.code);
-            while !b.len().is_multiple_of(8) {
+            let alignment = if index + 1 == count { 8 } else { 4 };
+            while !(start as usize + b.len()).is_multiple_of(alignment) {
                 b.push(0)
             }
             let n = b.len() - 4;
@@ -208,85 +293,17 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
             a.bytes(&b)?;
         }
     }
-    if !a.locations.is_empty() {
-        a.section(".debug_line", Some(0), false)?;
-        if a.offset() != 0 {
-            return Err("generated line table conflicts with explicit .debug_line data".into());
-        }
-        let mut b = vec![0; 4];
-        b.extend(4u16.to_le_bytes());
-        b.extend([0; 4]);
-        b.extend([1, 1, 1, (-5i8) as u8, 14, 13]);
-        b.extend([0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1]);
-        b.push(0);
-        let max = *a.files.keys().next_back().ok_or("line table needs .file")?;
-        if max > 1_000_000 {
-            return Err("file index too large".into());
-        }
-        for i in 1..=max {
-            let file = a
-                .files
-                .get(&i)
-                .ok_or(".file indices must be contiguous from 1")?;
-            b.extend(file);
-            b.extend([0, 0, 0, 0]);
-        }
-        b.push(0);
-        let hlen = b.len() - 10;
-        u32_at(&mut b, 6, hlen)?;
-        let locations = std::mem::take(&mut a.locations);
-        let (mut current, mut offset, mut line) = (None, 0, 1i128);
-        for loc in locations {
-            if current != Some(loc.section) {
-                if current.is_some() {
-                    b.extend([0, 1, 1]);
-                } // DW_LNE_end_sequence
-                let name = symbol(a, loc.section, loc.offset);
-                b.extend([0, 9, 2]);
-                let at = b.len();
-                b.extend([0; 8]);
-                a.fixes.push(Fix {
-                    section: a.current,
-                    offset: at as u64,
-                    width: 8,
-                    address: Address {
-                        expression: Expression::symbol(name),
-                        modifier: Modifier::None,
-                    },
-                    kind: 1,
-                    line: 0,
-                });
-                current = Some(loc.section);
-                offset = loc.offset;
-                line = 1;
-            }
-            if loc.offset < offset {
-                return Err("line addresses are not monotonic".into());
-            }
-            b.push(2);
-            leb(&mut b, (loc.offset - offset).into(), false)?;
-            offset = loc.offset;
-            b.push(4);
-            leb(&mut b, loc.file.into(), false)?;
-            b.push(5);
-            leb(&mut b, loc.column.into(), false)?;
-            b.push(3);
-            leb(&mut b, i128::from(loc.line) - line, true)?;
-            line = loc.line.into();
-            if loc.prologue_end {
-                b.push(10)
-            }
-            b.push(1);
-        }
-        if let Some(sec) = current {
-            let end = a.sections[sec].size;
-            b.push(2);
-            leb(&mut b, (end - offset).into(), false)?;
-            b.extend([0, 1, 1]);
-        }
-        let len = b.len() - 4;
-        u32_at(&mut b, 0, len)?;
-        a.bytes(&b)?;
+    super::dwarf::finish(a)?;
+    if a.addrsig.is_some() {
+        a.section_full(
+            ".llvm_addrsig",
+            Some(0x8000_0000),
+            false,
+            0,
+            None,
+            Some(0x6fff4c03),
+            None,
+        )?;
     }
     Ok(())
 }
@@ -330,7 +347,8 @@ pub(super) fn shared_cfi(a: &mut Assembler, c: &keel_asm_ir::Cfi) -> Result<(), 
     match c {
         Cfi::DefCfaOffset(n) => {
             f.code.push(0x0e);
-            leb(&mut f.code, (*n).into(), false)
+            f.cfa_offset = (*n).into();
+            leb(&mut f.code, f.cfa_offset, false)
         }
         Cfi::DefCfaRegister(r) => {
             f.code.push(0x0d);
@@ -339,7 +357,8 @@ pub(super) fn shared_cfi(a: &mut Assembler, c: &keel_asm_ir::Cfi) -> Result<(), 
         Cfi::DefCfa { register, offset } => {
             f.code.push(0x0c);
             leb(&mut f.code, (*register).into(), false)?;
-            leb(&mut f.code, (*offset).into(), false)
+            f.cfa_offset = (*offset).into();
+            leb(&mut f.code, f.cfa_offset, false)
         }
         Cfi::Offset { register, offset } => {
             if *offset > 0 || offset % 8 != 0 {

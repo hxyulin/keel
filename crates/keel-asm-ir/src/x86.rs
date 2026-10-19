@@ -754,6 +754,7 @@ pub fn unquote(s: &str) -> Result<Vec<u8>, String> {
     let mut bytes = s.as_bytes()[1..s.len() - 1].iter().copied().peekable();
     while let Some(b) = bytes.next() {
         if b != b'\\' {
+            if b == b'"' { return Err("unexpected quote inside string".into()); }
             out.push(b);
             continue;
         }
@@ -762,6 +763,10 @@ pub fn unquote(s: &str) -> Result<Vec<u8>, String> {
             b'n' => b'\n',
             b'r' => b'\r',
             b't' => b'\t',
+            b'b' => 8,
+            b'f' => 12,
+            b'v' => 11,
+            b'a' => 7,
             b'\\' | b'"' => b,
             b'0'..=b'7' => {
                 let mut value = u16::from(b - b'0');
