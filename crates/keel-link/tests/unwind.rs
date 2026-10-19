@@ -186,6 +186,59 @@ fn planning_accounts_for_address_dependent_gap_changes() {
 }
 
 #[test]
+fn tlv_metadata_replans_when_an_untracked_tls_template_moves() {
+    let source = ".text\n.globl _main\n_main:\nret\n.section __TEXT,__txttls\n.quad 0\n.tbss _tls,8,3\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n.long 0\n.quad 0\n.quad 0\n.quad 0x100004004\n.long 124\n.long 0\n.quad 0\n.quad 0\n.quad _tls+4294967552\n.long 0\n.long 0\n.quad 0\n.quad 0\n";
+    let mut bytes = keel_asm::assemble_object(source).unwrap();
+    // The assembler does not spell these unusual section types. Each padded
+    // section name occurs once in this fixture's Mach-O section headers.
+    for (name, flags) in [("__txttls", 0x11u32), ("__compact_unwind", 0x13u32)] {
+        let mut padded = [0; 16];
+        padded[..name.len()].copy_from_slice(name.as_bytes());
+        let offsets: Vec<_> = bytes
+            .windows(16)
+            .enumerate()
+            .filter_map(|(i, b)| (b == padded).then_some(i))
+            .collect();
+        assert_eq!(offsets.len(), 1);
+        let at = offsets[0] + 64;
+        bytes[at..at + 4].copy_from_slice(&flags.to_le_bytes());
+    }
+    let exe = keel_link::link(
+        &[Input {
+            name: "tlv-metadata.o",
+            bytes: &bytes,
+        }],
+        Options {
+            dylibs: vec![Dylib {
+                install_name: "/usr/lib/libSystem.B.dylib".into(),
+                exports: BTreeSet::new(),
+                weak_exports: BTreeSet::new(),
+            }],
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let unwind = file
+        .section_by_name("__unwind_info")
+        .unwrap()
+        .data()
+        .unwrap();
+    assert_eq!(unwind.len(), 92);
+    let (entries, sentinel, _, used) = table(unwind);
+    assert_eq!(
+        entries.iter().map(|e| e.0).collect::<Vec<_>>(),
+        [0x4000, 0x4004, 0x4080, 0x40a0]
+    );
+    assert_eq!(sentinel, 0x40a0);
+    assert_eq!(used, unwind.len());
+    assert_eq!(
+        file.section_by_name("__txttls").unwrap().address(),
+        0x1_0000_4060
+    );
+}
+
+#[test]
 fn malformed_metadata_and_relocation_ranges_remain_errors() {
     let prefix =
         ".text\n.globl _main\n_main:\nret\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n";

@@ -122,13 +122,23 @@ impl Linker {
         let bound = self.unwind_bound()?;
         self.outputs[self.unwind_section].size = bound;
         let mut settled = false;
+        let mut previous_plan = None;
         for _ in 0..8 {
             self.layout()?;
-            let Ok(planned) = self.planned_unwind_size() else {
+            let key = self.unwind_plan_key();
+            let planned = if let (Some((previous_key, size)), Some(key)) = (&previous_plan, &key)
+                && previous_key == key
+            {
+                Ok(*size)
+            } else {
+                self.planned_unwind_size()
+            };
+            let Ok(planned) = planned else {
                 // A provisional shrink can create overlapping ranges. Restore
                 // the bound and let final serialization validate that layout.
                 break;
             };
+            previous_plan = key.map(|key| (key, planned));
             if planned > bound {
                 return fail("internal unwind plan exceeds bound");
             }
@@ -594,7 +604,7 @@ impl Linker {
         }
         Ok(debug_objects)
     }
-    fn reloc_target(&self, oi: usize, r: &Reloc) -> Result<(Option<Target>, u64)> {
+    pub(crate) fn reloc_target(&self, oi: usize, r: &Reloc) -> Result<(Option<Target>, u64)> {
         if r.external {
             let t = self.symbol_target(oi, r.symbol)?;
             Ok((

@@ -91,6 +91,39 @@ impl Linker {
         Ok(Layout::new(ranges, personalities, records)?.size)
     }
 
+    // Reuse a successful size calculation only for ordinary pointer records.
+    // Lengths and encoding/LSDA flags cannot change in this subset, and the
+    // personality keys are fixed. Only relocated function starts affect the
+    // range/gap count. Input addends and section-relative bases remain fixed
+    // while layout changes output addresses; compare every start's target.
+    // Differences, instruction relocations and writes to other fields retain
+    // the full relocation-based planner on every provisional layout.
+    pub(crate) fn unwind_plan_key(&self) -> Option<Vec<u64>> {
+        let mut starts = Vec::new();
+        for (oi, o) in self.objects.iter().enumerate() {
+            for s in &o.sections {
+                if s.segment != "__LD" || s.name != "__compact_unwind" {
+                    continue;
+                }
+                // UNSIGNED in a TLV descriptor can subtract a moving TLS
+                // template base as well as adding the symbol target.
+                if s.flags & 255 == 0x13 {
+                    return None;
+                }
+                for r in &s.relocs {
+                    if r.kind != 0 || r.pc || r.width != 8 || !matches!(r.offset % 32, 0 | 16 | 24)
+                    {
+                        return None;
+                    }
+                    if r.offset % 32 == 0 {
+                        starts.push(self.reloc_target(oi, r).ok()?.1);
+                    }
+                }
+            }
+        }
+        Some(starts)
+    }
+
     // Relocate only metadata into scratch payloads using the real relocation
     // validator. Restore every original payload even on error: final relocation
     // must apply addends exactly once, after layout has been fixed.
@@ -416,6 +449,59 @@ fn validate_cie(bytes: &[u8], at: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_key_tracks_function_targets_but_not_lsda_addresses() {
+        let bytes = keel_asm::assemble_object(".text\n.globl _main\n_main:\nret\n.data\n_lsda:\n.quad 0\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n.long 0x42001000\n.quad _p0\n.quad _lsda\n").unwrap();
+        let mut l = prepare_linker(
+            &[Input {
+                name: "key.o",
+                bytes: &bytes,
+            }],
+            Options {
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::from(["_p0".into()]),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        let key = l.unwind_plan_key().unwrap();
+        assert_eq!(key.len(), 1);
+        let data = l.outputs.iter().position(|s| s.name == "__data").unwrap();
+        l.outputs[data].address += PAGE as u64;
+        l.outputs[l.got_section].address += PAGE as u64;
+        assert_eq!(l.unwind_plan_key().unwrap(), key);
+        let text = l.outputs.iter().position(|s| s.name == "__text").unwrap();
+        l.outputs[text].address += PAGE as u64;
+        assert_ne!(l.unwind_plan_key().unwrap(), key);
+
+        let metadata = l.objects[0]
+            .sections
+            .iter()
+            .position(|s| s.name == "__compact_unwind")
+            .unwrap();
+        let original = l.objects[0].sections[metadata].relocs[0].clone();
+        // Encoding/length writes, differences and instruction fixups must use
+        // the complete planner even when all function target addresses match.
+        for (offset, kind, width, pc) in [
+            (8, 0, 8, false),
+            (12, 0, 8, false),
+            (0, 1, 8, false),
+            (0, 0, 4, false),
+            (0, 0, 8, true),
+        ] {
+            let r = &mut l.objects[0].sections[metadata].relocs[0];
+            *r = original.clone();
+            r.offset = offset;
+            r.kind = kind;
+            r.width = width;
+            r.pc = pc;
+            assert!(l.unwind_plan_key().is_none());
+        }
+    }
 
     #[test]
     fn size_and_function_range_overflows_are_errors() {
