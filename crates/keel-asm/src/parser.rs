@@ -492,6 +492,7 @@ fn assemble_pass(
     let mut current = 0;
     let mut labels: BTreeMap<&str, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
+    let mut private_externs = BTreeMap::new();
     let mut common = BTreeMap::new();
     let mut branches = BumpVec::new_in(&arena);
     let mut loh = BumpVec::new_in(&arena);
@@ -520,6 +521,13 @@ fn assemble_pass(
                     } => current = data::select(&mut result, segment, name, *kind).map_err(err)?,
                     D::Global(name) => {
                         globals.insert(name.as_str(), line);
+                    }
+                    D::PrivateExtern(name) => {
+                        if name.starts_with('L') {
+                            return Err(err("private extern requires a non-local symbol".into()));
+                        }
+                        globals.insert(name.as_str(), line);
+                        private_externs.insert(name.as_str(), line);
                     }
                     D::SubsectionsViaSymbols => result.subsections_via_symbols = true,
                     D::Align(power) => {
@@ -1095,10 +1103,16 @@ fn assemble_pass(
                 current = data::section(&mut result, &args).map_err(err)?;
                 continue;
             }
-            ".globl" | ".global" | ".extern" => {
+            ".globl" | ".global" | ".extern" | ".private_extern" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
                     symbol(name).map_err(err)?;
+                    if op == ".private_extern" {
+                        if name.starts_with('L') {
+                            return Err(err("private extern requires a non-local symbol".into()));
+                        }
+                        private_externs.insert(name, line);
+                    }
                     // LLVM MC ignores .extern: undefined references are already
                     // external, and a later definition stays local unless .globl.
                     if op != ".extern" {
@@ -1623,6 +1637,7 @@ fn assemble_pass(
             Symbol {
                 common: common.get(name).copied(),
                 global: location.is_none() || globals.contains_key(&name),
+                private_extern: private_externs.contains_key(name),
                 offset: location.map(|l| l.offset),
                 section: location.map(|l| l.section),
                 name: name.to_string(),

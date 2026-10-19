@@ -93,6 +93,7 @@ pub(crate) struct Linker {
     stub_section: usize,
     unwind_section: usize,
     common_section: usize,
+    private_commons: BTreeSet<String>,
     rebases: BTreeSet<u64>,
     binds: BTreeMap<u64, (usize, i64)>,
     options: Options,
@@ -180,6 +181,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         stub_section: 0,
         unwind_section: 0,
         common_section: 0,
+        private_commons: BTreeSet::new(),
         rebases: BTreeSet::new(),
         binds: BTreeMap::new(),
         options,
@@ -220,7 +222,7 @@ impl Linker {
     fn prepare(&mut self) -> Result<()> {
         self.globals
             .insert("__mh_execute_header".into(), Target::Header);
-        let mut commons: BTreeMap<String, (u64, u32)> = BTreeMap::new();
+        let mut commons: BTreeMap<String, (u64, u32, bool)> = BTreeMap::new();
         for (oi, o) in self.objects.iter().enumerate() {
             self.options.minimum_macos = self.options.minimum_macos.max(o.minimum);
             for (si, s) in o
@@ -231,9 +233,10 @@ impl Linker {
             {
                 if s.kind & 0xe == 0 {
                     if s.value != 0 {
-                        let c = commons.entry(s.name.clone()).or_default();
+                        let c = commons.entry(s.name.clone()).or_insert((0, 0, true));
                         c.0 = c.0.max(s.value);
                         c.1 = c.1.max(u32::from((s.desc >> 8) & 15));
+                        c.2 &= s.kind & 0x10 != 0;
                     }
                     continue;
                 }
@@ -322,7 +325,7 @@ impl Linker {
             }
         }
         self.common_section = self.output("__DATA", "__common", 1, 3)?;
-        for (name, (size, alignment)) in commons {
+        for (name, (size, alignment, private)) in commons {
             if self.globals.contains_key(&name) {
                 continue;
             }
@@ -335,6 +338,9 @@ impl Linker {
                 return fail("common section exceeds 512 MiB");
             }
             s.alignment = s.alignment.max(alignment);
+            if private {
+                self.private_commons.insert(name.clone());
+            }
             self.globals.insert(name, Target::Common(off));
         }
         let undefined: BTreeSet<_> = self

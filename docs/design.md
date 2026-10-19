@@ -2010,8 +2010,14 @@ below. Semicolons and `//` begin comments.
 Directives are `.text`, `.section __TEXT,__text` (optionally with
 `,regular,pure_instructions`), `.globl`/`.global`, and `.p2align N` for
 0 <= N <= 16. Alignment pads text with NOPs and raises the object section’s
-alignment. `.globl`/`.global` and `.extern` may also declare undefined
-external symbols, which are retained for the linker.
+alignment. `.globl`/`.global` declare external symbols, including undefined
+ones retained for the linker. `.extern` validates its operands without changing
+binding, matching Clang. `.private_extern` declares a non-local external symbol
+with Mach-O `N_PEXT`: other objects can resolve it, but the native linker omits
+private definitions and private common storage from the dynamic export trie.
+A public common declaration makes coalesced common storage public; an ordinary
+definition takes precedence over common storage. The typed assembly transport
+also exposes `Directive::PrivateExtern`; ELF rejects this Mach-O directive.
 
 **Symbol addressing and relocations.** `adr` accepts a defined text label
 with an optional integer addend, resolved as a signed 21-bit byte displacement

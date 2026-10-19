@@ -51,6 +51,8 @@ pub struct Symbol {
     /// Zero is __TEXT,__text; subsequent indices address Assembly::sections.
     pub section: Option<usize>,
     pub global: bool,
+    /// Mach-O linkage-unit visibility (N_PEXT); requires an external symbol.
+    pub private_extern: bool,
     /// Tentative common definition: byte size and power-of-two alignment.
     pub common: Option<(u64, u8)>,
 }

@@ -123,6 +123,8 @@ pub enum Directive {
         kind: SectionKind,
     },
     Global(String),
+    /// Mach-O symbol visible to other objects but hidden from dynamic exports.
+    PrivateExtern(String),
     SubsectionsViaSymbols,
     Align(u8),
     Bytes(Vec<u8>),
@@ -265,6 +267,7 @@ impl fmt::Display for Directive {
                 }
             }
             Self::Global(s) => write!(f, ".globl\t{s}"),
+            Self::PrivateExtern(s) => write!(f, ".private_extern\t{s}"),
             Self::SubsectionsViaSymbols => f.write_str(".subsections_via_symbols"),
             Self::Align(n) => write!(f, ".p2align\t{n}"),
             Self::CString(bytes) => {
@@ -443,7 +446,9 @@ impl Expression {
 impl Directive {
     pub fn contains(&self, s: &str) -> bool {
         match self {
-            Self::Global(n) | Self::ZeroFill { symbol: n, .. } => n.contains(s),
+            Self::Global(n) | Self::PrivateExtern(n) | Self::ZeroFill { symbol: n, .. } => {
+                n.contains(s)
+            }
             Self::CString(bytes) | Self::File { path: bytes, .. } => {
                 s.is_empty() || bytes.windows(s.len()).any(|w| w == s.as_bytes())
             }
@@ -475,6 +480,12 @@ impl Directive {
                 }
             }
             Self::Global(s) | Self::ZeroFill { symbol: s, .. } => symbol(s)?,
+            Self::PrivateExtern(s) => {
+                symbol(s)?;
+                if s.starts_with('L') {
+                    return Err("private extern requires a non-local symbol".into());
+                }
+            }
             Self::Integer {
                 width, expression, ..
             } => {

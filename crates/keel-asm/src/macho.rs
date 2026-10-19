@@ -133,6 +133,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             || symbol.name.contains('\0')
             || !all_names.insert(symbol.name.as_str())
             || (symbol.offset.is_none() && !symbol.global)
+            || (symbol.private_extern && !symbol.global)
             || symbol.offset.is_some() != symbol.section.is_some()
             || symbol.common.is_some_and(|(size, alignment)| {
                 size == 0 || alignment > 15 || symbol.section.is_some() || !symbol.global
@@ -246,13 +247,13 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         };
         u32le(&mut entries, size(strings.len())?);
         entries.extend_from_slice(&[
-            if ordinal == 0 {
+            (if ordinal == 0 {
                 1
             } else if symbol.global {
                 0xf
             } else {
                 0xe
-            },
+            }) | if symbol.private_extern { 0x10 } else { 0 },
             ordinal,
             0,
             if let Some((_, alignment)) = symbol.common {

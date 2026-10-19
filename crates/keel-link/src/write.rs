@@ -291,7 +291,14 @@ impl Linker {
                         self.outputs[section.output.ok_or("export in discarded section")?].ordinal,
                     )
                 }
-                Target::Common(_) => (15, self.outputs[self.common_section].ordinal),
+                Target::Common(_) => (
+                    15 | if self.private_commons.contains(symbol) {
+                        0x10
+                    } else {
+                        0
+                    },
+                    self.outputs[self.common_section].ordinal,
+                ),
                 Target::Header => (15, 1),
                 Target::Import(_) => unreachable!(),
             };
@@ -925,6 +932,9 @@ impl Linker {
         let mut nodes = vec![Node::default()];
         for (symbol, &target) in &self.globals {
             if matches!(target, Target::Import(_)) {
+                continue;
+            }
+            if matches!(target, Target::Common(_)) && self.private_commons.contains(symbol) {
                 continue;
             }
             if let Target::Definition(o, s) = target
