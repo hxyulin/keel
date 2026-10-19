@@ -67,13 +67,47 @@ existing output. Allocated image size is bounded to 512 MiB.
 
 Automatic libc/CRT startup, static libc, PIE, shared-object output, native TLS
 relocations, COMDAT groups, native IFUNC/GNU-unique definitions, REL relocations,
-allocated notes, executable constructor/destructor arrays, linker scripts, dead
+allocated notes, linker scripts, dead
 stripping, identical-code folding, relaxation and source debugging remain outside
 the supported scope. Runtime-loader IFUNC resolution and constructors inside
 input shared libraries are supported.
 Unsupported allocated sections, flags, relocations and native options are
 errors. Nonallocated metadata is omitted. This is not a general GNU ld
 replacement or a static-libc linker.
+
+## Executable initialization and termination
+
+Dynamically linked output advertises executable `.preinit_array`, `.init_array`
+and `.fini_array` contributions using their address/size dynamic tags. Array
+contributions are placed contiguously, with `.init_array.N` and `.fini_array.N`
+ordered by numeric priority (0–65535), stable input order for ties, and ordinary
+unsuffixed contributions last. Arrays require their matching ELF section type,
+WRITE/ALLOC flags, pointer-sized entries, and eight-byte alignment when nonempty.
+Input entry size zero or eight is accepted; output entry size is eight.
+
+Split `.init` and `.fini` code contributions remain in input order, with NOP
+padding for alignment. `DT_INIT` and `DT_FINI` reference defined `_init` and
+`_fini` symbols, including hidden definitions, rather than assuming the section
+start is an entry point. Empty arrays and unmarked code do not create dispatch
+tags. Original contribution identities are retained for symbols and relocations.
+
+Dispatch is performed by the dynamic loader/libc startup and shutdown protocol;
+a syscall-only `_start` does not initialize libc or arrange all lifecycle calls.
+For static output the sections are retained, but startup remains responsible for
+invoking them. Legacy `.ctors`/`.dtors` conversion and linker-defined array
+boundary symbols are not implemented. Installed CRT objects still require
+additional metadata support; this stage does not establish standard compiler
+driver/CRT compatibility. The lifecycle validator uses an explicit
+`__libc_start_main` adapter to isolate these dispatch semantics:
+
+```sh
+python3 suite/validate_elf_lifecycle.py --keel target/debug/keel --out target/elf-lifecycle
+```
+
+It compares Clang O0/O2 inputs against GNU ld, checks argument passing and the
+order of preinit, legacy init, prioritized constructors, main, reverse-order
+destructors and legacy fini, and disables individual dispatch tags as negative
+controls. Run on x86-64 Linux under the caller's workload lock.
 
 ## Runtime unwind scope
 

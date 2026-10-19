@@ -2,6 +2,7 @@
 //! See docs/elf-linker.md for the supported input and execution contract.
 mod dynamic;
 mod input;
+mod lifecycle;
 mod unwind;
 use crate::{Input, Result};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
@@ -176,6 +177,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     return Err("executable stack requests are unsupported".into());
                 }
                 let kind = raw.sh_type(file.endian());
+                let lifecycle = lifecycle::validate(
+                    &name, kind, sh_flags, section.size(), section.align(),
+                    raw.sh_entsize(file.endian()),
+                )?;
                 let frame = name == ".eh_frame" || kind == object::elf::SHT_X86_64_UNWIND;
                 if name == ".eh_frame_hdr" {
                     return Err(
@@ -205,7 +210,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     return Err(format!("unsupported flags {sh_flags:#x} on {name}"));
                 }
                 let bss = section.kind() == object::SectionKind::UninitializedData;
-                if !matches!(
+                if !lifecycle && !matches!(
                     section.kind(),
                     object::SectionKind::Text
                         | object::SectionKind::Data
@@ -507,14 +512,15 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 }
             }
         }
+        let lifecycle = lifecycle::Plan::new(&sections, &units, &globals)?;
         Some(dynamic::Dynamic::prepare(
             &mut sections,
             imports.clone(),
             definitions,
             &libraries,
-            &options.interpreter,
-            &options.runpath,
+            &options,
             absolute,
+            lifecycle,
         )?)
     };
     let unwind_header = unwind::prepare(&mut sections, &unwind_sections)?;
@@ -530,10 +536,8 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         cursor = if permissions == 4 { PAGE } else { start };
         let mut file_end = cursor;
         for bss in [false, true] {
-            for section in sections
-                .iter_mut()
-                .filter(|s| s.permissions() == permissions && s.bss == bss)
-            {
+            for index in lifecycle::order(&sections, permissions, bss) {
+                let section = &mut sections[index];
                 cursor = align(cursor, section.align)?;
                 section.offset = cursor;
                 cursor = end(cursor, section.size)?;
@@ -595,6 +599,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let entry = address(entry_u, entry_s)?;
     let file_end = segments.iter().map(|s| s.file_end).max().unwrap_or(PAGE);
     let mut bytes = vec![0; file_end as usize];
+    lifecycle::code_padding(&mut bytes, &sections);
     for s in &sections {
         if !s.bss && !s.data.is_empty() {
             bytes[s.offset as usize..s.offset as usize + s.data.len()].copy_from_slice(&s.data);
@@ -694,7 +699,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let (kind, link, info, entsize) = dynamic
             .as_ref()
             .and_then(|d| d.section_header(index))
-            .unwrap_or((s.kind, 0, 0, 0));
+            .unwrap_or((s.kind, 0, 0, if matches!(s.kind, 14..=16) { 8 } else { 0 }));
         headers.push(shdr(
             name,
             kind,

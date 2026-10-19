@@ -1,5 +1,5 @@
 //! Shared-library interfaces and eagerly bound dynamic executable metadata.
-use super::{BASE, Section, put16, put32, put64, string};
+use super::{BASE, Section, lifecycle, put16, put32, put64, string};
 use crate::Result;
 use object::read::elf::{Dyn, ElfFile64, FileHeader};
 use object::{Object, ObjectSymbol, SymbolFlags};
@@ -167,6 +167,7 @@ pub(super) struct Dynamic {
     version_names: BTreeMap<(usize, String), u32>,
     pub relocations: Vec<(u64, u32, u32, i64)>,
     expected_relocations: usize,
+    lifecycle: lifecycle::Plan,
 }
 impl Dynamic {
     pub fn prepare(
@@ -174,10 +175,13 @@ impl Dynamic {
         imports: BTreeMap<String, Import>,
         definitions: Vec<Definition>,
         libraries: &[Library],
-        interpreter: &str,
-        runpath: &[String],
+        options: &super::Options,
         absolute_relocations: usize,
+        lifecycle: lifecycle::Plan,
     ) -> Result<Self> {
+        let interpreter = &options.interpreter;
+        let runpath = &options.runpath;
+        let lifecycle_tags = lifecycle.tag_count(sections);
         if !interpreter.starts_with('/') || interpreter.contains('\0') {
             return Err("ELF interpreter must be an absolute path without NUL bytes".into());
         }
@@ -318,6 +322,7 @@ impl Dynamic {
         // DT_NEEDED + eight basic tags + version tags + RUNPATH + NULL.
         let count = libraries.len()
             + 9
+            + lifecycle_tags
             + if version_indices.is_empty() { 0 } else { 3 }
             + usize::from(runpath.is_some());
         let table = add(
@@ -354,6 +359,7 @@ impl Dynamic {
             version_names,
             relocations: Vec::new(),
             expected_relocations,
+            lifecycle,
         })
     }
     pub fn stub(&self, name: &str, sections: &[Section]) -> Result<u64> {
@@ -496,6 +502,7 @@ impl Dynamic {
         if let Some(runpath) = self.runpath {
             tags.push((29, u64::from(runpath)));
         }
+        tags.extend(self.lifecycle.tags(sections)?);
         tags.push((0, 0));
         if tags.len() * 16 != sections[self.table].size as usize {
             return Err("internal dynamic table size mismatch".into());
