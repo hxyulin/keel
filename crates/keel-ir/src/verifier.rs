@@ -1065,8 +1065,9 @@ impl Verifier<'_> {
             }
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(*callee);
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if !args_match(&decl.sig, &got) {
+                let arg_types = || args.iter().map(|&a| ty(a));
+                if !args_match(&decl.sig, arg_types()) {
+                    let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1086,8 +1087,9 @@ impl Verifier<'_> {
                         format!("call_indirect callee must be ptr, got {}", ty(*callee)),
                     );
                 }
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if !args_match(sig, &got) {
+                let arg_types = || args.iter().map(|&a| ty(a));
+                if !args_match(sig, arg_types()) {
+                    let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1104,8 +1106,8 @@ impl Verifier<'_> {
                     self.inst_error(inst, "va_start in a function that is not variadic".into());
                 }
                 let info = id.info();
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if got != info.params {
+                if !args.iter().map(|&a| ty(a)).eq(info.params.iter().copied()) {
+                    let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1160,8 +1162,9 @@ impl Verifier<'_> {
                 dests,
             } => {
                 let decl = func.callee(*callee);
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if !args_match(&decl.sig, &got) {
+                let arg_types = || args.iter().map(|&a| ty(a));
+                if !args_match(&decl.sig, arg_types()) {
+                    let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1242,8 +1245,9 @@ impl Verifier<'_> {
             }
             InstData::ReturnCall { func: callee, args } => {
                 let decl = func.callee(*callee);
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if !args_match(&decl.sig, &got) {
+                let arg_types = || args.iter().map(|&a| ty(a));
+                if !args_match(&decl.sig, arg_types()) {
+                    let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1267,8 +1271,9 @@ impl Verifier<'_> {
                         ),
                     );
                 }
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if !args_match(sig, &got) {
+                let arg_types = || args.iter().map(|&a| ty(a));
+                if !args_match(sig, arg_types()) {
+                    let got: Vec<Type> = arg_types().collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1460,16 +1465,16 @@ fn check_signature(sig: &Signature) -> Vec<String> {
 /// types C's default argument promotions produce, or unpromoted SIMD vectors.
 /// (An `i8` or `f32` would
 /// be read back by the callee as an `int` or `double` it is not.)
-fn args_match(sig: &Signature, got: &[Type]) -> bool {
-    let params = sig.param_types();
-    let n = params.len();
-    if !sig.variadic {
-        return got == params;
+/// Whether arguments of types `got` fit `sig`: its parameters exactly,
+/// then for a variadic one any number of promoted variadic arguments.
+/// Compares in place; the caller collects `got` only to report a mismatch.
+fn args_match(sig: &Signature, mut got: impl ExactSizeIterator<Item = Type>) -> bool {
+    let n = sig.params.len();
+    if got.len() < n || (!sig.variadic && got.len() != n) {
+        return false;
     }
-    got.len() >= n
-        && got[..n] == params[..]
-        && got[n..]
-            .iter()
+    sig.params.iter().all(|p| got.next() == Some(p.ty))
+        && got
             .all(|ty| ty.is_vector() || matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64))
 }
 
@@ -1613,5 +1618,75 @@ mod name_tests {
             check_data(&names, &ptr("missing", 0)),
             ["points to @missing, which is not declared"]
         );
+    }
+}
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+    use crate::VectorType;
+
+    /// The comparison before it stopped allocating.
+    fn reference(sig: &Signature, got: &[Type]) -> bool {
+        let params = sig.param_types();
+        let n = params.len();
+        if !sig.variadic {
+            return got == params;
+        }
+        got.len() >= n
+            && got[..n] == params[..]
+            && got[n..].iter().all(|ty| {
+                ty.is_vector() || matches!(ty, Type::I32 | Type::I64 | Type::Ptr | Type::F64)
+            })
+    }
+
+    #[test]
+    fn args_match_agrees_with_the_allocating_comparison() {
+        let vector = Type::Vector(VectorType::I32x4);
+        let types = [
+            Type::I8,
+            Type::I32,
+            Type::I64,
+            Type::Ptr,
+            Type::F32,
+            Type::F64,
+            vector,
+        ];
+        let params: [&[Type]; 4] = [
+            &[],
+            &[Type::I32],
+            &[Type::Ptr, Type::F64],
+            &[Type::I8, Type::I8, Type::I64],
+        ];
+        // Every argument list of up to four of these types.
+        let mut lists: Vec<Vec<Type>> = vec![Vec::new()];
+        for len in 1..=4 {
+            let mut next = Vec::new();
+            for list in lists.iter().filter(|l| l.len() == len - 1) {
+                for &ty in &types {
+                    let mut l = list.clone();
+                    l.push(ty);
+                    next.push(l);
+                }
+            }
+            lists.extend(next);
+        }
+        let mut matched = 0;
+        for params in params {
+            for variadic in [false, true] {
+                let mut sig = Signature::new(params, &[]);
+                sig.variadic = variadic;
+                for got in &lists {
+                    let want = reference(&sig, got);
+                    assert_eq!(
+                        args_match(&sig, got.iter().copied()),
+                        want,
+                        "{sig} with {got:?}"
+                    );
+                    matched += usize::from(want);
+                }
+            }
+        }
+        assert!(matched > 100, "exercise matches as well as mismatches");
     }
 }

@@ -1,7 +1,7 @@
 //! SSA construction tests: build small programs the way a frontend would,
 //! with mutable variables, and check the IR that comes out.
 
-use keel_frontend::FunctionBuilder;
+use keel_frontend::{FunctionBuilder, FunctionBuilderContext};
 use keel_ir::{Function, IntCC, Signature, Type, verify};
 
 fn sig(params: &[Type], returns: &[Type]) -> Signature {
@@ -349,4 +349,201 @@ fn raw_destination_rewrite_before_sealing() {
     assert_eq!(func.block_params(join), &[result]);
     assert_eq!(func.inst_data(branch).branch_dests()[0].args, [one]);
     assert!(func.to_string().contains("iconst.i64 0"));
+}
+
+/// A read after the loop is complete, so every block is sealed: the join
+/// `j` is reached again through the loop while its predecessors are read.
+/// ```c
+/// i64 f(i8 c, i8 d) { i64 x = 1; while (c) { if (d) x = 2; } return x; }
+/// ```
+/// `x` needs a parameter at the header (1 or the latch's) and at the latch
+/// (2 or the header's); both are created only once the read finds that.
+#[test]
+fn join_reached_again_around_a_loop_gets_its_parameter() {
+    let mut func = Function::new("f", sig(&[Type::I8, Type::I8], &[Type::I64]));
+    let mut b = FunctionBuilder::new(&mut func);
+    let [entry, header, body, set, latch, exit] = [(); 6].map(|_| b.create_block());
+    let x = b.declare_var(Type::I64);
+
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    let c = b.append_block_param(entry, Type::I8);
+    let d = b.append_block_param(entry, Type::I8);
+    let one = b.ins().iconst(Type::I64, 1);
+    b.def_var(x, one);
+    b.ins().jump(header, &[]);
+    b.switch_to_block(header);
+    b.ins().brif(c, body, &[], exit, &[]);
+    b.switch_to_block(body);
+    b.ins().brif(d, set, &[], latch, &[]);
+    b.switch_to_block(set);
+    let two = b.ins().iconst(Type::I64, 2);
+    b.def_var(x, two);
+    b.ins().jump(latch, &[]);
+    b.switch_to_block(latch);
+    b.ins().jump(header, &[]);
+    b.seal_all_blocks();
+
+    b.switch_to_block(exit);
+    let result = b.use_var(x);
+    b.ins().return_(&[result]);
+    b.finalize();
+
+    verify(&func).unwrap();
+    assert_eq!(
+        func.to_string(),
+        "\
+func @f(i8, i8) -> i64 cc(c) {
+block0(v0: i8, v1: i8):
+    v2 = iconst.i64 1
+    jump block1(v2)
+block1(v4: i64):
+    brif v0, block2, block5
+block2:
+    brif v1, block3, block4(v4)
+block3:
+    v3 = iconst.i64 2
+    jump block4(v3)
+block4(v5: i64):
+    jump block1(v5)
+block5:
+    return v4
+}
+"
+    );
+}
+
+/// The same loop without the assignment: the read comes back around the
+/// loop, so the header's parameter is made, then removed as trivial.
+#[test]
+fn trivial_join_around_a_loop_reads_the_entry_value() {
+    let mut func = Function::new("f", sig(&[Type::I8], &[Type::I64]));
+    let mut b = FunctionBuilder::new(&mut func);
+    let [entry, header, body, exit] = [(); 4].map(|_| b.create_block());
+    let x = b.declare_var(Type::I64);
+
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    let c = b.append_block_param(entry, Type::I8);
+    let one = b.ins().iconst(Type::I64, 1);
+    b.def_var(x, one);
+    b.ins().jump(header, &[]);
+    b.switch_to_block(header);
+    b.ins().brif(c, body, &[], exit, &[]);
+    b.switch_to_block(body);
+    b.ins().jump(header, &[]);
+    b.seal_all_blocks();
+
+    b.switch_to_block(exit);
+    let result = b.use_var(x);
+    assert_eq!(result, one);
+    b.ins().return_(&[result]);
+    b.finalize();
+
+    verify(&func).unwrap();
+    assert!(func.to_string().contains("block1:\n"), "{func}");
+}
+
+/// A join whose predecessors agree, with no loop through it, never gets
+/// a parameter value at all, not even a removed one.
+#[test]
+fn trivial_acyclic_join_spends_no_value() {
+    let mut func = Function::new("f", sig(&[Type::I8], &[Type::I64]));
+    let mut b = FunctionBuilder::new(&mut func);
+    let [entry, then, other, join] = [(); 4].map(|_| b.create_block());
+    let x = b.declare_var(Type::I64);
+
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    let c = b.append_block_param(entry, Type::I8);
+    let one = b.ins().iconst(Type::I64, 1);
+    b.def_var(x, one);
+    b.ins().brif(c, then, &[], other, &[]);
+    for block in [then, other] {
+        b.seal_block(block);
+        b.switch_to_block(block);
+        b.ins().jump(join, &[]);
+    }
+    b.seal_block(join);
+    b.switch_to_block(join);
+    let result = b.use_var(x);
+    assert_eq!(result, one);
+    b.ins().return_(&[result]);
+    b.finalize();
+
+    verify(&func).unwrap();
+    // v0 and v1 only: no parameter value was made and then removed.
+    assert_eq!(func.num_values(), 2);
+    assert!(func.to_string().contains("block3:\n"), "{func}");
+}
+
+/// `n` sequential diamonds, each assigning one of three variables on one
+/// side, inside a counted loop; every variable is read after each join.
+fn diamonds(b: &mut FunctionBuilder, n: usize) {
+    let entry = b.create_block();
+    b.switch_to_block(entry);
+    b.seal_block(entry);
+    let arg = b.append_block_param(entry, Type::I64);
+    let vars = [(); 3].map(|_| b.declare_var(Type::I64));
+    let zero = b.ins().iconst(Type::I64, 0);
+    for &v in &vars {
+        b.def_var(v, zero);
+    }
+    let header = b.create_block();
+    b.ins().jump(header, &[]);
+    b.switch_to_block(header);
+    for k in 0..n {
+        let (then, other, join) = (b.create_block(), b.create_block(), b.create_block());
+        let c = b.ins().icmp(IntCC::Slt, arg, zero);
+        b.ins().brif(c, then, &[], other, &[]);
+        b.seal_block(then);
+        b.seal_block(other);
+        b.switch_to_block(then);
+        let old = b.use_var(vars[k % 3]);
+        let new = b.ins().iadd(old, arg);
+        b.def_var(vars[k % 3], new);
+        b.ins().jump(join, &[]);
+        b.switch_to_block(other);
+        b.ins().jump(join, &[]);
+        b.seal_block(join);
+        b.switch_to_block(join);
+        let sum = vars.map(|v| b.use_var(v));
+        let s = b.ins().iadd(sum[0], sum[1]);
+        let s = b.ins().iadd(s, sum[2]);
+        b.def_var(vars[(k + 1) % 3], s);
+    }
+    let exit = b.create_block();
+    let c = b.ins().icmp(IntCC::Slt, arg, zero);
+    b.ins().brif(c, header, &[], exit, &[]);
+    b.seal_block(header);
+    b.seal_block(exit);
+    b.switch_to_block(exit);
+    let result = b.use_var(vars[0]);
+    b.ins().return_(&[result]);
+}
+
+/// Handing the builder's tables from one function to the next, from big to
+/// small and back, builds exactly what fresh builders do.
+#[test]
+fn reused_context_builds_the_same_ir() {
+    let sizes = [40, 1, 0, 25, 3, 60, 2];
+    let fresh: Vec<String> = sizes
+        .iter()
+        .map(|&n| {
+            let mut func = Function::new("f", sig(&[Type::I64], &[Type::I64]));
+            let mut b = FunctionBuilder::new(&mut func);
+            diamonds(&mut b, n);
+            let _: () = b.finalize();
+            verify(&func).unwrap();
+            format!("{func:?}")
+        })
+        .collect();
+    let mut context = FunctionBuilderContext::new();
+    for (&n, want) in sizes.iter().zip(&fresh) {
+        let mut func = Function::new("f", sig(&[Type::I64], &[Type::I64]));
+        let mut b = FunctionBuilder::with_context(&mut func, context);
+        diamonds(&mut b, n);
+        context = b.finalize_with_context();
+        assert_eq!(&format!("{func:?}"), want, "diamonds({n})");
+    }
 }

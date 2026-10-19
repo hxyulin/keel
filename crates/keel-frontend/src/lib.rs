@@ -42,46 +42,76 @@ keel_ir::entity!(
 );
 
 /// Sparse definitions within one block. Most blocks use only a handful of
-/// variables; keep four inline and spill only the definitions actually used.
-/// Wide blocks use a map so reverse-order definitions cannot cause quadratic
-/// insertion work. Neither representation allocates a variable-by-block matrix.
-enum Definitions {
-    Small(SmallVec<[(Variable, Value); 4]>),
+/// variables; keep eight inline, unsorted, and spill only the definitions
+/// actually used. A short linear scan beats keeping them sorted, which
+/// moved entries on most insertions. Wide blocks use a map so lookups stay
+/// cheap. Neither representation allocates a variable-by-block matrix.
+#[derive(Default)]
+struct Definitions {
+    /// Bit `var % 64` is set for each variable defined here, so most
+    /// lookups of an undefined variable (the common case while a read
+    /// walks up to its definition) need no scan.
+    mask: u64,
+    entries: Entries,
+}
+
+enum Entries {
+    Small(SmallVec<[(Variable, Value); 8]>),
     Large(HashMap<Variable, Value>),
 }
 
-impl Default for Definitions {
+impl Default for Entries {
     fn default() -> Self {
         Self::Small(SmallVec::new())
     }
 }
 
+fn bit(var: Variable) -> u64 {
+    1 << (var.index() % 64)
+}
+
 impl Definitions {
     fn get(&self, var: Variable) -> Option<Value> {
-        match self {
-            Self::Small(entries) => entries
-                .binary_search_by_key(&var, |&(var, _)| var)
-                .ok()
-                .map(|i| entries[i].1),
-            Self::Large(entries) => entries.get(&var).copied(),
+        if self.mask & bit(var) == 0 {
+            return None;
+        }
+        match &self.entries {
+            Entries::Small(entries) => entries.iter().find(|e| e.0 == var).map(|e| e.1),
+            Entries::Large(entries) => entries.get(&var).copied(),
         }
     }
 
     fn insert(&mut self, var: Variable, value: Value) {
-        match self {
-            Self::Small(entries) => match entries.binary_search_by_key(&var, |&(var, _)| var) {
-                Ok(i) => entries[i].1 = value,
-                Err(i) if entries.len() < 32 => entries.insert(i, (var, value)),
-                Err(_) => {
-                    let mut map = HashMap::with_capacity(64);
-                    map.extend(std::mem::take(entries));
-                    map.insert(var, value);
-                    *self = Self::Large(map);
+        let known = self.mask & bit(var) != 0;
+        self.mask |= bit(var);
+        match &mut self.entries {
+            Entries::Small(entries) => {
+                match known
+                    .then(|| entries.iter().position(|e| e.0 == var))
+                    .flatten()
+                {
+                    Some(i) => entries[i].1 = value,
+                    None if entries.len() < 32 => entries.push((var, value)),
+                    None => {
+                        let mut map = HashMap::with_capacity(64);
+                        map.extend(std::mem::take(entries));
+                        map.insert(var, value);
+                        self.entries = Entries::Large(map);
+                    }
                 }
-            },
-            Self::Large(entries) => {
+            }
+            Entries::Large(entries) => {
                 entries.insert(var, value);
             }
+        }
+    }
+
+    /// Empties the table, keeping a spilled small table's allocation.
+    fn clear(&mut self) {
+        self.mask = 0;
+        match &mut self.entries {
+            Entries::Small(entries) => entries.clear(),
+            Entries::Large(_) => self.entries = Entries::default(),
         }
     }
 }
@@ -94,6 +124,61 @@ struct BlockState {
     defs: Definitions,
     incomplete: Vec<(Variable, Value)>,
     preds: Vec<(Inst, usize)>,
+    /// Its predecessors are being read for a variable, with no parameter
+    /// yet. A read that comes back here around a loop creates it.
+    visiting: bool,
+}
+
+impl BlockState {
+    /// Back to the unregistered state, keeping allocations.
+    fn clear(&mut self) {
+        self.sealed = None;
+        self.defs.clear();
+        self.incomplete.clear();
+        self.preds.clear();
+        self.visiting = false;
+    }
+}
+
+/// Allocations a [`FunctionBuilder`] can hand on to the next one, so
+/// building many functions does not reallocate its per-block tables for
+/// each. [`FunctionBuilder::finalize_with_context`] returns it; pass it to
+/// [`FunctionBuilder::with_context`]. It carries no state between
+/// functions: the IR built is the same as with [`FunctionBuilder::new`].
+#[derive(Default)]
+pub struct FunctionBuilderContext {
+    var_types: Vec<Type>,
+    result_tys: Vec<Type>,
+    blocks: Vec<BlockState>,
+    blocks_used: usize,
+    added_params: Vec<(Block, Option<Value>)>,
+    incoming: Vec<Vec<(Inst, usize)>>,
+    incoming_used: usize,
+    indexed_terms: Vec<Option<Inst>>,
+}
+
+impl FunctionBuilderContext {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Clears what the last function used. Entries past the `*_used`
+    /// marks are already clear, so this costs that function's size, not
+    /// the largest one's.
+    fn clear(&mut self) {
+        self.var_types.clear();
+        self.result_tys.clear();
+        for state in &mut self.blocks[..self.blocks_used] {
+            state.clear();
+        }
+        self.blocks_used = 0;
+        self.added_params.clear();
+        for edges in &mut self.incoming[..self.incoming_used] {
+            edges.clear();
+        }
+        self.incoming_used = 0;
+        self.indexed_terms.clear();
+    }
 }
 
 pub struct FunctionBuilder<'f> {
@@ -105,13 +190,20 @@ pub struct FunctionBuilder<'f> {
     var_types: Vec<Type>,
     result_tys: Vec<Type>,
     /// SSA state indexed directly by block, with sparse variable definitions.
+    /// Entries from `blocks_used` on are unregistered (cleared, possibly
+    /// left over from an earlier function).
     blocks: Vec<BlockState>,
+    blocks_used: usize,
     /// Every parameter the builder added, for the final trivial-parameter
-    /// cleanup.
-    added_params: Vec<(Block, Value)>,
+    /// cleanup, in the order it was requested. A join that turned out not
+    /// to need its parameter keeps an empty slot, so the order of the rest
+    /// (which the cleanup depends on) is unchanged.
+    added_params: Vec<(Block, Option<Value>)>,
     /// Incoming edges built so far, indexed by destination block. Sealing
     /// moves a sorted bucket into `preds`, preserving source-layout order.
+    /// Buckets from `incoming_used` on are empty.
     incoming: Vec<Vec<(Inst, usize)>>,
+    incoming_used: usize,
     /// The branch terminator already indexed for each source block.
     indexed_terms: Vec<Option<Inst>>,
     /// `ins()` lends out a builder; its insertion is observed on the next
@@ -121,17 +213,36 @@ pub struct FunctionBuilder<'f> {
 
 impl<'f> FunctionBuilder<'f> {
     pub fn new(func: &'f mut Function) -> Self {
+        Self::with_context(func, FunctionBuilderContext::default())
+    }
+
+    /// Like [`FunctionBuilder::new`], reusing the allocations in `context`
+    /// (returned by an earlier builder's [`FunctionBuilder::finalize`]).
+    pub fn with_context(func: &'f mut Function, mut context: FunctionBuilderContext) -> Self {
+        context.clear();
+        let FunctionBuilderContext {
+            var_types,
+            result_tys,
+            blocks,
+            blocks_used,
+            added_params,
+            incoming,
+            incoming_used,
+            indexed_terms,
+        } = context;
         Self {
             func,
             cfg_changed: true,
             current: None,
             srcloc: None,
-            var_types: Vec::new(),
-            result_tys: Vec::new(),
-            blocks: Vec::new(),
-            added_params: Vec::new(),
-            incoming: Vec::new(),
-            indexed_terms: Vec::new(),
+            var_types,
+            result_tys,
+            blocks,
+            blocks_used,
+            added_params,
+            incoming,
+            incoming_used,
+            indexed_terms,
             pending: None,
         }
     }
@@ -228,17 +339,25 @@ impl<'f> FunctionBuilder<'f> {
             return;
         }
         self.sync_preds();
-        if self.incoming.len() <= block.index() {
-            self.incoming.resize_with(block.index() + 1, Vec::new);
-        }
-        let mut preds = std::mem::take(&mut self.incoming[block.index()]);
+        let edges = bucket(&mut self.incoming, &mut self.incoming_used, block);
+        let state = &mut self.blocks[block.index()];
+        // Swap rather than take, so both buckets keep their allocations.
+        state.preds.clear();
+        std::mem::swap(&mut state.preds, edges);
         // Blocks are created in layout order. Construction may visit them
         // in a different order; keep SSA arguments/values deterministic.
-        preds.sort_unstable_by_key(|&(inst, dest)| (self.func.inst_block(inst), dest));
-        self.blocks[block.index()].preds = preds;
-        for (var, param) in std::mem::take(&mut self.blocks[block.index()].incomplete) {
+        let func = &*self.func;
+        state
+            .preds
+            .sort_unstable_by_key(|&(inst, dest)| (func.inst_block(inst), dest));
+        let incomplete = std::mem::take(&mut self.blocks[block.index()].incomplete);
+        for &(var, param) in &incomplete {
             self.add_param_args(var, block, param);
         }
+        // Nothing reads an incomplete list once sealed; recycle it.
+        let mut incomplete = incomplete;
+        incomplete.clear();
+        self.blocks[block.index()].incomplete = incomplete;
     }
 
     pub fn seal_all_blocks(&mut self) {
@@ -250,34 +369,64 @@ impl<'f> FunctionBuilder<'f> {
 
     /// Removes the trivial parameters that only became trivial after
     /// others were removed. Every block must be sealed.
-    pub fn finalize(mut self) {
+    pub fn finalize(self) {
+        let _ = self.finalize_with_context();
+    }
+
+    /// Finalizes the function and returns the builder's allocations for
+    /// reuse by the next function's builder. Every block must be sealed.
+    pub fn finalize_with_context(mut self) -> FunctionBuilderContext {
         assert!(
-            self.blocks.iter().all(|s| s.sealed != Some(false)),
+            self.blocks[..self.blocks_used]
+                .iter()
+                .all(|s| s.sealed != Some(false)),
             "finalize needs every block sealed"
         );
+        let mut params = std::mem::take(&mut self.added_params);
         loop {
             let mut changed = false;
-            for (block, param) in std::mem::take(&mut self.added_params) {
+            // Keep the parameters that are still there and not trivial, in
+            // order, and look at them again if anything was removed.
+            let mut kept = 0;
+            for i in 0..params.len() {
+                let (block, Some(param)) = params[i] else {
+                    continue;
+                };
                 if self.func.block_params(block).contains(&param) {
                     if self.try_remove_trivial(block, param) != param {
                         changed = true;
                     } else {
-                        self.added_params.push((block, param));
+                        params[kept] = (block, Some(param));
+                        kept += 1;
                     }
                 }
             }
+            params.truncate(kept);
             if !changed {
-                return;
+                break;
             }
+        }
+        FunctionBuilderContext {
+            var_types: self.var_types,
+            result_tys: self.result_tys,
+            blocks: self.blocks,
+            blocks_used: self.blocks_used,
+            added_params: params,
+            incoming: self.incoming,
+            incoming_used: self.incoming_used,
+            indexed_terms: self.indexed_terms,
         }
     }
 
     fn block_state(&mut self, block: Block) -> &mut BlockState {
-        if self.blocks.len() <= block.index() {
-            self.blocks
-                .resize_with(block.index() + 1, BlockState::default);
+        let i = block.index();
+        if self.blocks_used <= i {
+            if self.blocks.len() <= i {
+                self.blocks.resize_with(i + 1, BlockState::default);
+            }
+            self.blocks_used = i + 1;
         }
-        &mut self.blocks[block.index()]
+        &mut self.blocks[i]
     }
 
     fn read(&mut self, var: Variable, block: Block) -> Value {
@@ -285,31 +434,61 @@ impl<'f> FunctionBuilder<'f> {
             return self.func.resolve(value);
         }
         let ty = self.var_types[var.index()];
-        let value = if !self.blocks[block.index()]
-            .sealed
-            .expect("unregistered SSA block")
-        {
+        let state = &self.blocks[block.index()];
+        let value = if !state.sealed.expect("unregistered SSA block") {
             let param = self.add_param(block, ty);
             self.blocks[block.index()].incomplete.push((var, param));
             param
+        } else if state.visiting {
+            // A loop led back here: the parameter is needed after all.
+            // Defining it lets further reads find it; the pending read
+            // finishes it and records it in its reserved cleanup slot.
+            self.func.append_block_param(block, ty)
         } else {
-            match self.blocks[block.index()].preds.as_slice() {
+            match state.preds.as_slice() {
                 [] => self.zero(block, ty),
                 &[(branch, _)] => {
                     let pred = self.func.inst_block(branch);
                     self.read(var, pred)
                 }
-                _ => {
-                    // Define the parameter first, so a loop that reaches
-                    // this block again finds it instead of recursing.
-                    let param = self.add_param(block, ty);
-                    self.blocks[block.index()].defs.insert(var, param);
-                    self.add_param_args(var, block, param)
-                }
+                _ => self.read_join(var, block, ty),
             }
         };
         self.block_state(block).defs.insert(var, value);
         value
+    }
+
+    /// Reads `var` in a sealed block with several predecessors. The
+    /// parameter is created only if a loop reaches this block again while
+    /// its predecessors are read, or if they disagree; most joins pass the
+    /// same value on every edge and need none. The result is the same as
+    /// creating it first and removing it once found trivial, except that
+    /// no value number is spent on it.
+    fn read_join(&mut self, var: Variable, block: Block, ty: Type) -> Value {
+        // Reserve the parameter's place in the cleanup order.
+        let slot = self.added_params.len();
+        self.added_params.push((block, None));
+        self.blocks[block.index()].visiting = true;
+        let values = self.read_preds(var, block);
+        self.blocks[block.index()].visiting = false;
+        match self.blocks[block.index()].defs.get(var) {
+            // Created by a read around a loop: finish it as an ordinary
+            // parameter. Its cleanup slot is the one reserved here.
+            Some(param) => {
+                self.added_params[slot].1 = Some(param);
+                self.finish_param(block, param, values)
+            }
+            None => match self.trivial_value(None, values.iter().copied()) {
+                Some(same) => same.expect("a join has predecessors"),
+                None => {
+                    let param = self.func.append_block_param(block, ty);
+                    self.added_params[slot].1 = Some(param);
+                    let index = self.func.block_params(block).len() - 1;
+                    self.write_args(block, index, values);
+                    param
+                }
+            },
+        }
     }
 
     /// A zero of type `ty` at the top of `block`, for a variable read where
@@ -334,37 +513,55 @@ impl<'f> FunctionBuilder<'f> {
 
     fn add_param(&mut self, block: Block, ty: Type) -> Value {
         let param = self.func.append_block_param(block, ty);
-        self.added_params.push((block, param));
+        self.added_params.push((block, Some(param)));
         param
     }
 
     /// Passes each predecessor's value of `var` to `param`, then removes
     /// `param` if it is trivial. Returns what `param` stands for.
     fn add_param_args(&mut self, var: Variable, block: Block, param: Value) -> Value {
-        // Reading can add/remove SSA parameters of other blocks, but sealed
-        // predecessor edges stay fixed. `var` already has a definition in
-        // this block, so no read reaches this parameter's branch arguments.
-        // Read every edge first, and write arguments only for a parameter
-        // that stays; most are trivial and then need none.
+        let values = self.read_preds(var, block);
+        self.finish_param(block, param, values)
+    }
+
+    /// The value of `var` at the end of each predecessor, in edge order.
+    /// Reading can add/remove SSA parameters of other blocks, but sealed
+    /// predecessor edges stay fixed. `var` already has a definition (or a
+    /// pending one) in this block, so no read reaches this block's branch
+    /// arguments. Every edge is read before any argument is written, so
+    /// a trivial parameter needs none.
+    fn read_preds(&mut self, var: Variable, block: Block) -> SmallVec<[Value; 8]> {
         let edges = self.blocks[block.index()].preds.len();
-        let mut values: SmallVec<[Value; 8]> = SmallVec::with_capacity(edges);
+        let mut values = SmallVec::with_capacity(edges);
         for edge in 0..edges {
             let (branch, _) = self.blocks[block.index()].preds[edge];
             let pred = self.func.inst_block(branch);
             values.push(self.read(var, pred));
         }
+        values
+    }
+
+    /// Removes `param` if `values` (one per edge) make it trivial, else
+    /// passes them as its branch arguments. Returns what `param` stands for.
+    fn finish_param(&mut self, block: Block, param: Value, values: SmallVec<[Value; 8]>) -> Value {
         let index = self.param_index(block, param);
-        match self.trivial_value(param, values.iter().copied()) {
+        match self.trivial_value(Some(param), values.iter().copied()) {
             Some(same) => self.remove_trivial(block, index, param, same, false),
             None => {
-                for (edge, value) in values.into_iter().enumerate() {
-                    let (branch, i) = self.blocks[block.index()].preds[edge];
-                    let args = &mut self.func.inst_data_mut(branch).branch_dests_mut()[i].args;
-                    debug_assert_eq!(args.len(), index, "arguments are added in parameter order");
-                    args.push(value);
-                }
+                self.write_args(block, index, values);
                 param
             }
+        }
+    }
+
+    /// Appends `values` (one per edge) as the arguments for parameter
+    /// `index` of `block`.
+    fn write_args(&mut self, block: Block, index: usize, values: SmallVec<[Value; 8]>) {
+        for (edge, value) in values.into_iter().enumerate() {
+            let (branch, i) = self.blocks[block.index()].preds[edge];
+            let args = &mut self.func.inst_data_mut(branch).branch_dests_mut()[i].args;
+            debug_assert_eq!(args.len(), index, "arguments are added in parameter order");
+            args.push(value);
         }
     }
 
@@ -381,13 +578,13 @@ impl<'f> FunctionBuilder<'f> {
     /// such other value; `None` if `param` merges different values.
     fn trivial_value(
         &self,
-        param: Value,
+        param: Option<Value>,
         args: impl Iterator<Item = Value>,
     ) -> Option<Option<Value>> {
         let mut same = None;
         for arg in args {
             let arg = self.func.resolve(arg);
-            if arg == param || Some(arg) == same {
+            if Some(arg) == param || Some(arg) == same {
                 continue;
             }
             if same.is_some() {
@@ -406,7 +603,7 @@ impl<'f> FunctionBuilder<'f> {
         let args = preds
             .iter()
             .map(|&(branch, i)| self.func.inst_data(branch).branch_dests()[i].args[index]);
-        match self.trivial_value(param, args) {
+        match self.trivial_value(Some(param), args) {
             Some(same) => self.remove_trivial(block, index, param, same, true),
             None => param,
         }
@@ -468,15 +665,12 @@ impl<'f> FunctionBuilder<'f> {
         }
         self.indexed_terms[block.index()] = Some(term);
         for (i, dest) in self.func.inst_data(term).branch_dests().iter().enumerate() {
-            if self.incoming.len() <= dest.block.index() {
-                self.incoming.resize_with(dest.block.index() + 1, Vec::new);
-            }
-            self.incoming[dest.block.index()].push((term, i));
+            bucket(&mut self.incoming, &mut self.incoming_used, dest.block).push((term, i));
         }
     }
 
     fn rebuild_preds(&mut self) {
-        for edges in &mut self.incoming {
+        for edges in &mut self.incoming[..self.incoming_used] {
             edges.clear();
         }
         self.indexed_terms.fill(None);
@@ -489,6 +683,22 @@ impl<'f> FunctionBuilder<'f> {
         self.cfg_changed = false;
         self.pending = None;
     }
+}
+
+/// The incoming-edge bucket of `block`, marking it used.
+fn bucket<'a>(
+    incoming: &'a mut Vec<Vec<(Inst, usize)>>,
+    used: &mut usize,
+    block: Block,
+) -> &'a mut Vec<(Inst, usize)> {
+    let i = block.index();
+    if *used <= i {
+        if incoming.len() <= i {
+            incoming.resize_with(i + 1, Vec::new);
+        }
+        *used = i + 1;
+    }
+    &mut incoming[i]
 }
 
 #[cfg(test)]
@@ -504,16 +714,18 @@ mod tests {
             defs.insert(Variable::new(key), Value::new(i));
             reference.insert(Variable::new(key), Value::new(i));
         }
-        assert!(matches!(&defs, Definitions::Small(entries) if !entries.spilled()));
+        assert!(
+            matches!(&defs, Definitions { entries: Entries::Small(entries), .. } if !entries.spilled())
+        );
         // Updates and sparse IDs must not consume more slots or force a spill.
         defs.insert(Variable::new(900_000), Value::new(12));
         reference.insert(Variable::new(900_000), Value::new(12));
         assert!(
-            matches!(&defs, Definitions::Small(entries) if entries.len() == 4 && !entries.spilled())
+            matches!(&defs, Definitions { entries: Entries::Small(entries), .. } if entries.len() == 4 && !entries.spilled())
         );
         assert_eq!(defs.get(Variable::new(899_999)), None);
-        // Reverse insertion exercises sorted movement and the wide-block
-        // fallback; repeated overwrites must preserve the latest definition.
+        // Reverse insertion exercises the wide-block fallback; repeated
+        // overwrites must preserve the latest definition.
         for i in (0..96).rev().chain(0..96) {
             let var = Variable::new(i * 1_001);
             let value = Value::new(i + reference.len());
@@ -523,7 +735,38 @@ mod tests {
                 assert_eq!(defs.get(key), Some(want));
             }
         }
-        assert!(matches!(&defs, Definitions::Large(entries) if entries.len() == reference.len()));
+        assert!(
+            matches!(&defs, Definitions { entries: Entries::Large(entries), .. } if entries.len() == reference.len())
+        );
+        // Clearing forgets everything; a wide table goes back to inline.
+        defs.clear();
+        assert!(
+            matches!(&defs, Definitions { entries: Entries::Small(entries), .. } if entries.is_empty())
+        );
+        assert_eq!(defs.get(Variable::new(0)), None);
+    }
+
+    #[test]
+    fn cleared_definitions_keep_their_spilled_allocation() {
+        let mut defs = Definitions::default();
+        for i in 0..20 {
+            defs.insert(Variable::new(i), Value::new(i));
+        }
+        let Entries::Small(entries) = &defs.entries else {
+            panic!("20 definitions stay small")
+        };
+        assert!(entries.spilled());
+        defs.clear();
+        assert!(
+            matches!(&defs, Definitions { entries: Entries::Small(entries), .. } if entries.is_empty() && entries.spilled())
+        );
+        for i in (0..20).rev() {
+            assert_eq!(defs.get(Variable::new(i)), None);
+            defs.insert(Variable::new(i), Value::new(100 + i));
+        }
+        for i in 0..20 {
+            assert_eq!(defs.get(Variable::new(i)), Some(Value::new(100 + i)));
+        }
     }
 
     #[test]

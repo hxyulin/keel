@@ -21,7 +21,7 @@ use crate::eval::{Base, Const, eval};
 use crate::parse::Parser;
 use crate::types::*;
 use crate::{Error, Loc};
-use keel_frontend::{FunctionBuilder, Variable};
+use keel_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
     DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, InstData, IntCC,
@@ -57,6 +57,8 @@ pub struct Gen<'p> {
     /// Whether each struct has a volatile member at any depth, once asked.
     /// Struct definitions no longer change after parsing.
     volatile_members: Vec<std::cell::Cell<Option<bool>>>,
+    /// The SSA builder's tables, handed from one function to the next.
+    ssa: FunctionBuilderContext,
 }
 
 impl<'p> Gen<'p> {
@@ -76,6 +78,7 @@ impl<'p> Gen<'p> {
             global_alignments: None,
             generated_alignments: HashMap::new(),
             volatile_members: vec![std::cell::Cell::new(None); p.structs.len()],
+            ssa: FunctionBuilderContext::new(),
         }
     }
 
@@ -425,7 +428,7 @@ impl<'p> Gen<'p> {
         }
         func.attrs = global.function_attrs;
         func.local = global.internal;
-        let mut b = FunctionBuilder::new(&mut func);
+        let mut b = FunctionBuilder::with_context(&mut func, std::mem::take(&mut self.ssa));
         let entry = b.create_block();
         b.seal_block(entry);
         b.switch_to_block(entry);
@@ -581,7 +584,7 @@ impl<'p> Gen<'p> {
         fg.emit_dispatch();
         fg.b.seal_all_blocks();
         let alignments = std::mem::take(&mut fg.alignments);
-        fg.b.finalize();
+        fg.g.ssa = fg.b.finalize_with_context();
         self.preserve_access_alignment(&mut func, alignments);
         Ok(func)
     }
