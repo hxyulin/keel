@@ -4,6 +4,7 @@
 //! `write_signed` installs it atomically after Apple's ad-hoc codesign succeeds.
 pub mod archive;
 pub mod elf;
+mod extract;
 mod read;
 mod tbd;
 mod unwind;
@@ -181,32 +182,7 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
             )?);
         }
     }
-    // Fixed-point extraction supports archive dependency chains independent of
-    // member order. Ordinary objects take precedence over tentative commons.
-    loop {
-        let defined: BTreeSet<_> = objects
-            .iter()
-            .flat_map(|o| &o.symbols)
-            .filter(|s| s.kind & 1 != 0 && (s.kind & 0xe != 0 || s.value != 0))
-            .map(|s| s.name.as_str())
-            .collect();
-        let needed: BTreeSet<_> = objects
-            .iter()
-            .flat_map(|o| &o.symbols)
-            .filter(|s| s.kind & 0xe == 0 && s.value == 0 && !defined.contains(s.name.as_str()))
-            .map(|s| s.name.clone())
-            .chain((!defined.contains("_main")).then(|| "_main".into()))
-            .collect();
-        let found = archives.iter().position(|o| {
-            o.symbols
-                .iter()
-                .any(|s| s.kind & 1 != 0 && s.kind & 0xe != 0 && needed.contains(&s.name))
-        });
-        let Some(index) = found else {
-            break;
-        };
-        objects.push(archives.remove(index));
-    }
+    extract::archives(&mut objects, archives);
     if objects.is_empty() {
         return fail("no input objects");
     }

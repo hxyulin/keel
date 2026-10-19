@@ -189,6 +189,198 @@ fn archives_extract_transitive_members_and_skip_unused_duplicate() {
     )
     .unwrap();
 }
+
+fn assert_archive_image(inputs: &[(&str, &[u8])], extracted: &[(&str, &[u8])]) {
+    let build = |inputs: &[(&str, &[u8])]| {
+        keel_link::link(
+            &inputs
+                .iter()
+                .map(|&(name, bytes)| Input { name, bytes })
+                .collect::<Vec<_>>(),
+            options(),
+        )
+        .unwrap()
+    };
+    let actual = build(inputs);
+    let expected = build(extracted);
+    assert_eq!(actual.bytes, expected.bytes);
+    assert_eq!(actual.warnings, expected.warnings);
+}
+
+#[test]
+fn archive_cycles_reverse_chains_and_cross_archive_order_preserve_image() {
+    let main = object(".globl _main\n_main: b _a\n");
+    let a = object(".globl _a\n_a: b _b\nb _c\n");
+    let b = object(".globl _b\n_b: b _a\n");
+    let c = object(".globl _c\n_c: ret\n");
+    let alternative = object(".globl _b\n_b: mov w0,#99\nret\n");
+    let early = archive(&[
+        ("b.o", b.clone()),
+        ("c.o", c.clone()),
+        ("unused.o", main.clone()),
+    ]);
+    let late = archive(&[("a.o", a.clone()), ("other-b.o", alternative)]);
+    let expected = [("main", main.as_slice()), ("a", &a), ("b", &b), ("c", &c)];
+    // Ordinary objects are included before extraction, even when placed after
+    // archives; later archives can pull from earlier ones at the fixed point.
+    for inputs in [
+        vec![
+            ("early.a", early.as_slice()),
+            ("late.a", &late),
+            ("main", &main),
+        ],
+        vec![
+            ("main", main.as_slice()),
+            ("early.a", &early),
+            ("late.a", &late),
+        ],
+    ] {
+        assert_archive_image(&inputs, &expected);
+    }
+    let entry = archive(&[
+        ("c.o", c.clone()),
+        ("b.o", b.clone()),
+        ("a.o", a.clone()),
+        ("main.o", main.clone()),
+    ]);
+    assert_archive_image(
+        &[("entry.a", &entry)],
+        &[("main", &main), ("a", &a), ("c", &c), ("b", &b)],
+    );
+}
+
+#[test]
+fn archive_candidates_recheck_satisfied_names_and_prioritize_new_earlier_members() {
+    let main = object(".globl _main\n_main: b _a\nb _b\n");
+    let c = object(".globl _c\n_c: ret\n");
+    let a = object(".globl _a\n_a: b _c\n.globl _b\n_b: ret\n");
+    let duplicate = object(".globl _b\n_b: ret\n");
+    let ar = archive(&[
+        ("__.SYMDEF", b"intentionally unusable index".to_vec()),
+        ("c.o", c.clone()),
+        ("a.o", a.clone()),
+        ("duplicate.o", duplicate),
+    ]);
+    assert_archive_image(
+        &[("main", &main), ("lib.a", &ar)],
+        &[("main", &main), ("a", &a), ("c", &c)],
+    );
+}
+
+#[test]
+fn archive_weak_references_pull_members_and_included_weak_definitions_satisfy_names() {
+    let mut main = object(".globl _main\n_main: b _f\n");
+    weak_symbol(&mut main, "_f", 0x40);
+    let mut weak = object(".globl _f\n_f: mov w0,#17\nret\n");
+    weak_symbol(&mut weak, "_f", 0x80);
+    let strong = object(".globl _f\n_f: mov w0,#29\nret\n.globl _g\n_g: ret\n");
+    let ar = archive(&[("weak.o", weak.clone()), ("strong.o", strong.clone())]);
+    assert_archive_image(
+        &[("main", &main), ("lib.a", &ar)],
+        &[("main", &main), ("weak", &weak)],
+    );
+    let force = object(".globl _force\n_force: b _g\n");
+    assert_archive_image(
+        &[
+            ("main", &main),
+            ("weak", &weak),
+            ("force", &force),
+            ("lib.a", &ar),
+        ],
+        &[
+            ("main", &main),
+            ("weak", &weak),
+            ("force", &force),
+            ("strong", &strong),
+        ],
+    );
+}
+
+#[test]
+fn archive_commons_satisfy_names_but_cannot_trigger_extraction() {
+    let main = object(".globl _main\n_main: b _f\n");
+    let common = object(".comm _f,8,3\n");
+    let ar = archive(&[("common.o", common.clone())]);
+    let error = keel_link::link(
+        &[
+            Input {
+                name: "main",
+                bytes: &main,
+            },
+            Input {
+                name: "common.a",
+                bytes: &ar,
+            },
+        ],
+        options(),
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        error,
+        "undefined symbol `_f`: absent from input definitions and selected macOS arm64 TBD interfaces"
+    );
+
+    let strong = object(".globl _f\n_f: ret\n.globl _g\n_g: ret\n");
+    let ar = archive(&[("strong.o", strong.clone())]);
+    assert_archive_image(
+        &[("main", &main), ("common", &common), ("lib.a", &ar)],
+        &[("main", &main), ("common", &common)],
+    );
+    let with_common = object(".globl _a\n_a: ret\n.comm _f,16,4\n");
+    let both = object(".globl _main\n_main: b _a\nb _f\n");
+    let common_ar = archive(&[("a.o", with_common.clone()), ("strong.o", strong.clone())]);
+    assert_archive_image(
+        &[("main", &both), ("lib.a", &common_ar)],
+        &[("main", &both), ("a", &with_common)],
+    );
+    let force = object(".globl _force\n_force: b _g\n");
+    assert_archive_image(
+        &[
+            ("main", &main),
+            ("common", &common),
+            ("force", &force),
+            ("lib.a", &ar),
+        ],
+        &[
+            ("main", &main),
+            ("common", &common),
+            ("force", &force),
+            ("strong", &strong),
+        ],
+    );
+}
+
+#[test]
+fn extracted_archive_duplicates_keep_member_diagnostic_and_unused_inputs_are_validated() {
+    let main = object(".globl _main\n_main: b _a\nb _b\n");
+    let a = object(".globl _a\n_a: ret\n.globl _shared\n_shared: ret\n");
+    let b = object(".globl _b\n_b: ret\n.globl _shared\n_shared: ret\n");
+    let ar = archive(&[("a.o", a), ("b.o", b)]);
+    let error = |bytes: &[u8]| {
+        keel_link::link(
+            &[
+                Input {
+                    name: "main",
+                    bytes: &main,
+                },
+                Input {
+                    name: "lib.a",
+                    bytes,
+                },
+            ],
+            options(),
+        )
+        .err()
+        .unwrap()
+    };
+    assert_eq!(error(&ar), "lib.a(b.o): duplicate definition `_shared`");
+    let ar = archive(&[("unused.o", vec![0; 64])]);
+    assert_eq!(
+        error(&ar),
+        "lib.a(unused.o): expected a thin little-endian arm64 MH_OBJECT"
+    );
+}
 #[test]
 fn same_named_local_got_symbols_stay_object_local() {
     let first = object(
