@@ -194,3 +194,98 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     );
     std::fs::remove_dir_all(temp).unwrap();
 }
+
+#[test]
+fn compact_lsda_and_dwarf_exception_frames_work_after_a_regular_page_boundary() {
+    use object::{Object, ObjectSection};
+    let temp = std::env::temp_dir().join(format!("keel-link-unwind-pages-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let mut source = String::from(".text\n");
+    for i in 0..512 {
+        source.push_str(&format!(
+            "_padding{i}:\n.cfi_startproc\nret\n.cfi_endproc\n"
+        ));
+    }
+    // Force only the throwing frame to DWARF without changing its machine
+    // instructions. The catch frame retains compact register rules and LSDA.
+    source.push_str(
+        &include_str!("../../../suite/native-linker/compact.s").replace(
+            "_compact_throw:\n.cfi_startproc",
+            "_compact_throw:\n.cfi_startproc\n.cfi_remember_state\n.cfi_restore_state",
+        ),
+    );
+    let bytes = keel_asm::assemble_object(&source).unwrap();
+    let obj = temp.join("mixed.o");
+    std::fs::write(&obj, &bytes).unwrap();
+    let driver = temp.join("driver.o");
+    checked(
+        Command::new("clang++")
+            .args(["-O2", "-c"])
+            .arg(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../suite/native-linker/compact.cpp"),
+            )
+            .arg("-o")
+            .arg(&driver),
+    );
+    let driver_bytes = std::fs::read(&driver).unwrap();
+    let sdk = checked(Command::new("xcrun").arg("--show-sdk-path"));
+    let sdk = PathBuf::from(String::from_utf8(sdk.stdout).unwrap().trim());
+    let exe = keel_link::link(
+        &[
+            Input {
+                name: "mixed.o",
+                bytes: &bytes,
+            },
+            Input {
+                name: "driver.o",
+                bytes: &driver_bytes,
+            },
+        ],
+        Options {
+            dylibs: ["libSystem.tbd", "libc++.tbd"]
+                .iter()
+                .map(|name| Dylib::from_tbd(&sdk.join("usr/lib").join(name), &sdk).unwrap())
+                .collect(),
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let image = object::File::parse(exe.bytes.as_slice()).unwrap();
+    let unwind = image
+        .section_by_name("__unwind_info")
+        .unwrap()
+        .data()
+        .unwrap();
+    let word = |at| u32::from_le_bytes(unwind[at..at + 4].try_into().unwrap()) as usize;
+    assert_eq!(word(24), 3, "two regular pages plus sentinel");
+    let index = word(20);
+    let second = word(index + 16);
+    assert_eq!(word(second), 2);
+    let count = u16::from_le_bytes(unwind[second + 6..second + 8].try_into().unwrap()) as usize;
+    let encodings: Vec<_> = (0..count).map(|i| word(second + 12 + i * 8)).collect();
+    assert!(encodings.iter().any(|e| e & 0x0f000000 == 0x03000000));
+    assert!(encodings.iter().any(|e| e & 0x40000000 != 0));
+    assert!(image.section_by_name("__eh_frame").unwrap().size() > 0);
+    let native = temp.join("native");
+    let apple = temp.join("apple");
+    keel_link::write_signed(&exe, &native).unwrap();
+    checked(
+        Command::new("clang++")
+            .arg(&obj)
+            .arg(&driver)
+            .arg("-o")
+            .arg(&apple),
+    );
+    for executable in [&native, &apple] {
+        checked(
+            Command::new("codesign")
+                .args(["--verify", "--strict"])
+                .arg(executable),
+        );
+        for _ in 0..5 {
+            checked(&mut Command::new(executable));
+        }
+    }
+    std::fs::remove_dir_all(temp).unwrap();
+}

@@ -2,8 +2,44 @@ use crate::*;
 use read::Reader;
 use write::u32le;
 
-pub(crate) fn reserve(records: usize) -> usize {
-    align(8192 + records * 64, 4)
+const ENTRIES_PER_PAGE: usize = 511;
+
+// All arrays and regular pages are 4-byte aligned. Keep sizing and emission on
+// the same checked format layout; no final address or encoding affects widths.
+struct Layout {
+    index: usize,
+    lsda: usize,
+    pages: usize,
+    page_count: usize,
+    size: usize,
+}
+impl Layout {
+    fn new(entries: usize, personalities: usize, lsdas: usize) -> Result<Self> {
+        let page_count = entries.div_ceil(ENTRIES_PER_PAGE);
+        let add = |base: usize, count: usize, width: usize| {
+            base.checked_add(count.checked_mul(width).ok_or("unwind size overflow")?)
+                .ok_or("unwind size overflow")
+        };
+        let index = add(28, personalities, 4)?;
+        let lsda = add(
+            index,
+            page_count.checked_add(1).ok_or("unwind size overflow")?,
+            12,
+        )?;
+        let pages = add(lsda, lsdas, 8)?;
+        let size = add(add(pages, page_count, 8)?, entries, 8)?;
+        u32::try_from(size).map_err(|_| "unwind section exceeds 32-bit offsets")?;
+        if size > 512 * 1024 * 1024 {
+            return fail("unwind section exceeds 512 MiB");
+        }
+        Ok(Self {
+            index,
+            lsda,
+            pages,
+            page_count,
+            size,
+        })
+    }
 }
 #[derive(Clone)]
 struct Entry {
@@ -13,6 +49,89 @@ struct Entry {
     lsda: u32,
 }
 impl Linker {
+    // This bound includes one gap per pair of input records, all possible
+    // personalities and LSDA entries. It is independent of final addresses.
+    fn unwind_counts(&self) -> Result<(usize, usize, usize)> {
+        let mut records = 0usize;
+        let mut lsdas = 0usize;
+        let mut personalities = BTreeSet::new();
+        for (oi, o) in self.objects.iter().enumerate() {
+            for s in &o.sections {
+                if s.segment != "__LD" || s.name != "__compact_unwind" {
+                    continue;
+                }
+                if s.data.len() % 32 != 0 {
+                    return fail("compact unwind size is not a multiple of 32");
+                }
+                records = records
+                    .checked_add(s.data.len() / 32)
+                    .ok_or("unwind record count overflow")?;
+                for at in (0..s.data.len()).step_by(32) {
+                    lsdas = lsdas
+                        .checked_add(usize::from(Reader(&s.data).u32(at + 12)? & 0x40000000 != 0))
+                        .ok_or("unwind LSDA count overflow")?;
+                }
+                for rel in &s.relocs {
+                    if rel.offset % 32 == 16 {
+                        personalities.insert(self.got_key(oi, rel.symbol)?);
+                    }
+                }
+            }
+        }
+        Ok((records, personalities.len(), lsdas))
+    }
+
+    pub(crate) fn unwind_bound(&self) -> Result<usize> {
+        let (records, personalities, _) = self.unwind_counts()?;
+        let ranges = records
+            .checked_add(records.saturating_sub(1))
+            .ok_or("unwind range count overflow")?;
+        // Count every record as a potential LSDA: unusual relocations may
+        // change its flag/pointer during provisional layout.
+        Ok(Layout::new(ranges, personalities, records)?.size)
+    }
+
+    // Relocate only metadata into scratch payloads using the real relocation
+    // validator. Restore every original payload even on error: final relocation
+    // must apply addends exactly once, after layout has been fixed.
+    pub(crate) fn planned_unwind_size(&mut self) -> Result<usize> {
+        let mut originals = Vec::new();
+        let result = (|| {
+            for oi in 0..self.objects.len() {
+                for si in 0..self.objects[oi].sections.len() {
+                    let s = &self.objects[oi].sections[si];
+                    if s.segment == "__LD" && s.name == "__compact_unwind" {
+                        originals.push((oi, si, s.data.clone()));
+                        self.relocate_section(oi, si)?;
+                    }
+                }
+            }
+            let (_, personalities, lsdas) = self.unwind_counts()?;
+            let mut entries = Vec::new();
+            for o in &self.objects {
+                for s in &o.sections {
+                    if s.segment == "__LD" && s.name == "__compact_unwind" {
+                        let r = Reader(&s.data);
+                        for at in (0..s.data.len()).step_by(32) {
+                            let (start, end) = function_range(r.u64(at)?, r.u32(at + 8)?)?;
+                            entries.push(Entry {
+                                start,
+                                end,
+                                encoding: 0,
+                                lsda: 0,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(Layout::new(function_ranges(entries)?.len(), personalities, lsdas)?.size)
+        })();
+        for (oi, si, data) in originals {
+            self.objects[oi].sections[si].data = data;
+        }
+        result
+    }
+
     pub(crate) fn unwind(&self) -> Result<Vec<u8>> {
         let mut fdes = BTreeMap::new();
         for o in &self.objects {
@@ -56,7 +175,12 @@ impl Linker {
                         }
                         let field = output.address + s.offset as u64 + at as u64 + 8;
                         let start = field.wrapping_add(r.u64(at + 8)?);
-                        let offset = (s.offset + at) as u32;
+                        let offset = u32::try_from(
+                            s.offset
+                                .checked_add(at)
+                                .ok_or("DWARF FDE offset overflow")?,
+                        )
+                        .map_err(|_| "DWARF unwind FDE offset exceeds 32 bits")?;
                         if offset >= 1 << 24 {
                             return fail("DWARF unwind FDE offset exceeds 24 bits");
                         }
@@ -66,6 +190,68 @@ impl Linker {
                 }
             }
         }
+        let (ranges, personalities) = self.unwind_entries(&fdes)?;
+        let sentinel = ranges.last().map_or(0, |e| e.end);
+        let layout = Layout::new(
+            ranges.len(),
+            personalities.len(),
+            ranges.iter().filter(|e| e.lsda != 0).count(),
+        )?;
+        let personality_off = 28;
+        let index_off = layout.index;
+        let lsda_off = layout.lsda;
+        let pages_off = layout.pages;
+        let page_count = layout.page_count;
+        let mut out = Vec::with_capacity(layout.size);
+        for n in [
+            1,
+            28,
+            0,
+            personality_off as u32,
+            personalities.len() as u32,
+            index_off as u32,
+            (page_count + 1) as u32,
+        ] {
+            u32le(&mut out, n);
+        }
+        for p in personalities {
+            u32le(&mut out, p);
+        }
+        let mut lsda_cursor = lsda_off;
+        let mut page_cursor = pages_off;
+        for chunk in ranges.chunks(ENTRIES_PER_PAGE) {
+            for n in [chunk[0].start, page_cursor as u32, lsda_cursor as u32] {
+                u32le(&mut out, n);
+            }
+            lsda_cursor += chunk.iter().filter(|e| e.lsda != 0).count() * 8;
+            page_cursor += 8 + chunk.len() * 8;
+        }
+        for n in [sentinel, 0, lsda_cursor as u32] {
+            u32le(&mut out, n);
+        }
+        for e in &ranges {
+            if e.lsda != 0 {
+                u32le(&mut out, e.start);
+                u32le(&mut out, e.lsda);
+            }
+        }
+        out.resize(pages_off, 0);
+        for chunk in ranges.chunks(ENTRIES_PER_PAGE) {
+            u32le(&mut out, 2);
+            out.extend_from_slice(&8u16.to_le_bytes());
+            out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+            for e in chunk {
+                u32le(&mut out, e.start);
+                u32le(&mut out, e.encoding);
+            }
+        }
+        if out.len() != layout.size {
+            return fail("internal unwind serialization size mismatch");
+        }
+        Ok(out)
+    }
+
+    fn unwind_entries(&self, fdes: &BTreeMap<u64, u32>) -> Result<(Vec<Entry>, Vec<u32>)> {
         let mut personalities = Vec::new();
         let mut entries = Vec::new();
         for (oi, o) in self.objects.iter().enumerate() {
@@ -79,13 +265,7 @@ impl Linker {
                 let r = Reader(&s.data);
                 for at in (0..s.data.len()).step_by(32) {
                     let address = r.u64(at)?;
-                    let start = u32::try_from(
-                        address
-                            .checked_sub(BASE)
-                            .ok_or("unwind function below image")?,
-                    )
-                    .map_err(|_| "unwind address exceeds 32 bits")?;
-                    let length = r.u32(at + 8)?;
+                    let (start, end) = function_range(address, r.u32(at + 8)?)?;
                     let mut encoding = r.u32(at + 12)?;
                     if encoding & 0x30000000 != 0 {
                         return fail("input unwind encoding already has personality index");
@@ -133,85 +313,50 @@ impl Linker {
                     };
                     entries.push(Entry {
                         start,
-                        end: start
-                            .checked_add(length)
-                            .ok_or("unwind function range overflow")?,
+                        end,
                         encoding,
                         lsda,
                     });
                 }
             }
         }
-        entries.sort_by_key(|e| e.start);
-        let mut ranges: Vec<Entry> = Vec::new();
-        for e in entries {
-            if let Some(prev) = ranges.last() {
-                if e.start < prev.end {
-                    return fail("overlapping compact unwind functions");
-                }
-                if e.start > prev.end {
-                    ranges.push(Entry {
-                        start: prev.end,
-                        end: e.start,
-                        encoding: 0,
-                        lsda: 0,
-                    });
-                }
-            }
-            ranges.push(e);
-        }
-        let sentinel = ranges.last().map_or(0, |e| e.end);
-        let page_count = ranges.len().div_ceil(511);
-        let personality_off = 28;
-        let index_off = personality_off + personalities.len() * 4;
-        let lsda_off = index_off + (page_count + 1) * 12;
-        let lsda_count = ranges.iter().filter(|e| e.lsda != 0).count();
-        let pages_off = align(lsda_off + lsda_count * 8, 4);
-        let mut out = Vec::new();
-        for n in [
-            1,
-            28,
-            0,
-            personality_off as u32,
-            personalities.len() as u32,
-            index_off as u32,
-            (page_count + 1) as u32,
-        ] {
-            u32le(&mut out, n);
-        }
-        for p in personalities {
-            u32le(&mut out, p);
-        }
-        let mut lsda_cursor = lsda_off;
-        let mut page_cursor = pages_off;
-        for chunk in ranges.chunks(511) {
-            for n in [chunk[0].start, page_cursor as u32, lsda_cursor as u32] {
-                u32le(&mut out, n);
-            }
-            lsda_cursor += chunk.iter().filter(|e| e.lsda != 0).count() * 8;
-            page_cursor += 8 + chunk.len() * 8;
-        }
-        for n in [sentinel, 0, lsda_cursor as u32] {
-            u32le(&mut out, n);
-        }
-        for e in &ranges {
-            if e.lsda != 0 {
-                u32le(&mut out, e.start);
-                u32le(&mut out, e.lsda);
-            }
-        }
-        out.resize(pages_off, 0);
-        for chunk in ranges.chunks(511) {
-            u32le(&mut out, 2);
-            out.extend_from_slice(&8u16.to_le_bytes());
-            out.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
-            for e in chunk {
-                u32le(&mut out, e.start);
-                u32le(&mut out, e.encoding);
-            }
-        }
-        Ok(out)
+        Ok((function_ranges(entries)?, personalities))
     }
+}
+
+fn function_range(address: u64, length: u32) -> Result<(u32, u32)> {
+    let start = u32::try_from(
+        address
+            .checked_sub(BASE)
+            .ok_or("unwind function below image")?,
+    )
+    .map_err(|_| "unwind address exceeds 32 bits")?;
+    let end = start
+        .checked_add(length)
+        .ok_or("unwind function range overflow")?;
+    Ok((start, end))
+}
+
+fn function_ranges(mut entries: Vec<Entry>) -> Result<Vec<Entry>> {
+    entries.sort_by_key(|e| e.start);
+    let mut ranges: Vec<Entry> = Vec::new();
+    for e in entries {
+        if let Some(prev) = ranges.last() {
+            if e.start < prev.end {
+                return fail("overlapping compact unwind functions");
+            }
+            if e.start > prev.end {
+                ranges.push(Entry {
+                    start: prev.end,
+                    end: e.start,
+                    encoding: 0,
+                    lsda: 0,
+                });
+            }
+        }
+        ranges.push(e);
+    }
+    Ok(ranges)
 }
 
 // Keel's supported CIE contract: version 1, AArch64 LR=30, code/data
@@ -266,4 +411,19 @@ fn validate_cie(bytes: &[u8], at: usize) -> Result<()> {
         return fail("invalid CIE augmentation layout");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_and_function_range_overflows_are_errors() {
+        assert!(Layout::new(usize::MAX, 0, 0).is_err());
+        assert!(Layout::new(0, usize::MAX, 0).is_err());
+        assert!(Layout::new(0, 0, usize::MAX).is_err());
+        assert!(Layout::new(1 << 29, 0, 0).is_err());
+        assert!(function_range(BASE - 1, 0).is_err());
+        assert!(function_range(BASE + u32::MAX as u64, 1).is_err());
+    }
 }

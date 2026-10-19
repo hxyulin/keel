@@ -474,16 +474,6 @@ impl Linker {
         self.outputs[self.stub_section].size = self.stubs.len() * 12;
         self.outputs[self.stub_section].data = vec![0; self.stubs.len() * 12];
         self.unwind_section = self.output("__TEXT", "__unwind_info", 0, 2)?;
-        let records: usize = self
-            .objects
-            .iter()
-            .flat_map(|o| &o.sections)
-            .filter(|s| s.name == "__compact_unwind")
-            .map(|s| s.size / 32)
-            .sum();
-        let reserve = unwind::reserve(records);
-        self.outputs[self.unwind_section].size = reserve;
-        self.outputs[self.unwind_section].data = vec![0; reserve];
         Ok(())
     }
     fn coalesces(&self, target: Target, name: &str) -> bool {

@@ -116,100 +116,40 @@ impl Linker {
         output: &mut W,
         reserve: impl FnOnce(&mut W, usize),
     ) -> Result<LinkArtifacts> {
-        let mut segments = vec![Segment {
-            name: "__PAGEZERO",
-            address: 0,
-            vm: BASE as usize,
-            file: 0,
-            size: 0,
-            prot: 0,
-            sections: vec![],
-        }];
-        let mut file = 0;
-        let mut address = BASE;
-        let mut ordinal = 1u16;
-        for (seg, prot) in [("__TEXT", 5), ("__DATA", 3)] {
-            let mut ids: Vec<_> = self
-                .outputs
-                .iter()
-                .enumerate()
-                .filter(|(_, s)| s.segment == seg)
-                .map(|(id, _)| id)
-                .collect();
-            ids.sort_by_key(|&id| {
-                (
-                    match self.outputs[id].flags & 255 {
-                        0x11 => 1,
-                        0x12 => 2,
-                        1 => 3,
-                        _ => 0,
-                    },
-                    id,
-                )
-            });
-            let start = file;
-            let vmstart = address;
-            if seg == "__TEXT" {
-                file = PAGE;
-                address += PAGE as u64;
+        // Plan before committing any relocations. Gap entries can change when
+        // later sections move as unwind shrinks. Iterate provisional layouts,
+        // with a bounded fallback for unusual address-dependent inputs.
+        let bound = self.unwind_bound()?;
+        self.outputs[self.unwind_section].size = bound;
+        let mut settled = false;
+        for _ in 0..8 {
+            self.layout()?;
+            let Ok(planned) = self.planned_unwind_size() else {
+                // A provisional shrink can create overlapping ranges. Restore
+                // the bound and let final serialization validate that layout.
+                break;
+            };
+            if planned > bound {
+                return fail("internal unwind plan exceeds bound");
             }
-            let mut file_end = file;
-            let tls_alignment = ids
-                .iter()
-                .filter(|&&id| matches!(self.outputs[id].flags & 255, 0x11 | 0x12))
-                .map(|&id| self.outputs[id].alignment)
-                .max()
-                .unwrap_or(0);
-            let mut tls_started = false;
-            for &id in &ids {
-                let s = &mut self.outputs[id];
-                if !tls_started && matches!(s.flags & 255, 0x11 | 0x12) {
-                    // dyld uses offsets into a malloc-backed TLS template.
-                    // Preserve section alignment relative to the template base,
-                    // not only relative to the executable's image base.
-                    s.alignment = s.alignment.max(tls_alignment);
-                    tls_started = true;
-                }
-                let a = 1 << s.alignment;
-                // Segment starts are at least 16 KiB aligned, and all section
-                // alignments above that are handled in VM and file together.
-                let pad = align(address as usize, a) - address as usize;
-                address += pad as u64;
-                s.address = address;
-                s.ordinal = ordinal as u8;
-                ordinal += 1;
-                if !matches!(s.flags & 255, 1 | 0x12) {
-                    file += pad;
-                    s.file = file;
-                    file += s.size;
-                    file_end = file;
-                }
-                address += s.size as u64;
+            if planned == self.outputs[self.unwind_section].size {
+                settled = true;
+                break;
             }
-            file = align(file_end, PAGE);
-            address = align(address as usize, PAGE) as u64;
-            segments.push(Segment {
-                name: seg,
-                address: vmstart,
-                vm: (address - vmstart) as usize,
-                file: start,
-                size: file - start,
-                prot,
-                sections: ids,
-            });
+            self.outputs[self.unwind_section].size = planned;
         }
-        if ordinal > 256 {
-            return fail("too many executable sections");
+        // If sizing cannot settle, retain a proven bound before final layout.
+        if !settled {
+            self.outputs[self.unwind_section].size = bound;
         }
-        if file > 512 * 1024 * 1024 {
-            return fail("basic executable exceeds 512 MiB file limit");
-        }
+        let (mut segments, file, address) = self.layout()?;
+        self.outputs[self.unwind_section].data = vec![0; self.outputs[self.unwind_section].size];
         self.relocate()?;
         self.make_got_stubs()?;
         let unwind = self.unwind()?;
         let u = &mut self.outputs[self.unwind_section];
-        if unwind.len() > u.size {
-            return fail("internal unwind reservation exhausted");
+        if unwind.len() > u.size || (settled && unwind.len() != u.size) {
+            return fail("internal unwind plan exhausted");
         }
         u.data[..unwind.len()].copy_from_slice(&unwind);
         let mut linkedit = Vec::new();
@@ -674,6 +614,97 @@ impl Linker {
             Ok((None, out.address + s.offset as u64))
         }
     }
+    fn layout(&mut self) -> Result<(Vec<Segment>, usize, u64)> {
+        let mut segments = vec![Segment {
+            name: "__PAGEZERO",
+            address: 0,
+            vm: BASE as usize,
+            file: 0,
+            size: 0,
+            prot: 0,
+            sections: vec![],
+        }];
+        let mut file = 0;
+        let mut address = BASE;
+        let mut ordinal = 1u16;
+        for (seg, prot) in [("__TEXT", 5), ("__DATA", 3)] {
+            let mut ids: Vec<_> = self
+                .outputs
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.segment == seg)
+                .map(|(id, _)| id)
+                .collect();
+            ids.sort_by_key(|&id| {
+                (
+                    match self.outputs[id].flags & 255 {
+                        0x11 => 1,
+                        0x12 => 2,
+                        1 => 3,
+                        _ => 0,
+                    },
+                    id,
+                )
+            });
+            let start = file;
+            let vmstart = address;
+            if seg == "__TEXT" {
+                file = PAGE;
+                address += PAGE as u64;
+            }
+            let mut file_end = file;
+            let tls_alignment = ids
+                .iter()
+                .filter(|&&id| matches!(self.outputs[id].flags & 255, 0x11 | 0x12))
+                .map(|&id| self.outputs[id].alignment)
+                .max()
+                .unwrap_or(0);
+            let mut tls_started = false;
+            for &id in &ids {
+                let s = &mut self.outputs[id];
+                if !tls_started && matches!(s.flags & 255, 0x11 | 0x12) {
+                    // dyld uses offsets into a malloc-backed TLS template.
+                    // Preserve section alignment relative to the template base,
+                    // not only relative to the executable's image base.
+                    s.alignment = s.alignment.max(tls_alignment);
+                    tls_started = true;
+                }
+                let a = 1 << s.alignment;
+                // Segment starts are at least 16 KiB aligned, and all section
+                // alignments above that are handled in VM and file together.
+                let pad = align(address as usize, a) - address as usize;
+                address += pad as u64;
+                s.address = address;
+                s.ordinal = ordinal as u8;
+                ordinal += 1;
+                if !matches!(s.flags & 255, 1 | 0x12) {
+                    file += pad;
+                    s.file = file;
+                    file += s.size;
+                    file_end = file;
+                }
+                address += s.size as u64;
+            }
+            file = align(file_end, PAGE);
+            address = align(address as usize, PAGE) as u64;
+            segments.push(Segment {
+                name: seg,
+                address: vmstart,
+                vm: (address - vmstart) as usize,
+                file: start,
+                size: file - start,
+                prot,
+                sections: ids,
+            });
+        }
+        if ordinal > 256 {
+            return fail("too many executable sections");
+        }
+        if file > 512 * 1024 * 1024 {
+            return fail("basic executable exceeds 512 MiB file limit");
+        }
+        Ok((segments, file, address))
+    }
     fn relocate(&mut self) -> Result<()> {
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
@@ -692,7 +723,7 @@ impl Linker {
         }
         Ok(())
     }
-    fn relocate_section(&mut self, oi: usize, si: usize) -> Result<()> {
+    pub(crate) fn relocate_section(&mut self, oi: usize, si: usize) -> Result<()> {
         // Relocation consumes this section's payload. Symbol resolution uses
         // section addresses and sizes, so it does not need the resident bytes.
         let mut data = std::mem::take(&mut self.objects[oi].sections[si].data);
