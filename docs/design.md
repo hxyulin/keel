@@ -2217,13 +2217,18 @@ compared with Clang; unresolved GOT placeholder bytes are normalized.
 program in `__DWARF,__debug_line`. As in LLVM, `is_stmt` persists across
 `.loc` directives while the other options apply to one row. A directory is
 kept verbatim as an include directory and its name unsplit, matching Clang's
-DWARF 4 tables; a one-string path keeps directory index 0. DWARF 5 forms
-(`.file 0`, `md5`, `source`) and unnumbered `.file` are errors. File numbers
-are contiguous from 1. The line program covers the text section and terminates
-at its end. Explicit debug sections support `__debug_info`, `__debug_abbrev`,
-`__debug_line`, `__debug_ranges`, `__debug_str`, `__debug_loc`, and Clang's
-DWARF 4 accelerator tables (`__apple_names`, `__apple_objc`,
-`__apple_namespac`, `__apple_types`), with
+DWARF 4 tables; a one-string path keeps directory index 0. As in LLVM,
+`.file 0 "directory" "name"` selects a DWARF 5 table instead, with optional
+`md5` and `source` operands on every `.file` (see [dwarf5.md](dwarf5.md));
+without it the DWARF 4 output is unchanged, and `md5`/`source` are errors.
+Unnumbered `.file` is an error. File numbers are contiguous from 1. The line
+program covers the text section and terminates at its end. Explicit debug
+sections support `__debug_info`, `__debug_abbrev`, `__debug_line`,
+`__debug_ranges`, `__debug_str`, `__debug_loc`, Clang's DWARF 4 accelerator
+tables (`__apple_names`, `__apple_objc`, `__apple_namespac`,
+`__apple_types`), and the DWARF 5 sections `__debug_line_str`,
+`__debug_str_offs`, `__debug_addr`, `__debug_rnglists`, `__debug_loclists`
+and `__debug_names`, with
 `regular,debug` attributes. Their Mach-O `S_ATTR_DEBUG` flag excludes them
 from the loaded image. Local debug address relocations use section ordinals
 and preserve original addresses in the data, allowing tools to read unlinked

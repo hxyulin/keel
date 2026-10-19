@@ -75,7 +75,10 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
             "__debug_info" | "__debug_abbrev" | "__debug_line" | "__debug_ranges" | "__debug_str"
             | "__debug_loc"
             // Clang's DWARF 4 Apple accelerator tables (16-byte section names).
-            | "__apple_names" | "__apple_objc" | "__apple_namespac" | "__apple_types",
+            | "__apple_names" | "__apple_objc" | "__apple_namespac" | "__apple_types"
+            // DWARF 5 sections Clang emits (Mach-O truncates to 16 bytes).
+            | "__debug_line_str" | "__debug_str_offs" | "__debug_addr" | "__debug_rnglists"
+            | "__debug_loclists" | "__debug_names",
         ) => SectionKind::Debug,
         ("__TEXT", "__eh_frame") => SectionKind::EhFrame,
         _ => return Err("unsupported Mach-O section".into()),
@@ -99,6 +102,13 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
         return Err("unsupported section type or attributes".into());
     }
     select(a, args[0], args[1], kind)
+}
+/// LLVM resolves LEB128 symbol differences by layout in any section. Debug
+/// sections are not split into linker atoms (dsymutil reads object
+/// addresses), so their differences may span atoms; Clang's DWARF 5 range and
+/// location lists use `Ltmp-Lfunc_begin0` offsets across functions.
+pub(super) fn is_debug(a: &Assembly, section: usize) -> bool {
+    section != 0 && a.sections[section - 1].kind == SectionKind::Debug
 }
 pub(super) fn bytes_mut(a: &mut Assembly, section: usize) -> Result<&mut Vec<u8>, String> {
     if section == 0 {

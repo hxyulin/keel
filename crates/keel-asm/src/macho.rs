@@ -421,7 +421,9 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     u32le(&mut out, segment_size as u32);
     name(&mut out, "");
     u64le(&mut out, 0);
-    u64le(&mut out, vm);
+    // Section file offsets and addresses are aligned independently, so file
+    // padding can exceed address padding; tools reject filesize > vmsize.
+    u64le(&mut out, vm.max(data_end - first_file));
     u64le(&mut out, first_file);
     u64le(&mut out, data_end - first_file);
     for value in [7, 7, views.len() as u32, 0] {

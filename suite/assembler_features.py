@@ -237,7 +237,8 @@ NEGATIVE = {
     'widen-bad-suffix': 'saddw.8b v0, v1, v2',
     'unknown-apple-root': 'sqadd.4s v0, v1, v2',
     'udot-without-dotprod': None,  # filled from source without --cpu below
-    'file-dwarf5-zero': '.file 0 "/dir" "a.c"',
+    # `.file 0` now selects a DWARF 5 table; without a directory it stays an error.
+    'file-dwarf5-zero': '.file 0 "a.c"',
     'file-md5': '.file 1 "/dir" "a.c" md5 0x00112233445566778899aabbccddeeff',
     'file-trailing': '.file 1 "/dir" "a.c" junk',
     'file-unterminated': '.file 1 "/dir',

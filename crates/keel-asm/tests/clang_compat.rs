@@ -246,7 +246,10 @@ ret
 #[test]
 fn malformed_file_and_loc_operands_are_diagnosed() {
     for (source, message) in [
-        (".file 0 \"/d\" \"a.c\"", ".file 0 requires DWARF 5"),
+        (
+            ".file 0 \"a.c\"",
+            ".file 0 requires a nonempty compilation directory",
+        ),
         (
             ".file 1 \"/d\" \"a.c\" md5 0x00112233445566778899aabbccddeeff",
             "require DWARF 5",

@@ -173,19 +173,60 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
     let outputs = opts.outputs()?;
     for (input, output) in opts.inputs.iter().zip(outputs) {
         let src = Source::open(input).map_err(|e| format!("{}: {e}", input.display()))?;
-        let text = src
-            .text()
-            .map_err(|e| format!("{}: {e}", input.display()))?;
+        let text = match src.text() {
+            Ok(text) => std::borrow::Cow::Borrowed(text),
+            Err(e) if !opts.x86 => std::fs::read(input)
+                .ok()
+                .and_then(|bytes| comment_lossy(&bytes))
+                .map(std::borrow::Cow::Owned)
+                .ok_or_else(|| format!("{}: {e}", input.display()))?,
+            Err(e) => return Err(format!("{}: {e}", input.display())),
+        };
         let object = if opts.x86 {
-            keel_asm::x86::assemble_object_with_features(text, opts.x86_features)
+            keel_asm::x86::assemble_object_with_features(&text, opts.x86_features)
         } else {
-            keel_asm::assemble_object_with_features(text, opts.features)
+            keel_asm::assemble_object_with_features(&text, opts.features)
         }
         .map_err(|e| format!("{}: {e}", input.display()))?;
         drop(src);
         std::fs::write(&output, object).map_err(|e| format!("{}: {e}", output.display()))?;
     }
     Ok(())
+}
+
+/// Clang's verbose AArch64 assembly prints DWARF data bytes as raw characters
+/// in `;` comments (such as `DW_OP_implicit_value` operands in DWARF 5
+/// `__debug_loclists`), which need not be UTF-8. Only after strict decoding
+/// fails, accept input whose invalid bytes all lie in `;` or `//` line
+/// comments outside quotes, replacing them. Anything else (including invalid
+/// bytes in strings, code, or block comments) still fails.
+fn comment_lossy(bytes: &[u8]) -> Option<String> {
+    let mut out = String::with_capacity(bytes.len());
+    for line in bytes.split_inclusive(|&b| b == b'\n') {
+        if let Ok(line) = std::str::from_utf8(line) {
+            out.push_str(line);
+            continue;
+        }
+        let (mut quoted, mut escaped, mut comment) = (false, false, None);
+        for (i, &b) in line.iter().enumerate() {
+            match b {
+                _ if escaped => escaped = false,
+                b'\\' if quoted => escaped = true,
+                b'"' => quoted = !quoted,
+                b';' if !quoted => comment = Some(i),
+                b'/' if !quoted && line.get(i + 1) == Some(&b'/') => comment = Some(i),
+                b'/' if !quoted && line.get(i + 1) == Some(&b'*') => return None,
+                _ => {}
+            }
+            if comment.is_some() {
+                break;
+            }
+        }
+        let comment = comment?;
+        out.push_str(std::str::from_utf8(&line[..comment]).ok()?);
+        out.push_str(&String::from_utf8_lossy(&line[comment..]));
+    }
+    Some(out)
 }
 
 #[cfg(test)]
@@ -343,6 +384,46 @@ mod tests {
         assert!(temp.0.join("objects/first.o").exists());
         assert!(!temp.0.join("objects/bad.o").exists());
         assert!(!temp.0.join("objects/last.o").exists());
+    }
+
+    #[test]
+    fn invalid_utf8_is_accepted_only_inside_line_comments() {
+        let fixed = comment_lossy(b".byte 228 ; \xe4\n.byte 1 // \xff\xfe\r\nret\n").unwrap();
+        assert_eq!(
+            fixed,
+            ".byte 228 ; \u{fffd}\n.byte 1 // \u{fffd}\u{fffd}\r\nret\n"
+        );
+        for bad in [
+            &b".ascii \"\xe4\"\n"[..],
+            b".ascii \"; \xe4\"\n",
+            b".ascii \"\\\"; \xe4\"\n",
+            b"nop \xe4 ; x\n",
+            b"nop /* \xe4 */\n",
+            b"nop # \xe4\n",
+        ] {
+            assert_eq!(comment_lossy(bad), None, "{}", String::from_utf8_lossy(bad));
+        }
+        let temp = Temp::new();
+        let input = temp.0.join("raw.s");
+        let mut source = b".data\n.byte 228 ; ".to_vec();
+        source.extend([0xe4, b'\n']);
+        std::fs::write(&input, &source).unwrap();
+        temp.invoke(&["raw.s"], &[]).unwrap();
+        let object = std::fs::read(temp.0.join("objects/raw.o")).unwrap();
+        assert_eq!(
+            object,
+            keel_asm::assemble_object_with_features(
+                ".data\n.byte 228\n",
+                TargetFeatures::default()
+            )
+            .unwrap()
+        );
+        source.extend(b".ascii \"");
+        source.extend([0xe4, b'"', b'\n']);
+        std::fs::write(&input, &source).unwrap();
+        assert!(temp.invoke(&["raw.s"], &[]).unwrap_err().contains("UTF-8"));
+        temp.invoke(&["raw.s"], &["--target", "x86_64-unknown-linux-gnu"])
+            .unwrap_err();
     }
 }
 

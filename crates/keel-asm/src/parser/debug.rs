@@ -5,13 +5,23 @@ use super::data::{self, Location};
 use super::text::Trim;
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use bumpalo::{Bump, collections::Vec as BumpVec};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub(super) struct Debug<'a> {
     arena: &'a Bump,
     files: BTreeMap<u32, File>,
-    /// DWARF 4 include_directories, in first-use order; entry `n` is index `n + 1`.
+    /// Include directories after the implicit entry 0, in first-use order;
+    /// entry `n` is index `n + 1`. DWARF 4 has no entry 0 in the table; in
+    /// DWARF 5 entry 0 is the compilation directory from `.file 0`.
     directories: Vec<Vec<u8>>,
+    /// `.file 0`, as in LLVM, selects a version 5 line table. It holds the
+    /// compilation directory and the root (primary source) file.
+    root: Option<(Vec<u8>, File)>,
+    /// Numbered DWARF 5 files LLVM folds into the root file without
+    /// allocating their number, kept only to explain later `.loc` errors.
+    folded: Vec<u32>,
+    /// Whether any DWARF 5 entry carries `source`; then every entry has one.
+    source: bool,
     /// LLVM carries only is_stmt from one `.loc` to the next; it starts set.
     is_stmt: bool,
     rows: BumpVec<'a, Row>,
@@ -21,6 +31,8 @@ pub(super) struct Debug<'a> {
 struct File {
     directory: u32,
     name: Vec<u8>,
+    md5: Option<[u8; 16]>,
+    source: Option<Vec<u8>>,
 }
 struct Row {
     address: u64,
@@ -51,6 +63,41 @@ fn quoted(s: &str) -> Result<(&str, &str), String> {
         }
     }
     Err("unterminated string".into())
+}
+/// LLVM's POSIX `sys::path::parent_path`/`filename` split of a `.file` name
+/// without a directory. Spellings where LLVM yields surprising components
+/// (a trailing separator, or a leading `//` network root) are rejected.
+fn split(path: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), String> {
+    if path.ends_with(b"/") || path.starts_with(b"//") {
+        return Err("DWARF 5 .file path must not end with `/` or start with `//`".into());
+    }
+    let Some(at) = path.iter().rposition(|&b| b == b'/') else {
+        return Ok((Vec::new(), path));
+    };
+    let name = path[at + 1..].to_vec();
+    let mut end = at;
+    while end > 0 && path[end - 1] == b'/' {
+        end -= 1;
+    }
+    let directory = if end == 0 {
+        b"/".to_vec()
+    } else {
+        path[..end].to_vec()
+    };
+    Ok((directory, name))
+}
+/// LLVM's `md5` operand: an integer of at most 128 bits, stored big-endian.
+fn md5(token: &str) -> Result<[u8; 16], String> {
+    let (digits, radix) = super::text::integer_radix(token);
+    if digits.is_empty()
+        || !token.as_bytes()[0].is_ascii_digit()
+        || !digits.bytes().all(|b| b.is_ascii_alphanumeric())
+    {
+        return Err("expected integer md5 checksum".into());
+    }
+    u128::from_str_radix(digits, radix)
+        .map(u128::to_be_bytes)
+        .map_err(|_| "md5 checksum is not an integer of at most 128 bits".into())
 }
 struct Frame<'a> {
     start: u64,
@@ -178,6 +225,9 @@ impl<'a> Debug<'a> {
             arena,
             files: BTreeMap::new(),
             directories: Vec::new(),
+            root: None,
+            folded: Vec::new(),
+            source: false,
             is_stmt: true,
             rows: BumpVec::new_in(arena),
             frames: BumpVec::new_in(arena),
@@ -185,7 +235,121 @@ impl<'a> Debug<'a> {
         }
     }
     pub(super) fn file(&mut self, index: u32, path: Vec<u8>) -> Result<(), String> {
+        if self.root.is_some() && index != 0 {
+            return self.file5(index, None, path, None, None);
+        }
         self.file_in(index, None, path)
+    }
+    /// `.file 0 "directory" "name"`: LLVM's `setRootFile`. The name is kept
+    /// unsplit with directory index 0, and the directory becomes entry 0.
+    /// LLVM substitutes the assembler's working directory for a missing or
+    /// empty one; that is not reproducible, so it is an error here.
+    fn root(
+        &mut self,
+        directory: Option<Vec<u8>>,
+        name: Vec<u8>,
+        md5: Option<[u8; 16]>,
+        source: Option<Vec<u8>>,
+    ) -> Result<(), String> {
+        if self.root.is_some() {
+            return Err("duplicate .file 0".into());
+        }
+        if !self.files.is_empty() || !self.rows.is_empty() {
+            return Err(".file 0 must precede numbered .file and .loc directives".into());
+        }
+        let directory = directory
+            .filter(|d| !d.is_empty())
+            .ok_or(".file 0 requires a nonempty compilation directory string")?;
+        if name.is_empty() {
+            return Err(".file 0 requires a nonempty file name".into());
+        }
+        if name.contains(&0) || directory.contains(&0) {
+            return Err("file path contains NUL".into());
+        }
+        if source.as_ref().is_some_and(|s| s.contains(&0)) {
+            return Err(".file source contains NUL".into());
+        }
+        self.source = source.is_some();
+        self.root = Some((
+            directory,
+            File {
+                directory: 0,
+                name,
+                md5,
+                source,
+            },
+        ));
+        Ok(())
+    }
+    /// A numbered `.file` after `.file 0`, following LLVM's `tryGetFile`: a
+    /// directory equal to the compilation directory becomes index 0, a file
+    /// without a directory is split at its last `/`, and an entry whose name
+    /// and checksum equal the root file's is folded into file 0 without
+    /// allocating its number. LLVM only warns about inconsistent checksums
+    /// and then drops them all; that is an error here.
+    fn file5(
+        &mut self,
+        index: u32,
+        directory: Option<Vec<u8>>,
+        mut name: Vec<u8>,
+        md5: Option<[u8; 16]>,
+        source: Option<Vec<u8>>,
+    ) -> Result<(), String> {
+        let (compilation, root) = self.root.as_ref().expect("DWARF 5 root file");
+        if self.files.contains_key(&index) {
+            return Err("duplicate or zero file number".into());
+        }
+        if name.contains(&0) || directory.as_ref().is_some_and(|d| d.contains(&0)) {
+            return Err("file path contains NUL".into());
+        }
+        if source.as_ref().is_some_and(|s| s.contains(&0)) {
+            return Err(".file source contains NUL".into());
+        }
+        let all_md5 = root.md5.is_some() && self.files.values().all(|f| f.md5.is_some());
+        if all_md5 != md5.is_some() {
+            return Err("inconsistent use of MD5 checksums in .file directives".into());
+        }
+        let mut directory = directory.filter(|d| d != compilation).unwrap_or_default();
+        if name.is_empty() {
+            name = b"<stdin>".to_vec();
+            directory.clear();
+        }
+        if name == root.name && md5 == root.md5 {
+            // LLVM keeps the root's source; a different one would be lost.
+            if source.is_some() && source != root.source {
+                return Err(".file source differs from the matching .file 0 entry".into());
+            }
+            if self.files.is_empty() {
+                self.source |= source.is_some();
+            }
+            self.folded.push(index);
+            return Ok(());
+        }
+        if directory.is_empty() {
+            (directory, name) = split(name)?;
+        }
+        let directory = if directory.is_empty() {
+            0
+        } else {
+            match self.directories.iter().position(|e| *e == directory) {
+                Some(n) => n as u32 + 1,
+                None => {
+                    self.directories.push(directory);
+                    self.directories.len() as u32
+                }
+            }
+        };
+        self.source |= source.is_some();
+        self.files.insert(
+            index,
+            File {
+                directory,
+                name,
+                md5,
+                source,
+            },
+        );
+        Ok(())
     }
     /// Like Clang's DWARF 4 tables, an explicit directory is kept verbatim as
     /// an include directory and the name is stored unsplit. An empty directory
@@ -212,7 +376,15 @@ impl<'a> Debug<'a> {
                 }
             },
         };
-        self.files.insert(index, File { directory, name });
+        self.files.insert(
+            index,
+            File {
+                directory,
+                name,
+                md5: None,
+                source: None,
+            },
+        );
         Ok(())
     }
     pub(super) fn loc(
@@ -239,7 +411,16 @@ impl<'a> Debug<'a> {
     }
     /// `row.flags` holds the per-directive bits; is_stmt comes from `self.is_stmt`.
     fn row(&mut self, mut row: Row) -> Result<(), String> {
-        if !self.files.contains_key(&row.file) {
+        if row.file == 0 && self.root.is_none() {
+            return Err(".loc file number must be at least one without .file 0".into());
+        }
+        if row.file != 0 && !self.files.contains_key(&row.file) {
+            if self.folded.contains(&row.file) {
+                return Err(format!(
+                    ".loc references file {}, which matched the .file 0 root file and, as in LLVM, was not allocated; use file 0",
+                    row.file
+                ));
+            }
             return Err(".loc references undeclared file".into());
         }
         if self.is_stmt {
@@ -368,7 +549,8 @@ impl<'a> Debug<'a> {
         line: usize,
     ) -> Result<bool, String> {
         if op == ".file" {
-            // DWARF 4 forms only: `.file N "path"` and `.file N "dir" "name"`.
+            // `.file N "path"` or `.file N "dir" "name"`, then optional
+            // `md5 <integer>` and `source "text"`. `.file 0` selects DWARF 5.
             let operands = operands.trim_fast();
             if operands.starts_with('"') {
                 return Err(
@@ -379,24 +561,49 @@ impl<'a> Debug<'a> {
                 .split_once(char::is_whitespace)
                 .ok_or("expected .file number and path")?;
             let id: u32 = id.parse().map_err(|_| "invalid file number")?;
-            if id == 0 {
-                return Err(".file 0 requires DWARF 5 line tables, which are unsupported".into());
-            }
             let (first, rest) = quoted(rest)?;
-            let (directory, name, rest) = if rest.trim_fast().starts_with('"') {
+            let (directory, name, mut rest) = if rest.trim_fast().starts_with('"') {
                 let (name, rest) = quoted(rest)?;
                 (Some(string(first)?), string(name)?, rest)
             } else {
                 (None, string(first)?, rest)
             };
-            match rest.split_whitespace().next() {
-                None => {}
-                Some("md5" | "source") => {
-                    return Err(".file md5/source operands require DWARF 5 line tables, which are unsupported".into());
+            let (mut checksum, mut source) = (None, None);
+            loop {
+                rest = rest.trim_fast();
+                let Some((keyword, tail)) = rest
+                    .split_once(char::is_whitespace)
+                    .or((!rest.is_empty()).then_some((rest, "")))
+                else {
+                    break;
+                };
+                match keyword {
+                    "md5" if checksum.is_none() => {
+                        let tail = tail.trim_fast();
+                        let end = tail.find(char::is_whitespace).unwrap_or(tail.len());
+                        checksum = Some(md5(&tail[..end])?);
+                        rest = &tail[end..];
+                    }
+                    "source" if source.is_none() => {
+                        let (text, tail) = quoted(tail)?;
+                        source = Some(string(text)?);
+                        rest = tail;
+                    }
+                    "md5" | "source" => {
+                        return Err(format!("duplicate .file {keyword} operand"));
+                    }
+                    _ => return Err("unexpected token in .file directive".into()),
                 }
-                Some(_) => return Err("unexpected token in .file directive".into()),
             }
-            self.file_in(id, directory, name)?;
+            if id == 0 {
+                self.root(directory, name, checksum, source)?;
+            } else if self.root.is_some() {
+                self.file5(id, directory, name, checksum, source)?;
+            } else if checksum.is_some() || source.is_some() {
+                return Err(".file md5/source operands require DWARF 5 line tables; declare the root file with .file 0 first".into());
+            } else {
+                self.file_in(id, directory, name)?;
+            }
             return Ok(true);
         }
         if op == ".loc" {
@@ -410,8 +617,8 @@ impl<'a> Debug<'a> {
                     .ok_or_else(|| format!("invalid .loc {what}"))
             };
             let file = number(args.next(), "file number")?;
-            if file == 0 {
-                return Err(".loc file number must be at least one".into());
+            if file == 0 && self.root.is_none() {
+                return Err(".loc file number must be at least one without .file 0".into());
             }
             let mut position = [0; 2];
             for slot in &mut position {
@@ -711,45 +918,66 @@ impl<'a> Debug<'a> {
                 a.sections[section - 1].contents = crate::SectionContents::Bytes(bytes);
             }
         }
-        if !self.rows.is_empty() {
-            if self.files.keys().copied().ne(1..=self.files.len() as u32) {
-                return Err(Error::new(
-                    0,
-                    "DWARF file numbers must be contiguous starting at 1",
-                ));
-            }
-            let section = data::select(a, "__DWARF", "__debug_line", SectionKind::Debug)
-                .map_err(|s| Error::new(0, s))?;
-            if a.sections[section - 1].size() != 0 {
-                return Err(Error::new(
-                    0,
-                    "cannot mix .loc with explicit __debug_line contents",
-                ));
-            }
-            let mut bytes = vec![0; 4];
-            bytes.extend_from_slice(&4u16.to_le_bytes());
-            bytes.extend_from_slice(&[0; 4]);
-            let header = bytes.len();
-            bytes.extend_from_slice(&[
-                1,
-                1,
-                1,
-                (-5i8) as u8,
-                14,
-                13,
+        // LLVM emits a DWARF 5 table, possibly without rows, whenever a file
+        // table exists; the DWARF 4 table keeps Keel's rows-only behavior.
+        if self.root.is_none() && self.rows.is_empty() {
+            return Ok(());
+        }
+        if self.files.keys().copied().ne(1..=self.files.len() as u32) {
+            return Err(Error::new(
                 0,
-                1,
-                1,
-                1,
-                1,
+                "DWARF file numbers must be contiguous starting at 1",
+            ));
+        }
+        let section = data::select(a, "__DWARF", "__debug_line", SectionKind::Debug)
+            .map_err(|s| Error::new(0, s))?;
+        if a.sections[section - 1].size() != 0 {
+            return Err(Error::new(
                 0,
-                0,
-                0,
-                1,
-                0,
-                0,
-                1,
-            ]);
+                "cannot mix .loc with explicit __debug_line contents",
+            ));
+        }
+        let version: u16 = if self.root.is_some() { 5 } else { 4 };
+        let mut bytes = vec![0; 4];
+        bytes.extend_from_slice(&version.to_le_bytes());
+        if version >= 5 {
+            // address_size, segment_selector_size
+            bytes.extend_from_slice(&[8, 0]);
+        }
+        let length_at = bytes.len();
+        bytes.extend_from_slice(&[0; 4]);
+        let header = bytes.len();
+        bytes.extend_from_slice(&[
+            1,
+            1,
+            1,
+            (-5i8) as u8,
+            14,
+            13,
+            0,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+        ]);
+        if let Some((compilation, root)) = &self.root {
+            tables5(
+                a,
+                compilation,
+                root,
+                &self.directories,
+                &self.files,
+                self.source,
+                &mut bytes,
+            )?;
+        } else {
             for directory in &self.directories {
                 bytes.extend(directory);
                 bytes.push(0);
@@ -762,8 +990,10 @@ impl<'a> Debug<'a> {
                 bytes.extend_from_slice(&[0, 0]);
             }
             bytes.push(0);
-            let len = (bytes.len() - header) as u32;
-            bytes[6..10].copy_from_slice(&len.to_le_bytes());
+        }
+        let len = (bytes.len() - header) as u32;
+        bytes[length_at..header].copy_from_slice(&len.to_le_bytes());
+        if !self.rows.is_empty() {
             bytes.extend_from_slice(&[0, 9, 2]);
             references.address(&mut bytes, section, 0, false, a);
             let (mut address, mut file, mut line, mut column) = (0, 1, 1i64, 0);
@@ -816,12 +1046,93 @@ impl<'a> Debug<'a> {
             bytes.push(2);
             uleb(a.text.len() as u64 - address, &mut bytes);
             bytes.extend_from_slice(&[0, 1, 1]);
-            let len = (bytes.len() - 4) as u32;
-            bytes[..4].copy_from_slice(&len.to_le_bytes());
-            a.sections[section - 1].contents = crate::SectionContents::Bytes(bytes);
         }
+        let len = (bytes.len() - 4) as u32;
+        bytes[..4].copy_from_slice(&len.to_le_bytes());
+        a.sections[section - 1].contents = crate::SectionContents::Bytes(bytes);
         Ok(())
     }
+}
+/// DWARF 5 directory and file-name tables in LLVM's layout: every path
+/// (and embedded source) is a `DW_FORM_line_strp` offset into
+/// `__debug_line_str`, which on Mach-O needs no relocation. Strings are
+/// deduplicated in first-use order; any explicit contents come first.
+fn tables5(
+    a: &mut Assembly,
+    compilation: &[u8],
+    root: &File,
+    directories: &[Vec<u8>],
+    files: &BTreeMap<u32, File>,
+    source: bool,
+    bytes: &mut Vec<u8>,
+) -> Result<(), Error> {
+    let section = data::select(a, "__DWARF", "__debug_line_str", SectionKind::Debug)
+        .map_err(|s| Error::new(0, s))?;
+    let crate::SectionContents::Bytes(table) = &mut a.sections[section - 1].contents else {
+        unreachable!("debug sections are file-backed");
+    };
+    let mut offsets = HashMap::new();
+    let mut strp = |text: &[u8], bytes: &mut Vec<u8>| -> Result<(), Error> {
+        let offset = match offsets.get(text) {
+            Some(&offset) => offset,
+            None => {
+                let offset = u32::try_from(table.len())
+                    .map_err(|_| Error::new(0, "__debug_line_str exceeds 32 bits"))?;
+                table.extend_from_slice(text);
+                table.push(0);
+                offsets.insert(text.to_vec(), offset);
+                offset
+            }
+        };
+        bytes.extend_from_slice(&offset.to_le_bytes());
+        Ok(())
+    };
+    const PATH: u64 = 1; // DW_LNCT_path
+    const DIRECTORY: u64 = 2; // DW_LNCT_directory_index
+    const MD5: u64 = 5; // DW_LNCT_MD5
+    const SOURCE: u64 = 0x2001; // DW_LNCT_LLVM_source
+    const LINE_STRP: u64 = 0x1f; // DW_FORM_line_strp
+    const UDATA: u64 = 0x0f; // DW_FORM_udata
+    const DATA16: u64 = 0x1e; // DW_FORM_data16
+    bytes.push(1);
+    uleb(PATH, bytes);
+    uleb(LINE_STRP, bytes);
+    uleb(directories.len() as u64 + 1, bytes);
+    strp(compilation, bytes)?;
+    for directory in directories {
+        strp(directory, bytes)?;
+    }
+    // `.file` rejects inconsistent checksums, so the root decides.
+    let md5 = root.md5.is_some();
+    let mut format = vec![(PATH, LINE_STRP), (DIRECTORY, UDATA)];
+    if md5 {
+        format.push((MD5, DATA16));
+    }
+    if source {
+        format.push((SOURCE, LINE_STRP));
+    }
+    bytes.push(format.len() as u8);
+    for (content, form) in format {
+        uleb(content, bytes);
+        uleb(form, bytes);
+    }
+    uleb(files.len() as u64 + 1, bytes);
+    for file in std::iter::once(root).chain(files.values()) {
+        strp(&file.name, bytes)?;
+        uleb(file.directory.into(), bytes);
+        if md5 {
+            bytes.extend_from_slice(&file.md5.expect("consistent MD5 usage"));
+        }
+        if source {
+            // LLVM: no source is an empty string, an empty source is "\n".
+            match file.source.as_deref() {
+                None => strp(b"", bytes)?,
+                Some([]) => strp(b"\n", bytes)?,
+                Some(text) => strp(text, bytes)?,
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Synthetic labels let the existing Mach-O difference relocation machinery

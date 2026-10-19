@@ -834,7 +834,30 @@ impl Assembler {
                     .split_once(char::is_whitespace)
                     .ok_or(".file requires an index and quoted path")?;
                 let index = u32::try_from(num(index)?).map_err(|_| "file index too large")?;
-                if index == 0 || self.files.insert(index, x86::unquote(path)?).is_some() {
+                if index == 0 {
+                    return Err(".file 0 (DWARF 5 line tables) is unsupported on x86 ELF".into());
+                }
+                // One quoted path only: a directory string or DWARF 5 `md5`/
+                // `source` operand must not be folded into the name.
+                let path = path.trim();
+                let mut escaped = false;
+                let end = path
+                    .bytes()
+                    .enumerate()
+                    .skip(1)
+                    .find(|&(_, b)| {
+                        let close = b == b'"' && !escaped;
+                        escaped = b == b'\\' && !escaped;
+                        close
+                    })
+                    .map(|(i, _)| i);
+                if path.starts_with('"') && end.is_some_and(|end| end + 1 != path.len()) {
+                    return Err(
+                        "x86 .file accepts one quoted path; directory, md5 and source operands are unsupported"
+                            .into(),
+                    );
+                }
+                if self.files.insert(index, x86::unquote(path)?).is_some() {
                     return Err("invalid or duplicate .file index".into());
                 }
                 Ok(())

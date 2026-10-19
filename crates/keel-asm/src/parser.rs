@@ -591,7 +591,9 @@ fn assemble_pass(
                         let expr = native_expression(e);
                         let value = if let Some(add) = expr.add {
                             symbolic_leb = true;
-                            if let Some(sub) = expr.subtract {
+                            if let Some(sub) = expr.subtract
+                                && !data::is_debug(&result, current)
+                            {
                                 leb_differences.push((line, add, sub));
                             }
                             if let Some(previous) = previous {
@@ -934,7 +936,9 @@ fn assemble_pass(
                 let expr = data::expression(arg).map_err(err)?;
                 let value = if let Some(add) = &expr.add {
                     symbolic_leb = true;
-                    if let Some(sub) = &expr.subtract {
+                    if let Some(sub) = &expr.subtract
+                        && !data::is_debug(&result, current)
+                    {
                         leb_differences.push((line, *add, *sub));
                     }
                     if let Some(previous) = previous {
