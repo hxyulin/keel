@@ -1,3 +1,4 @@
+use crate::input::Source;
 use std::path::{Path, PathBuf};
 
 pub fn run(args: &[String]) -> Result<(), String> {
@@ -130,14 +131,17 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let owned: Vec<_> = inputs
         .iter()
         .map(|p| {
-            std::fs::read(p)
+            Source::open(p)
                 .map(|b| (p.to_string_lossy().into_owned(), b))
                 .map_err(|e| format!("{}: {e}", p.display()))
         })
         .collect::<Result<_, _>>()?;
     let inputs: Vec<_> = owned
         .iter()
-        .map(|(name, bytes)| keel_link::Input { name, bytes })
+        .map(|(name, source)| keel_link::Input {
+            name,
+            bytes: source.bytes(),
+        })
         .collect();
     if dsym.is_some() && debug_directory.is_none() {
         debug_directory = Some(output.with_extension("debug-objects"));
@@ -153,7 +157,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             }
         })
         .transpose()?;
-    let executable = keel_link::link(
+    let warnings = keel_link::link_signed(
         &inputs,
         keel_link::Options {
             dylibs,
@@ -161,11 +165,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
             sdk_version: sdk_version(&root),
             debug_directory,
         },
+        &output,
     )?;
-    for warning in &executable.warnings {
+    for warning in &warnings {
         eprintln!("keel link: warning: {warning}");
     }
-    keel_link::write_signed(&executable, &output)?;
     if let Some(path) = dsym {
         let result = std::process::Command::new("/usr/bin/dsymutil")
             .arg(&output)
@@ -323,21 +327,25 @@ fn run_elf(args: &[String]) -> Result<(), String> {
     let owned = paths
         .iter()
         .map(|p| {
-            std::fs::read(p)
+            Source::open(p)
                 .map(|b| (p.to_string_lossy().into_owned(), b))
                 .map_err(|e| format!("{}: {e}", p.display()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     if force_static
-        && owned
-            .iter()
-            .any(|(_, b)| b.len() >= 18 && &b[..4] == b"\x7fELF" && b[16..18] == [3, 0])
+        && owned.iter().any(|(_, source)| {
+            let b = source.bytes();
+            b.len() >= 18 && &b[..4] == b"\x7fELF" && b[16..18] == [3, 0]
+        })
     {
         return Err("--static cannot link shared libraries".into());
     }
     let inputs = owned
         .iter()
-        .map(|(name, bytes)| keel_link::Input { name, bytes })
+        .map(|(name, source)| keel_link::Input {
+            name,
+            bytes: source.bytes(),
+        })
         .collect::<Vec<_>>();
     let executable = keel_link::elf::link(&inputs, options)?;
     for warning in &executable.warnings {

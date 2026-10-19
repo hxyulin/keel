@@ -59,6 +59,11 @@ pub struct Executable {
     pub bytes: Vec<u8>,
     pub warnings: Vec<String>,
 }
+/// Artifacts returned when the unsigned image is written directly to a sink.
+pub struct LinkArtifacts {
+    pub debug_objects: Vec<DebugObject>,
+    pub warnings: Vec<String>,
+}
 #[derive(Clone)]
 pub(crate) struct OutputSection {
     pub segment: String,
@@ -101,6 +106,37 @@ pub(crate) struct Linker {
 }
 
 pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
+    let mut image = std::io::Cursor::new(Vec::new());
+    let artifacts = prepare_linker(inputs, options)?.emit_to(&mut image, |image, size| {
+        image.get_mut().reserve(size);
+    })?;
+    Ok(Executable {
+        bytes: image.into_inner(),
+        debug_objects: artifacts.debug_objects,
+        warnings: artifacts.warnings,
+    })
+}
+
+/// Write an unsigned Mach-O image to an empty, seekable output, leaving its
+/// cursor at the end. On error, the sink may contain a partial image. Callers
+/// installing an executable should use a temporary file or `link_signed`.
+/// Input bytes must remain stable until this function returns.
+pub fn link_to<W: std::io::Write + std::io::Seek>(
+    inputs: &[Input<'_>],
+    options: Options,
+    output: &mut W,
+) -> Result<LinkArtifacts> {
+    if output
+        .seek(std::io::SeekFrom::End(0))
+        .map_err(|e| e.to_string())?
+        != 0
+    {
+        return fail("link output must be empty");
+    }
+    prepare_linker(inputs, options)?.emit_to(output, |_, _| {})
+}
+
+fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
     if let Some(directory) = &options.debug_directory
         && (!directory.is_absolute() || directory.to_str().is_none_or(|p| p.contains('\0')))
     {
@@ -196,7 +232,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         warnings: Vec::new(),
     };
     l.prepare()?;
-    l.emit()
+    Ok(l)
 }
 impl Linker {
     fn output(&mut self, segment: &str, name: &str, flags: u32, alignment: u32) -> Result<usize> {
@@ -533,6 +569,27 @@ impl Linker {
     }
 }
 
+/// Link directly to a sibling temporary file, sign, and atomically install it.
+/// This avoids a complete executable byte buffer. Returns linker warnings.
+pub fn link_signed(inputs: &[Input<'_>], options: Options, path: &Path) -> Result<Vec<String>> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (inputs, options, path);
+        fail("ad-hoc signing requires macOS codesign")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut warnings = Vec::new();
+        install_output(path, true, |file| {
+            let artifacts = link_to(inputs, options, file)?;
+            write_debug_objects(&artifacts.debug_objects)?;
+            warnings = artifacts.warnings;
+            Ok(())
+        })?;
+        Ok(warnings)
+    }
+}
+
 /// Sign to a sibling temporary file, then replace the destination only on success.
 /// No Apple linker or compiler is invoked. `codesign` is the platform's signer.
 pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
@@ -544,45 +601,70 @@ pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-        for object in &executable.debug_objects {
-            std::fs::create_dir_all(
-                object
-                    .path
-                    .parent()
-                    .ok_or("debug object has no directory")?,
-            )
-            .map_err(|e| e.to_string())?;
-            std::fs::write(&object.path, &object.bytes)
-                .map_err(|e| format!("debug object {}: {e}", object.path.display()))?;
-        }
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        let mut temp = None;
-        for n in 0..100 {
-            let p = parent.join(format!(".keel-link-{}-{n}", std::process::id()));
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&p)
-            {
-                Ok(f) => {
-                    temp = Some((p, f));
-                    break;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return fail(e.to_string()),
+        write_debug_objects(&executable.debug_objects)?;
+        install_output(path, true, |file| {
+            file.write_all(&executable.bytes).map_err(|e| e.to_string())
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn write_debug_objects(objects: &[DebugObject]) -> Result<()> {
+    for object in objects {
+        std::fs::create_dir_all(
+            object
+                .path
+                .parent()
+                .ok_or("debug object has no directory")?,
+        )
+        .map_err(|e| e.to_string())?;
+        // Snapshot paths may themselves be mapped inputs on a later link.
+        // Atomic replacement keeps the old inode stable until maps are dropped.
+        install_output(&object.path, false, |file| {
+            use std::io::Write;
+            file.write_all(&object.bytes).map_err(|e| e.to_string())
+        })
+        .map_err(|e| format!("debug object {}: {e}", object.path.display()))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_output(
+    path: &Path,
+    sign: bool,
+    write: impl FnOnce(&mut std::fs::File) -> Result<()>,
+) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let mut temp = None;
+    for n in 0..100 {
+        let p = parent.join(format!(".keel-link-{}-{n}", std::process::id()));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&p)
+        {
+            Ok(f) => {
+                temp = Some((p, f));
+                break;
             }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return fail(e.to_string()),
         }
-        let (temp, mut file) = temp.ok_or("could not allocate output temporary file")?;
-        let result = (|| {
-            file.write_all(&executable.bytes)
-                .map_err(|e| e.to_string())?;
+    }
+    let (temp, mut file) = temp.ok_or("could not allocate output temporary file")?;
+    let result = (|| {
+        write(&mut file)?;
+        if sign {
             file.set_permissions(std::fs::Permissions::from_mode(0o755))
                 .map_err(|e| e.to_string())?;
-            drop(file);
+        }
+        drop(file);
+        if sign {
             let signed = std::process::Command::new("/usr/bin/codesign")
                 .args([
                     "--force",
@@ -601,11 +683,11 @@ pub fn write_signed(executable: &Executable, path: &Path) -> Result<()> {
                     String::from_utf8_lossy(&signed.stderr)
                 ));
             }
-            std::fs::rename(&temp, path).map_err(|e| e.to_string())
-        })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&temp);
         }
-        result
+        std::fs::rename(&temp, path).map_err(|e| e.to_string())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
     }
+    result
 }

@@ -111,7 +111,11 @@ impl Segment {
     }
 }
 impl Linker {
-    pub(crate) fn emit(mut self) -> Result<Executable> {
+    pub(crate) fn emit_to<W: std::io::Write + std::io::Seek>(
+        mut self,
+        output: &mut W,
+        reserve: impl FnOnce(&mut W, usize),
+    ) -> Result<LinkArtifacts> {
         let mut segments = vec![Segment {
             name: "__PAGEZERO",
             address: 0,
@@ -442,12 +446,12 @@ impl Linker {
         if 32 + commands.len() + 16 > PAGE {
             return fail("load commands exceed reserved header page");
         }
-        // Layout already includes all file-backed data and linkedit. Reserve
-        // the final size so appending linkedit cannot grow/copy the whole image.
         let image_size = file
             .checked_add(linkedit.len())
             .ok_or("image size overflow")?;
-        let mut bytes = Vec::with_capacity(image_size);
+        // The byte API can reserve exactly once; file sinks need no buffer.
+        reserve(output, image_size);
+        let mut bytes = Vec::with_capacity(32 + commands.len());
         let mut flags = 0x200085; // MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
         if self
             .weak_names
@@ -476,24 +480,68 @@ impl Linker {
             u32le(&mut bytes, n);
         }
         bytes.extend_from_slice(&commands);
-        bytes.resize(file, 0);
-        for s in &self.outputs {
-            if !matches!(s.flags & 255, 1 | 0x12) {
-                bytes[s.file..s.file + s.data.len()].copy_from_slice(&s.data);
-            }
-        }
-        bytes.extend_from_slice(&linkedit);
+        // Serialize and hash in file order. Padding is emitted in bounded
+        // chunks, so file output never allocates another complete image.
         use sha2::{Digest, Sha256};
-        let digest = Sha256::digest(&bytes);
-        bytes[uuid_offset..uuid_offset + 16].copy_from_slice(&digest[..16]);
-        bytes[uuid_offset + 6] = (bytes[uuid_offset + 6] & 15) | 0x80; // UUID version 8
-        bytes[uuid_offset + 8] = (bytes[uuid_offset + 8] & 63) | 0x80;
-        Ok(Executable {
+        let mut hash = Sha256::new();
+        let mut position = 0;
+        let mut write = |data: &[u8]| -> Result<()> {
+            output.write_all(data).map_err(|e| e.to_string())?;
+            hash.update(data);
+            position += data.len();
+            Ok(())
+        };
+        write(&bytes)?;
+        let mut sections: Vec<_> = self
+            .outputs
+            .iter()
+            .filter(|s| !matches!(s.flags & 255, 1 | 0x12) && !s.data.is_empty())
+            .collect();
+        sections.sort_by_key(|s| s.file);
+        // Keep padding bounded independently of section or image size.
+        let zeros = [0u8; 16384];
+        let mut at = bytes.len();
+        for s in sections {
+            if s.file < at {
+                return fail("overlapping output sections");
+            }
+            let mut gap = s.file - at;
+            while gap != 0 {
+                let count = gap.min(zeros.len());
+                write(&zeros[..count])?;
+                gap -= count;
+            }
+            write(&s.data)?;
+            at = s.file + s.data.len();
+        }
+        if at > file {
+            return fail("section exceeds output layout");
+        }
+        let mut gap = file - at;
+        while gap != 0 {
+            let count = gap.min(zeros.len());
+            write(&zeros[..count])?;
+            gap -= count;
+        }
+        write(&linkedit)?;
+        let digest = hash.finalize();
+        let mut uuid = [0u8; 16];
+        uuid.copy_from_slice(&digest[..16]);
+        uuid[6] = (uuid[6] & 15) | 0x80; // UUID version 8
+        uuid[8] = (uuid[8] & 63) | 0x80;
+        output
+            .seek(std::io::SeekFrom::Start(uuid_offset as u64))
+            .map_err(|e| e.to_string())?;
+        output.write_all(&uuid).map_err(|e| e.to_string())?;
+        output
+            .seek(std::io::SeekFrom::Start(position as u64))
+            .map_err(|e| e.to_string())?;
+        Ok(LinkArtifacts {
             debug_objects,
-            bytes,
             warnings: self.warnings,
         })
     }
+
     /// Darwin's debug map relocates object DWARF via N_OSO/N_FUN/N_GSYM
     /// records. Retain exact input snapshots, including archive members, so the
     /// reusable byte-oriented API never depends on diagnostic input names.

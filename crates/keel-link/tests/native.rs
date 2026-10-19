@@ -156,6 +156,22 @@ fn debug_map_snapshots_in_memory_inputs_for_standalone_dsym() {
     assert!(exe.warnings.is_empty());
     let executable = temp.join("memory");
     keel_link::write_signed(&exe, &executable).unwrap();
+    let buffered = std::fs::read(&executable).unwrap();
+    let warnings = keel_link::link_signed(
+        &[Input {
+            name: "in-memory.o",
+            bytes: &bytes,
+        }],
+        Options {
+            dylibs: vec![Dylib::from_tbd(&sdk.join("usr/lib/libSystem.tbd"), &sdk).unwrap()],
+            debug_directory: Some(temp.join("snapshots")),
+            ..Options::default()
+        },
+        &executable,
+    )
+    .unwrap();
+    assert!(warnings.is_empty());
+    assert_eq!(buffered, std::fs::read(&executable).unwrap());
     checked(&mut Command::new(&executable));
     checked(Command::new("dsymutil").arg(&executable));
     std::fs::remove_dir_all(temp.join("snapshots")).unwrap();
