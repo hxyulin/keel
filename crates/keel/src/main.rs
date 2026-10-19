@@ -499,13 +499,20 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let rows: Vec<_> = locations
                 .iter()
                 .map(|loc| {
-                    let word = u32::from_le_bytes(
-                        assembly.text[loc.offset..loc.offset + 4]
-                            .try_into()
-                            .unwrap(),
-                    );
+                    let bytes = if loc.section == 0 {
+                        &assembly.text
+                    } else {
+                        assembly.sections[loc.section - 1].data()
+                    };
+                    let word =
+                        u32::from_le_bytes(bytes[loc.offset..loc.offset + 4].try_into().unwrap());
+                    let section = if loc.section == 0 {
+                        String::new()
+                    } else {
+                        format!(",\"section\":{}", loc.section)
+                    };
                     format!(
-                        "{{\"line\":{},\"offset\":{},\"word\":{}}}",
+                        "{{\"line\":{},\"offset\":{},\"word\":{}{section}}}",
                         loc.line, loc.offset, word
                     )
                 })

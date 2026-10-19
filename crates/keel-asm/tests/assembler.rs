@@ -101,7 +101,7 @@ fn invalid_operands_and_unsupported_syntax_are_diagnostics() {
         "nop #0",
         "movz x0, #0,",
         ".cfi_startproc",
-        ".section __DATA,__unsupported",
+        ".section __DATA,__unsupported,unknown_type",
         ".p2align 17",
         ".p2align 2, 256",
         ".byte 256",

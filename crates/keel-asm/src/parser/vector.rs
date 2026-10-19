@@ -493,8 +493,15 @@ pub(super) fn apple_syntax<'a, 'b>(
         };
         let arg = arg.trim();
         let text = if let Some(number) = arg.strip_prefix(['v', 'V']) {
-            if let Some((number, lane)) = number.split_once('[').filter(|_| role == Apple::Dup) {
-                // dup.<T> Vd, Vn[i] names the element size of <T>.
+            if let Some((number, lane)) = number.split_once('[').filter(|_| {
+                role == Apple::Dup
+                    || index == 2
+                        && matches!(root, "fmla" | "fmls" | "fmul" | "fmulx")
+                        && matches!(shape, "4h" | "8h" | "2s" | "4s" | "2d")
+            }) {
+                // Duplicate and indexed FP forms name a single element,
+                // while the other vector operands use the full arrangement.
+                // Ordinary lane parsing retains index/register validation.
                 register_number(number)?;
                 let element = &shape[shape.len() - 1..];
                 vectors += 1;
@@ -565,8 +572,10 @@ fn apple_role(root: &str) -> Option<Apple> {
         | "cmgt" | "cmhi" | "cmhs" | "cmle" | "cmlt" | "cmtst" | "umax" | "umin" | "smax"
         | "smin" | "ushl" | "sshl" | "ushr" | "sshr" | "shl" | "sli" | "sri" | "ext" | "uzp1"
         | "uzp2" | "zip1" | "zip2" | "trn1" | "trn2" | "rev16" | "rev32" | "rev64" | "ucvtf"
-        | "scvtf" | "fdiv" | "fmul" | "fadd" | "fsub" | "fneg" | "addv" | "addp" | "umaxv"
-        | "uminv" | "smaxv" | "sminv" => Apple::Same,
+        | "scvtf" | "fdiv" | "fmul" | "fmulx" | "fmla" | "fmls" | "fadd" | "fsub" | "fneg"
+        | "cnt" | "addv" | "saddlv" | "uaddlv" | "addp" | "umaxv" | "uminv" | "smaxv" | "sminv" => {
+            Apple::Same
+        }
         "ushll" | "ushll2" | "sshll" | "sshll2" | "umull" | "umull2" | "smull" | "smull2" => {
             Apple::Long
         }

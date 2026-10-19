@@ -173,6 +173,37 @@ ret
     );
 }
 
+/// LLVM accepts mixed checksum presence but warns and omits the checksum
+/// column for all entries. File identity still uses the supplied checksum.
+#[test]
+fn mixed_checksums_match_clang_without_inventing_values() {
+    for files in [
+        format!(".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"b.h\" md5 {MD5_B}"),
+        format!(".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"b.h\""),
+        format!(
+            ".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"b.h\" md5 {MD5_B}\n.file 2 \"/w\" \"c.h\""
+        ),
+        format!(
+            ".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"b.h\"\n.file 2 \"/w\" \"c.h\" md5 {MD5_C}"
+        ),
+        // Equal names with different checksum presence must remain distinct.
+        format!(".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"a.c\" md5 {MD5_A}"),
+        format!(".file 0 \"/w\" \"a.c\" md5 {MD5_A}\n.file 1 \"/w\" \"a.c\""),
+    ] {
+        let table = compare(&format!(
+            "{files}\n.text\n_f:\n.loc 0 1 0\nnop\n.loc 1 2 1\nret\n"
+        ));
+        assert!(
+            !table
+                .header
+                .iter()
+                .any(|entry| entry.starts_with("md5_checksum:")),
+            "{table:?}"
+        );
+        assert_eq!(table.rows.len(), 3);
+    }
+}
+
 #[test]
 fn embedded_source_matches_clang() {
     // An absent source becomes an empty string once any entry has one.
@@ -507,14 +538,6 @@ fn malformed_dwarf5_directives_are_diagnosed() {
             "source contains NUL",
         ),
         (
-            format!("{root}.file 1 \"/w\" \"b.c\""),
-            "inconsistent use of MD5",
-        ),
-        (
-            ".file 0 \"/w\" \"a.c\"\n.file 1 \"/w\" \"b.c\" md5 0x1".into(),
-            "inconsistent use of MD5",
-        ),
-        (
             format!("{root}.file 1 \"/w\" \"b.c\" md5 {MD5_A} junk"),
             "unexpected token in .file",
         ),
@@ -584,4 +607,35 @@ fn x86_elf_rejects_dwarf5_file_forms() {
     }
     // The single-path form, including escaped quotes, still works.
     keel_asm::x86::assemble_object(".file 1 \"a\\\"b.c\"\n.text\n.loc 1 2 3\nret\n").unwrap();
+}
+
+#[test]
+fn line_sequences_across_text_sections_match_clang() {
+    let source = r#"
+.file 0 "/w" "a.c"
+.section __TEXT,__StaticInit,regular,pure_instructions
+_init:
+.loc 0 10 0
+nop
+.text
+_f:
+.loc 0 20 0
+nop
+.section __TEXT,__StaticInit,regular,pure_instructions
+.loc 0 11 0
+ret
+.text
+.loc 0 21 0
+ret
+"#;
+    let table = compare(source);
+    assert_eq!(
+        table
+            .rows
+            .iter()
+            .filter(|row| row.contains("end_sequence"))
+            .count(),
+        2,
+        "{table:?}"
+    );
 }

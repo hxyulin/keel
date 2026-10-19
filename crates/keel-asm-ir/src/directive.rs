@@ -254,6 +254,8 @@ impl fmt::Display for Directive {
                 write!(f, ".section\t{segment},{name}")?;
                 match kind {
                     SectionKind::Debug => f.write_str(",regular,debug"),
+                    SectionKind::Code => f.write_str(",regular,pure_instructions"),
+                    SectionKind::ModuleInit => f.write_str(",mod_init_funcs"),
                     SectionKind::ThreadData => f.write_str(",thread_local_regular"),
                     SectionKind::ThreadVariables => f.write_str(",thread_local_variables"),
                     SectionKind::CString => f.write_str(",cstring_literals"),
@@ -359,6 +361,10 @@ impl fmt::Display for Directive {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SectionKind {
     Data,
+    /// A regular executable section with pure instructions.
+    Code,
+    /// Pointers to functions invoked at image initialization.
+    ModuleInit,
     CString,
     Literal4,
     Literal8,
@@ -380,6 +386,8 @@ impl SectionKind {
         Some(match (segment, name) {
             ("__TEXT", "__text" | "__const" | "__gcc_except_tab")
             | ("__DATA", "__data" | "__const") => Self::Data,
+            ("__TEXT", "__StaticInit") => Self::Code,
+            ("__DATA", "__mod_init_func") => Self::ModuleInit,
             ("__TEXT", "__cstring") => Self::CString,
             ("__TEXT", "__literal4") => Self::Literal4,
             ("__TEXT", "__literal8") => Self::Literal8,
@@ -391,7 +399,10 @@ impl SectionKind {
             (
                 "__DWARF",
                 "__debug_info" | "__debug_abbrev" | "__debug_line" | "__debug_ranges"
-                | "__debug_str" | "__debug_loc",
+                | "__debug_str" | "__debug_loc" | "__debug_aranges" | "__debug_line_str"
+                | "__debug_str_offs" | "__debug_addr" | "__debug_rnglists" | "__debug_loclists"
+                | "__debug_names" | "__apple_names" | "__apple_objc" | "__apple_namespac"
+                | "__apple_types",
             ) => Self::Debug,
             ("__TEXT", "__eh_frame") => Self::EhFrame,
             _ => return None,
@@ -400,6 +411,8 @@ impl SectionKind {
     pub fn flags(self) -> u32 {
         match self {
             Self::Data => 0,
+            Self::Code => 0x8000_0000,
+            Self::ModuleInit => 9,
             Self::CString => 2,
             Self::Literal4 => 3,
             Self::Literal8 => 4,
@@ -467,7 +480,8 @@ impl Directive {
                 name,
                 kind,
             } => {
-                if SectionKind::for_section(segment, name) != Some(*kind) {
+                if SectionKind::for_section(segment, name).is_some_and(|expected| expected != *kind)
+                {
                     return Err("unsupported Mach-O section or type".into());
                 }
                 for s in [segment, name] {

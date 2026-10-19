@@ -375,6 +375,7 @@ fn symbol(s: &str) -> Result<(), String> {
     Ok(())
 }
 struct Branch<'a> {
+    section: usize,
     line: usize,
     offset: usize,
     spec: control::Branch<'a>,
@@ -493,6 +494,8 @@ fn assemble_pass(
     let mut labels: BTreeMap<&str, data::Location> = BTreeMap::new();
     let mut globals = BTreeMap::new();
     let mut private_externs = BTreeMap::new();
+    let mut weak_definitions = BTreeMap::new();
+    let mut weak_hidden = BTreeMap::new();
     let mut common = BTreeMap::new();
     let mut branches = BumpVec::new_in(&arena);
     let mut loh = BumpVec::new_in(&arena);
@@ -676,19 +679,29 @@ fn assemble_pass(
                         line: row,
                         column,
                         prologue_end,
-                    } => debug
-                        .loc(
-                            *file,
-                            *row,
-                            *column,
-                            *prologue_end,
-                            current,
-                            data::position(&result, current),
-                        )
-                        .map_err(err)?,
-                    D::Cfi(cfi) => debug
-                        .cfi(cfi, current, data::position(&result, current), line)
-                        .map_err(err)?,
+                    } => {
+                        if !data::is_code(&result, current) {
+                            return Err(err(".loc requires an executable section".into()));
+                        }
+                        debug
+                            .loc(
+                                *file,
+                                *row,
+                                *column,
+                                *prologue_end,
+                                current,
+                                data::position(&result, current),
+                            )
+                            .map_err(err)?;
+                    }
+                    D::Cfi(cfi) => {
+                        if !data::is_code(&result, current) {
+                            return Err(err("CFI requires an executable section".into()));
+                        }
+                        debug
+                            .cfi(cfi, current, data::position(&result, current), line)
+                            .map_err(err)?;
+                    }
                 }
                 continue;
             }
@@ -696,16 +709,22 @@ fn assemble_pass(
                 use keel_asm_ir::{PageKind as P, SymbolicInstruction as S};
                 spec.validate().map_err(err)?;
                 symbol(spec.target()).map_err(err)?;
-                if current != 0 || !result.text.len().is_multiple_of(4) {
+                if !data::is_code(&result, current)
+                    || !data::position(&result, current).is_multiple_of(4)
+                {
                     return Err(err(
-                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                        "instructions require a four-byte-aligned executable section".into(),
                     ));
                 }
                 let instruction = spec.zero_instruction();
                 let word = crate::encode_instruction(&instruction, features).map_err(err)?;
-                let offset = result.text.len();
+                let offset = data::position(&result, current) as usize;
                 if metrics {
-                    locations.push(InstructionLocation { line, offset });
+                    locations.push(InstructionLocation {
+                        line,
+                        section: current,
+                        offset,
+                    });
                 }
                 match spec {
                     S::Conditional { .. } | S::Compare { .. } => {
@@ -718,6 +737,7 @@ fn assemble_pass(
                                 .filter(|(f, _)| *f != FieldId::imm19),
                         );
                         branches.push(Branch {
+                            section: current,
                             line,
                             offset,
                             spec: control::Branch {
@@ -730,6 +750,7 @@ fn assemble_pass(
                         });
                     }
                     S::Address { register, .. } => addresses.push((
+                        current,
                         line,
                         offset,
                         u32::from(*register),
@@ -751,9 +772,9 @@ fn assemble_pass(
                         };
                         let offset = u32::try_from(offset)
                             .map_err(|_| err("relocation offset exceeds 32 bits".into()))?;
-                        relocation_lines.insert((0, offset), line);
+                        relocation_lines.insert((current, offset), line);
                         result.relocations.push(crate::Relocation {
-                            section: 0,
+                            section: current,
                             size: 4,
                             subtract_symbol: None,
                             offset,
@@ -763,25 +784,29 @@ fn assemble_pass(
                         });
                     }
                 }
-                result.text.extend_from_slice(&word.to_le_bytes());
+                data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
                 continue;
             }
             program::Entry::Branch(link, target) => {
                 symbol(target).map_err(err)?;
-                if current != 0 || !result.text.len().is_multiple_of(4) {
+                if !data::is_code(&result, current)
+                    || !data::position(&result, current).is_multiple_of(4)
+                {
                     return Err(err(
-                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                        "instructions require a four-byte-aligned executable section".into(),
                     ));
                 }
                 if metrics {
                     locations.push(InstructionLocation {
+                        section: current,
                         line,
-                        offset: result.text.len(),
+                        offset: data::position(&result, current) as usize,
                     });
                 }
                 branches.push(Branch {
+                    section: current,
                     line,
-                    offset: result.text.len(),
+                    offset: data::position(&result, current) as usize,
                     spec: control::Branch {
                         encoding: if link {
                             keel_asm_ir::Opcode::BL_only_branch_imm
@@ -794,23 +819,26 @@ fn assemble_pass(
                         target,
                     },
                 });
-                result.text.extend_from_slice(&[0; 4]);
+                data::instruction(&mut result, current, &[0; 4]).map_err(err)?;
                 continue;
             }
             program::Entry::Instruction(instruction) => {
-                if current != 0 || !result.text.len().is_multiple_of(4) {
+                if !data::is_code(&result, current)
+                    || !data::position(&result, current).is_multiple_of(4)
+                {
                     return Err(err(
-                        "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                        "instructions require a four-byte-aligned executable section".into(),
                     ));
                 }
                 let word = crate::encode_instruction(instruction, features).map_err(err)?;
                 if metrics {
                     locations.push(InstructionLocation {
+                        section: current,
                         line,
-                        offset: result.text.len(),
+                        offset: data::position(&result, current) as usize,
                     });
                 }
-                result.text.extend_from_slice(&word.to_le_bytes());
+                data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
                 continue;
             }
             program::Entry::Label(name) => {
@@ -874,6 +902,13 @@ fn assemble_pass(
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
         let operands = operands.trim_fast();
         let op = lower(op);
+        if (op == ".loc" || op.starts_with(".cfi_")) && !data::is_code(&result, current) {
+            return Err(err(if op == ".loc" {
+                ".loc requires __text or another executable section".into()
+            } else {
+                "CFI directives require __text or another executable section".into()
+            }));
+        }
         if debug
             .directive(
                 &op,
@@ -1107,6 +1142,20 @@ fn assemble_pass(
                 current = data::section(&mut result, &args).map_err(err)?;
                 continue;
             }
+            ".weak_definition" | ".weak_def_can_be_hidden" => {
+                count(&args, 1, usize::MAX).map_err(err)?;
+                for name in args.iter().copied() {
+                    symbol(name).map_err(err)?;
+                    if name.starts_with('L') {
+                        return Err(err("weak definition requires a non-local symbol".into()));
+                    }
+                    weak_definitions.insert(name, line);
+                    if op == ".weak_def_can_be_hidden" {
+                        weak_hidden.insert(name, line);
+                    }
+                }
+                continue;
+            }
             ".globl" | ".global" | ".extern" | ".private_extern" => {
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
@@ -1194,9 +1243,9 @@ fn assemble_pass(
             _ if op.starts_with('.') => return Err(err(format!("unsupported directive `{op}`"))),
             _ => {}
         }
-        if current != 0 || !result.text.len().is_multiple_of(4) {
+        if !data::is_code(&result, current) || !data::position(&result, current).is_multiple_of(4) {
             return Err(err(
-                "instructions require four-byte-aligned __TEXT,__text locations".into(),
+                "instructions require a four-byte-aligned executable section".into(),
             ));
         }
         let (op, args) = if op.contains('.')
@@ -1212,8 +1261,9 @@ fn assemble_pass(
         };
         if metrics {
             locations.push(InstructionLocation {
+                section: current,
                 line,
-                offset: result.text.len(),
+                offset: data::position(&result, current) as usize,
             });
         }
         if let Some(spec) = control::branch(&op, &args, &arena).map_err(err)? {
@@ -1224,22 +1274,22 @@ fn assemble_pass(
                 }
             }
             branches.push(Branch {
+                section: current,
                 line,
-                offset: result.text.len(),
+                offset: data::position(&result, current) as usize,
                 spec,
             });
-            result.text.extend_from_slice(&[0; 4]);
+            data::instruction(&mut result, current, &[0; 4]).map_err(err)?;
             continue;
         }
         if let Some((word, mut relocation)) = relocate::instruction(&op, &args).map_err(err)? {
-            relocation.offset = result
-                .text
-                .len()
+            relocation.section = current;
+            relocation.offset = data::position(&result, current)
                 .try_into()
                 .map_err(|_| err("text offset exceeds 32 bits".into()))?;
-            relocation_lines.insert((0, relocation.offset), line);
+            relocation_lines.insert((current, relocation.offset), line);
             result.relocations.push(relocation);
-            result.text.extend_from_slice(&word.to_le_bytes());
+            data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
             continue;
         }
         if op == "adr" || op == "adrp" {
@@ -1252,14 +1302,15 @@ fn assemble_pass(
                     return Err(err("adr does not accept symbol modifiers".into()));
                 }
                 addresses.push((
+                    current,
                     line,
-                    result.text.len(),
+                    data::position(&result, current) as usize,
                     reg(args[0], false, true).map_err(err)?.number,
                     expr,
                 ));
                 relocate::address_word("adr", args[0], 0).map_err(err)?
             };
-            result.text.extend_from_slice(&word.to_le_bytes());
+            data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
             continue;
         }
         let word = match scalable::instruction(&op, &args, features).map_err(err)? {
@@ -1269,7 +1320,87 @@ fn assemble_pass(
                 None => instruction_with_features(op, &args, features).map_err(err)?,
             },
         };
-        result.text.extend_from_slice(&word.to_le_bytes());
+        data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
+    }
+    // Resolve assignments before instruction fixups so function aliases (including
+    // Clang's TLS initialization wrapper aliases) retain their defining section.
+    // Iteration admits forward/chained assignments and diagnoses unresolved cycles.
+    let mut constants = BTreeMap::new();
+    let mut alias_definitions = BTreeMap::new();
+    while !aliases.is_empty() {
+        let mut resolved = Vec::new();
+        for (&name, (line, expr)) in &aliases {
+            let err = |message| Error::new(*line, message);
+            if labels.contains_key(name) {
+                return Err(err("assignment conflicts with label"));
+            }
+            if expr.subtract.is_none()
+                && let Some(add) = expr.add
+                && let Some(target) = labels.get(add).copied()
+            {
+                if expr.constant != 0 {
+                    return Err(err(
+                        "section-symbol aliases with nonzero addends require unsupported Mach-O alternate-entry semantics",
+                    ));
+                }
+                labels.insert(name, target);
+                // Exact aliases take the defining symbol's weak attributes,
+                // replacing annotations on the alias itself. Keep this identity
+                // separate from locations, visibility and linker-atom ownership.
+                alias_definitions.insert(name, alias_definitions.get(add).copied().unwrap_or(add));
+                // Source order is significant for temporary labels at atom ends.
+                // Keep aliases beside their target, rather than assigning them
+                // to whichever function happened to be parsed last.
+                let position = label_order
+                    .iter()
+                    .position(|(label, _)| *label == add)
+                    .ok_or_else(|| err("symbol alias has no source definition"))?;
+                label_order.insert(position + 1, (name, target));
+                resolved.push(name);
+                continue;
+            }
+            let value = match (expr.add, expr.subtract) {
+                (Some(add), Some(sub)) => {
+                    let (Some(a), Some(b)) = (labels.get(add), labels.get(sub)) else {
+                        continue;
+                    };
+                    if a.section != b.section {
+                        return Err(err("assignments require a same-section difference"));
+                    }
+                    expr.constant
+                        .checked_add(i128::from(a.offset) - i128::from(b.offset))
+                        .ok_or_else(|| err("assignment overflow"))?
+                }
+                (None, None) => expr.constant,
+                (Some(add), None) => {
+                    let Some(value) = constants.get(add).copied() else {
+                        continue;
+                    };
+                    expr.constant
+                        .checked_add(value)
+                        .ok_or_else(|| err("assignment overflow"))?
+                }
+                _ => {
+                    return Err(err(
+                        "assignments require constants, symbol aliases or same-section differences",
+                    ));
+                }
+            };
+            if globals.contains_key(name) || weak_definitions.contains_key(name) {
+                return Err(err(
+                    "exported absolute symbol assignments require unsupported Mach-O N_ABS semantics",
+                ));
+            }
+            constants.insert(name, value);
+            resolved.push(name);
+        }
+        if resolved.is_empty() {
+            let (_, (line, _)) = aliases.first_key_value().unwrap();
+            return Err(Error::new(*line, "undefined or cyclic symbol assignment"));
+        }
+        for name in resolved {
+            aliases.remove(name);
+        }
     }
     let mut atoms = atoms::Atoms::new(
         &arena,
@@ -1306,11 +1437,11 @@ fn assemble_pass(
             let local = expr.name.starts_with('L') && !globals.contains_key(expr.name);
             if branch.spec.width == 26
                 && (target.is_some_and(|t| {
-                    t.section != 0
+                    t.section != branch.section
                         || (result.subsections_via_symbols
                             && !atoms.contains(
                                 data::Location {
-                                    section: 0,
+                                    section: branch.section,
                                     offset: branch.offset as u64,
                                 },
                                 (expr.name, *t),
@@ -1324,9 +1455,9 @@ fn assemble_pass(
                     .offset
                     .try_into()
                     .map_err(|_| err("text offset exceeds 32 bits".into()))?;
-                relocation_lines.insert((0, offset), branch.line);
+                relocation_lines.insert((branch.section, offset), branch.line);
                 result.relocations.push(crate::Relocation {
-                    section: 0,
+                    section: branch.section,
                     size: 4,
                     subtract_symbol: None,
                     offset,
@@ -1338,13 +1469,15 @@ fn assemble_pass(
             } else {
                 let target = target
                     .ok_or_else(|| err(format!("undefined local {kind} target `{}`", expr.name)))?;
-                if target.section != 0 {
-                    return Err(err(format!("{kind} targets must be in __text")));
+                if target.section != branch.section {
+                    return Err(err(format!(
+                        "{kind} targets must be in the same executable section"
+                    )));
                 }
                 if result.subsections_via_symbols
                     && !atoms.contains(
                         data::Location {
-                            section: 0,
+                            section: branch.section,
                             offset: branch.offset as u64,
                         },
                         (expr.name, *target),
@@ -1372,16 +1505,18 @@ fn assemble_pass(
         let instruction =
             keel_asm_ir::Instruction::new(branch.spec.encoding, branch.spec.fields.iter().copied());
         let word = crate::encode_instruction(&instruction, features).map_err(err)?;
-        result.text[branch.offset..branch.offset + 4].copy_from_slice(&word.to_le_bytes());
+        data::bytes_mut(&mut result, branch.section).map_err(err)?
+            [branch.offset..branch.offset + 4]
+            .copy_from_slice(&word.to_le_bytes());
     }
-    for (line, offset, destination, expr) in addresses {
+    for (section, line, offset, destination, expr) in addresses {
         let target = labels.get(expr.name).ok_or_else(|| {
             Error::new(
                 line,
                 format!("adr requires a defined text symbol `{}`", expr.name),
             )
         })?;
-        if target.section != 0 {
+        if target.section != section {
             return Err(Error::new(
                 line,
                 "adr requires a target in the same text section",
@@ -1390,7 +1525,7 @@ fn assemble_pass(
         if result.subsections_via_symbols
             && !atoms.contains(
                 data::Location {
-                    section: 0,
+                    section,
                     offset: offset as u64,
                 },
                 (expr.name, *target),
@@ -1407,40 +1542,10 @@ fn assemble_pass(
             target.offset as i64 + expr.addend - offset as i64,
         )
         .map_err(|e| Error::new(line, e))?;
-        result.text[offset..offset + 4].copy_from_slice(&word.to_le_bytes());
+        data::bytes_mut(&mut result, section).map_err(|e| Error::new(line, e))?[offset..offset + 4]
+            .copy_from_slice(&word.to_le_bytes());
     }
     debug.finish(&mut result, &mut labels, &prefix)?;
-    let mut constants = BTreeMap::new();
-    for (name, (line, expr)) in aliases {
-        if labels.contains_key(&name) {
-            return Err(Error::new(line, "assignment conflicts with label"));
-        }
-        let value = if let (Some(add), Some(sub)) = (&expr.add, &expr.subtract) {
-            let a = labels
-                .get(add)
-                .ok_or_else(|| Error::new(line, "undefined assignment symbol"))?;
-            let b = labels
-                .get(sub)
-                .ok_or_else(|| Error::new(line, "undefined assignment symbol"))?;
-            if a.section != b.section {
-                return Err(Error::new(
-                    line,
-                    "assignments require a same-section difference",
-                ));
-            }
-            expr.constant
-                .checked_add(i128::from(a.offset) - i128::from(b.offset))
-                .ok_or_else(|| Error::new(line, "assignment overflow"))?
-        } else if expr.add.is_none() {
-            expr.constant
-        } else {
-            return Err(Error::new(
-                line,
-                "assignments require constants or same-section differences",
-            ));
-        };
-        constants.insert(name, value);
-    }
     for fixup in data_fixups {
         let mut expr = fixup.expression;
         if fixup.got {
@@ -1572,13 +1677,15 @@ fn assemble_pass(
     for (line, kind, names, arity) in loh {
         let mut offsets = [0; 3];
         let mut first = None;
+        let mut hint_section = None;
         for (offset, name) in offsets.iter_mut().zip(&names[..arity]) {
             let location = *labels
                 .get(name)
                 .ok_or_else(|| Error::new(line, format!("undefined LOH symbol `{name}`")))?;
-            if location.section != 0
+            if !data::is_code(&result, location.section)
+                || hint_section.is_some_and(|s| s != location.section)
                 || location.offset % 4 != 0
-                || location.offset >= result.text.len() as u64
+                || location.offset >= data::position(&result, location.section)
             {
                 return Err(Error::new(
                     line,
@@ -1597,16 +1704,28 @@ fn assemble_pass(
             } else {
                 first = Some((*name, location));
             }
+            hint_section = Some(location.section);
             *offset = location.offset;
         }
         result
             .linker_optimization_hints
-            .push(crate::LinkerOptimizationHint { kind, offsets });
+            .push(crate::LinkerOptimizationHint {
+                section: hint_section.unwrap(),
+                kind,
+                offsets,
+            });
     }
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
-    let mut names = BumpVec::from_iter_in(labels.keys().chain(globals.keys()).copied(), &arena);
+    let mut names = BumpVec::from_iter_in(
+        labels
+            .keys()
+            .chain(globals.keys())
+            .chain(weak_definitions.keys())
+            .copied(),
+        &arena,
+    );
     for relocation in &result.relocations {
         for name in std::iter::once(&relocation.symbol).chain(relocation.subtract_symbol.iter()) {
             if name.starts_with('L')
@@ -1638,10 +1757,13 @@ fn assemble_pass(
         .into_iter()
         .map(|name| {
             let location = labels.get(&name);
+            let definition = alias_definitions.get(name).copied().unwrap_or(name);
             Symbol {
                 common: common.get(name).copied(),
                 global: location.is_none() || globals.contains_key(&name),
                 private_extern: private_externs.contains_key(name),
+                weak_definition: weak_definitions.contains_key(definition),
+                weak_can_be_hidden: weak_hidden.contains_key(definition),
                 offset: location.map(|l| l.offset),
                 section: location.map(|l| l.section),
                 name: name.to_string(),

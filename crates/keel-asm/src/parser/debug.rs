@@ -35,6 +35,7 @@ struct File {
     source: Option<Vec<u8>>,
 }
 struct Row {
+    section: usize,
     address: u64,
     file: u32,
     line: u32,
@@ -100,6 +101,7 @@ fn md5(token: &str) -> Result<[u8; 16], String> {
         .map_err(|_| "md5 checksum is not an integer of at most 128 bits".into())
 }
 struct Frame<'a> {
+    section: usize,
     start: u64,
     end: u64,
     line: usize,
@@ -191,7 +193,7 @@ pub(super) fn string(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 fn reg(s: &str) -> Result<u64, String> {
-    if s == "sp" {
+    if matches!(s, "sp" | "wsp") {
         return Ok(31);
     }
     if s == "fp" {
@@ -285,8 +287,8 @@ impl<'a> Debug<'a> {
     /// directory equal to the compilation directory becomes index 0, a file
     /// without a directory is split at its last `/`, and an entry whose name
     /// and checksum equal the root file's is folded into file 0 without
-    /// allocating its number. LLVM only warns about inconsistent checksums
-    /// and then drops them all; that is an error here.
+    /// allocating its number. Inconsistent checksums are retained here for
+    /// file identity; like LLVM, the emitted table then omits its MD5 column.
     fn file5(
         &mut self,
         index: u32,
@@ -304,10 +306,6 @@ impl<'a> Debug<'a> {
         }
         if source.as_ref().is_some_and(|s| s.contains(&0)) {
             return Err(".file source contains NUL".into());
-        }
-        let all_md5 = root.md5.is_some() && self.files.values().all(|f| f.md5.is_some());
-        if all_md5 != md5.is_some() {
-            return Err("inconsistent use of MD5 checksums in .file directives".into());
         }
         let mut directory = directory.filter(|d| d != compilation).unwrap_or_default();
         if name.is_empty() {
@@ -396,10 +394,8 @@ impl<'a> Debug<'a> {
         section: usize,
         address: u64,
     ) -> Result<(), String> {
-        if section != 0 {
-            return Err(".loc requires __text".into());
-        }
         self.row(Row {
+            section,
             address,
             file,
             line: row,
@@ -437,8 +433,12 @@ impl<'a> Debug<'a> {
         line: usize,
     ) -> Result<(), String> {
         use keel_asm_ir::Cfi as C;
-        if section != 0 {
-            return Err("CFI directives require __text".into());
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|frame| frame.section != section)
+        {
+            return Err("CFI procedure cannot span sections".into());
         }
         match cfi {
             C::Start => {
@@ -446,6 +446,7 @@ impl<'a> Debug<'a> {
                     return Err("invalid or nested .cfi_startproc".into());
                 }
                 self.active = Some(Frame {
+                    section,
                     start: address,
                     end: address,
                     line,
@@ -607,9 +608,6 @@ impl<'a> Debug<'a> {
             return Ok(true);
         }
         if op == ".loc" {
-            if section != 0 {
-                return Err(".loc requires __text".into());
-            }
             // LLVM's grammar: file [line [column]] followed by sub-directives.
             let mut args = operands.split_whitespace().peekable();
             let number = |s: Option<&str>, what: &str| {
@@ -646,6 +644,7 @@ impl<'a> Debug<'a> {
                 }
             }
             self.row(Row {
+                section,
                 address,
                 file,
                 line: position[0],
@@ -658,9 +657,6 @@ impl<'a> Debug<'a> {
         }
         if !op.starts_with(".cfi_") {
             return Ok(false);
-        }
-        if section != 0 {
-            return Err("CFI directives require __text".into());
         }
         use keel_asm_ir::Cfi as C;
         if op == ".cfi_startproc" || op == ".cfi_endproc" {
@@ -715,6 +711,9 @@ impl<'a> Debug<'a> {
             .active
             .as_mut()
             .ok_or("CFI directive outside a procedure")?;
+        if frame.section != section {
+            return Err("CFI procedure cannot span sections".into());
+        }
         let mut bytes = BumpVec::new_in(self.arena);
         let mut rule = Rule::Other;
         match (op, args.as_slice()) {
@@ -811,7 +810,16 @@ impl<'a> Debug<'a> {
                 .map(|frame| compact::encoding(&frame.rules, frame.personality))
                 .collect();
             for (frame, encoding) in self.frames.iter().zip(&encodings) {
-                references.address(&mut index, compact, frame.start, false, a);
+                references.address(
+                    &mut index,
+                    compact,
+                    Location {
+                        section: frame.section,
+                        offset: frame.start,
+                    },
+                    false,
+                    a,
+                );
                 let length = u32::try_from(frame.end - frame.start).map_err(|_| {
                     Error::new(frame.line, "unwind function length exceeds 32 bits")
                 })?;
@@ -895,7 +903,16 @@ impl<'a> Debug<'a> {
                     let start = bytes.len();
                     bytes.extend_from_slice(&[0; 4]);
                     bytes.extend_from_slice(&((start + 4 - cie) as u32).to_le_bytes());
-                    references.address(&mut bytes, section, frame.start, true, a);
+                    references.address(
+                        &mut bytes,
+                        section,
+                        Location {
+                            section: frame.section,
+                            offset: frame.start,
+                        },
+                        true,
+                        a,
+                    );
                     bytes.extend_from_slice(&(frame.end - frame.start).to_le_bytes());
                     bytes.push(if frame.lsda.is_some() { 8 } else { 0 });
                     if let Some(lsda) = &frame.lsda {
@@ -993,12 +1010,34 @@ impl<'a> Debug<'a> {
         }
         let len = (bytes.len() - header) as u32;
         bytes[length_at..header].copy_from_slice(&len.to_le_bytes());
-        if !self.rows.is_empty() {
+        // LLVM orders sequences by the first .loc in each section, even
+        // when an earlier-created section receives its first row later.
+        let mut sequences = Vec::<(usize, Vec<Row>)>::new();
+        for row in self.rows {
+            if let Some((_, rows)) = sequences
+                .iter_mut()
+                .find(|(section, _)| *section == row.section)
+            {
+                rows.push(row);
+            } else {
+                sequences.push((row.section, vec![row]));
+            }
+        }
+        for (code_section, rows) in sequences {
             bytes.extend_from_slice(&[0, 9, 2]);
-            references.address(&mut bytes, section, 0, false, a);
+            references.address(
+                &mut bytes,
+                section,
+                Location {
+                    section: code_section,
+                    offset: 0,
+                },
+                false,
+                a,
+            );
             let (mut address, mut file, mut line, mut column) = (0, 1, 1i64, 0);
             let (mut is_stmt, mut isa) = (true, 0);
-            for row in self.rows {
+            for row in rows {
                 if row.address != address {
                     bytes.push(2);
                     uleb(row.address - address, &mut bytes);
@@ -1044,7 +1083,12 @@ impl<'a> Debug<'a> {
                 bytes.push(1);
             }
             bytes.push(2);
-            uleb(a.text.len() as u64 - address, &mut bytes);
+            let end = if code_section == 0 {
+                a.text.len() as u64
+            } else {
+                a.sections[code_section - 1].size()
+            };
+            uleb(end - address, &mut bytes);
             bytes.extend_from_slice(&[0, 1, 1]);
         }
         let len = (bytes.len() - 4) as u32;
@@ -1102,8 +1146,9 @@ fn tables5(
     for directory in directories {
         strp(directory, bytes)?;
     }
-    // `.file` rejects inconsistent checksums, so the root decides.
-    let md5 = root.md5.is_some();
+    // DWARF 5 gives every file the same columns. LLVM omits checksums
+    // entirely when any file lacks one; do not invent zero checksums.
+    let md5 = root.md5.is_some() && files.values().all(|file| file.md5.is_some());
     let mut format = vec![(PATH, LINE_STRP), (DIRECTORY, UDATA)];
     if md5 {
         format.push((MD5, DATA16));
@@ -1153,18 +1198,12 @@ impl References<'_, '_> {
         &mut self,
         bytes: &mut Vec<u8>,
         section: usize,
-        address: u64,
+        target: Location,
         relative: bool,
         a: &mut Assembly,
     ) {
         let name = self.name();
-        self.labels.insert(
-            self.arena.alloc_str(&name),
-            Location {
-                section: 0,
-                offset: address,
-            },
-        );
+        self.labels.insert(self.arena.alloc_str(&name), target);
         self.symbol(bytes, section, name, relative, a);
     }
     fn symbol(

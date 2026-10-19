@@ -75,7 +75,12 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             segment: &section.segment,
             name: &section.name,
             alignment: section.alignment,
-            flags: section.kind.flags(),
+            flags: section.kind.flags()
+                | if section.contains_instructions {
+                    0x400
+                } else {
+                    0
+                },
             data: section.data(),
             size: section.size(),
             zero: section.kind.is_zero_fill(),
@@ -134,6 +139,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             || !all_names.insert(symbol.name.as_str())
             || (symbol.offset.is_none() && !symbol.global)
             || (symbol.private_extern && !symbol.global)
+            || (symbol.weak_can_be_hidden && !symbol.weak_definition)
             || symbol.offset.is_some() != symbol.section.is_some()
             || symbol.common.is_some_and(|(size, alignment)| {
                 size == 0 || alignment > 15 || symbol.section.is_some() || !symbol.global
@@ -255,7 +261,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
                 0xe
             }) | if symbol.private_extern { 0x10 } else { 0 },
             ordinal,
-            0,
+            (if symbol.weak_definition { 0x80 } else { 0 })
+                | (if symbol.weak_can_be_hidden { 0x40 } else { 0 }),
             if let Some((_, alignment)) = symbol.common {
                 alignment
             } else if symbol.section.is_some() && !symbol.global && symbol.name.starts_with('L') {
@@ -290,7 +297,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             if view.zero
                 || u64::from(r.offset) + u64::from(r.size) > previous_end
                 || r.offset > i32::MAX as u32
-                || (instruction && (r.section != 0 || !r.offset.is_multiple_of(4)))
+                || (instruction && (view.flags & 0x400 == 0 || !r.offset.is_multiple_of(4)))
                 || (instruction && r.subtract_symbol.is_some())
                 || (r.kind == RelocationKind::Unsigned
                     && r.size == 4
@@ -369,10 +376,14 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
         uleb(&mut loh, u64::from(hint.kind));
         uleb(&mut loh, count as u64);
         for offset in &hint.offsets[..count] {
-            if *offset % 4 != 0 || *offset >= assembly.text.len() as u64 {
+            if *offset % 4 != 0
+                || views
+                    .get(hint.section)
+                    .is_none_or(|v| *offset >= v.size || v.flags & 0x400 == 0)
+            {
                 return Err(Error::new(0, "invalid LOH text offset"));
             }
-            uleb(&mut loh, addresses[0] + offset);
+            uleb(&mut loh, addresses[hint.section] + offset);
         }
     }
     let lohoff = align(file, 8)?;

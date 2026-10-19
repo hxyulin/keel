@@ -39,6 +39,7 @@ pub(super) fn select(
         return Err("Mach-O supports at most 255 sections".into());
     }
     a.sections.push(Section {
+        contains_instructions: false,
         segment: segment.into(),
         name: name.into(),
         alignment: 0,
@@ -53,55 +54,70 @@ pub(super) fn select(
 }
 pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> {
     count(args, 2, 4)?;
-    let kind = match (args[0], args[1]) {
-        ("__TEXT", "__text")
-            if args.len() == 2 || args == ["__TEXT", "__text", "regular", "pure_instructions"] =>
+    for name in &args[..2] {
+        if name.is_empty()
+            || name.len() > 16
+            || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         {
-            return Ok(0);
+            return Err("invalid Mach-O section name".into());
         }
-        ("__TEXT", "__const" | "__gcc_except_tab") | ("__DATA", "__data" | "__const") => {
-            SectionKind::Data
-        }
-        ("__TEXT", "__cstring") => SectionKind::CString,
-        ("__TEXT", "__literal4") => SectionKind::Literal4,
-        ("__TEXT", "__literal8") => SectionKind::Literal8,
-        ("__TEXT", "__literal16") => SectionKind::Literal16,
-        ("__DATA", "__bss") => SectionKind::ZeroFill,
-        ("__DATA", "__thread_data") => SectionKind::ThreadData,
-        ("__DATA", "__thread_bss") => SectionKind::ThreadZeroFill,
-        ("__DATA", "__thread_vars") => SectionKind::ThreadVariables,
-        (
-            "__DWARF",
-            "__debug_info" | "__debug_abbrev" | "__debug_line" | "__debug_ranges" | "__debug_str"
-            | "__debug_loc"
-            // Clang's DWARF 4 Apple accelerator tables (16-byte section names).
-            | "__apple_names" | "__apple_objc" | "__apple_namespac" | "__apple_types"
-            // DWARF 5 sections Clang emits (Mach-O truncates to 16 bytes).
-            | "__debug_line_str" | "__debug_str_offs" | "__debug_addr" | "__debug_rnglists"
-            | "__debug_loclists" | "__debug_names",
-        ) => SectionKind::Debug,
-        ("__TEXT", "__eh_frame") => SectionKind::EhFrame,
-        _ => return Err("unsupported Mach-O section".into()),
-    };
-    let expected = match kind {
-        SectionKind::Data | SectionKind::Debug => "regular",
-        SectionKind::EhFrame => "coalesced",
-        SectionKind::CString => "cstring_literals",
-        SectionKind::Literal4 => "4byte_literals",
-        SectionKind::Literal8 => "8byte_literals",
-        SectionKind::Literal16 => "16byte_literals",
-        SectionKind::ZeroFill => "zerofill",
-        SectionKind::ThreadData => "thread_local_regular",
-        SectionKind::ThreadZeroFill => "thread_local_zerofill",
-        SectionKind::ThreadVariables => "thread_local_variables",
-    };
-    if kind == SectionKind::Debug && args == [args[0], args[1], "regular", "debug"] {
-        return select(a, args[0], args[1], kind);
     }
-    if args.len() > 3 || (args.len() == 3 && args[2] != expected) {
-        return Err("unsupported section type or attributes".into());
+    if args[0] == "__TEXT" && args[1] == "__text" {
+        if args.len() != 2 && args != ["__TEXT", "__text", "regular", "pure_instructions"] {
+            return Err("unsupported section type or attributes".into());
+        }
+        return Ok(0);
+    }
+    // A bare selection revisits the existing declaration, including custom
+    // instruction sections whose attributes cannot be inferred from their name.
+    if args.len() == 2
+        && let Some(index) = a
+            .sections
+            .iter()
+            .position(|s| s.segment == args[0] && s.name == args[1])
+    {
+        return Ok(index + 1);
+    }
+    let inferred = SectionKind::for_section(args[0], args[1]);
+    // Darwin infers these reserved types even for an explicit `regular`.
+    // StaticInit and mod_init_func need explicit attributes/types, however.
+    let default_kind = match inferred {
+        Some(SectionKind::Code | SectionKind::ModuleInit) | None => SectionKind::Data,
+        Some(kind) => kind,
+    };
+    let kind = match args.get(2).copied() {
+        None => default_kind,
+        Some("regular") => match args.get(3).copied() {
+            Some("debug") => SectionKind::Debug,
+            Some("pure_instructions") => SectionKind::Code,
+            None => default_kind,
+            _ => return Err("unsupported section attributes".into()),
+        },
+        Some("cstring_literals") => SectionKind::CString,
+        Some("4byte_literals") => SectionKind::Literal4,
+        Some("8byte_literals") => SectionKind::Literal8,
+        Some("16byte_literals") => SectionKind::Literal16,
+        Some("zerofill") => SectionKind::ZeroFill,
+        Some("thread_local_regular") => SectionKind::ThreadData,
+        Some("thread_local_zerofill") => SectionKind::ThreadZeroFill,
+        Some("thread_local_variables") => SectionKind::ThreadVariables,
+        Some("mod_init_funcs") => SectionKind::ModuleInit,
+        Some("coalesced") if inferred == Some(SectionKind::EhFrame) => SectionKind::EhFrame,
+        _ => return Err("unsupported section type".into()),
+    };
+    if args.len() == 4 && !matches!(kind, SectionKind::Debug | SectionKind::Code) {
+        return Err("unsupported section attributes".into());
+    }
+    if inferred.is_some_and(|expected| expected != kind) && kind != SectionKind::Data {
+        return Err("section type does not match its reserved name".into());
     }
     select(a, args[0], args[1], kind)
+}
+pub(super) fn is_code(a: &Assembly, section: usize) -> bool {
+    section == 0
+        || a.sections[section - 1].kind == SectionKind::Code
+        || (a.sections[section - 1].segment == "__TEXT"
+            && a.sections[section - 1].kind == SectionKind::Data)
 }
 /// LLVM resolves LEB128 symbol differences by layout in any section. Debug
 /// sections are not split into linker atoms (dsymutil reads object
@@ -118,6 +134,12 @@ pub(super) fn bytes_mut(a: &mut Assembly, section: usize) -> Result<&mut Vec<u8>
         SectionContents::Bytes(bytes) => Ok(bytes),
         SectionContents::ZeroFill(_) => Err("relocations require a file-backed section".into()),
     }
+}
+pub(super) fn instruction(a: &mut Assembly, section: usize, bytes: &[u8]) -> Result<(), String> {
+    if section != 0 {
+        a.sections[section - 1].contains_instructions = true;
+    }
+    append(a, section, bytes)
 }
 pub(super) fn append(a: &mut Assembly, section: usize, bytes: &[u8]) -> Result<(), String> {
     if section != 0
@@ -187,12 +209,12 @@ pub(super) fn align_with(
     if let Some(fill) = fill {
         return reserve(a, section, padding, fill);
     }
-    if section == 0 {
+    if section == 0 || a.sections[section - 1].kind == SectionKind::Code {
         let partial = padding % 4;
         reserve(a, section, partial, 0)?;
         let nop = crate::encode("NOP_HI_hints", &[])?.to_le_bytes();
         for _ in 0..padding / 4 {
-            a.text.extend_from_slice(&nop);
+            bytes_mut(a, section)?.extend_from_slice(&nop);
         }
     } else {
         reserve(a, section, padding, 0)?;
@@ -281,7 +303,7 @@ pub(super) fn allocation<'a>(
     args: &[&'a str],
     tls: bool,
 ) -> Result<(&'a str, &'a str, u64, u32), String> {
-    count(args, if tls { 3 } else { 5 }, if tls { 3 } else { 5 })?;
+    count(args, if tls { 2 } else { 4 }, if tls { 3 } else { 5 })?;
     let (section, values) = if tls {
         ("__thread_bss", args)
     } else {
@@ -292,7 +314,7 @@ pub(super) fn allocation<'a>(
     };
     symbol(values[0])?;
     let size = u64::from(unsigned(values[1], u32::MAX as i64)?);
-    let alignment = unsigned(values[2], 16)?;
+    let alignment = values.get(2).map_or(Ok(0), |s| unsigned(s, 16))?;
     Ok((section, values[0], size, alignment))
 }
 

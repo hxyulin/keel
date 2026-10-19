@@ -140,3 +140,70 @@ int main(void) {
     assert!(address("_target") < address("_dispatch"));
     assert!(address("_second") < address("_first"));
 }
+
+#[test]
+fn temporary_aliases_keep_their_targets_original_atom() {
+    for target in ["Linside", "Lend"] {
+        let source = format!(
+            ".subsections_via_symbols\n.globl _f,_g,_pointer\n_f:nop\nLinside:nop\nLend:\n_g:ret\n.set Lalias,{target}\n.set Lchain,Lalias\n.data\n_pointer:.quad Lchain\n"
+        );
+        let assembly = assemble(&source).unwrap();
+        let pointer = assembly
+            .relocations
+            .iter()
+            .find(|r| r.kind == RelocationKind::Unsigned)
+            .unwrap();
+        assert_eq!(pointer.symbol, "_f");
+        assert_eq!(pointer.addend, if target == "Linside" { 4 } else { 8 });
+    }
+    for source in [
+        ".set _a,_b\n.set _b,_a",
+        ".set _a,_missing",
+        "_f:nop\n.set _alias,_f+4",
+        ".globl _alias\n.set _alias,3",
+        ".globl _alias\n.set _alias,_constant\n.set _constant,3",
+    ] {
+        let error = assemble(source).unwrap_err();
+        assert!(
+            error.message.contains("undefined or cyclic")
+                || error.message.contains("alternate-entry")
+                || error.message.contains("N_ABS"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn temporary_alias_pointers_survive_linker_reordering() {
+    let temp = Temp::new();
+    let source = ".subsections_via_symbols\n.globl _f,_g,_pointer\n_f:nop\nLinside:ret\n_g:ret\n.set Lalias,Linside\n.data\n_pointer:.quad Lalias\n";
+    let input = temp.0.join("alias.s");
+    let driver = temp.0.join("driver.c");
+    let order = temp.0.join("order");
+    std::fs::write(&input, source).unwrap();
+    std::fs::write(&driver, "#include <stdint.h>\nextern void f(void),g(void);extern void *pointer;int main(void){g();return pointer!=(void*)((uintptr_t)f+4);}").unwrap();
+    std::fs::write(&order, "_g\n_f\n_pointer\n").unwrap();
+    for tag in ["ours", "clang"] {
+        let object = temp.0.join(format!("{tag}.o"));
+        if tag == "ours" {
+            std::fs::write(&object, assemble_object(source).unwrap()).unwrap();
+        } else {
+            run(Command::new("clang")
+                .args(["-c", "-target", "arm64-apple-macos11"])
+                .arg(&input)
+                .arg("-o")
+                .arg(&object));
+        }
+        let exe = temp.0.join(tag);
+        run(Command::new("clang")
+            .arg(&driver)
+            .arg(&object)
+            .arg("-Wl,-dead_strip")
+            .args(["-Xlinker", "-order_file", "-Xlinker"])
+            .arg(&order)
+            .arg("-o")
+            .arg(&exe));
+        assert!(common::execute(&exe).success());
+    }
+}

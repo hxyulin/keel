@@ -53,6 +53,10 @@ pub struct Symbol {
     pub global: bool,
     /// Mach-O linkage-unit visibility (N_PEXT); requires an external symbol.
     pub private_extern: bool,
+    /// Mach-O N_WEAK_DEF: a definition that can be coalesced or overridden.
+    pub weak_definition: bool,
+    /// Mach-O N_WEAK_REF on a weak definition: the linker may hide it.
+    pub weak_can_be_hidden: bool,
     /// Tentative common definition: byte size and power-of-two alignment.
     pub common: Option<(u64, u8)>,
 }
@@ -111,6 +115,8 @@ pub enum SectionContents {
 /// this vector has no duplicate copy of its bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
+    /// Whether instruction statements contributed bytes (S_ATTR_SOME_INSTRUCTIONS).
+    pub contains_instructions: bool,
     pub segment: String,
     pub name: String,
     pub alignment: u32,
@@ -152,6 +158,8 @@ impl Default for BuildVersion {
 /// A Mach-O linker optimization hint referencing text instruction offsets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkerOptimizationHint {
+    /// Section containing all referenced instructions (zero is __text).
+    pub section: usize,
     pub kind: u8,
     pub offsets: [u64; 3],
 }
@@ -196,12 +204,14 @@ pub fn assemble(source: &str) -> Result<Assembly, Error> {
 /// A source instruction's location in the assembled text (excluding padding/data).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InstructionLocation {
+    /// Defining section (zero is Assembly::text; others index sections from one).
+    pub section: usize,
     pub line: usize,
     pub offset: usize,
 }
 
 /// Assemble while retaining instruction locations for metrics and CPU modeling.
-/// Words must be read from the final text after branch/address fixups.
+/// Words must be read from the final defining section after branch/address fixups.
 pub fn assemble_with_metrics(source: &str) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
     parser::assemble(source, true, TargetFeatures::default())
 }

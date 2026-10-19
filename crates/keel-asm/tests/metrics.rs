@@ -44,3 +44,24 @@ fn collecting_metrics_preserves_all_example_objects() {
         }
     }
 }
+
+#[test]
+fn instruction_locations_identify_additional_code_sections() {
+    let source = ".section __TEXT,__StaticInit,regular,pure_instructions\nLstart: nop\nb Lstart\n.text\nret\n";
+    let (assembly, instructions) = assemble_with_metrics(source).unwrap();
+    assert_eq!(
+        instructions
+            .iter()
+            .map(|i| (i.section, i.offset))
+            .collect::<Vec<_>>(),
+        [(1, 0), (1, 4), (0, 0)]
+    );
+    assert_eq!(
+        u32::from_le_bytes(assembly.sections[0].data()[4..8].try_into().unwrap()),
+        0x17ff_ffff
+    );
+    assert_eq!(
+        u32::from_le_bytes(assembly.text[..4].try_into().unwrap()),
+        0xd65f_03c0
+    );
+}

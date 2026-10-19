@@ -108,7 +108,6 @@ fn stack_unwinding_crosses_assembled_frame() {
     let c = temp.0.join("main.c");
     let exe = temp.0.join("run");
     let source = ".globl _frame\n_frame:\n.cfi_startproc\nstp x29,x30,[sp,#-16]!\nmov x29,sp\n.cfi_def_cfa x29,16\n.cfi_offset x29,-16\n.cfi_offset x30,-8\n.cfi_remember_state\n.cfi_restore_state\nbl _capture\nldp x29,x30,[sp],#16\nret\n.cfi_endproc\n";
-    std::fs::write(&obj, assemble_object(source).unwrap()).unwrap();
     std::fs::write(
         &c,
         r#"
@@ -126,8 +125,15 @@ int main(void) {frame();return found!=1;}
 "#,
     )
     .unwrap();
-    run(Command::new("clang").arg(c).arg(&obj).arg("-o").arg(&exe));
-    assert!(common::execute(&exe).success());
+    for section in [
+        ".text",
+        ".section __TEXT,__StaticInit,regular,pure_instructions",
+    ] {
+        let assembly = format!("{section}\n{source}");
+        std::fs::write(&obj, assemble_object(&assembly).unwrap()).unwrap();
+        run(Command::new("clang").arg(&c).arg(&obj).arg("-o").arg(&exe));
+        assert!(common::execute(&exe).success(), "{section}");
+    }
     let decoded = dump(&obj, "--eh-frame");
     assert!(decoded.contains("W29+16"));
     assert!(decoded.contains("W30=[CFA-8]"));
@@ -248,6 +254,110 @@ fn compact_cfi_forms_match_clang_size_and_decoded_rules() {
         assert!(
             decoded.contains(&format!("DW_CFA_{opcode}")),
             "{opcode}: {decoded}"
+        );
+    }
+}
+
+#[test]
+fn wsp_cfi_alias_matches_sp_and_clang() {
+    let source = ".text\n.globl _wsp_frame\n_wsp_frame:\n.cfi_startproc\n.cfi_def_cfa wsp,16\nnop\n.cfi_def_cfa_register wsp\nret\n.cfi_endproc\n";
+    let bytes = assemble_object(source).unwrap();
+    assert_eq!(
+        bytes,
+        assemble_object(
+            &source
+                .replace("wsp,", "sp,")
+                .replace("register wsp", "register sp")
+        )
+        .unwrap()
+    );
+    let temp = Temp::new();
+    let input = temp.0.join("wsp.s");
+    let reference = temp.0.join("clang.o");
+    let ours = temp.0.join("ours.o");
+    std::fs::write(&input, source).unwrap();
+    std::fs::write(&ours, bytes).unwrap();
+    run(Command::new("clang")
+        .args(["-target", "arm64-apple-macos11", "-c"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&reference));
+    let rules = |path: &std::path::Path| {
+        dump(path, "--eh-frame")
+            .lines()
+            .filter(|line| {
+                line.contains("DW_CFA_def_cfa:") || line.contains("DW_CFA_def_cfa_register:")
+            })
+            .map(|line| line.trim().to_string())
+            .collect::<Vec<_>>()
+    };
+    let got = rules(&ours);
+    assert!(!got.is_empty());
+    assert_eq!(got, rules(&reference));
+    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+}
+
+#[test]
+fn unwind_addresses_target_each_executable_section() {
+    let source = ".text\n.globl _text_frame\n_text_frame:\n.cfi_startproc\n.cfi_def_cfa wsp,16\nret\n.cfi_endproc\n.section __TEXT,__StaticInit,regular,pure_instructions\n.globl _init_frame\n_init_frame:\n.cfi_startproc\n.cfi_def_cfa wsp,16\nret\n.cfi_endproc\n";
+    let temp = Temp::new();
+    let input = temp.0.join("sections.s");
+    let reference = temp.0.join("clang.o");
+    let ours = temp.0.join("ours.o");
+    std::fs::write(&input, source).unwrap();
+    std::fs::write(&ours, assemble_object(source).unwrap()).unwrap();
+    run(Command::new("clang")
+        .args(["-target", "arm64-apple-macos11", "-c"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&reference));
+    // Object-file FDE addresses still contain linker relocations, so compare
+    // their final destinations after the native linker has applied them.
+    for object in [&ours, &reference] {
+        let linked = object.with_extension("dylib");
+        run(Command::new("clang")
+            .arg("-dynamiclib")
+            .arg(object)
+            .arg("-o")
+            .arg(&linked));
+        let decoded = dump(&linked, "--eh-frame");
+        let ranges = decoded
+            .lines()
+            .filter_map(|line| {
+                let (_, range) = line.split_once("pc=")?;
+                let (start, end) = range.split_once("...")?;
+                Some((
+                    u64::from_str_radix(start, 16).unwrap(),
+                    u64::from_str_radix(end, 16).unwrap(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ranges.len(), 2, "{decoded}");
+        let bytes = std::fs::read(&linked).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        for name in ["_text_frame", "_init_frame"] {
+            use object::ObjectSymbol;
+            let address = file
+                .symbols()
+                .find(|symbol| symbol.name().unwrap() == name)
+                .unwrap()
+                .address();
+            assert!(
+                ranges.contains(&(address, address + 4)),
+                "{name}: {address:x}: {decoded}"
+            );
+        }
+    }
+    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+    for directive in [".cfi_def_cfa wsp,16", ".cfi_restore_state", ".cfi_endproc"] {
+        let invalid = format!(
+            ".text\n.cfi_startproc\nnop\n.section __TEXT,__StaticInit,regular,pure_instructions\n{directive}\n"
+        );
+        assert!(
+            assemble(&invalid)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot span sections")
         );
     }
 }

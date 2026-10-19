@@ -114,6 +114,11 @@ rows-only behavior.
   rows are identical, but `__debug_line` is about 1.5x Clang's size on the
   measured corpus.
 
+Mixed MD5 use is accepted, including a root `.file 0` without a checksum
+followed by numbered files with checksums. Like LLVM, Keel omits the MD5
+column for the whole line table when any entry lacks a checksum. Supplied
+checksums still participate in file identity and root-file folding.
+
 ## Where Keel is stricter than LLVM
 
 Each of these is an explicit error where LLVM would warn, guess or silently
@@ -123,7 +128,6 @@ drop data:
   directory.
 - A missing root name, a duplicate `.file 0`, or `.file 0` after a numbered
   `.file` or `.loc`.
-- Inconsistent MD5 use. LLVM warns once and then drops every checksum.
 - A folded entry whose `source` differs from the root's. LLVM silently
   keeps the root's source.
 - Duplicate `md5`/`source` operands, malformed checksums, NUL in paths or
