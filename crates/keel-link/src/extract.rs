@@ -10,7 +10,7 @@ fn definition(s: &Symbol) -> bool {
 struct Resolution<'a> {
     defined: BTreeSet<&'a str>,
     needed: BTreeSet<&'a str>,
-    providers: BTreeMap<&'a str, Vec<usize>>,
+    providers: BTreeMap<&'a str, usize>,
     ready: BTreeSet<usize>,
 }
 
@@ -18,9 +18,9 @@ impl<'a> Resolution<'a> {
     fn need(&mut self, name: &'a str) {
         if !self.defined.contains(name)
             && self.needed.insert(name)
-            && let Some(members) = self.providers.get(name)
+            && let Some(&index) = self.providers.get(name)
         {
-            self.ready.extend(members);
+            self.ready.insert(index);
         }
     }
 
@@ -41,16 +41,41 @@ impl<'a> Resolution<'a> {
 
 fn selection(objects: &[Object], members: &[Object]) -> Vec<usize> {
     let mut resolution = Resolution::default();
-    // Build our own index from parsed symbols, never from the archive's index.
-    // Commons cannot pull a member, even though included commons satisfy names.
-    for (index, member) in members.iter().enumerate() {
-        for s in member.symbols.iter().filter(|s| definition(s)) {
-            resolution.providers.entry(&s.name).or_default().push(index);
-        }
-    }
     resolution.need("_main");
     for object in objects {
         resolution.include(object);
+    }
+    if resolution.needed.is_empty() {
+        return Vec::new();
+    }
+    if members.len() == 1 {
+        // With no remaining members, newly introduced needs cannot pull anything
+        // else. The selected object still reaches prepare, including its errors.
+        return if members[0]
+            .symbols
+            .iter()
+            .any(|s| definition(s) && resolution.needed.contains(s.name.as_str()))
+        {
+            vec![0]
+        } else {
+            Vec::new()
+        };
+    }
+    // Build our own index from parsed symbols, never from the archive's index.
+    // Commons cannot pull a member, even though included commons satisfy names.
+    // Only the earliest defining member is needed: whenever its name is needed,
+    // it is eligible. If already included, its definition would have satisfied
+    // that name permanently. A later provider can still be pulled by another
+    // name; weak/strong precedence and duplicates remain prepare's responsibility.
+    for (index, member) in members.iter().enumerate() {
+        for s in member.symbols.iter().filter(|s| definition(s)) {
+            resolution.providers.entry(&s.name).or_insert(index);
+        }
+    }
+    for name in &resolution.needed {
+        if let Some(&index) = resolution.providers.get(name) {
+            resolution.ready.insert(index);
+        }
     }
     let mut selected = Vec::new();
     let mut included = vec![false; members.len()];
@@ -94,6 +119,25 @@ pub(crate) fn archives(objects: &mut Vec<Object>, members: Vec<Object>) {
 mod tests {
     use super::*;
 
+    fn object(name: &str, symbols: &[(&str, u8, u16, u64)]) -> Object {
+        Object {
+            name: name.into(),
+            sections: Vec::new(),
+            symbols: symbols
+                .iter()
+                .map(|&(name, kind, desc, value)| Symbol {
+                    name: name.into(),
+                    kind,
+                    section: 0,
+                    desc,
+                    value,
+                })
+                .collect(),
+            minimum: 11 << 16,
+            debug_bytes: None,
+        }
+    }
+
     // Keep the old full-set algorithm as an independent ordering oracle. The
     // generated graphs exercise interactions beyond the named image fixtures.
     fn original(objects: &[Object], members: &[Object]) -> Vec<usize> {
@@ -125,6 +169,57 @@ mod tests {
             selected.push(index);
             objects.push(member);
         }
+    }
+
+    #[test]
+    fn no_demand_and_single_member_preserve_roots_and_current_predicate() {
+        let main = object("main", &[("_main", 15, 0, 0)]);
+        let entry = object("entry", &[("_main", 15, 0, 0), ("_missing", 1, 0, 0)]);
+        assert_eq!(selection(&[], &[entry]), vec![0]);
+        let unused = object("unused", &[("_main", 15, 0, 0)]);
+        assert!(selection(&[main], &[unused]).is_empty());
+
+        for direct_kind in 0..=255 {
+            for provider_kind in 0..=255 {
+                for direct_value in [0, 8] {
+                    for provider_value in [0, 8] {
+                        let objects = [object(
+                            "ordinary",
+                            &[("_main", 15, 0, 0), ("_f", direct_kind, 0x40, direct_value)],
+                        )];
+                        let members = [object(
+                            "member",
+                            &[("_f", provider_kind, 0x80, provider_value), ("_g", 1, 0, 0)],
+                        )];
+                        assert_eq!(
+                            selection(&objects, &members),
+                            original(&objects, &members),
+                            "kinds={direct_kind}/{provider_kind}, values={direct_value}/{provider_value}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn earliest_provider_retains_forced_later_definitions_and_backward_needs() {
+        let objects = [object(
+            "main",
+            &[("_main", 15, 0, 0), ("_f", 1, 0x40, 0), ("_g", 1, 0, 0)],
+        )];
+        let members = [
+            object("backward", &[("_back", 15, 0, 0)]),
+            object("common", &[("_f", 1, 0, 8)]),
+            object("local", &[("_f", 14, 0, 0)]),
+            object("weak-private", &[("_f", 31, 0x80, 0), ("_f", 31, 0x80, 0)]),
+            object(
+                "forced-strong",
+                &[("_f", 15, 0, 0), ("_g", 15, 0, 0), ("_back", 1, 0, 0)],
+            ),
+        ];
+        assert_eq!(selection(&objects, &members), vec![3, 4, 0]);
+        assert_eq!(selection(&objects, &members), original(&objects, &members));
     }
 
     #[test]

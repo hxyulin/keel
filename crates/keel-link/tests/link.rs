@@ -381,6 +381,73 @@ fn extracted_archive_duplicates_keep_member_diagnostic_and_unused_inputs_are_val
         "lib.a(unused.o): expected a thin little-endian arm64 MH_OBJECT"
     );
 }
+
+#[test]
+fn single_member_archive_paths_preserve_images_and_downstream_diagnostics() {
+    let main = object(".globl _main\n_main: ret\n");
+    let entry = archive(&[("entry.o", main.clone())]);
+    assert_archive_image(&[("entry.a", &entry)], &[("main", &main)]);
+    // The ordinary entry appears after the archive and leaves no demand.
+    assert_archive_image(&[("entry.a", &entry), ("main", &main)], &[("main", &main)]);
+
+    let caller = object(".globl _main\n_main: b _f\n");
+    let member = object(".globl _f\n_f: b _missing\n");
+    let ar = archive(&[("member.o", member.clone())]);
+    let link_error = |inputs: &[(&str, &[u8])]| {
+        keel_link::link(
+            &inputs
+                .iter()
+                .map(|&(name, bytes)| Input { name, bytes })
+                .collect::<Vec<_>>(),
+            options(),
+        )
+        .err()
+        .unwrap()
+    };
+    assert_eq!(
+        link_error(&[("main", &caller), ("entry.a", &entry)]),
+        link_error(&[("main", &caller)]),
+    );
+    assert_eq!(
+        link_error(&[("main", &caller), ("lib.a", &ar)]),
+        link_error(&[("main", &caller), ("lib.a(member.o)", &member)]),
+    );
+    let duplicate = object(".globl _main\n_main: ret\n.globl _f\n_f: ret\n");
+    let ar = archive(&[("duplicate.o", duplicate)]);
+    assert_eq!(
+        link_error(&[("main", &caller), ("lib.a", &ar)]),
+        "lib.a(duplicate.o): duplicate definition `_main`",
+    );
+}
+
+#[test]
+fn no_archive_demand_still_eagerly_validates_inputs_in_order() {
+    let main = object(".globl _main\n_main: ret\n");
+    let malformed = vec![0; 64];
+    let bad_archive = archive(&[("unused.o", malformed.clone())]);
+    for ordinary_first in [false, true] {
+        let archive_input = Input {
+            name: "bad.a",
+            bytes: &bad_archive,
+        };
+        let ordinary_input = Input {
+            name: "bad.o",
+            bytes: &malformed,
+        };
+        let mut inputs = vec![Input {
+            name: "main",
+            bytes: &main,
+        }];
+        let expected = if ordinary_first {
+            inputs.extend([ordinary_input, archive_input]);
+            "bad.o: expected a thin little-endian arm64 MH_OBJECT"
+        } else {
+            inputs.extend([archive_input, ordinary_input]);
+            "bad.a(unused.o): expected a thin little-endian arm64 MH_OBJECT"
+        };
+        assert_eq!(keel_link::link(&inputs, options()).err().unwrap(), expected,);
+    }
+}
 #[test]
 fn same_named_local_got_symbols_stay_object_local() {
     let first = object(
