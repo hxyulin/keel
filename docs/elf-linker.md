@@ -399,3 +399,37 @@ Ubuntu's glibc 2.39, with each target's own runtime libc used at execution.
 
 Format references: [System V ELF ABI](https://gabi.xinuos.com/elf/)
 and [x86-64 psABI](https://gitlab.com/x86-psABIs/x86-64-ABI).
+
+### Explicit installed CRT validation — 2026-10-20
+
+On LinuxHost, ten cases using unchanged installed `crt1.o`, `crti.o`, `crtbegin.o`,
+`crtend.o`, `crtn.o`, `libc.so.6` and (where needed) `libgcc.a` pass with Keel
+and GNU ld. Each executable ran three times with matching stdout/stderr and
+exit status. The five sources, each built with ordinary Clang `-O0` and `-O2`,
+exercise argc/argv and stdio, a signed 128-bit division runtime helper, the
+`_DYNAMIC` anchor, out-of-line C++ construction/destruction, and empty clone
+bounds with a shared library supplying the optional ITM callbacks. Inputs
+were compiled on Linux, linked by Keel on macOS, and executed unchanged on
+Linux. No custom startup adapter or input-section stripping was used.
+
+The outputs contain GNU property and ABI notes, SFrame, native unwind data
+and real CRT lifecycle code together. Input and output hashes are retained.
+Intact COMDAT template, surviving IBT and second-SFrame-producer inputs still
+reject; each failed link preserves an existing destination. This is a bounded
+explicit-input, non-PIE milestone: ordinary C++ COMDAT/templates/exceptions,
+PIE, GNU linker scripts and drop-in Clang-driver compatibility remain outside
+this validation. Concrete ELF DSO paths avoid installed GNU linker scripts.
+
+On x86-64 Linux, reproduce with installed Clang, GNU ld/as (including SFrame
+v3 output), readelf and Python:
+
+```sh
+python3 suite/validate_elf_crt.py --keel target/debug/keel --out target/elf-crt
+```
+
+For cross-linking, `--prepare-only` retains objects, concrete libraries and
+`cases.json`; cross-link those inputs with Keel, place each `<name>.keel`
+beside its `<name>.gnu`, then run `--verify-only` on Linux. That mode runs the
+executables and inspects metadata; rejection tests must be run on the linking
+host separately. The retained LinuxHost tool qualification is package
+`binutils 2.47-4`, while `ld`/`as`/`readelf` banners report `2.46`.
