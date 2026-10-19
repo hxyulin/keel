@@ -53,9 +53,11 @@ linker. `--system` continues to select the explicit Clang fallback.
   zero-filled BSS and a non-executable GNU_STACK program header. There is no
   interpreter or dynamic relocation processing for static output. This output is not PIE.
 - ELF section headers and a global symbol table for `readelf`/`nm`. Input debug
-  sections are omitted with warnings. Ordinary `.eh_frame` bytes and their
-  relocations are retained, but there is no generated unwind search index or
-  tested exception/runtime-unwind contract.
+  sections are omitted with warnings. Read-only allocated `.eh_frame` inputs
+  accept both PROGBITS and x86-64 `SHT_X86_64_UNWIND`, preserving their types,
+  alignment, CFI bytes and supported pointer relocations. A generated read-only
+  `.eh_frame_hdr` and `PT_GNU_EH_FRAME` advertise a sorted FDE search index to
+  the runtime unwinder, including frames spread across independent sections.
 
 The library API is `keel_link::elf::link(&[Input], elf::Options)`, returning
 image bytes and warnings without filesystem access. The CLI reads all inputs,
@@ -72,6 +74,29 @@ input shared libraries are supported.
 Unsupported allocated sections, flags, relocations and native options are
 errors. Nonallocated metadata is omitted. This is not a general GNU ld
 replacement or a static-libc linker.
+
+## Runtime unwind scope
+
+Unwind records use DWARF32 lengths, CIE versions 1/3/4 (64-bit addresses,
+no segments), empty or `z` augmentations with `P`, `L`, `R`, `S`, and fixed-width
+absolute/PC-relative encoded pointers. Indirect personality/LSDA pointers are
+retained; FDE code pointers must be direct. Nonempty frame sections require
+alignment of at least four bytes, `SHF_ALLOC` alone, and zero entry size.
+Record bounds, backward CIE references, augmentation sizes, pointer encodings,
+relocation fields and final FDE code ranges are checked. The existing RELA
+implementation applies absolute 32/32S/64 and PC32/PC64 pointer relocations;
+relocations into CFI instructions or structural fields are explicitly unsupported.
+FDE ranges must lie within executable input sections, with distinct start
+addresses. Input `.eh_frame_hdr`, DWARF64, variable-width encoded pointers,
+and text/data/function-relative or aligned pointer applications are unsupported.
+CFI instructions are retained verbatim, not interpreted or exhaustively validated.
+
+The Linux validator below tests `_Unwind_Backtrace` discovery through three
+independent assembly functions without frame pointers, with Keel/Clang C
+callers, and compares GNU ld on the same objects. This does not establish
+arbitrary C++ exception, standard CRT or static-libgcc support; COMDAT and the
+other unsupported features above remain explicit errors. Startup/runtime setup
+is still the caller's responsibility.
 
 ## Static archives and shared libraries
 
@@ -156,6 +181,7 @@ cargo fmt --all -- --check
 # On x86-64 Linux, with clang, GNU ld, readelf and Python 3:
 python3 suite/validate_elf_linker.py --keel target/debug/keel --out target/elf-validation
 python3 suite/validate_elf_libraries.py --keel target/debug/keel --out target/elf-libraries
+python3 suite/validate_elf_unwind.py --keel target/debug/keel --out target/elf-unwind
 ```
 
 Validated on 2026-10-16 on LinuxHost (CachyOS, Clang 23.1.1, GNU ld 2.47)

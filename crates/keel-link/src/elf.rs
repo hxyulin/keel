@@ -2,13 +2,14 @@
 //! See docs/elf-linker.md for the supported input and execution contract.
 mod dynamic;
 mod input;
+mod unwind;
 use crate::{Input, Result};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
 use object::{
     Object, ObjectSection, ObjectSymbol, RelocationFlags, RelocationTarget, SectionFlags,
     SymbolFlags, SymbolSection,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const BASE: u64 = 0x400000;
 const PAGE: u64 = 4096;
@@ -36,6 +37,7 @@ pub struct Executable {
 struct Section {
     name: String,
     flags: u64,
+    kind: u32,
     align: u64,
     size: u64,
     bss: bool,
@@ -125,6 +127,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let (inputs, libraries) = input::prepare(inputs, &options.entry)?;
     let mut sections = Vec::new();
     let mut units = Vec::new();
+    let mut unwind_sections = BTreeMap::new();
     let mut warnings = Vec::new();
     for input in &inputs {
         let mut parse = || -> Result<Unit> {
@@ -172,6 +175,24 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 if name == ".note.GNU-stack" && sh_flags & 4 != 0 {
                     return Err("executable stack requests are unsupported".into());
                 }
+                let kind = raw.sh_type(file.endian());
+                let frame = name == ".eh_frame" || kind == object::elf::SHT_X86_64_UNWIND;
+                if name == ".eh_frame_hdr" {
+                    return Err(
+                        "input .eh_frame_hdr is unsupported; the linker generates it".into(),
+                    );
+                }
+                if frame
+                    && (name != ".eh_frame"
+                        || !matches!(
+                            kind,
+                            object::elf::SHT_PROGBITS | object::elf::SHT_X86_64_UNWIND
+                        )
+                        || sh_flags != u64::from(object::elf::SHF_ALLOC)
+                        || raw.sh_entsize(file.endian()) != 0)
+                {
+                    return Err(".eh_frame requires PROGBITS or SHT_X86_64_UNWIND, SHF_ALLOC only, and no entry size".into());
+                }
                 if sh_flags & 2 == 0 {
                     if name.starts_with(".debug") || name.starts_with(".zdebug") {
                         warnings.push(format!("{}: omitted debug section {name}", input.name));
@@ -191,6 +212,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         | object::SectionKind::ReadOnlyData
                         | object::SectionKind::ReadOnlyString
                         | object::SectionKind::UninitializedData
+                        | object::SectionKind::Elf(object::elf::SHT_X86_64_UNWIND)
                 ) {
                     return Err(format!(
                         "unsupported allocated section {name} ({:?})",
@@ -203,10 +225,19 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 if !bss && data.len() as u64 != size {
                     return Err(format!("invalid section size for {name}"));
                 }
+                if frame {
+                    if size != 0 && alignment < 4 {
+                        return Err(".eh_frame alignment must be at least 4".into());
+                    }
+                    let frames =
+                        unwind::Frames::parse(data).map_err(|e| format!(".eh_frame: {e}"))?;
+                    unwind_sections.insert(sections.len(), frames);
+                }
                 unit.sections.insert(section.index().0, sections.len());
                 sections.push(Section {
                     name,
                     flags: sh_flags & 7,
+                    kind,
                     align: alignment,
                     size,
                     bss,
@@ -216,6 +247,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 // The generic relocation iterator skips malformed tables. Validate
                 // explicitly before consuming it so bad inputs cannot mislink.
                 section.elf_linked_rela().map_err(|e| e.to_string())?;
+                let mut unwind_relocations = BTreeSet::new();
                 for (offset, r) in section.relocations() {
                     let RelocationFlags::Elf { r_type: kind } = r.flags() else {
                         return Err("non-ELF relocation".into());
@@ -233,6 +265,14 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     };
                     if bss || offset.checked_add(width).is_none_or(|e| e > size) {
                         return Err("relocation field is outside file-backed section data".into());
+                    }
+                    if let Some(frames) = unwind_sections.get(&(sections.len() - 1)) {
+                        if !unwind_relocations.insert(offset) {
+                            return Err("duplicate .eh_frame pointer relocation".into());
+                        }
+                        frames
+                            .relocation(offset, kind)
+                            .map_err(|e| format!(".eh_frame: {e}"))?;
                     }
                     let RelocationTarget::Symbol(symbol) = r.target() else {
                         return Err("unsupported relocation target".into());
@@ -320,6 +360,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut common = Section {
         name: ".bss.common".into(),
         flags: 3,
+        kind: 8,
         align: 1,
         size: 0,
         bss: true,
@@ -421,6 +462,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     sections.push(Section {
         name: ".got".into(),
         flags: 2,
+        kind: 1,
         align: 8,
         size: got_size,
         bss: false,
@@ -475,6 +517,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             absolute,
         )?)
     };
+    let unwind_header = unwind::prepare(&mut sections, &unwind_sections)?;
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
     let mut cursor = PAGE;
@@ -639,6 +682,9 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         }
         d.emit(&mut bytes, &sections, &definitions)?;
     }
+    if let Some(header) = unwind_header {
+        unwind::emit(&mut bytes, &sections, &unwind_sections, header)?;
+    }
     // Section headers and a global symbol table make readelf/nm useful without
     // promising source debugging or retaining input debug sections.
     let mut names = vec![0];
@@ -648,7 +694,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let (kind, link, info, entsize) = dynamic
             .as_ref()
             .and_then(|d| d.section_header(index))
-            .unwrap_or((if s.bss { 8 } else { 1 }, 0, 0, 0));
+            .unwrap_or((s.kind, 0, 0, 0));
         headers.push(shdr(
             name,
             kind,
@@ -757,13 +803,19 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     put16(
         &mut bytes,
         56,
-        (segments.len() + 1 + if dynamic.is_some() { 3 } else { 0 }) as u16,
+        (segments.len()
+            + 1
+            + usize::from(unwind_header.is_some())
+            + if dynamic.is_some() { 3 } else { 0 }) as u16,
     );
     put16(&mut bytes, 58, 64);
     put16(&mut bytes, 60, headers.len() as u16);
     put16(&mut bytes, 62, (headers.len() - 1) as u16);
     let mut phdrs = Vec::new();
-    let phnum = segments.len() + 1 + if dynamic.is_some() { 3 } else { 0 };
+    let phnum = segments.len()
+        + 1
+        + usize::from(unwind_header.is_some())
+        + if dynamic.is_some() { 3 } else { 0 };
     if let Some(d) = &dynamic {
         phdrs.push((6, 4, 64, (phnum * 56) as u64, (phnum * 56) as u64, 8));
         let s = &sections[d.interp];
@@ -782,6 +834,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     if let Some(d) = &dynamic {
         let s = &sections[d.table];
         phdrs.push((2, 6, s.offset, s.size, s.size, 8));
+    }
+    if let Some(header) = unwind_header {
+        let s = &sections[header];
+        phdrs.push((object::elf::PT_GNU_EH_FRAME, 4, s.offset, s.size, s.size, 4));
     }
     phdrs.push((0x6474e551, 6, 0, 0, 0, 16));
     for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {

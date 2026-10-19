@@ -224,6 +224,7 @@ impl Dynamic {
             sections.push(Section {
                 name: name.into(),
                 flags,
+                kind,
                 align: alignment,
                 size: data.len() as u64,
                 bss: false,
