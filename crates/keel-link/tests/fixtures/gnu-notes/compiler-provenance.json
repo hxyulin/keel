@@ -1,0 +1,178 @@
+[
+  {
+    "file": "defined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/defined.c",
+    "size": 36,
+    "sha256": "58659887b797d95f3b8edfd69b3f99b77ae2d1010b2c788dabe0d8c2a481fd71"
+  },
+  {
+    "file": "libdefined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/libdefined.so",
+    "size": 2096,
+    "sha256": "71063d7ec04eab2d8576e753856c1ee144a6e02675a910b271f615fe634011b1"
+  },
+  {
+    "file": "weak-defined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/weak-defined.c",
+    "size": 58,
+    "sha256": "0803e32de1b5d68566e101d93b8585796f5f7e806b63fe3a99cd05fc2d2841c2"
+  },
+  {
+    "file": "libweak-defined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/libweak-defined.so",
+    "size": 2104,
+    "sha256": "f1440c925b3e386608e5a9e6245851c56638f4a089ad0c77f8af23e5b78a4764"
+  },
+  {
+    "file": "protected-defined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/protected-defined.c",
+    "size": 77,
+    "sha256": "2281f5f9b3527abb10d62408e5843c7199f01ebd4a26aea72c7e026a3614ce51"
+  },
+  {
+    "file": "libprotected-defined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/libprotected-defined.so",
+    "size": 2128,
+    "sha256": "16a2444470e139355ac81ecad10dd9795c0ac93465ecacedd878128fc3f6e2c7"
+  },
+  {
+    "file": "undefined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/undefined.c",
+    "size": 38,
+    "sha256": "9e7a02113b184df1023860c8c072c79b3fa7825a5db2fa9ee90d1411568f048a"
+  },
+  {
+    "file": "libundefined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/review-r2/libundefined.so",
+    "size": 2088,
+    "sha256": "e8c27e1eda6e8c12bbfa4720b9ca2561f03e3f305e7614cc33b74eba7228556d"
+  },
+  {
+    "file": "plt-defined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.c",
+    "size": 108,
+    "sha256": "498db8d776df43f254a1092580c82d4227cbda02185c7340a7e70daba987f6ec",
+    "commands": [
+      [
+        "/usr/bin/clang",
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-fPIC",
+        "-fno-asynchronous-unwind-tables",
+        "-fno-stack-protector",
+        "-c",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.c",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.o"
+      ],
+      [
+        "~/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+        "-flavor",
+        "gnu",
+        "-shared",
+        "--hash-style=sysv",
+        "-soname",
+        "libplt-defined.so",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.o",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/libplt-defined.so"
+      ]
+    ]
+  },
+  {
+    "file": "libplt-defined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/fixes-r2/libplt-defined.so",
+    "size": 2656,
+    "sha256": "d49a456e0155e051067e5fb6366efa6dfcc4a71d4ebfa5113c7e28adf976b18a",
+    "commands": [
+      [
+        "/usr/bin/clang",
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-fPIC",
+        "-fno-asynchronous-unwind-tables",
+        "-fno-stack-protector",
+        "-c",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.c",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.o"
+      ],
+      [
+        "~/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+        "-flavor",
+        "gnu",
+        "-shared",
+        "--hash-style=sysv",
+        "-soname",
+        "libplt-defined.so",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/plt-defined.o",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/libplt-defined.so"
+      ]
+    ]
+  },
+  {
+    "file": "got-defined.c",
+    "original": "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.c",
+    "size": 54,
+    "sha256": "ad8cd54483b16d09f2fcff6d8b63916b8173129088a0bd770a33640b5c2c1c80",
+    "commands": [
+      [
+        "/usr/bin/clang",
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-fPIC",
+        "-fno-asynchronous-unwind-tables",
+        "-fno-stack-protector",
+        "-c",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.c",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.o"
+      ],
+      [
+        "~/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+        "-flavor",
+        "gnu",
+        "-shared",
+        "--hash-style=sysv",
+        "-soname",
+        "libgot-defined.so",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.o",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/libgot-defined.so"
+      ]
+    ]
+  },
+  {
+    "file": "libgot-defined.so",
+    "original": "target/elf-crt-gnu-notes-20261020/fixes-r2/libgot-defined.so",
+    "size": 2208,
+    "sha256": "3049db05d7e64e434b9e9047219ee534e9e4dc8f2e615273c8dc4cfc0cd4b24c",
+    "commands": [
+      [
+        "/usr/bin/clang",
+        "-target",
+        "x86_64-unknown-linux-gnu",
+        "-fPIC",
+        "-fno-asynchronous-unwind-tables",
+        "-fno-stack-protector",
+        "-c",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.c",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.o"
+      ],
+      [
+        "~/.rustup/toolchains/1.99.0-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld",
+        "-flavor",
+        "gnu",
+        "-shared",
+        "--hash-style=sysv",
+        "-soname",
+        "libgot-defined.so",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/got-defined.o",
+        "-o",
+        "target/elf-crt-gnu-notes-20261020/fixes-r2/libgot-defined.so"
+      ]
+    ]
+  }
+]

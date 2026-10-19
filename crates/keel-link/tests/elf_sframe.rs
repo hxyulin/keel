@@ -61,6 +61,98 @@ fn fixture(targets: [&str; 3]) -> Vec<u8> {
 fn valid() -> Vec<u8> {
     fixture(["_start", "_start+48", "_start+64"])
 }
+
+#[test]
+fn notes_abi_sframe_unwind_and_dynamic_share_final_headers_and_addresses() {
+    let abi = include_bytes!("fixtures/gnu-notes/crt1.o.note.ABI-tag.bin");
+    let metadata = object(&format!(
+        ".section .note.gnu.property,\"a\",@note\n.p2align 3\n.long 4,16,5,0x00554e47,0xc0008002,4,8,0\n\
+         .section .note.ABI-tag,\"a\",@note\n.p2align 2\nabi: .byte {}\n\
+         .data\n.globl abi_pointer\nabi_pointer: .quad abi+7\n",
+        abi.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
+    ));
+    let unwind = object(".text\n.globl framed\nframed:\n.cfi_startproc\nret\n.cfi_endproc\n");
+    for dynamic in [false, true] {
+        for reverse in [false, true] {
+            let mut inputs = vec![metadata.clone(), valid(), unwind.clone()];
+            if reverse {
+                inputs.reverse();
+            }
+            if dynamic {
+                inputs.push(include_bytes!("fixtures/gnu-notes/libprotected-defined.so").to_vec());
+            }
+            let exe = link(&inputs).unwrap();
+            let f = object::File::parse(exe.bytes.as_slice()).unwrap();
+            let phnum = u16::from_le_bytes(exe.bytes[56..58].try_into().unwrap()) as usize;
+            let headers = exe.bytes[64..64 + 56 * phnum].as_chunks::<56>().0;
+            assert!(64 + 56 * phnum <= 4096);
+            assert_eq!(phnum, 3 + 1 + 1 + 1 + 3 + if dynamic { 3 } else { 0 });
+            for (kind, name, alignment) in [
+                (object::elf::PT_GNU_PROPERTY, ".note.gnu.property", 8),
+                (object::elf::PT_NOTE, ".note.gnu.property", 8),
+                (object::elf::PT_NOTE, ".note.ABI-tag", 4),
+                (0x6474_e554, ".sframe", 8),
+                (object::elf::PT_GNU_EH_FRAME, ".eh_frame_hdr", 4),
+            ] {
+                let s = f.section_by_name(name).unwrap();
+                let matches = headers
+                    .iter()
+                    .filter(|p| u32_at(*p, 0) == kind && u64_at(*p, 16) == s.address())
+                    .collect::<Vec<_>>();
+                assert_eq!(matches.len(), 1);
+                let p = matches[0];
+                assert_eq!(u32_at(p, 4), 4);
+                assert_eq!(u64_at(p, 8), s.file_range().unwrap().0);
+                assert_eq!(u64_at(p, 32), s.size());
+                assert_eq!(u64_at(p, 40), s.size());
+                assert_eq!(u64_at(p, 48), alignment);
+                assert!(headers.iter().any(|load| u32_at(load, 0) == 1
+                    && u32_at(load, 4) == 4
+                    && u64_at(load, 16) <= s.address()
+                    && s.address() + s.size() <= u64_at(load, 16) + u64_at(load, 32)));
+            }
+            if dynamic {
+                let p = headers
+                    .iter()
+                    .find(|p| u32_at(*p, 0) == object::elf::PT_PHDR)
+                    .unwrap();
+                assert_eq!(u64_at(p, 32), (phnum * 56) as u64);
+                assert_eq!(u64_at(p, 40), (phnum * 56) as u64);
+            }
+            assert_eq!(
+                f.section_by_name(".note.ABI-tag").unwrap().data().unwrap(),
+                abi
+            );
+            let symbol = |name| {
+                f.symbols()
+                    .find(|s| s.name().unwrap() == name)
+                    .unwrap()
+                    .address()
+            };
+            assert_eq!(
+                u64_at(&exe.bytes, (symbol("abi_pointer") - 0x400000) as usize),
+                f.section_by_name(".note.ABI-tag").unwrap().address() + 7
+            );
+            let s = f.section_by_name(".sframe").unwrap();
+            let data = s.data().unwrap();
+            assert_eq!(data[3], 5);
+            for (i, addend) in [0, 48, 64].into_iter().enumerate() {
+                let at = 28 + 16 * i;
+                assert_eq!(
+                    (s.address() + at as u64) as i128 + i128::from(u64_at(data, at) as i64),
+                    i128::from(symbol("_start") + addend)
+                );
+            }
+            let eh = f.section_by_name(".eh_frame_hdr").unwrap();
+            let data = eh.data().unwrap();
+            assert_eq!(u32_at(data, 8), 1);
+            assert_eq!(
+                (eh.address() as i64 + i64::from(u32_at(data, 12) as i32)) as u64,
+                symbol("framed")
+            );
+        }
+    }
+}
 fn error(b: Vec<u8>, expected: &str) {
     let e = link(&[b]).unwrap_err();
     assert!(e.contains(expected), "expected {expected:?}, got {e:?}");

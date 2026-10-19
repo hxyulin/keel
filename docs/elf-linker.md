@@ -67,7 +67,7 @@ existing output. Allocated image size is bounded to 512 MiB.
 
 Automatic libc/CRT startup, static libc, PIE, shared-object output, native TLS
 relocations, COMDAT groups, native IFUNC/GNU-unique definitions, REL relocations,
-allocated notes, linker scripts, dead
+other allocated notes, linker scripts, dead
 stripping, identical-code folding, relaxation and source debugging remain outside
 the supported scope. Runtime-loader IFUNC resolution and constructors inside
 input shared libraries are supported.
@@ -98,6 +98,62 @@ are grouped together while retaining their input symbol identities. This keeps
 CRT list/end bounds equal despite intervening arrays or data. Nonempty clone
 tables and other clone-table layouts remain explicit errors. These foundations
 alone do not establish installed CRT or full compiler-driver compatibility.
+
+## Bounded GNU note metadata
+
+Selected relocatable objects admit allocated `.note.gnu.property` and one
+Linux `.note.ABI-tag`. Both require `SHT_NOTE`, `SHF_ALLOC` alone, zero
+entry size/link/info, and exact alignment eight/four respectively. Unknown
+allocated notes, malformed bounds, unexpected owners/types and note relocations
+are errors. ABI-tag bytes and original section/symbol address identities are
+preserved; additional ABI tags are rejected. The output symbol table still
+contains globals only, so internal local `__abi_tag` identity does not imply
+local symbols appear in `readelf -s`.
+
+All property records in each selected object are collected before merging.
+Unsorted arrays and duplicates are accepted for installed producer compatibility;
+duplicates within one object are ORed. Across selected objects, including empty
+and propertyless objects and extracted archive members, `FEATURE_1_AND`
+intersects (absence is zero), `ISA_1_NEEDED` unions, and `ISA_1_USED` and
+`FEATURE_2_USED` union only when that type is present in every object. Present
+zero USED values retain their presence; emitted FEATURE_2_USED includes basic
+x86. Generated import code adds baseline ISA usage only to complete USED data.
+DSO properties and unselected archive members do not participate.
+
+Only FEATURE_1 bits 0–1, ISA_1 bits 0–3 and FEATURE_2_USED bits 0–11 are
+accepted. Unknown IDs/bits and FEATURE_2_NEEDED are rejected before reduction.
+Mandatory ISA requirements, including installed CRT `ISA_1_NEEDED=0xf`, are
+retained. Surviving IBT is explicitly rejected until ENDBR64 generated stubs
+are implemented; SHSTK is admitted with the existing balanced call/tail-jump
+contract. Import stub bytes and sizes are unchanged by this stage.
+
+Nonempty output properties become one sorted, unique, zero-padded read-only
+`.note.gnu.property`, exposed by `PT_GNU_PROPERTY` and a separate eight-byte
+aligned `PT_NOTE`. An ABI tag gets its own four-byte aligned `PT_NOTE`. Empty
+property results create neither property section nor property segments.
+References into consumed property input sections are rejected because their
+offsets cannot be preserved through reduction. This includes undefined strong
+and weak references and dynamic relocations against default-visible preemptible
+DSO definitions, using the resolved visible executable provider. Defined-symbol
+lookups do not become undefined strong archive demand. DSO local, hidden,
+internal, protected and symbolically bound definitions retain local binding;
+an unused export or a symbol-free relative relocation is not a lookup.
+Same-named locals and overridden weak definitions do not supply that provider.
+All REL/RELA table associations must use the selected object symbol table and
+an ordinary nonzero target section before any note is consumed; malformed or
+unsupported associations are errors, including links the object reader skips.
+DSO lookup accounting inspects runtime REL/RELA and PLT descriptors, requiring
+matching allocated relocation sections, dynamic symbol/string associations and
+LOAD bytes. Packed symbol-bearing relocation formats are rejected. RELR is
+symbol-free. This bounded interface accounting does not certify arbitrary
+runtime-loader, symbol-versioning or preemption ABI behavior; existing
+same-SONAME interface selection still retains the first equivalent interface.
+
+This is metadata support, not standard CRT compatibility or compiler-driver
+integration. Full installed CRT linking still requires combined real-file replay
+with the integrated SFrame support. Exact retained note
+fixtures and GNU oracle provenance are in
+`crates/keel-link/tests/fixtures/gnu-notes/README.md`.
 
 ## Executable initialization and termination
 

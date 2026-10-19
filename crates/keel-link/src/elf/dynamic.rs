@@ -1,8 +1,8 @@
 //! Shared-library interfaces and eagerly bound dynamic executable metadata.
 use super::{BASE, Section, lifecycle, put16, put32, put64, string};
 use crate::Result;
-use object::read::elf::{Dyn, ElfFile64, FileHeader};
-use object::{Object, ObjectSymbol, SymbolFlags};
+use object::read::elf::{Dyn, ElfFile64, FileHeader, ProgramHeader, SectionHeader};
+use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -14,6 +14,10 @@ pub(super) struct Library {
     pub needed: String,
     pub exports: BTreeMap<String, Export>,
     pub required: BTreeSet<String>,
+    // Runtime lookups are separate from undefined strong archive demand.
+    // Includes weak and preemptible defined symbols, but not locally bound
+    // definitions. None may lose a selected executable property provider.
+    pub references: BTreeSet<String>,
 }
 impl Library {
     pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
@@ -75,16 +79,49 @@ impl Library {
             .map_err(|e| e.to_string())?;
         let mut exports = BTreeMap::new();
         let mut required = BTreeSet::new();
+        let mut references = BTreeSet::new();
+        let lookup_symbols = relocation_symbols(&file, bytes, entries)?;
+        let symbolic = entries
+            .iter()
+            .take_while(|e| e.tag32(file.endian()) != Some(object::elf::DT_NULL))
+            .any(|e| {
+                e.tag32(file.endian()) == Some(object::elf::DT_SYMBOLIC)
+                    || (e.tag32(file.endian()) == Some(object::elf::DT_FLAGS)
+                        && e.d_val(file.endian()) & u64::from(object::elf::DF_SYMBOLIC) != 0)
+            });
         for s in file.dynamic_symbols() {
-            if s.is_undefined() && s.is_global() && !s.is_weak() {
-                required.insert(s.name().map_err(|e| e.to_string())?.to_owned());
+            let SymbolFlags::Elf { st_info, st_other } = s.flags() else {
+                unreachable!()
+            };
+            // A defined export alone is not a reference. A real symbol-based
+            // runtime relocation can preempt it unless visibility, local
+            // binding, or DT_SYMBOLIC/DF_SYMBOLIC binds it to this DSO.
+            // A nondefault version is not itself local visibility.
+            if !s.is_undefined()
+                && lookup_symbols.contains(&s.index().0)
+                && st_other & 3 == object::elf::STV_DEFAULT
+                && !symbolic
+            {
+                match st_info >> 4 {
+                    object::elf::STB_LOCAL => {}
+                    object::elf::STB_GLOBAL
+                    | object::elf::STB_WEAK
+                    | object::elf::STB_GNU_UNIQUE => {
+                        references.insert(s.name().map_err(|e| e.to_string())?.to_owned());
+                    }
+                    binding => return Err(format!("unsupported dynamic lookup binding {binding}")),
+                }
+            }
+            if s.is_undefined() && (s.is_global() || s.is_weak()) {
+                let name = s.name().map_err(|e| e.to_string())?.to_owned();
+                references.insert(name.clone());
+                if !s.is_weak() {
+                    required.insert(name);
+                }
             }
             if s.is_undefined() || (!s.is_global() && !s.is_weak()) {
                 continue;
             }
-            let SymbolFlags::Elf { st_info, st_other } = s.flags() else {
-                unreachable!()
-            };
             if !matches!(st_other & 3, 0 | 3) {
                 continue;
             }
@@ -117,8 +154,215 @@ impl Library {
             needed,
             exports,
             required,
+            references,
         })
     }
+}
+
+/// Inspect the loader's REL/RELA and PLT tables, not section names or
+/// Object::dynamic_relocations (which silently skips bad sh_link/tails).
+/// This interface reader requires runtime tables to have matching allocated
+/// section metadata and LOAD bytes. RELR has no symbol indices; NONE,
+/// RELATIVE[64] and IRELATIVE likewise do not perform symbol lookup.
+fn relocation_symbols(
+    file: &ElfFile64<'_>,
+    bytes: &[u8],
+    entries: &[object::elf::Dyn64<object::Endianness>],
+) -> Result<BTreeSet<usize>> {
+    use object::elf::*;
+    let endian = file.endian();
+    let mut tags = BTreeMap::new();
+    for entry in entries
+        .iter()
+        .take_while(|e| e.tag32(endian) != Some(DT_NULL))
+    {
+        if let Some(tag) = entry.tag32(endian) {
+            // Android packed REL/RELA also contain symbol lookups; do not
+            // silently treat a table we cannot inspect as reference-free.
+            if matches!(tag, 0x6000_000f..=0x6000_0012) {
+                return Err("packed dynamic symbol relocations are unsupported".into());
+            }
+            if matches!(
+                tag,
+                DT_REL
+                    | DT_RELSZ
+                    | DT_RELENT
+                    | DT_RELA
+                    | DT_RELASZ
+                    | DT_RELAENT
+                    | DT_JMPREL
+                    | DT_PLTRELSZ
+                    | DT_PLTREL
+                    | DT_SYMTAB
+                    | DT_SYMENT
+                    | DT_STRTAB
+                    | DT_STRSZ
+                    | DT_FLAGS
+                    | DT_SYMBOLIC
+            ) && tags.insert(tag, entry.d_val(endian)).is_some()
+            {
+                return Err(format!("duplicate dynamic relocation/symbol tag {tag}"));
+            }
+        }
+    }
+    let mut tables = Vec::new();
+    for (address, size, entry, kind, width) in [
+        (DT_RELA, DT_RELASZ, DT_RELAENT, SHT_RELA, 24),
+        (DT_REL, DT_RELSZ, DT_RELENT, SHT_REL, 16),
+    ] {
+        if tags.get(&size).copied().unwrap_or(0) != 0 {
+            if tags.get(&entry) != Some(&width) {
+                return Err("invalid dynamic relocation entry size".into());
+            }
+            tables.push((
+                *tags
+                    .get(&address)
+                    .ok_or("missing dynamic relocation address")?,
+                tags[&size],
+                kind,
+                width,
+            ));
+        } else if tags.contains_key(&address) && !tags.contains_key(&size) {
+            return Err("missing dynamic relocation table size".into());
+        }
+    }
+    if tags.get(&DT_PLTRELSZ).copied().unwrap_or(0) != 0 {
+        let (kind, width) = match tags.get(&DT_PLTREL).copied() {
+            Some(v) if v == u64::from(DT_RELA) => (SHT_RELA, 24),
+            Some(v) if v == u64::from(DT_REL) => (SHT_REL, 16),
+            _ => return Err("invalid dynamic PLT relocation format".into()),
+        };
+        tables.push((
+            *tags
+                .get(&DT_JMPREL)
+                .ok_or("missing dynamic PLT relocation address")?,
+            tags[&DT_PLTRELSZ],
+            kind,
+            width,
+        ));
+    } else if tags.contains_key(&DT_JMPREL) && !tags.contains_key(&DT_PLTRELSZ) {
+        return Err("missing dynamic PLT relocation size".into());
+    }
+    let mut symbols = BTreeSet::new();
+    let mut dynamic_segments = 0;
+    for p in file.elf_program_headers() {
+        if p.p_type(endian) == PT_DYNAMIC {
+            dynamic_segments += 1;
+            let segment = p
+                .dynamic(endian, bytes)
+                .map_err(|e| e.to_string())?
+                .unwrap();
+            if !segment
+                .iter()
+                .map(|e| (e.d_tag(endian), e.d_val(endian)))
+                .eq(entries.iter().map(|e| (e.d_tag(endian), e.d_val(endian))))
+            {
+                return Err("dynamic relocation section/segment tables disagree".into());
+            }
+        }
+    }
+    if tables.is_empty() {
+        return Ok(symbols);
+    }
+    if dynamic_segments != 1 {
+        return Err("dynamic relocations require one matching PT_DYNAMIC".into());
+    }
+    let symtab = file.elf_dynamic_symbol_table();
+    let section = file
+        .section_by_index(symtab.section())
+        .map_err(|e| e.to_string())?;
+    if tags.get(&DT_SYMTAB) != Some(&section.address())
+        || tags.get(&DT_SYMENT) != Some(&24)
+        || section.elf_section_header().sh_entsize(endian) != 24
+        || !section.size().is_multiple_of(24)
+    {
+        return Err("dynamic relocations require the selected SHT_DYNSYM association".into());
+    }
+    let strings = file
+        .section_by_index(object::SectionIndex(
+            section.elf_section_header().sh_link(endian) as usize,
+        ))
+        .map_err(|e| e.to_string())?;
+    if tags.get(&DT_STRTAB) != Some(&strings.address())
+        || tags.get(&DT_STRSZ) != Some(&strings.size())
+    {
+        return Err("dynamic relocations require matching dynamic symbol strings".into());
+    }
+    for section in [section, strings] {
+        let data = section.data().map_err(|e| e.to_string())?;
+        if section.elf_section_header().sh_flags(endian) & u64::from(SHF_ALLOC) == 0
+            || !file.elf_program_headers().iter().any(|p| {
+                p.p_type(endian) == PT_LOAD
+                    && p.data_range(endian, bytes, section.address(), section.size())
+                        .ok()
+                        .flatten()
+                        == Some(data)
+            })
+        {
+            return Err("dynamic symbols/strings are not backed by matching LOAD bytes".into());
+        }
+    }
+    for (address, size, kind, width) in tables {
+        if !size.is_multiple_of(width) || address.checked_add(size).is_none() {
+            return Err("invalid dynamic relocation table bounds".into());
+        }
+        let mut data = None;
+        for section in file.sections() {
+            let raw = section.elf_section_header();
+            if raw.sh_type(endian) != kind || raw.sh_flags(endian) & u64::from(SHF_ALLOC) == 0 {
+                continue;
+            }
+            if let Some(range) = section
+                .data_range(address, size)
+                .map_err(|e| e.to_string())?
+            {
+                if raw.sh_link(endian) as usize != symtab.section().0
+                    || raw.sh_entsize(endian) != width
+                    || !(address - section.address()).is_multiple_of(width)
+                    || !section.size().is_multiple_of(width)
+                {
+                    return Err("invalid dynamic relocation section/symbol association".into());
+                }
+                if data.replace(range).is_some() {
+                    return Err("ambiguous dynamic relocation section association".into());
+                }
+            }
+        }
+        let data =
+            data.ok_or("dynamic relocation table lacks matching allocated section metadata")?;
+        if !file.elf_program_headers().iter().any(|p| {
+            p.p_type(endian) == PT_LOAD
+                && p.data_range(endian, bytes, address, size).ok().flatten() == Some(data)
+        }) {
+            return Err("dynamic relocation table is not backed by matching LOAD bytes".into());
+        }
+        for row in data.chunks_exact(width as usize) {
+            let info = u64::from_le_bytes(row[8..16].try_into().unwrap());
+            let kind = info as u32;
+            let symbol = (info >> 32) as usize;
+            if kind == R_X86_64_IRELATIVE && symbol != 0 {
+                return Err("IRELATIVE dynamic relocation must be symbol-free".into());
+            }
+            // COPY lookup excludes the executable from its provider scope.
+            if matches!(
+                kind,
+                R_X86_64_NONE
+                    | R_X86_64_RELATIVE
+                    | R_X86_64_RELATIVE64
+                    | R_X86_64_IRELATIVE
+                    | R_X86_64_COPY
+            ) {
+                continue;
+            }
+            if symbol >= symtab.len() {
+                return Err("dynamic relocation references an invalid symbol index".into());
+            }
+            if symbol != 0 {
+                symbols.insert(symbol);
+            }
+        }
+    }
+    Ok(symbols)
 }
 #[derive(Clone)]
 pub(super) struct Import {

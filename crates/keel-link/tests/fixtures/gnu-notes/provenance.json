@@ -1,0 +1,122 @@
+[
+  {
+    "input": "crt1.o",
+    "input_sha256": "10ac96ba393f9812f1fa92b6a393a08c4b6f38e6d178320a4f258b4c2454b1ca",
+    "section": ".note.gnu.property",
+    "fixture": "crt1.o.note.gnu.property.bin",
+    "sha256": "86a04c4cc8b9d2c91bf640be4cf2eb353cea677f0384c98b0e3a1a34a6a692d5",
+    "size": 80
+  },
+  {
+    "input": "crt1.o",
+    "input_sha256": "10ac96ba393f9812f1fa92b6a393a08c4b6f38e6d178320a4f258b4c2454b1ca",
+    "section": ".note.ABI-tag",
+    "fixture": "crt1.o.note.ABI-tag.bin",
+    "sha256": "f8544bc50c9370bd688abe952318bba9016ef8d7498deada21daa03a25f66b61",
+    "size": 32
+  },
+  {
+    "input": "crti.o",
+    "input_sha256": "caf7f0c99019735e97e9bfabf52c376e86e1ef92d1b53a63c36a5bc2688e8fcc",
+    "section": ".note.gnu.property",
+    "fixture": "crti.o.note.gnu.property.bin",
+    "sha256": "dcc6fc94492ed0b80dec0e55294201d1a45e437b6e70d70460a822ca0b22106a",
+    "size": 80
+  },
+  {
+    "input": "crtbegin.o",
+    "input_sha256": "99b561fbcf63b9180c5da2bad9d4e5ffff1f1c64f1be4e06f705ad5052c11da1",
+    "section": ".note.gnu.property",
+    "fixture": "crtbegin.o.note.gnu.property.bin",
+    "sha256": "dcc6fc94492ed0b80dec0e55294201d1a45e437b6e70d70460a822ca0b22106a",
+    "size": 80
+  },
+  {
+    "input": "crtend.o",
+    "input_sha256": "bcbcd1dcbc7b235c96ab3ff1f06e5b7f44677fed502fa22c2a0b2f8360db71fd",
+    "section": ".note.gnu.property",
+    "fixture": "crtend.o.note.gnu.property.bin",
+    "sha256": "eacb68f7beff6399a6c7925aa0ac5a4925dfbd9c2f66aaf7f9f1a1acce4b1671",
+    "size": 80
+  },
+  {
+    "input": "crtn.o",
+    "input_sha256": "71236f0a232a3686adf2319f3ae172831e8fd8166b9f0764ed184bc4df11be3c",
+    "section": ".note.gnu.property",
+    "fixture": "crtn.o.note.gnu.property.bin",
+    "sha256": "dcc6fc94492ed0b80dec0e55294201d1a45e437b6e70d70460a822ca0b22106a",
+    "size": 80
+  },
+  {
+    "input": "split.o",
+    "input_sha256": "4740ca554ba1e5c1688da2d329be3065e4f55d73da68f1cef7b5340ba111d4b4",
+    "section": ".note.gnu.property",
+    "fixture": "split.o.note.gnu.property.bin",
+    "sha256": "9ecaed19933a9e964091f8b12bbce15ad366f3c0cfda3503ef105817bfe170f1",
+    "size": 112
+  },
+  {
+    "input": "allprops.o",
+    "input_sha256": "3614fe77037d91aff429e5095afb5340278efce5844b70dc6d9b5cdcee4e683d",
+    "section": ".note.gnu.property",
+    "fixture": "allprops.o.note.gnu.property.bin",
+    "sha256": "3c8bba292efe6d17395d553ed0760fe9eb83927fa03b7c4215addbf3c6fe6fcd",
+    "size": 80
+  },
+  {
+    "input": "isazero.o",
+    "input_sha256": "9da18914710cebbfadb9e3e15e18ba7d920a31b67a0cebaa837ed8a77df7ad95",
+    "section": ".note.gnu.property",
+    "fixture": "isazero.o.note.gnu.property.bin",
+    "sha256": "7952340cfcb5f2d02204ae3034aa0ad2e624286e482318219a446890f263732d",
+    "size": 32
+  },
+  {
+    "input": "usedzero.o",
+    "input_sha256": "7a4d8a05e230f2f469feddfa1f9e377727894e2d11bed0a4ffeff4695ccfb317",
+    "section": ".note.gnu.property",
+    "fixture": "usedzero.o.note.gnu.property.bin",
+    "sha256": "049d1ccf5931db6541f634ac636506aa2ddf1073b07157218d102b23c95690ab",
+    "size": 48
+  },
+  {
+    "input": "split-alone",
+    "input_sha256": "13aa504cd73919288510ae1a7ef8551593f0921a254ad2fc398164aabb953075",
+    "section": ".note.gnu.property",
+    "fixture": "split-alone.note.gnu.property.bin",
+    "sha256": "02c84da6b8f8a6fedf5fc18df76c506089f88260db82e2c854240062d244b4d9",
+    "size": 80
+  },
+  {
+    "input": "split-all",
+    "input_sha256": "fdd069c64b6babc4d0689b0acb2085507c1f97b3338cd386ad54c21574667e88",
+    "section": ".note.gnu.property",
+    "fixture": "split-all.note.gnu.property.bin",
+    "sha256": "0decd4323b54408610658b5a06f671e44dd399b195ddffee20c2bc665c02773d",
+    "size": 80
+  },
+  {
+    "input": "split-missing",
+    "input_sha256": "623855dd887a97b0e32413f62cb6a7afe8712affcc62875ad81cb14c6e976e9b",
+    "section": ".note.gnu.property",
+    "fixture": "split-missing.note.gnu.property.bin",
+    "sha256": "800c4c073dc2dcb8de3a2a61841bb597dff57010abb68a286a1d111b78d0af3d",
+    "size": 32
+  },
+  {
+    "input": "split-usedzero",
+    "input_sha256": "52f8cc01154170db822ff10fba842919648f3c10f12f043625b7667fef9cafb5",
+    "section": ".note.gnu.property",
+    "fixture": "split-usedzero.note.gnu.property.bin",
+    "sha256": "1013c364f24d731190ea0f0090ac022be0ecb7ae5420741148ed3448ae671033",
+    "size": 64
+  },
+  {
+    "input": "isazero-gnu",
+    "input_sha256": "e760fc24afa2dda72f9fcd59d7c67044a70dd80a3b5bec0046fc18b6f774b3c3",
+    "section": ".note.gnu.property",
+    "fixture": "isazero-gnu.note.gnu.property.bin",
+    "sha256": "7952340cfcb5f2d02204ae3034aa0ad2e624286e482318219a446890f263732d",
+    "size": 32
+  }
+]

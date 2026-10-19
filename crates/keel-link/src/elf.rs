@@ -3,6 +3,7 @@
 mod dynamic;
 mod input;
 mod lifecycle;
+mod notes;
 mod sframe;
 mod unwind;
 use crate::{Input, Result};
@@ -101,6 +102,7 @@ struct Unit {
     sections: BTreeMap<usize, usize>,
     symbols: BTreeMap<usize, Symbol>,
     relocs: Vec<Reloc>,
+    consumed_properties: BTreeSet<usize>,
 }
 struct Segment {
     flags: u32,
@@ -139,7 +141,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut unwind_sections = BTreeMap::new();
     let mut sframe_section = None;
     let mut warnings = Vec::new();
+    let mut note_plan = notes::Plan::default();
+    let mut object_properties = Vec::new();
     for input in &inputs {
+        let mut properties = notes::Properties::new();
         let mut parse = || -> Result<Unit> {
             let file =
                 ElfFile64::<object::Endianness>::parse(input.bytes).map_err(|e| e.to_string())?;
@@ -157,11 +162,45 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             if file.comdats().next().is_some() {
                 return Err("COMDAT groups are unsupported".into());
             }
+            // object ignores REL/RELA tables not linked to its chosen symbol
+            // table (and sh_info=0). Validate every association before consuming
+            // notes or trusting its per-section relocation iterators.
+            for section in file.sections() {
+                let raw = section.elf_section_header();
+                if !matches!(
+                    raw.sh_type(file.endian()),
+                    object::elf::SHT_REL | object::elf::SHT_RELA
+                ) {
+                    continue;
+                }
+                let name = section.name().map_err(|e| e.to_string())?;
+                let link = raw.sh_link(file.endian());
+                if link == 0 || link as usize != file.elf_symbol_table().section().0 {
+                    return Err(format!(
+                        "unsupported relocation table {name} sh_link {link}: expected the selected SHT_SYMTAB"
+                    ));
+                }
+                let info = raw.sh_info(file.endian());
+                let target = file
+                    .section_by_index(object::SectionIndex(info as usize))
+                    .map_err(|_| format!("invalid relocation table {name} sh_info {info}"))?;
+                if info == 0
+                    || matches!(
+                        target.elf_section_header().sh_type(file.endian()),
+                        object::elf::SHT_REL | object::elf::SHT_RELA
+                    )
+                {
+                    return Err(format!(
+                        "unsupported relocation table {name} sh_info {info}"
+                    ));
+                }
+            }
             let mut unit = Unit {
                 name: input.name.clone(),
                 sections: BTreeMap::new(),
                 symbols: BTreeMap::new(),
                 relocs: Vec::new(),
+                consumed_properties: BTreeSet::new(),
             };
             for section in file.sections() {
                 let name = section.name().map_err(|e| e.to_string())?.to_owned();
@@ -195,6 +234,40 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     raw.sh_link(file.endian()),
                     raw.sh_info(file.endian()),
                 )?;
+                let note = notes::validate(
+                    &name,
+                    kind,
+                    sh_flags,
+                    section.align(),
+                    raw.sh_entsize(file.endian()),
+                    raw.sh_link(file.endian()),
+                    raw.sh_info(file.endian()),
+                )?;
+                if let Some(note) = note {
+                    end(0, section.size())?;
+                    if data.len() as u64 != section.size() {
+                        return Err(format!("invalid section size for {name}"));
+                    }
+                    section.elf_linked_rela().map_err(|e| e.to_string())?;
+                    if section.relocations().next().is_some() {
+                        return Err(format!("relocations into {name} are unsupported"));
+                    }
+                    match note {
+                        notes::Kind::Property => {
+                            notes::properties(data, &mut properties)?;
+                            unit.consumed_properties.insert(section.index().0);
+                            continue;
+                        }
+                        notes::Kind::Abi => {
+                            notes::abi(data)?;
+                            if note_plan.abi.replace(sections.len()).is_some() {
+                                return Err(
+                                    "additional .note.ABI-tag contracts are unsupported".into()
+                                );
+                            }
+                        }
+                    }
+                }
                 let lifecycle = lifecycle::validate(
                     &name,
                     kind,
@@ -234,6 +307,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 let bss = section.kind() == object::SectionKind::UninitializedData;
                 if !lifecycle
                     && !sframe
+                    && note.is_none()
                     && !matches!(
                         section.kind(),
                         object::SectionKind::Text
@@ -377,6 +451,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             Ok(unit)
         };
         units.push(parse().map_err(|e| format!("{}: {e}", input.name))?);
+        object_properties.push(properties);
     }
     let mut globals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut commons: BTreeMap<String, (u64, u64)> = BTreeMap::new();
@@ -517,6 +592,42 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             (u, s)
         })
     };
+    for (ui, u) in units.iter().enumerate() {
+        for r in &u.relocs {
+            let (target_unit, target_symbol) = canonical(ui, r.symbol)?;
+            let target = &units[target_unit].symbols[&target_symbol];
+            if matches!(target.section, SymbolSection::Section(i)
+                if units[target_unit].consumed_properties.contains(&i.0))
+            {
+                return Err(format!(
+                    "{}: reference into consumed GNU property section for `{}` is unsupported",
+                    u.name, target.name
+                ));
+            }
+        }
+    }
+    // DSO consumers have no Unit.relocs. Check their dynamic lookups,
+    // including preemptible defined symbols, against the selected executable
+    // definitions used by native references and dynamic exports. A discarded
+    // weak property definition or a same-named local is not the provider.
+    for library in &libraries {
+        for name in &library.references {
+            if let Some(&(ui, si)) = globals.get(name) {
+                let target = &units[ui].symbols[&si];
+                // Hidden/internal definitions are not executable exports and
+                // cannot satisfy a DSO lookup, even with the same name.
+                if matches!(target.other & 3, 0 | 3)
+                    && matches!(target.section, SymbolSection::Section(i)
+                    if units[ui].consumed_properties.contains(&i.0))
+                {
+                    return Err(format!(
+                        "{}: reference into consumed GNU property section for `{name}` is unsupported (provider {})",
+                        library.needed, units[ui].name
+                    ));
+                }
+            }
+        }
+    }
     let mut got = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
         for r in &u.relocs {
@@ -589,6 +700,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         )?)
     };
     let unwind_header = unwind::prepare(&mut sections, &unwind_sections)?;
+    note_plan.prepare(
+        &mut sections,
+        &object_properties,
+        dynamic.as_ref().is_some_and(|d| !d.stubs.is_empty()),
+    )?;
     let mut segments = Vec::new();
     // Header space holds three LOADs and a non-executable GNU_STACK header.
     let mut cursor = PAGE;
@@ -910,9 +1026,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         + 1
         + usize::from(unwind_header.is_some())
         + usize::from(sframe_section.is_some())
+        + note_plan.header_count()
         + if dynamic.is_some() { 3 } else { 0 };
-    if 64 + phnum * 56 > PAGE as usize {
-        return Err("ELF program headers exceed reserved first page".into());
+    if 64 + 56 * phnum > PAGE as usize {
+        return Err("ELF program headers exceed the reserved first page".into());
     }
     put16(&mut bytes, 56, phnum as u16);
     put16(&mut bytes, 58, 64);
@@ -946,8 +1063,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let s = &sections[*section];
         phdrs.push((sframe::PT_GNU_SFRAME, 4, s.offset, s.size, s.size, 8));
     }
+    phdrs.extend(note_plan.headers(&sections));
     phdrs.push((0x6474e551, 6, 0, 0, 0, 16));
-    debug_assert_eq!(phdrs.len(), phnum);
+    if phdrs.len() != phnum {
+        return Err("inconsistent ELF program header count".into());
+    }
     for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {
         let at = 64 + i * 56;
         put32(&mut bytes, at, *kind);
