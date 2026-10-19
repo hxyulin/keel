@@ -494,7 +494,52 @@ fn folds(
     .map(|(addr, _)| addr);
     addr.into_iter()
         .chain(folded_imm(func, data).map(|(v, _)| v))
+        .chain(folded_divisor(func, data))
         .collect()
+}
+
+/// The divisor of an integer division by a constant that is lowered without
+/// a divide instruction, extended from the IR width to the register width:
+/// not 0 or 1, nor -1 if signed, so no check or trap is needed.
+fn reducible_divisor(func: &Function, data: &InstData) -> Option<i64> {
+    let InstData::Binary { op, args } = *data else {
+        return None;
+    };
+    let signed = match op {
+        BinaryOp::Sdiv | BinaryOp::Srem => true,
+        BinaryOp::Udiv | BinaryOp::Urem => false,
+        _ => return None,
+    };
+    let ty = func.value_type(func.resolve(args[0]));
+    if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
+        return None;
+    }
+    // Iconst's immediate wraps to the IR width, even if it spells a trivial
+    // divisor with a noncanonical bit pattern.
+    let unused = 64 - ty.bytes()? * 8;
+    let bits = (iconst(func, args[1])? as u64) << unused;
+    let divisor = if signed {
+        bits as i64 >> unused
+    } else {
+        (bits >> unused) as i64
+    };
+    let trivial = if signed {
+        (-1..=1).contains(&divisor)
+    } else {
+        divisor as u64 <= 1
+    };
+    (!trivial).then_some(divisor)
+}
+
+/// A quotient by a [`reducible_divisor`] never reads the divisor's register.
+fn folded_divisor(func: &Function, data: &InstData) -> Option<Value> {
+    match *data {
+        InstData::Binary {
+            op: BinaryOp::Sdiv | BinaryOp::Udiv,
+            args,
+        } if reducible_divisor(func, data).is_some() => Some(func.resolve(args[1])),
+        _ => None,
+    }
 }
 
 /// Instructions that clobber the caller-saved registers: calls, the memory
@@ -847,7 +892,11 @@ impl<'a> FunctionCompiler<'a> {
             pipeline
                 .selector
                 .select(func, crate::select::Target::Aarch64, &|data| {
-                    folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
+                    folded_imm(func, data)
+                        .map(|(v, _)| v)
+                        .into_iter()
+                        .chain(folded_divisor(func, data))
+                        .collect()
                 })
         };
         let fused_compares = {
@@ -3410,6 +3459,10 @@ impl<'a> FunctionCompiler<'a> {
             }
             return;
         }
+        if let Some(divisor) = reducible_divisor(self.func, &data) {
+            self.constant_division(op, ty, a, args[1], divisor, d);
+            return;
+        }
         let b = self.use_reg(args[1], S1);
         let (ra, rb, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
         let simple = match op {
@@ -3616,6 +3669,232 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
             _ => unreachable!("handled above"),
+        }
+    }
+
+    /// Divides by a [`reducible_divisor`] without `sdiv`/`udiv`: shifts for
+    /// a power of two, else a multiply by a fixed-point reciprocal (Hacker's
+    /// Delight, chapter 10).
+    ///
+    /// Narrow operands are extended to 32 bits and divided as i32, which
+    /// gives the same register bits as `sdiv`/`udiv` on extended operands.
+    /// Intermediate values use reserved scratch registers. The result may
+    /// alias the dividend or the divisor. Only a remainder reads the divisor.
+    fn constant_division(
+        &mut self,
+        op: BinaryOp,
+        ty: Type,
+        a: u8,
+        divisor_value: Value,
+        divisor: i64,
+        d: u8,
+    ) {
+        let signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
+        let remainder = matches!(op, BinaryOp::Urem | BinaryOp::Srem);
+        let is64 = ty == Type::I64;
+        let bits = if is64 { 64 } else { 32 };
+        let magnitude = if signed {
+            divisor.unsigned_abs()
+        } else {
+            divisor as u64
+        };
+        let r = |n: u8| if is64 { Reg::x(n) } else { Reg::w(n) };
+        let a = self.extend(S0, a, ty, signed);
+        // The quotient's register: a remainder still reads `a` afterwards.
+        let q = if remainder { S2 } else { d };
+        if magnitude.is_power_of_two() {
+            let k = magnitude.trailing_zeros();
+            if !signed {
+                if remainder {
+                    self.mach("and", [r(d).into(), r(a).into(), Arg::imm(magnitude - 1)]);
+                } else {
+                    self.mach("lsr", [r(d).into(), r(a).into(), Arg::imm(k)]);
+                }
+                return;
+            }
+            // Add |d| - 1 to a negative dividend so the shift rounds toward
+            // zero. Neither the bias nor the negation overflows, d = MIN too.
+            if k == 1 {
+                self.mach(
+                    "add",
+                    [
+                        r(S2).into(),
+                        r(a).into(),
+                        r(a).into(),
+                        Arg::shift("lsr", bits - 1),
+                    ],
+                );
+            } else {
+                self.mach("asr", [r(S2).into(), r(a).into(), Arg::imm(bits - 1)]);
+                self.mach(
+                    "add",
+                    [
+                        r(S2).into(),
+                        r(a).into(),
+                        r(S2).into(),
+                        Arg::shift("lsr", bits - k),
+                    ],
+                );
+            }
+            if divisor > 0 {
+                self.mach("asr", [r(q).into(), r(S2).into(), Arg::imm(k)]);
+            } else {
+                let zero = if is64 { Reg::XZR } else { Reg::WZR };
+                self.mach(
+                    "sub",
+                    [r(q).into(), zero.into(), r(S2).into(), Arg::shift("asr", k)],
+                );
+            }
+        } else if signed {
+            let (multiplier, shift) = signed_reciprocal(bits, divisor);
+            // The multiplier is used as signed; when its sign differs from
+            // the divisor's, the dividend corrects the high product.
+            let correction = match (divisor > 0, multiplier >> (bits - 1) == 1) {
+                (true, true) => Some("add"),
+                (false, false) => Some("sub"),
+                _ => None,
+            };
+            self.materialize(S2, multiplier, is64);
+            if is64 {
+                self.mach(
+                    "smulh",
+                    [(Reg::x(S2)).into(), (Reg::x(a)).into(), (Reg::x(S2)).into()],
+                );
+                if let Some(c) = correction {
+                    self.mach(
+                        c,
+                        [(Reg::x(S2)).into(), (Reg::x(S2)).into(), (Reg::x(a)).into()],
+                    );
+                }
+                if shift > 0 {
+                    self.mach(
+                        "asr",
+                        [(Reg::x(S2)).into(), (Reg::x(S2)).into(), Arg::imm(shift)],
+                    );
+                }
+            } else {
+                self.mach(
+                    "smull",
+                    [(Reg::x(S2)).into(), (Reg::w(a)).into(), (Reg::w(S2)).into()],
+                );
+                match correction {
+                    // The high-half and final shifts combine.
+                    None => self.mach(
+                        "asr",
+                        [
+                            (Reg::x(S2)).into(),
+                            (Reg::x(S2)).into(),
+                            Arg::imm(32 + shift),
+                        ],
+                    ),
+                    Some(c) => {
+                        self.mach(
+                            "asr",
+                            [(Reg::x(S2)).into(), (Reg::x(S2)).into(), Arg::imm(32)],
+                        );
+                        self.mach(
+                            c,
+                            [(Reg::w(S2)).into(), (Reg::w(S2)).into(), (Reg::w(a)).into()],
+                        );
+                        if shift > 0 {
+                            self.mach(
+                                "asr",
+                                [(Reg::w(S2)).into(), (Reg::w(S2)).into(), Arg::imm(shift)],
+                            );
+                        }
+                    }
+                }
+            }
+            // The shifts round down; a negative quotient rounds up by one.
+            self.mach(
+                "add",
+                [
+                    r(q).into(),
+                    r(S2).into(),
+                    r(S2).into(),
+                    Arg::shift("lsr", bits - 1),
+                ],
+            );
+        } else {
+            let reciprocal = unsigned_reciprocal(bits, magnitude);
+            self.materialize(S2, reciprocal.multiplier, is64);
+            if is64 {
+                self.mach(
+                    "umulh",
+                    [(Reg::x(S2)).into(), (Reg::x(a)).into(), (Reg::x(S2)).into()],
+                );
+                if reciprocal.add {
+                    // hi + (n - hi) / 2 averages without overflowing.
+                    self.mach(
+                        "sub",
+                        [(Reg::x(S1)).into(), (Reg::x(a)).into(), (Reg::x(S2)).into()],
+                    );
+                    self.mach(
+                        "add",
+                        [
+                            (Reg::x(S2)).into(),
+                            (Reg::x(S2)).into(),
+                            (Reg::x(S1)).into(),
+                            Arg::shift("lsr", 1),
+                        ],
+                    );
+                }
+                self.mach(
+                    "lsr",
+                    [
+                        (Reg::x(q)).into(),
+                        (Reg::x(S2)).into(),
+                        Arg::imm(reciprocal.shift),
+                    ],
+                );
+            } else {
+                self.mach(
+                    "umull",
+                    [(Reg::x(S2)).into(), (Reg::w(a)).into(), (Reg::w(S2)).into()],
+                );
+                if reciprocal.add {
+                    // hi + n fits in 64 bits, so average it directly.
+                    self.mach(
+                        "lsr",
+                        [(Reg::x(S2)).into(), (Reg::x(S2)).into(), Arg::imm(32)],
+                    );
+                    self.mach(
+                        "add",
+                        [
+                            (Reg::x(S2)).into(),
+                            (Reg::x(S2)).into(),
+                            (Reg::w(a)).into(),
+                            Arg::from("uxtw"),
+                        ],
+                    );
+                    self.mach(
+                        "lsr",
+                        [
+                            (Reg::x(q)).into(),
+                            (Reg::x(S2)).into(),
+                            Arg::imm(reciprocal.shift + 1),
+                        ],
+                    );
+                } else {
+                    self.mach(
+                        "lsr",
+                        [
+                            (Reg::x(q)).into(),
+                            (Reg::x(S2)).into(),
+                            Arg::imm(32 + reciprocal.shift),
+                        ],
+                    );
+                }
+            }
+        }
+        if remainder {
+            // remainder = a - q * d, reading the divisor only now.
+            let b = self.use_reg(divisor_value, S1);
+            let b = self.extend(S1, b, ty, signed);
+            self.mach(
+                "msub",
+                [r(d).into(), r(S2).into(), r(b).into(), r(a).into()],
+            );
         }
     }
 
@@ -4759,6 +5038,77 @@ fn min_value(ty: Type) -> u64 {
     }
 }
 
+/// The `width`-bit multiplier and shift dividing by `divisor`, |d| >= 3 and
+/// not a power of two: shift `mulhs(n, m)`, plus n if d > 0 > m or minus n
+/// if d < 0 < m, right by `shift`, then add one if negative (Hacker's
+/// Delight, figure 10-1). Width is a parameter for exhaustive small-width
+/// testing; the arithmetic is exact in u128.
+fn signed_reciprocal(width: u32, divisor: i64) -> (u64, u32) {
+    let ad = u128::from(divisor.unsigned_abs());
+    debug_assert!(ad > 2 && !ad.is_power_of_two() && ad < 1 << (width - 1));
+    let two = 1u128 << (width - 1);
+    let t = two + u128::from(divisor < 0);
+    // The largest dividend magnitude for which the remainder is |d| - 1.
+    let anc = t - 1 - t % ad;
+    let mut p = width - 1;
+    let (mut q1, mut r1) = (two / anc, two % anc);
+    let (mut q2, mut r2) = (two / ad, two % ad);
+    loop {
+        p += 1;
+        q1 *= 2;
+        r1 *= 2;
+        if r1 >= anc {
+            q1 += 1;
+            r1 -= anc;
+        }
+        q2 *= 2;
+        r2 *= 2;
+        if r2 >= ad {
+            q2 += 1;
+            r2 -= ad;
+        }
+        let delta = ad - r2;
+        if q1 > delta || (q1 == delta && r1 != 0) {
+            break;
+        }
+    }
+    let mask = (1u128 << width) - 1;
+    let m = q2 + 1;
+    let m = if divisor < 0 { m.wrapping_neg() } else { m } & mask;
+    (m as u64, p - width)
+}
+
+#[derive(Debug)]
+struct UnsignedReciprocal {
+    multiplier: u64,
+    shift: u32,
+    add: bool,
+}
+
+/// The round-up unsigned reciprocal of `divisor`, > 1 and not a power of two,
+/// as in keel-opt's constant division: q = (mulhu(n, m) [averaged with n if
+/// `add`]) >> shift.
+fn unsigned_reciprocal(width: u32, divisor: u64) -> UnsignedReciprocal {
+    let d = u128::from(divisor);
+    debug_assert!(d > 1 && !d.is_power_of_two() && d < 1 << width);
+    let shift = divisor.ilog2();
+    let numerator = 1u128 << (width + shift);
+    let (proposed, remainder) = (numerator / d, numerator % d);
+    // If the rounding error fits, the w-bit rounded-up reciprocal works;
+    // otherwise a w+1-bit one, with its leading bit handled by averaging.
+    let add = d - remainder >= (1u128 << shift);
+    let multiplier = if add {
+        2 * proposed + u128::from(2 * remainder >= d) + 1
+    } else {
+        proposed + 1
+    };
+    UnsignedReciprocal {
+        multiplier: (multiplier & ((1u128 << width) - 1)) as u64,
+        shift,
+        add,
+    }
+}
+
 fn cond_code(cond: IntCC) -> &'static str {
     match cond {
         IntCC::Eq => "eq",
@@ -4788,5 +5138,198 @@ fn float_cond_code(cond: FloatCC) -> &'static str {
         FloatCC::Ge => "ge",
         FloatCC::Ord => "vc",
         FloatCC::Uno => "vs",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Wraps to `width` bits, signed.
+    fn wrap(width: u32, x: i128) -> i128 {
+        let unused = 128 - width;
+        x << unused >> unused
+    }
+
+    /// The emitted signed sequence in `width`-bit arithmetic.
+    fn signed_quotient(width: u32, n: i128, d: i64) -> i128 {
+        let ad = d.unsigned_abs();
+        if ad.is_power_of_two() {
+            let k = ad.trailing_zeros();
+            let mask = (1i128 << width) - 1;
+            // asr by width - 1, then lsr by width - k, then add.
+            let sign = (n >> (width - 1)) & mask;
+            let t = wrap(width, n + (sign >> (width - k)));
+            let q = t >> k;
+            return if d > 0 { q } else { wrap(width, -q) };
+        }
+        let (m, shift) = signed_reciprocal(width, d);
+        let m = wrap(width, i128::from(m));
+        let mut hi = (n * m) >> width;
+        if d > 0 && m < 0 {
+            hi = wrap(width, hi + n);
+        } else if d < 0 && m > 0 {
+            hi = wrap(width, hi - n);
+        }
+        let q = hi >> shift;
+        q + i128::from(q < 0)
+    }
+
+    /// The emitted unsigned sequence, both the 64-bit averaging and the
+    /// 32-bit wide-sum forms.
+    fn unsigned_quotient(width: u32, n: u128, d: u64) -> u128 {
+        let r = unsigned_reciprocal(width, d);
+        let hi = (n * u128::from(r.multiplier)) >> width;
+        if !r.add {
+            return hi >> r.shift;
+        }
+        let averaged = (hi + ((n - hi) >> 1)) >> r.shift;
+        assert_eq!(averaged, (hi + n) >> (r.shift + 1));
+        averaged
+    }
+
+    fn signed_divisors(width: u32) -> impl Iterator<Item = i64> {
+        let half = 1i64 << (width - 1);
+        (-half..half).filter(|d| !matches!(d, -1..=1))
+    }
+
+    #[test]
+    fn signed_reciprocals_are_exact_for_small_widths() {
+        for width in 3..=10 {
+            let half = 1i128 << (width - 1);
+            for d in signed_divisors(width) {
+                for n in -half..half {
+                    assert_eq!(
+                        signed_quotient(width, n, d),
+                        n / i128::from(d),
+                        "w={width} n={n} d={d}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unsigned_reciprocals_are_exact_for_small_widths() {
+        for width in 3..=10 {
+            for d in 3..1u64 << width {
+                if d.is_power_of_two() {
+                    continue;
+                }
+                for n in 0..1u128 << width {
+                    assert_eq!(unsigned_quotient(width, n, d), n / u128::from(d));
+                }
+            }
+        }
+    }
+
+    /// i8 and i16 divide as i32 on extended values: every divisor, with all
+    /// i8 dividends and a spread of i16 ones.
+    #[test]
+    fn narrow_divisions_through_32_bit_reciprocals() {
+        for width in [8u32, 16] {
+            let half = 1i64 << (width - 1);
+            let dividends: Vec<i128> = if width == 8 {
+                (-half..half).map(i128::from).collect()
+            } else {
+                (-half..half)
+                    .step_by(97)
+                    .chain([-half, -half + 1, -1, 0, 1, half - 1])
+                    .map(i128::from)
+                    .collect()
+            };
+            for d in signed_divisors(width) {
+                for &n in &dividends {
+                    assert_eq!(signed_quotient(32, n, d), n / i128::from(d), "n={n} d={d}");
+                    let (un, ud) = (
+                        (n as u128) & ((1 << width) - 1),
+                        (d as u64) & ((1 << width) - 1),
+                    );
+                    if ud > 2 && !ud.is_power_of_two() {
+                        assert_eq!(unsigned_quotient(32, un, ud), un / u128::from(ud));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_reciprocals_at_quotient_boundaries() {
+        let mut random = 0x9e37_79b9_7f4a_7c15u64;
+        for width in [32u32, 64] {
+            let half = 1i128 << (width - 1);
+            let mask = (1u128 << width) - 1;
+            for i in 0..20_000u64 {
+                random ^= random << 13;
+                random ^= random >> 7;
+                random ^= random << 17;
+                let raw = match i {
+                    0..=200 => i as i128 - 100,
+                    201 => half - 1,
+                    202 => -half,
+                    203 => -half + 1,
+                    204 => half / 3,
+                    _ => wrap(width, i128::from(random >> (i % 61))),
+                };
+                let d = wrap(width, raw);
+                if (-1..=1).contains(&d) {
+                    continue;
+                }
+                let d = d as i64;
+                let ad = i128::from(d.unsigned_abs());
+                let boundary = (half - 1) / ad * ad;
+                let r = wrap(width, i128::from(random.rotate_left(17)));
+                for n in [
+                    -half,
+                    -half + 1,
+                    -boundary,
+                    -boundary - 1,
+                    -1,
+                    0,
+                    1,
+                    ad - 1,
+                    ad,
+                    boundary - 1,
+                    boundary,
+                    half - 1,
+                    r,
+                ] {
+                    let n = wrap(width, n);
+                    assert_eq!(
+                        signed_quotient(width, n, d),
+                        n / i128::from(d),
+                        "w={width} n={n} d={d}"
+                    );
+                }
+                let ud = (d as u64) & mask as u64;
+                if ud > 2 && !ud.is_power_of_two() {
+                    let ubound = mask / u128::from(ud) * u128::from(ud);
+                    for n in [
+                        0,
+                        1,
+                        u128::from(ud) - 1,
+                        u128::from(ud),
+                        ubound - 1,
+                        ubound,
+                        mask,
+                        r as u128 & mask,
+                    ] {
+                        assert_eq!(
+                            unsigned_quotient(width, n, ud),
+                            n / u128::from(ud),
+                            "w={width} n={n} d={ud}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn known_reciprocals() {
+        assert_eq!(signed_reciprocal(32, 3), (0x5555_5556, 0));
+        assert_eq!(signed_reciprocal(32, -5), (0x9999_9999, 1));
+        assert_eq!(signed_reciprocal(32, 7), (0x9249_2493, 2));
+        assert_eq!(signed_reciprocal(64, 3), (0x5555_5555_5555_5556, 0));
     }
 }
