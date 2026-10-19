@@ -1,0 +1,30 @@
+[package]
+name = "keel-cranelift"
+description = "Experimental diagnostic Keel IR to Cranelift bridge"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# A standalone workspace: Cranelift stays out of the main workspace's lock file,
+# its default builds and its offline/locked remote builds. See README.md.
+[workspace]
+
+[dependencies]
+keel-ir = { path = "../keel-ir" }
+# Exact pins; 0.136.3 is the newest stable Cranelift release (2026-10-14).
+# Only the AArch64 backend is compiled. No host detection, JIT or unwind info.
+cranelift-codegen = { version = "=0.136.3", default-features = false, features = ["std", "arm64"] }
+cranelift-frontend = { version = "=0.136.3", default-features = false, features = ["std"] }
+cranelift-module = { version = "=0.136.3", default-features = false, features = ["std"] }
+cranelift-object = { version = "=0.136.3", default-features = false }
+target-lexicon = "0.13"
+
+# The comparison harness links the native backend from the same source tree.
+keel-codegen = { path = "../keel-codegen" }
+keel-asm = { path = "../keel-asm" }
+
+[dev-dependencies]
+# Kernel C sources are compiled to Keel IR in-process for differential tests.
+keel-c = { path = "../keel-c" }
+keel-opt = { path = "../keel-opt" }

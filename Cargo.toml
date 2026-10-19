@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Experimental Cranelift bridge: its own workspace and lock file, so default and
+# offline/locked builds never fetch or compile Cranelift. See its README.
+exclude = ["crates/keel-cranelift"]
 
 [workspace.package]
 version = "0.1.0"

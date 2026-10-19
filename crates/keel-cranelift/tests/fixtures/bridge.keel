@@ -1,0 +1,387 @@
+; Edge cases for the Keel -> Cranelift bridge. Every function is compiled by
+; both the native Keel backend and Cranelift and driven by bridge_driver.c.
+decl @c_narrow(i8 sext, i16 uext) -> i8 sext
+
+; Division and remainder at four widths. The driver never passes a zero
+; divisor or sdiv MIN/-1 here; srem MIN/-1 is defined (0) and is passed.
+func @sdiv64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sdiv v0, v1
+    return v2
+}
+func @srem64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = srem v0, v1
+    return v2
+}
+func @udiv64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = udiv v0, v1
+    return v2
+}
+func @urem64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = urem v0, v1
+    return v2
+}
+func @sdiv8(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = trunc.i8 v1
+    v4 = sdiv v2, v3
+    v5 = sext.i64 v4
+    return v5
+}
+func @srem8(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = trunc.i8 v1
+    v4 = srem v2, v3
+    v5 = sext.i64 v4
+    return v5
+}
+func @udiv16(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i16 v0
+    v3 = trunc.i16 v1
+    v4 = udiv v2, v3
+    v5 = urem v2, v3
+    v6 = uext.i64 v4
+    v7 = uext.i64 v5
+    v8 = iconst.i64 16
+    v9 = shl v7, v8
+    v10 = or v6, v9
+    return v10
+}
+func @srem32(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i32 v0
+    v3 = trunc.i32 v1
+    v4 = srem v2, v3
+    v5 = sdiv v2, v3
+    v6 = sext.i64 v4
+    v7 = uext.i64 v5
+    v8 = iconst.i64 32
+    v9 = shl v7, v8
+    v10 = xor v6, v9
+    return v10
+}
+
+; Shift/rotate amounts of other widths, including oversized ones.
+func @shift_mixed(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = shl v2, v1
+    v4 = trunc.i32 v0
+    v5 = trunc.i8 v1
+    v6 = sshr v4, v5
+    v7 = trunc.i16 v0
+    v8 = trunc.i32 v1
+    v9 = ushr v7, v8
+    v10 = rotl v0, v5
+    v11 = rotr v4, v1
+    v12 = uext.i128 v0
+    v13 = shl v12, v1
+    v14 = iconst.i64 64
+    v15 = ushr v13, v14
+    v16 = trunc.i64 v15
+    v17 = uext.i64 v3
+    v18 = uext.i64 v6
+    v19 = uext.i64 v9
+    v20 = uext.i64 v11
+    v21 = iconst.i64 8
+    v22 = shl v18, v21
+    v23 = iconst.i64 24
+    v24 = shl v19, v23
+    v25 = xor v17, v22
+    v26 = xor v25, v24
+    v27 = xor v26, v10
+    v28 = rotl v20, v14
+    v29 = xor v27, v28
+    v30 = xor v29, v16
+    v31 = sshr v13, v1
+    v32 = trunc.i64 v31
+    v33 = xor v30, v32
+    return v33
+}
+
+; Signed versus unsigned narrow comparisons, packed into bits.
+func @cmp_narrow(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = trunc.i8 v1
+    v4 = icmp.slt v2, v3
+    v5 = icmp.ult v2, v3
+    v6 = icmp.sge v2, v3
+    v7 = icmp.ugt v2, v3
+    v8 = trunc.i16 v0
+    v9 = trunc.i16 v1
+    v10 = icmp.sle v8, v9
+    v11 = icmp.ule v8, v9
+    v12 = icmp.eq v2, v3
+    v13 = icmp.ne v8, v9
+    v14 = uext.i64 v4
+    v15 = uext.i64 v5
+    v16 = uext.i64 v6
+    v17 = uext.i64 v7
+    v18 = uext.i64 v10
+    v19 = uext.i64 v11
+    v20 = uext.i64 v12
+    v21 = uext.i64 v13
+    v22 = iconst.i64 1
+    v23 = shl v15, v22
+    v24 = iconst.i64 2
+    v25 = shl v16, v24
+    v26 = iconst.i64 3
+    v27 = shl v17, v26
+    v28 = iconst.i64 4
+    v29 = shl v18, v28
+    v30 = iconst.i64 5
+    v31 = shl v19, v30
+    v32 = iconst.i64 6
+    v33 = shl v20, v32
+    v34 = iconst.i64 7
+    v35 = shl v21, v34
+    v36 = or v14, v23
+    v37 = or v36, v25
+    v38 = or v37, v27
+    v39 = or v38, v29
+    v40 = or v39, v31
+    v41 = or v40, v33
+    v42 = or v41, v35
+    return v42
+}
+
+func @mulhi(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = umulhi v0, v1
+    v3 = smulhi v0, v1
+    v4 = trunc.i32 v0
+    v5 = trunc.i32 v1
+    v6 = smulhi v4, v5
+    v7 = umulhi v4, v5
+    v8 = sext.i64 v6
+    v9 = uext.i64 v7
+    v10 = iconst.i64 17
+    v11 = rotl v9, v10
+    v12 = xor v2, v3
+    v13 = xor v12, v8
+    v14 = xor v13, v11
+    return v14
+}
+
+; Parallel switch edges to one block with different arguments, an i8
+; switch on bit patterns written signed and unsigned.
+func @switch_args(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 100
+    v2 = iconst.i64 200
+    v3 = iconst.i64 300
+    v4 = iconst.i64 400
+    switch v0, block1(v4), [0: block1(v1), 1: block1(v2), 2: block1(v1), 9: block2, 1000000: block1(v3), -5: block1(v2)]
+block1(v5: i64):
+    v6 = iadd v5, v0
+    return v6
+block2:
+    v7 = trunc.i8 v0
+    switch v7, block3, [255: block4(v1), -128: block4(v2), 127: block4(v3)]
+block3:
+    v8 = iconst.i64 7
+    return v8
+block4(v9: i64):
+    return v9
+}
+func @switch_i8(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = iconst.i64 1
+    v3 = iconst.i64 2
+    v4 = iconst.i64 3
+    switch v1, block1(v4), [255: block1(v2), -128: block1(v3), 0: block2]
+block1(v5: i64):
+    return v5
+block2:
+    v6 = iconst.i64 4
+    return v6
+}
+
+func @brif_same(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = trunc.i8 v0
+    v3 = iconst.i64 77
+    brif v2, block1(v1, v3), block1(v3, v1)
+block1(v4: i64, v5: i64):
+    v6 = isub v4, v5
+    return v6
+}
+
+; A loop whose header carries every value as a block argument.
+func @entry_loop(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    jump block3(v0, v1)
+block3(v10: i64, v11: i64):
+    v2 = iconst.i64 0
+    v3 = icmp.eq v10, v2
+    brif v3, block1(v11), block2
+block2:
+    v4 = iconst.i64 1
+    v5 = isub v10, v4
+    v6 = iconst.i64 3
+    v7 = imul v11, v6
+    v8 = iadd v7, v10
+    jump block3(v5, v8)
+block1(v9: i64):
+    return v9
+}
+
+func @square(i64) -> i64 cc(c) noinline local {
+block0(v0: i64):
+    v1 = imul v0, v0
+    return v1
+}
+func @indirect(i64) -> i64 {
+block0(v0: i64):
+    v1 = symbol_addr @square
+    v2 = call_indirect v1(v0) : (i64) -> i64
+    v3 = iconst.i64 1
+    v4 = iadd v2, v3
+    return v4
+}
+
+; Narrow ABI in both directions: C calls this, and this calls C.
+func @narrow_abi(i8 sext, i16 uext) -> i16 sext {
+block0(v0: i8, v1: i16):
+    v2 = sext.i16 v0
+    v3 = iconst.i16 3
+    v4 = imul v2, v3
+    v5 = iadd v4, v1
+    return v5
+}
+func @call_c_narrow(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = iconst.i64 8
+    v3 = ushr v0, v2
+    v4 = trunc.i16 v3
+    v5 = call @c_narrow(v1, v4)
+    v6 = sext.i64 v5
+    return v6
+}
+
+func @fconv_narrow(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = sitofp.f64 v1
+    v3 = trunc.i16 v0
+    v4 = uitofp.f32 v3
+    v5 = fpext.f64 v4
+    v6 = fadd v2, v5
+    v7 = uitofp.f64 v0
+    v8 = fmul v6, v7
+    v9 = bitcast.i64 v8
+    v10 = sitofp.f32 v0
+    v11 = bitcast.i32 v10
+    v12 = uext.i64 v11
+    v13 = xor v9, v12
+    return v13
+}
+
+; Vector operations over memory. a, b and out are 16-byte buffers.
+func @vec_int(ptr, ptr, ptr) {
+block0(v0: ptr, v1: ptr, v2: ptr):
+    v3 = load.i32x4 v0
+    v4 = load.i32x4 v1
+    v5 = viadd v3, v4
+    v6 = vimul v5, v3
+    v7 = visub v6, v4
+    v8 = vshl v7, v4
+    v9 = vsshr v3, v4
+    v10 = vushr v3, v4
+    v11 = vxor v8, v9
+    v12 = vor v11, v10
+    v13 = vicmp.slt v3, v4
+    v14 = vselect v13, v12, v5
+    v15 = vshuffle v14, v3, [7, 0, 5, 2]
+    v16 = iconst.i32 -99
+    v17 = vinsert v15, v16, 1
+    v18 = vextract v17, 3
+    v19 = vsplat.i32x4 v18
+    v20 = vand v17, v19
+    v21 = bitcast.i16x8 v20
+    v22 = load.i16x8 v1
+    v23 = vimul v21, v22
+    v24 = vshuffle v23, v22, [15, 0, 3, 8, 1, 1, 14, 6]
+    v25 = bitcast.i8x16 v24
+    v26 = vineg v25
+    v27 = vbnot v26
+    v28 = load.i8x16 v0
+    v29 = vsshr v27, v28
+    v30 = load.i64x2 v1
+    v31 = bitcast.i64x2 v29
+    v32 = vimul v31, v30
+    v33 = vicmp.ugt v31, v30
+    v34 = vselect v33, v32, v31
+    store v34, v2
+    return
+}
+func @vec_float(ptr, ptr, ptr) {
+block0(v0: ptr, v1: ptr, v2: ptr):
+    v3 = load.f32x4 v0
+    v4 = load.f32x4 v1
+    v5 = vfadd v3, v4
+    v6 = vfmul v5, v3
+    v7 = vfmin v6, v4
+    v8 = vfmax v7, v3
+    v9 = vfcmp.lt v3, v4
+    v10 = vfcmp.ne v3, v4
+    v11 = vxor v9, v10
+    v12 = vselect v11, v8, v5
+    v13 = vfsqrt v12
+    v14 = vffloor v13
+    v15 = vfcopysign v14, v4
+    v16 = vfneg v15
+    store v16, v2
+    v17 = load.f64x2 v0
+    v18 = load.f64x2 v1
+    v19 = vfdiv v17, v18
+    v20 = vfnearest v19
+    v21 = vfabs v20
+    v22 = iconst.i64 16
+    v23 = ptradd v2, v22
+    store v21, v23
+    return
+}
+
+; Scalar select of a whole vector, and a vector block argument.
+func @vec_select(ptr, ptr, i64) {
+block0(v0: ptr, v1: ptr, v2: i64):
+    v3 = load.i64x2 v0
+    v4 = load.i64x2 v1
+    v5 = trunc.i8 v2
+    v6 = select v5, v3, v4
+    brif v5, block1(v6), block1(v4)
+block1(v7: i64x2):
+    v8 = viadd v7, v6
+    store v8, v0
+    return
+}
+
+; i128 <-> vector bit reinterpretation through memory.
+func @vec_i128(ptr) {
+block0(v0: ptr):
+    v1 = load.i128 v0
+    v2 = bitcast.i32x4 v1
+    v3 = viadd v2, v2
+    v4 = bitcast.i128 v3
+    v5 = iconst.i64 3
+    v6 = uext.i128 v5
+    v7 = rotl v4, v6
+    store v7, v0
+    return
+}
+
+; Explicit traps and trapping division for subprocess tests.
+func @do_trap() -> i64 {
+block0:
+    trap
+}
