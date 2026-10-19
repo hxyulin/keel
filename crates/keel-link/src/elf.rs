@@ -3,6 +3,7 @@
 mod dynamic;
 mod input;
 mod lifecycle;
+mod sframe;
 mod unwind;
 use crate::{Input, Result};
 use object::read::elf::{ElfFile64, FileHeader, SectionHeader};
@@ -136,6 +137,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut sections = Vec::new();
     let mut units = Vec::new();
     let mut unwind_sections = BTreeMap::new();
+    let mut sframe_section = None;
     let mut warnings = Vec::new();
     for input in &inputs {
         let mut parse = || -> Result<Unit> {
@@ -184,6 +186,15 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     return Err("executable stack requests are unsupported".into());
                 }
                 let kind = raw.sh_type(file.endian());
+                let sframe = sframe::validate_section(
+                    &name,
+                    kind,
+                    sh_flags,
+                    section.align(),
+                    raw.sh_entsize(file.endian()),
+                    raw.sh_link(file.endian()),
+                    raw.sh_info(file.endian()),
+                )?;
                 let lifecycle = lifecycle::validate(
                     &name,
                     kind,
@@ -222,6 +233,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 }
                 let bss = section.kind() == object::SectionKind::UninitializedData;
                 if !lifecycle
+                    && !sframe
                     && !matches!(
                         section.kind(),
                         object::SectionKind::Text
@@ -251,6 +263,12 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         unwind::Frames::parse(data).map_err(|e| format!(".eh_frame: {e}"))?;
                     unwind_sections.insert(sections.len(), frames);
                 }
+                if sframe {
+                    if sframe_section.is_some() {
+                        return Err(".sframe: second selected SFrame producer is unsupported; merging is not implemented (empty headers also count)".into());
+                    }
+                    sframe_section = Some((sections.len(), sframe::Table::parse(data)?));
+                }
                 unit.sections.insert(section.index().0, sections.len());
                 sections.push(Section {
                     name,
@@ -266,6 +284,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 // explicitly before consuming it so bad inputs cannot mislink.
                 section.elf_linked_rela().map_err(|e| e.to_string())?;
                 let mut unwind_relocations = BTreeSet::new();
+                let mut sframe_relocations = BTreeSet::new();
                 for (offset, r) in section.relocations() {
                     let RelocationFlags::Elf { r_type: kind } = r.flags() else {
                         return Err("non-ELF relocation".into());
@@ -275,6 +294,13 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                     }
                     if r.has_implicit_addend() {
                         return Err("REL relocations are unsupported; use RELA".into());
+                    }
+                    if sframe {
+                        sframe_section.as_ref().unwrap().1.relocation(
+                            offset,
+                            kind,
+                            &mut sframe_relocations,
+                        )?;
                     }
                     let width = match kind {
                         1 | 24 => 8,
@@ -302,6 +328,13 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                         kind,
                         addend: r.addend(),
                     });
+                }
+                if sframe {
+                    sframe_section
+                        .as_ref()
+                        .unwrap()
+                        .1
+                        .require_relocations(&sframe_relocations)?;
                 }
             }
             for s in file.symbols() {
@@ -403,6 +436,10 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         common.align = common.align.max(alignment);
     }
     sections.push(common);
+    let sframe_targets = sframe_section
+        .as_ref()
+        .map(|(section, table)| table.targets(*section, &units, &sections, &globals))
+        .transpose()?;
     let mut imports: BTreeMap<String, dynamic::Import> = BTreeMap::new();
     for u in &units {
         for s in u.symbols.values() {
@@ -700,6 +737,14 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             bytes[offset..offset + data.len()].copy_from_slice(&data);
         }
     }
+    if let Some((section, table)) = &sframe_section {
+        table.finish(
+            &mut bytes,
+            *section,
+            &sections,
+            sframe_targets.as_ref().unwrap(),
+        )?;
+    }
     if let Some(d) = dynamic.as_mut() {
         let mut definitions = BTreeMap::new();
         for (name, &(ui, si)) in &globals {
@@ -861,22 +906,19 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     put64(&mut bytes, 40, shoff);
     put16(&mut bytes, 52, 64);
     put16(&mut bytes, 54, 56);
-    put16(
-        &mut bytes,
-        56,
-        (segments.len()
-            + 1
-            + usize::from(unwind_header.is_some())
-            + if dynamic.is_some() { 3 } else { 0 }) as u16,
-    );
+    let phnum = segments.len()
+        + 1
+        + usize::from(unwind_header.is_some())
+        + usize::from(sframe_section.is_some())
+        + if dynamic.is_some() { 3 } else { 0 };
+    if 64 + phnum * 56 > PAGE as usize {
+        return Err("ELF program headers exceed reserved first page".into());
+    }
+    put16(&mut bytes, 56, phnum as u16);
     put16(&mut bytes, 58, 64);
     put16(&mut bytes, 60, headers.len() as u16);
     put16(&mut bytes, 62, (headers.len() - 1) as u16);
     let mut phdrs = Vec::new();
-    let phnum = segments.len()
-        + 1
-        + usize::from(unwind_header.is_some())
-        + if dynamic.is_some() { 3 } else { 0 };
     if let Some(d) = &dynamic {
         phdrs.push((6, 4, 64, (phnum * 56) as u64, (phnum * 56) as u64, 8));
         let s = &sections[d.interp];
@@ -900,7 +942,12 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         let s = &sections[header];
         phdrs.push((object::elf::PT_GNU_EH_FRAME, 4, s.offset, s.size, s.size, 4));
     }
+    if let Some((section, _)) = &sframe_section {
+        let s = &sections[*section];
+        phdrs.push((sframe::PT_GNU_SFRAME, 4, s.offset, s.size, s.size, 8));
+    }
     phdrs.push((0x6474e551, 6, 0, 0, 0, 16));
+    debug_assert_eq!(phdrs.len(), phnum);
     for (i, (kind, flags, offset, filesz, memsz, alignment)) in phdrs.iter().enumerate() {
         let at = 64 + i * 56;
         put32(&mut bytes, at, *kind);

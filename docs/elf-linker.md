@@ -156,6 +156,62 @@ arbitrary C++ exception, standard CRT or static-libgcc support; COMDAT and the
 other unsupported features above remain explicit errors. Startup/runtime setup
 is still the caller's responsibility.
 
+### Bounded SFrame v3 metadata
+
+The linker also retains one selected `.sframe` input with `SHT_GNU_SFRAME`
+(`0x6ffffff4`), `SHF_ALLOC` alone, zero entry size/link/info, and power-of-two
+alignment from eight bytes through 1 MiB. It publishes the same loaded bytes
+through one read-only `PT_GNU_SFRAME` (`0x6474e554`, alignment eight), pointing
+at the SFrame header. Archive selection occurs before producer counting;
+unused members do not count. A second selected section is rejected, including
+an empty header. A complete 28-byte header with zero functions, rows and FRE
+length is retained; a zero-byte section is invalid.
+
+The accepted contract follows the retained binutils-2_47 `sframe.h` and
+`libsframe/sframe.c`, matching the installed CRT metadata examined on
+2026-10-20: little-endian v3, AMD64 arch 3, fixed FP=0, RA=-8, no auxiliary
+header, PCREL flag 4 and optional SORTED flag 1. The packed 28-byte header is
+followed immediately by 16-byte indices, then independent FRE blocks. Index
+start fields at `0x1c + 16*i` are intentionally unaligned. Attributes occupy
+five bytes inside the FRE length; row counts exclude attributes. Blocks must
+partition the FRE bytes without sharing, gaps, overlaps or trailing data.
+Only DEFAULT, incrementing-PC, nonsignal frames are supported. Row PC widths
+and signed data-word widths are one, two or four bytes; DEFAULT AMD64 rows
+have N=1 or N=2 offsets, or N=0 for RA undefined (including crt1's PC4 row).
+FLEX, PCMASK, PAUTH, signal frames, other flags/architectures/versions and
+auxiliary conventions are explicit errors.
+
+Every index start field requires exactly one RELA `R_X86_64_PC64`; no other
+real relocation into the section is accepted. `R_NONE` remains a no-op.
+Targets must resolve by original symbol identity into retained native executable
+input code, with a positive complete function range inside that target section.
+Undefined/imported, absolute, common, omitted and noncode targets are rejected.
+After static relocation, each signed field-relative PC is decoded independently
+and checked against that target's final location. Resolved function PCs must
+increase without overlaps; input SORTED is never trusted, and unordered indices
+are rejected until reordering is implemented. SORTED is set only after this
+proof. Raw signed displacement order is insufficient because every field has
+a different anchor. All admitted row bytes and index identities are preserved.
+
+The custom-startup Linux validator uses installed libsframe lookup and
+`dl_iterate_phdr`, comparing identical inputs with GNU ld and checking function
+and row boundaries, RA-undefined rows, LOAD backing, header sizes, discovery
+and sorted-lookup negative controls, second-producer rejection and unused
+archive selection:
+
+```sh
+python3 suite/validate_elf_sframe.py --keel target/debug/keel --out target/elf-sframe
+```
+
+Run it under the caller's workload lock. It uses concrete installed libc and
+libsframe DSOs, without CRT startup. This proves bounded metadata lookup, not
+arbitrary CFI unwinding, full executable coverage, PIE or standard CRT
+compatibility. The observed reference package is binutils **2.47-4**, while
+its assembler/linker/readelf banners report **2.46**; the installed SFrame
+header matches the pinned **2.47** header. Keep these separate facts when
+reporting reference results. The current manual's draft alignment prose and
+older intermediate v3 layouts do not override those installed bytes.
+
 ## Static archives and shared libraries
 
 Regular GNU/BSD `ar` archives are extracted lazily, left to right. Each archive
