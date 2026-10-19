@@ -341,7 +341,14 @@ block0(v0: {from}):
 }}"
             );
             let (original, optimized) = optimize(&source);
-            assert!(optimized.to_string().contains(conversion), "{optimized}");
+            // `uge 0` is decided by width alone; a zero extension is
+            // nonnegative and cannot be all ones.
+            let decided = cc == "uge" || (conversion == "uext" && matches!(cc, "slt" | "ne"));
+            assert_eq!(
+                optimized.to_string().contains(conversion),
+                !decided,
+                "{optimized}"
+            );
             for input in inputs(from[1..].parse().unwrap()) {
                 assert_eq!(
                     execute(&original.functions[0], &[input]),

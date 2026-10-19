@@ -4,6 +4,14 @@
 //! identities require a known nonzero divisor; x/x and 0/x may still trap.
 //! A use worklist revisits consumers after substitutions, including when
 //! layout order differs from definition order across blocks.
+//!
+//! Width-aware rules look at most `DEPTH` producers deep for bits that may be
+//! set (masks, shifts, extensions, comparisons, counts). They remove masks
+//! and shifts that cannot change a value, decide integer comparisons against
+//! constants, and turn tests adjacent to a range bound into equality. Shift
+//! amounts are reduced modulo the width, as the IR defines. These rules and
+//! single-use constant grouping (`iadd`/`isub`/`ptradd`, ...) run only in the
+//! worklist; the bounded Fast visit keeps the original local rules.
 
 mod constant_division;
 
@@ -42,6 +50,286 @@ fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
         return None;
     };
     Some((op, args.map(|v| func.resolve(v))))
+}
+
+/// Use information for profitability gates only. User lists can overcount
+/// (stale or removed users) but never undercount, so a shared value is never
+/// mistaken for an unshared one. Only the worklist (`Users`) enables the
+/// width-aware rules: in Fast they cost about 3% more optimizer instructions
+/// on the 44-file C corpus for a 0.2% object-size reduction (2026-10-19).
+#[derive(Clone, Copy)]
+enum Uses<'a> {
+    /// The worklist's user lists. Also enables reciprocal division expansion.
+    Users(&'a [Vec<Inst>]),
+    /// Fast keeps no use information: every value may be shared.
+    Unknown,
+}
+
+impl Uses<'_> {
+    fn single(self, value: Value) -> bool {
+        match self {
+            Uses::Users(users) => users.get(value.index()).is_some_and(|u| u.len() == 1),
+            Uses::Unknown => false,
+        }
+    }
+}
+
+/// A literal before `inst`, or None if an i128 value is not representable as
+/// the IR's sign-extended i64 immediate.
+fn literal(func: &mut Function, inst: Inst, ty: Type, bits: u128) -> Option<Value> {
+    let bits = bits & mask(ty);
+    let imm = bits as i64;
+    if imm as i128 as u128 & mask(ty) != bits {
+        return None;
+    }
+    let c = func.insert_inst(InsertPoint::Before(inst), InstData::Iconst { ty, imm });
+    func.set_inst_loc(c, func.inst_loc(inst));
+    Some(func.first_result(c))
+}
+
+/// Producers examined by `possible`: at most 15 for binary trees of this depth.
+const DEPTH: u32 = 3;
+
+/// A constant shift or rotate amount, reduced modulo the operated width.
+fn count(func: &Function, value: Value, width: u32) -> Option<u32> {
+    bits(func, value).map(|n| (n % u128::from(width)) as u32)
+}
+
+/// Bits that may be one in integer `value`, looking through at most `depth`
+/// producers. Unknown producers and parameters give the full width.
+fn possible(func: &Function, value: Value, depth: u32) -> u128 {
+    let value = func.resolve(value);
+    let ty = func.value_type(value);
+    if !ty.is_int() {
+        return u128::MAX;
+    }
+    let full = mask(ty);
+    let ValueDef::Result(inst, index) = func.value_def(value) else {
+        return full;
+    };
+    let data = func.inst_data(inst);
+    if index != 0 {
+        return if matches!(data, InstData::Overflow { .. }) {
+            1
+        } else {
+            full
+        };
+    }
+    let width = 8 * ty.bytes().unwrap();
+    let next = |v| possible(func, v, depth - 1);
+    match *data {
+        InstData::Iconst { imm, .. } => imm as i128 as u128 & full,
+        InstData::Icmp { .. } | InstData::Fcmp { .. } => 1,
+        _ if depth == 0 => full,
+        // Counts are at most the width, which is a power of two.
+        InstData::Unary {
+            op: UnaryOp::Clz | UnaryOp::Ctz | UnaryOp::Popcnt,
+            ..
+        } => (u128::MAX >> (127 - width.ilog2())) & full,
+        InstData::Convert {
+            op: ConvertOp::Uext,
+            arg,
+            ..
+        } => next(arg),
+        InstData::Convert {
+            op: ConvertOp::Sext,
+            arg,
+            ..
+        } => {
+            let from = mask(func.value_type(arg));
+            let bits = next(arg);
+            if bits & (from ^ (from >> 1)) == 0 {
+                bits
+            } else {
+                bits | (full & !from)
+            }
+        }
+        InstData::Convert {
+            op: ConvertOp::Trunc,
+            arg,
+            ..
+        } => next(arg) & full,
+        InstData::Binary { op, args: [a, b] } => match op {
+            BinaryOp::And => next(a) & next(b),
+            BinaryOp::Or | BinaryOp::Xor => next(a) | next(b),
+            BinaryOp::Shl | BinaryOp::Ushr => match count(func, b, width) {
+                Some(n) if op == BinaryOp::Shl => (next(a) << n) & full,
+                Some(n) => next(a) >> n,
+                None => full,
+            },
+            _ => full,
+        },
+        InstData::Select { args: [_, a, b] } => next(a) | next(b),
+        _ => full,
+    }
+}
+
+/// Removes masks and shifts using bits that cannot be set, and combines
+/// constant shift pairs. Shift amounts are reduced modulo the width first.
+fn bits_and_shifts(
+    func: &mut Function,
+    inst: Inst,
+    op: BinaryOp,
+    a: Value,
+    b: Value,
+    ty: Type,
+) -> Option<Fold> {
+    if !ty.is_int() {
+        return None;
+    }
+    let full = mask(ty);
+    let width = 8 * ty.bytes().unwrap();
+    match op {
+        BinaryOp::And => {
+            let set = possible(func, a, DEPTH);
+            if set & possible(func, b, DEPTH) == 0 {
+                return Some(zero(ty));
+            }
+            let c = bits(func, b)?;
+            (set & !c == 0).then_some(Fold::Value(a))
+        }
+        BinaryOp::Or => {
+            let c = bits(func, b)?;
+            (possible(func, a, DEPTH) & !c == 0).then_some(Fold::Value(b))
+        }
+        BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
+            let n = count(func, b, width)?;
+            let set = possible(func, a, DEPTH);
+            let shifted = if op == BinaryOp::Shl {
+                (set << n) & full
+            } else {
+                set >> n
+            };
+            if shifted == 0 {
+                return Some(zero(ty));
+            }
+            let (inner, [x, k]) = binary(func, a)?;
+            let m = count(func, k, width)?;
+            let count_ty = func.value_type(b);
+            let combined = |func: &mut Function, op, total: u32| {
+                let total = literal(func, inst, count_ty, u128::from(total))?;
+                Some(Fold::Data(InstData::Binary {
+                    op,
+                    args: [x, total],
+                }))
+            };
+            match (inner, op) {
+                // Clearing high or low bits is one mask operation.
+                (BinaryOp::Shl, BinaryOp::Ushr)
+                | (BinaryOp::Ushr | BinaryOp::Sshr, BinaryOp::Shl)
+                    if m == n =>
+                {
+                    let keep = if op == BinaryOp::Ushr {
+                        full >> n
+                    } else {
+                        (full << n) & full
+                    };
+                    let keep = literal(func, inst, ty, keep)?;
+                    Some(Fold::Data(InstData::Binary {
+                        op: BinaryOp::And,
+                        args: [x, keep],
+                    }))
+                }
+                (BinaryOp::Shl, BinaryOp::Shl) | (BinaryOp::Ushr, BinaryOp::Ushr) => {
+                    if m + n >= width {
+                        Some(zero(ty))
+                    } else {
+                        combined(func, op, m + n)
+                    }
+                }
+                (BinaryOp::Sshr, BinaryOp::Sshr) => combined(func, op, (m + n).min(width - 1)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Integer comparisons decided by the operand's possible bits, the type's
+/// bounds, or an invertible operation; adjacent ordered tests become equality.
+fn compare(func: &mut Function, inst: Inst, cond: IntCC, a: Value, b: Value) -> Option<Fold> {
+    let ty = func.value_type(a);
+    if !ty.is_int() {
+        return None;
+    }
+    let full = mask(ty);
+    let k = bits(func, b);
+    if matches!(cond, IntCC::Eq | IntCC::Ne)
+        && let Some((op, [x, y])) = binary(func, a)
+    {
+        // x - y and x ^ y are zero exactly when x == y.
+        if k == Some(0) && matches!(op, BinaryOp::Isub | BinaryOp::Xor) {
+            let mut data = InstData::Icmp { cond, args: [x, y] };
+            crate::canonicalize::normalize(func, &mut data);
+            return Some(Fold::Data(data));
+        }
+        let target = match (op, k, bits(func, y)) {
+            (BinaryOp::Iadd, Some(k), Some(c)) => Some(k.wrapping_sub(c)),
+            (BinaryOp::Isub, Some(k), Some(c)) => Some(k.wrapping_add(c)),
+            (BinaryOp::Xor, Some(k), Some(c)) => Some(k ^ c),
+            _ => None,
+        };
+        if let Some(target) = target.and_then(|t| literal(func, inst, ty, t)) {
+            return Some(Fold::Data(InstData::Icmp {
+                cond,
+                args: [x, target],
+            }));
+        }
+    }
+    let k = k?;
+    let set = possible(func, a, DEPTH);
+    if cond == IntCC::Eq || cond == IntCC::Ne {
+        return (k & !set != 0).then(|| truth(cond == IntCC::Ne));
+    }
+    // Compare in an unsigned key space; signed order is unsigned order with
+    // the sign bit flipped. [lo, hi] bounds every value of `a`.
+    let signed = matches!(cond, IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge);
+    let sign = full ^ (full >> 1);
+    let (key, lo, hi) = if !signed {
+        (k, 0, set)
+    } else if set & sign == 0 {
+        (k ^ sign, sign, sign | set)
+    } else {
+        (k ^ sign, 0, full)
+    };
+    let decided = match cond {
+        IntCC::Slt | IntCC::Ult => (hi < key).then_some(true).or((lo >= key).then_some(false)),
+        IntCC::Sle | IntCC::Ule => (hi <= key).then_some(true).or((lo > key).then_some(false)),
+        IntCC::Sgt | IntCC::Ugt => (lo > key).then_some(true).or((hi <= key).then_some(false)),
+        _ => (lo >= key).then_some(true).or((hi < key).then_some(false)),
+    };
+    if let Some(value) = decided {
+        return Some(truth(value));
+    }
+    // Undecided: lo < key <= hi for < and >=, lo <= key < hi for <= and >.
+    let (cond, bound) = match cond {
+        IntCC::Slt | IntCC::Ult if key == lo + 1 => (IntCC::Eq, lo),
+        IntCC::Slt | IntCC::Ult if key == hi => (IntCC::Ne, hi),
+        IntCC::Sle | IntCC::Ule if key == lo => (IntCC::Eq, lo),
+        IntCC::Sle | IntCC::Ule if key + 1 == hi => (IntCC::Ne, hi),
+        IntCC::Sgt | IntCC::Ugt if key == lo => (IntCC::Ne, lo),
+        IntCC::Sgt | IntCC::Ugt if key + 1 == hi => (IntCC::Eq, hi),
+        IntCC::Sge | IntCC::Uge if key == lo + 1 => (IntCC::Ne, lo),
+        IntCC::Sge | IntCC::Uge if key == hi => (IntCC::Eq, hi),
+        _ => return None,
+    };
+    let bound = if signed { bound ^ sign } else { bound };
+    let bound = if bound == k {
+        b
+    } else {
+        literal(func, inst, ty, bound)?
+    };
+    Some(Fold::Data(InstData::Icmp {
+        cond,
+        args: [a, bound],
+    }))
+}
+
+fn truth(value: bool) -> Fold {
+    Fold::Data(InstData::Iconst {
+        ty: Type::I8,
+        imm: i64::from(value),
+    })
 }
 
 fn boolean(func: &Function, op: BinaryOp, a: Value, b: Value, ty: Type) -> Option<Fold> {
@@ -94,8 +382,11 @@ fn algebra(
     a: Value,
     b: Value,
     ty: Type,
-    users: &[Vec<Inst>],
+    uses: Uses,
 ) -> Option<Fold> {
+    if op == BinaryOp::Ptradd {
+        return offsets(func, inst, op, a, b, uses);
+    }
     if !matches!(
         op,
         BinaryOp::Iadd
@@ -154,34 +445,73 @@ fn algebra(
             }
         }
     }
+    if matches!(op, BinaryOp::Iadd | BinaryOp::Isub) {
+        return offsets(func, inst, op, a, b, uses);
+    }
     // Reassociation must remove the inner operation, rather than duplicate a
     // shared computation or merely move constants between live expressions.
-    if op != BinaryOp::Isub
-        && users[a.index()].len() == 1
+    if uses.single(a)
         && let Some((inner_op, args)) = binary(func, a)
         && inner_op == op
         && let (Some(c1), Some(c2)) = (bits(func, args[1]), bits(func, b))
     {
         let combined = match op {
-            BinaryOp::Iadd => c1.wrapping_add(c2),
             BinaryOp::Imul => c1.wrapping_mul(c2),
             BinaryOp::And => c1 & c2,
             BinaryOp::Or => c1 | c2,
             BinaryOp::Xor => c1 ^ c2,
             _ => unreachable!(),
-        } & mask(ty);
-        let imm = combined as i64;
-        if ty == Type::I128 && imm as i128 as u128 != combined {
-            return None;
-        }
-        let c = func.insert_inst(InsertPoint::Before(inst), InstData::Iconst { ty, imm });
-        func.set_inst_loc(c, func.inst_loc(inst));
+        };
+        let c = literal(func, inst, ty, combined)?;
         return Some(Fold::Data(InstData::Binary {
             op,
-            args: [args[0], func.first_result(c)],
+            args: [args[0], c],
         }));
     }
     None
+}
+
+/// Groups constant integer offsets (`iadd`/`isub`) or constant pointer
+/// offsets (`ptradd`) into one, wrapping at the offset's width, under the
+/// same single-use gate as other reassociation.
+fn offsets(
+    func: &mut Function,
+    inst: Inst,
+    op: BinaryOp,
+    a: Value,
+    b: Value,
+    uses: Uses,
+) -> Option<Fold> {
+    let offset = |op, c: u128| match op {
+        BinaryOp::Iadd | BinaryOp::Ptradd => Some(c),
+        BinaryOp::Isub => Some(c.wrapping_neg()),
+        _ => None,
+    };
+    let outer = offset(op, bits(func, b)?)?;
+    if !uses.single(a) {
+        return None;
+    }
+    let (inner_op, [x, k]) = binary(func, a)?;
+    if (inner_op == BinaryOp::Ptradd) != (op == BinaryOp::Ptradd) {
+        return None;
+    }
+    let ty = func.value_type(b);
+    let m = mask(ty);
+    let total = offset(inner_op, bits(func, k)?)?.wrapping_add(outer) & m;
+    if total == 0 {
+        return Some(Fold::Value(x));
+    }
+    // Integer offsets keep a positive literal, as frontends write them.
+    let (op, total) = match op {
+        BinaryOp::Ptradd => (op, total),
+        _ if total & (m ^ (m >> 1)) != 0 => (BinaryOp::Isub, total.wrapping_neg() & m),
+        _ => (BinaryOp::Iadd, total),
+    };
+    let total = literal(func, inst, ty, total)?;
+    Some(Fold::Data(InstData::Binary {
+        op,
+        args: [x, total],
+    }))
 }
 
 // Extensions preserve zero/nonzero only when they strictly widen integers.
@@ -236,7 +566,59 @@ fn simplify_branch(func: &Function, inst: Inst) -> Option<InstData> {
     Some(data)
 }
 
-fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Option<Fold> {
+fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool) -> Option<Fold> {
+    if a == b {
+        return Some(Fold::Value(a));
+    }
+    if let Some(c) = bits(func, cond) {
+        return Some(Fold::Value(if c == 0 { b } else { a }));
+    }
+    if !full {
+        return None;
+    }
+    // The selection already tests nonzero; an equality with zero only
+    // decides the arm order. i128 conditions stay compared.
+    if let ValueDef::Result(test, 0) = func.value_def(cond)
+        && let InstData::Icmp {
+            cond: cc @ (IntCC::Eq | IntCC::Ne),
+            args: [x, zero],
+        } = *func.inst_data(test)
+        && bits(func, zero) == Some(0)
+        && func.value_type(x).bytes().is_some_and(|n| n <= 8)
+        && func.value_type(x).is_int()
+    {
+        let x = func.resolve(x);
+        let args = if cc == IntCC::Ne {
+            [x, a, b]
+        } else {
+            [x, b, a]
+        };
+        return Some(Fold::Data(InstData::Select { args }));
+    }
+    // A 0/1 condition selecting 1 or 0 is the condition at the result width.
+    let from = func.value_type(cond);
+    if ty.is_int()
+        && (bits(func, a), bits(func, b)) == (Some(1), Some(0))
+        && possible(func, cond, DEPTH) & !1 == 0
+    {
+        return Some(match ty.bytes().cmp(&from.bytes()) {
+            std::cmp::Ordering::Equal => Fold::Value(cond),
+            std::cmp::Ordering::Greater => Fold::Data(InstData::Convert {
+                op: ConvertOp::Uext,
+                ty,
+                arg: cond,
+            }),
+            std::cmp::Ordering::Less => Fold::Data(InstData::Convert {
+                op: ConvertOp::Trunc,
+                ty,
+                arg: cond,
+            }),
+        });
+    }
+    None
+}
+
+fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
     let canonicalized = data != *func.inst_data(inst);
@@ -246,19 +628,26 @@ fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Opt
     }
     let result = *func.inst_results(inst).first()?;
     let ty = func.value_type(result);
-    if let InstData::Select { args: [cond, a, b] } = data {
-        if a == b {
-            return Some(Fold::Value(a));
-        }
-        if let Some(c) = bits(func, cond) {
-            return Some(Fold::Value(if c == 0 { b } else { a }));
-        }
+    // Width-aware rules, reassociation and division expansion are measured
+    // costs (see `Uses`); Fast keeps only the original local rules.
+    let full = matches!(uses, Uses::Users(_));
+    if let InstData::Select { args: [cond, a, b] } = data
+        && let Some(fold) = select(func, cond, a, b, ty, full)
+    {
+        return Some(fold);
     }
     if !matches!(data, InstData::Iconst { .. } | InstData::Fconst { .. })
         && func.inst_results(inst).len() == 1
         && let Some(folded) = const_fold::fold(&data, |v| constant(func, v))
     {
         return Some(Fold::Data(folded));
+    }
+    if let InstData::Icmp { cond, args: [a, b] } = data
+        && full
+        && a != b
+        && let Some(fold) = compare(func, inst, cond, a, b)
+    {
+        return Some(fold);
     }
     match data {
         InstData::Binary { op, args: [a, b] } if !op.is_float() => {
@@ -302,9 +691,10 @@ fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Opt
             if let Some(fold) = boolean(func, op, a, b, ty) {
                 return Some(fold);
             }
-            if let Some(users) = users
-                && let Some(fold) = algebra(func, inst, op, a, b, ty, users)
-            {
+            if full && let Some(fold) = bits_and_shifts(func, inst, op, a, b, ty) {
+                return Some(fold);
+            }
+            if full && let Some(fold) = algebra(func, inst, op, a, b, ty, uses) {
                 return Some(fold);
             }
             let power = match op {
@@ -325,20 +715,10 @@ fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Opt
                     BinaryOp::Urem => {
                         // Remainder by a power of two is a mask; use a
                         // same-width constant and retain the result handle.
-                        if ty == Type::I128 && power > (1u128 << 63) {
-                            return None;
-                        }
-                        let c = func.insert_inst(
-                            InsertPoint::Before(inst),
-                            InstData::Iconst {
-                                ty,
-                                imm: (power - 1) as i64,
-                            },
-                        );
-                        func.set_inst_loc(c, func.inst_loc(inst));
+                        let c = literal(func, inst, ty, power - 1)?;
                         return Some(Fold::Data(InstData::Binary {
                             op: BinaryOp::And,
-                            args: [a, func.first_result(c)],
+                            args: [a, c],
                         }));
                     }
                     _ => return None,
@@ -357,7 +737,7 @@ fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Opt
                 }));
             }
             if matches!(op, BinaryOp::Udiv | BinaryOp::Urem)
-                && users.is_some()
+                && full
                 && let Some(divisor) = y
                 && let Some(data) = constant_division::reduce(func, inst, op, a, b, ty, divisor)
             {
@@ -386,6 +766,19 @@ fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Opt
                 && ty == func.value_type(arg)
             {
                 return Some(Fold::Value(arg));
+            }
+            // Truncation ignores an operation that cannot change its low bits.
+            if op == ConvertOp::Trunc
+                && full
+                && let Some((inner, [x, y])) = binary(func, arg)
+                && let Some(c) = bits(func, y)
+                && match inner {
+                    BinaryOp::And => c & mask(ty) == mask(ty),
+                    BinaryOp::Or | BinaryOp::Xor => c & mask(ty) == 0,
+                    _ => false,
+                }
+            {
+                return Some(Fold::Data(InstData::Convert { op, ty, arg: x }));
             }
             let ValueDef::Result(inner, _) = func.value_def(arg) else {
                 return None;
@@ -581,7 +974,7 @@ pub fn run(func: &mut Function) -> bool {
             }
             continue;
         }
-        let Some(fold) = simplify(func, inst, Some(&users)) else {
+        let Some(fold) = simplify(func, inst, Uses::Users(&users)) else {
             continue;
         };
         let result = func.first_result(inst);
@@ -634,12 +1027,12 @@ pub fn run(func: &mut Function) -> bool {
 }
 
 /// One visit, with no user graph, reassociation, reciprocal division expansion,
-/// or consumer requeue. Used by the bounded Fast pipeline.
+/// width-aware rules, or consumer requeue. Used by the bounded Fast pipeline.
 pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
     if func.inst_results(inst).is_empty() {
         return false;
     }
-    let Some(fold) = simplify(func, inst, None) else {
+    let Some(fold) = simplify(func, inst, Uses::Unknown) else {
         return false;
     };
     match fold {

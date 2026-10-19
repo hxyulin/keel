@@ -22,6 +22,26 @@ removing a redundant mask, or replacing a trivial parameter simplifies the
 representation. Inlining/unrolling/code-motion choices need additional
 profitability policy. They should not prevent improving scalar reasoning first.
 
+### Local worklist rules
+
+Basic and Full `instcombine` also use a bounded, three-producer-depth
+possible-bits query. It removes redundant masks and shifts, decides comparisons
+against type or masked-value bounds, and replaces adjacent-bound comparisons
+with equality tests. It builds no whole-function bit analysis.
+
+The worklist combines constant shift pairs, looks through bit operations when
+truncation discards their effect, moves equality through invertible wrapping
+operations, simplifies integer zero-test selects, and groups single-use
+integer/pointer offsets. Counts are normalized to the operated width; i128
+literal creation retains the IR's sign-extended i64 representability limit.
+Effectful and trapping producers remain pinned even if a consuming expression
+becomes constant. Floating-point arithmetic keeps its strict rules.
+
+These additional rules use the worklist's existing use information. Fast's
+single-visit simplifier and bounded tables retain their earlier rules; no use
+graph, extra rewrite loop, or new pass was added to Fast. Pipeline order and
+tier defaults are unchanged.
+
 ## Canonicalization contract
 
 Basic and Full first canonicalize the CFG with `simplify-cfg`, then run operand
