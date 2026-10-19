@@ -236,7 +236,7 @@ fn simplify_branch(func: &Function, inst: Inst) -> Option<InstData> {
     Some(data)
 }
 
-fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold> {
+fn simplify(func: &mut Function, inst: Inst, users: Option<&[Vec<Inst>]>) -> Option<Fold> {
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
     let canonicalized = data != *func.inst_data(inst);
@@ -302,7 +302,9 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
             if let Some(fold) = boolean(func, op, a, b, ty) {
                 return Some(fold);
             }
-            if let Some(fold) = algebra(func, inst, op, a, b, ty, users) {
+            if let Some(users) = users
+                && let Some(fold) = algebra(func, inst, op, a, b, ty, users)
+            {
                 return Some(fold);
             }
             let power = match op {
@@ -355,6 +357,7 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
                 }));
             }
             if matches!(op, BinaryOp::Udiv | BinaryOp::Urem)
+                && users.is_some()
                 && let Some(divisor) = y
                 && let Some(data) = constant_division::reduce(func, inst, op, a, b, ty, divisor)
             {
@@ -504,38 +507,46 @@ fn reuse_quotients(func: &mut Function) -> bool {
     for block in func.blocks().collect::<Vec<_>>() {
         quotients.clear();
         for inst in func.block_insts(block).to_vec() {
-            let InstData::Binary { op, args } = *func.inst_data(inst) else {
-                continue;
-            };
-            let args = args.map(|v| func.resolve(v));
-            let division = match op {
-                BinaryOp::Sdiv | BinaryOp::Udiv => {
-                    quotients.insert((op, args), func.first_result(inst));
-                    continue;
-                }
-                BinaryOp::Srem => BinaryOp::Sdiv,
-                BinaryOp::Urem => BinaryOp::Udiv,
-                _ => continue,
-            };
-            let Some(&quotient) = quotients.get(&(division, args)) else {
-                continue;
-            };
-            let product = func.insert_inst(
-                InsertPoint::Before(inst),
-                InstData::Binary {
-                    op: BinaryOp::Imul,
-                    args: [quotient, args[1]],
-                },
-            );
-            func.set_inst_loc(product, func.inst_loc(inst));
-            *func.inst_data_mut(inst) = InstData::Binary {
-                op: BinaryOp::Isub,
-                args: [args[0], func.first_result(product)],
-            };
-            changed = true;
+            changed |= reuse_quotient(func, inst, &mut quotients);
         }
     }
     changed
+}
+
+pub(crate) type Quotients = std::collections::HashMap<(BinaryOp, [Value; 2]), Value>;
+
+/// The caller clears this table at every block boundary and may cap its size.
+/// Only an earlier quotient can guard the remainder's zero/overflow behavior.
+pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Quotients) -> bool {
+    let InstData::Binary { op, args } = *func.inst_data(inst) else {
+        return false;
+    };
+    let args = args.map(|v| func.resolve(v));
+    let division = match op {
+        BinaryOp::Sdiv | BinaryOp::Udiv => {
+            quotients.insert((op, args), func.first_result(inst));
+            return false;
+        }
+        BinaryOp::Srem => BinaryOp::Sdiv,
+        BinaryOp::Urem => BinaryOp::Udiv,
+        _ => return false,
+    };
+    let Some(&quotient) = quotients.get(&(division, args)) else {
+        return false;
+    };
+    let product = func.insert_inst(
+        InsertPoint::Before(inst),
+        InstData::Binary {
+            op: BinaryOp::Imul,
+            args: [quotient, args[1]],
+        },
+    );
+    func.set_inst_loc(product, func.inst_loc(inst));
+    *func.inst_data_mut(inst) = InstData::Binary {
+        op: BinaryOp::Isub,
+        args: [args[0], func.first_result(product)],
+    };
+    true
 }
 
 pub fn run(func: &mut Function) -> bool {
@@ -570,7 +581,7 @@ pub fn run(func: &mut Function) -> bool {
             }
             continue;
         }
-        let Some(fold) = simplify(func, inst, &users) else {
+        let Some(fold) = simplify(func, inst, Some(&users)) else {
             continue;
         };
         let result = func.first_result(inst);
@@ -620,4 +631,34 @@ pub fn run(func: &mut Function) -> bool {
         changed = true;
     }
     changed
+}
+
+/// One visit, with no user graph, reassociation, reciprocal division expansion,
+/// or consumer requeue. Used by the bounded Fast pipeline.
+pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
+    if func.inst_results(inst).is_empty() {
+        return false;
+    }
+    let Some(fold) = simplify(func, inst, None) else {
+        return false;
+    };
+    match fold {
+        Fold::Value(value) => {
+            let value = func.resolve(value);
+            let result = func.first_result(inst);
+            if value == result {
+                return false;
+            }
+            func.replace_all_uses(result, value);
+            func.remove_inst(inst);
+        }
+        Fold::Data(data) => {
+            if *func.inst_data(inst) == data {
+                return false;
+            }
+            *func.inst_data_mut(inst) = data;
+        }
+        Fold::Multi(constants) => const_fold::replace_with_constants(func, inst, &constants),
+    }
+    true
 }

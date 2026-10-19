@@ -48,7 +48,8 @@ const USAGE: &str = "usage:
 
   -O enables full IR optimization and all target selection passes.
   --isel / --isel-tier override -O selection in either order; last selector wins.
-  --opt-tier controls IR optimization; -p overrides its pipeline in either order.
+  --opt-tier none|fast|basic|full controls IR optimization; -p overrides its pipeline in either order.
+  fast runs bounded local/CFG cleanup and keeps the allocator and selection defaults.
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
   Initial input verification and canonical restoration always run.
@@ -322,9 +323,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
             "--opt-tier" => {
                 opts.optimization = match args.next().map(String::as_str) {
                     Some("none") => keel_opt::OptimizationTier::None,
+                    Some("fast") => keel_opt::OptimizationTier::Fast,
                     Some("basic") => keel_opt::OptimizationTier::Basic,
                     Some("full") => keel_opt::OptimizationTier::Full,
-                    _ => return Err("`--opt-tier` needs none, basic, or full".into()),
+                    _ => return Err("`--opt-tier` needs none, fast, basic, or full".into()),
                 };
             }
             "--remat" => {
@@ -971,10 +973,12 @@ mod tests {
     fn optimization_preset_selection_and_explicit_overrides() {
         use keel_codegen::{SelectionOptions, SelectionTier};
         use keel_opt::OptimizationTier;
-        for tier in ["none", "basic", "full"] {
+        for tier in ["none", "fast", "basic", "full"] {
+            let standalone = options(&["--opt-tier", tier]).unwrap();
+            assert_eq!(standalone.selection, SelectionOptions::default());
             assert_eq!(
-                options(&["--opt-tier", tier]).unwrap().selection,
-                SelectionOptions::default()
+                standalone.allocation,
+                keel_codegen::regalloc::AllocationTier::Full
             );
             for flags in [
                 vec!["-O", "--opt-tier", tier],
@@ -988,6 +992,7 @@ mod tests {
                 } else {
                     match tier {
                         "none" => OptimizationTier::None,
+                        "fast" => OptimizationTier::Fast,
                         "basic" => OptimizationTier::Basic,
                         _ => OptimizationTier::Full,
                     }

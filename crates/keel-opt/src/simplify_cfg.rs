@@ -25,7 +25,7 @@ pub fn run(func: &mut Function) -> bool {
     }
 }
 
-fn fold_branches(func: &mut Function) -> bool {
+pub(crate) fn fold_branches(func: &mut Function) -> bool {
     let mut changed = false;
     let blocks: Vec<Block> = func.blocks().collect();
     for block in blocks {
@@ -94,7 +94,7 @@ fn forwarding_target(func: &Function, incoming: &BlockCall) -> Option<BlockCall>
     }
 }
 
-fn skip_forwarding_blocks(func: &mut Function) -> bool {
+pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
     // Removing a forwarding block's parameters is only legal when all
     // their uses are in that block's jump. Resolve aliases before checking.
     let mut escaping = vec![false; func.num_blocks()];
@@ -147,6 +147,12 @@ fn remove_unreachable(func: &mut Function) -> bool {
 }
 
 fn merge_blocks(func: &mut Function) -> bool {
+    merge_small_blocks(func, usize::MAX)
+}
+
+/// Limit movement through chains for the bounded pipeline. The legacy pass
+/// keeps its unlimited merge policy.
+pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool {
     // Count branch edges, not unique predecessors: duplicate brif/switch
     // destinations must still prevent a merge. Block indices remain stable
     // when blocks leave the layout, so this census lasts for this invocation.
@@ -179,6 +185,14 @@ fn merge_blocks(func: &mut Function) -> bool {
                 _ => break,
             };
             let block = dest.block;
+            if func
+                .block_insts(pred)
+                .len()
+                .saturating_add(func.block_insts(block).len())
+                > max_insts
+            {
+                break;
+            }
             for (&param, &arg) in func.block_params(block).to_vec().iter().zip(&dest.args) {
                 func.replace_all_uses(param, arg);
             }
@@ -343,7 +357,10 @@ block2(v4: i64):
         assert_eq!(f.resolve(middle_param), arg);
         assert_eq!(f.resolve(tail_param), f.first_result(middle_inst));
         assert_eq!(
-            expected.iter().map(|&inst| f.inst_loc(inst)).collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|&inst| f.inst_loc(inst))
+                .collect::<Vec<_>>(),
             locations
         );
         assert!(!merge_blocks(f));

@@ -19,6 +19,7 @@ mod call_contracts;
 mod canonicalize;
 mod const_fold;
 mod dce;
+mod fast;
 mod gcm;
 mod gvn;
 mod inline;
@@ -36,8 +37,8 @@ mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
 mod sccp;
-mod simplify_cfg;
 mod sign_extend_idiom;
+mod simplify_cfg;
 mod small_memory;
 mod stack_forward;
 
@@ -183,6 +184,8 @@ impl Pass for BuiltinPass {
 }
 
 pub const PASSES: &[&dyn Pass] = &[
+    &fast::Cfg,
+    &fast::Local,
     &SMALL_MEMORY,
     &sign_extend_idiom::SignExtendIdiom,
     &BUILTINS[0],
@@ -264,6 +267,8 @@ fn observe_verification(
 pub enum OptimizationTier {
     #[default]
     None,
+    /// Fixed CFG sweeps and local simplification, without global analyses.
+    Fast,
     Basic,
     Full,
 }
@@ -271,6 +276,7 @@ impl OptimizationTier {
     pub fn pipeline(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
+            Self::Fast => &["fast-cfg", "fast-local", "fast-cfg", "dce"],
             Self::Basic => &[
                 "simplify-cfg",
                 "canonicalize",

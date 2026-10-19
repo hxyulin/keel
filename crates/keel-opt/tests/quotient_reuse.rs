@@ -26,6 +26,7 @@ fn earlier_quotients_preserve_arithmetic_and_traps_in_each_tier() {
             let min = 1u64 << (width - 1);
             for tier in [
                 OptimizationTier::None,
+                OptimizationTier::Fast,
                 OptimizationTier::Basic,
                 OptimizationTier::Full,
             ] {
@@ -100,10 +101,12 @@ fn later_sibling_and_differently_signed_divisions_are_not_reused() {
         pair("i64", true, false).replace("v2 = sdiv", "v2 = udiv"),
         sibling.into(),
     ] {
-        let mut m = keel_ir::parse(&src).unwrap();
-        keel_opt::run_passes(&mut m, &["instcombine"]).unwrap();
-        keel_ir::verify_module(&m).unwrap();
-        assert!(m.to_string().contains("srem"), "{m}");
+        for passes in [&["instcombine"][..], OptimizationTier::Fast.pipeline()] {
+            let mut m = keel_ir::parse(&src).unwrap();
+            keel_opt::run_passes(&mut m, passes).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            assert!(m.to_string().contains("srem"), "{m}");
+        }
     }
 }
 

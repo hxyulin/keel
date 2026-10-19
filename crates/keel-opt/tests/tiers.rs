@@ -16,7 +16,11 @@ fn optimizer_tiers_and_full_pipeline() {
     let mut none = original.clone();
     keel_opt::optimize_with_tier(&mut none, OptimizationTier::None).unwrap();
     assert_eq!(original.to_string(), none.to_string());
-    for tier in [OptimizationTier::Basic, OptimizationTier::Full] {
+    for tier in [
+        OptimizationTier::Fast,
+        OptimizationTier::Basic,
+        OptimizationTier::Full,
+    ] {
         let mut module = original.clone();
         keel_opt::optimize_with_tier(&mut module, tier).unwrap();
         assert!(!module.to_string().contains("iadd"));
