@@ -353,7 +353,9 @@ fn instruction_with_features(
         | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fcsel" | "fmadd" | "fmsub" | "fnmadd"
         | "fnmsub" | "fcmp" | "fcmpe" | "fccmp" | "fccmpe" | "fcvt" | "scvtf" | "ucvtf"
         | "fcvtzs" | "fcvtzu" | "fcvtms" | "fcvtmu" | "fcvtns" | "fcvtnu" | "fcvtps" | "fcvtpu"
-        | "fcvtas" | "fcvtau" => float::instruction(op, a),
+        | "fcvtas" | "fcvtau" | "frinta" | "frintx" | "fmaxnm" | "fminnm" => {
+            float::instruction(op, a)
+        }
         _ => match system::instruction(op, a, features)? {
             Some(word) => Ok(word),
             None => arithmetic::instruction(op, a),
@@ -1097,7 +1099,11 @@ fn assemble_pass(
                 count(&args, 1, usize::MAX).map_err(err)?;
                 for name in args.iter().copied() {
                     symbol(name).map_err(err)?;
-                    globals.insert(name, line);
+                    // LLVM MC ignores .extern: undefined references are already
+                    // external, and a later definition stays local unless .globl.
+                    if op != ".extern" {
+                        globals.insert(name, line);
+                    }
                 }
                 continue;
             }
@@ -1139,14 +1145,15 @@ fn assemble_pass(
             }
             ".zerofill" | ".tbss" => {
                 let tls = op == ".tbss";
-                let (name, size, alignment) = data::allocation(&args, tls).map_err(err)?;
+                let (section_name, name, size, alignment) =
+                    data::allocation(&args, tls).map_err(err)?;
                 if labels.contains_key(name) {
                     return Err(err(format!("duplicate label `{name}`")));
                 }
                 let section = data::select(
                     &mut result,
                     "__DATA",
-                    if tls { "__thread_bss" } else { "__bss" },
+                    section_name,
                     if tls {
                         crate::SectionKind::ThreadZeroFill
                     } else {

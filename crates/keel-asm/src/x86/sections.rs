@@ -42,6 +42,33 @@ pub(super) fn validate(
     Ok(())
 }
 
+/// LLVM's `name` or `name.*` section-name prefix test.
+fn has_prefix(name: &str, prefix: &str) -> bool {
+    name.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// The flags LLVM MC infers from a section name. It ORs them into explicit
+/// flags too. Names needing SHT_INIT_ARRAY/SHT_NOTE-style types are not inferred.
+pub(super) fn default_flags(name: &str) -> u64 {
+    if has_prefix(name, ".rodata") || name == ".rodata1" {
+        2
+    } else if has_prefix(name, ".text") || matches!(name, ".init" | ".fini") {
+        6
+    } else if has_prefix(name, ".data") || name == ".data1" || has_prefix(name, ".bss") {
+        3
+    } else if has_prefix(name, ".tdata") || has_prefix(name, ".tbss") {
+        0x403
+    } else {
+        0
+    }
+}
+
+/// LLVM MC makes `.bss`/`.tbss` sections NOBITS unless a type is given.
+pub(super) fn default_nobits(name: &str) -> bool {
+    has_prefix(name, ".bss") || has_prefix(name, ".tbss")
+}
+
 pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
     let name = if parts[0].starts_with('"') {
         x86::symbol(parts[0])?
@@ -69,9 +96,9 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
                 _ => return Err(format!("unsupported ELF section flag `{}`", b as char)),
             };
         }
-        flags = Some(f);
+        flags = Some(f | default_flags(&name));
     }
-    let mut nobits = matches!(name.as_str(), ".bss" | ".tbss");
+    let mut nobits = default_nobits(&name);
     if let Some(t) = parts.get(2) {
         match *t {
             "@progbits" | "%progbits" => nobits = false,
@@ -86,7 +113,7 @@ pub(super) fn parse(parts: &[&str]) -> Result<Declaration, String> {
             .get(next)
             .ok_or("SHF_MERGE requires a positive entry size")?;
         next += 1;
-        u64::try_from(x86::integer(size).map_err(|_| "invalid merge entry size")?)
+        u64::try_from(x86::integer(size).map_err(|e| format!("invalid merge entry size: {e}"))?)
             .ok()
             .filter(|&n| n != 0)
             .ok_or("merge entry size must be a positive u64")?

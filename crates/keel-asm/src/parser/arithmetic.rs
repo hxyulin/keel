@@ -312,9 +312,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 ],
             )
         }
-        "smulh" | "umulh" | "smull" | "umull" | "smaddl" | "umaddl" => {
+        "smulh" | "umulh" | "smull" | "umull" | "smaddl" | "umaddl" | "smsubl" | "umsubl" => {
             let long = op.ends_with('l');
-            let accumulate = op.contains("add");
+            let accumulate = op.contains("add") || op.contains("sub");
             count(
                 args,
                 if accumulate { 4 } else { 3 },
@@ -339,8 +339,9 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
             let name = if long {
                 fields.push((FieldId::Ra, if accumulate { r[3].number } else { 31 }));
                 format!(
-                    "{}MADDL_64WA_dp_3src",
-                    if op.starts_with('s') { "S" } else { "U" }
+                    "{}M{}L_64WA_dp_3src",
+                    if op.starts_with('s') { "S" } else { "U" },
+                    if op.contains("sub") { "SUB" } else { "ADD" }
                 )
             } else {
                 format!("{}_64_dp_3src", upper(op))

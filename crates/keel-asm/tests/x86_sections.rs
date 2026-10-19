@@ -197,7 +197,7 @@ fn malformed_section_diagnostics() {
         (".section .bad,\"aM\",@progbits,-1", "positive u64"),
         (
             ".section .bad,\"aM\",@progbits,18446744073709551616",
-            "positive u64",
+            "exceeds 64 bits",
         ),
         (
             ".section .bad,\"aM\",@progbits,symbol",

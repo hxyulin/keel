@@ -53,13 +53,14 @@ for bits in (32, 64):
     ARITHMETIC_NAMES += [f"{op}_{bits}_condcmp_{form}" for op in ("CCMP", "CCMN") for form in ("reg", "imm")]
     ARITHMETIC_NAMES += [f"{op}_{bits}M_bitfield" for op in ("SBFM", "UBFM", "BFM")]
     ARITHMETIC_NAMES += [f"EXTR_{bits}_extract"]
-ARITHMETIC_NAMES += ["REV32_64_dp_1src", "SMULH_64_dp_3src", "UMULH_64_dp_3src", "SMADDL_64WA_dp_3src", "UMADDL_64WA_dp_3src"]
+ARITHMETIC_NAMES += ["REV32_64_dp_1src", "SMULH_64_dp_3src", "UMULH_64_dp_3src", "SMADDL_64WA_dp_3src", "UMADDL_64WA_dp_3src",
+                     "SMSUBL_64WA_dp_3src", "UMSUBL_64WA_dp_3src"]
 CONTROL_NAMES = ["BR_64_branch_reg", "BLR_64_branch_reg", "BRK_EX_exception", "SVC_EX_exception", "B_only_condbranch", "TBZ_only_testbranch", "TBNZ_only_testbranch"]
 CONTROL_NAMES += [f"{op}_{bits}_compbranch" for op in ("CBZ", "CBNZ") for bits in (32, 64)]
 FP_NAMES = []
 for tag in ("S", "D"):
-    FP_NAMES += [f"{op}_{tag}_floatdp1" for op in ("FMOV", "FABS", "FNEG", "FSQRT", "FRINTN", "FRINTP", "FRINTM", "FRINTZ")]
-    FP_NAMES += [f"{op}_{tag}_floatdp2" for op in ("FADD", "FSUB", "FMUL", "FDIV", "FMIN", "FMAX")]
+    FP_NAMES += [f"{op}_{tag}_floatdp1" for op in ("FMOV", "FABS", "FNEG", "FSQRT", "FRINTN", "FRINTP", "FRINTM", "FRINTZ", "FRINTA", "FRINTX")]
+    FP_NAMES += [f"{op}_{tag}_floatdp2" for op in ("FADD", "FSUB", "FMUL", "FDIV", "FMIN", "FMAX", "FMINNM", "FMAXNM")]
     FP_NAMES += [f"{op}_{tag}_floatdp3" for op in ("FMADD", "FMSUB", "FNMADD", "FNMSUB")]
     FP_NAMES += [f"{op}_{tag}{zero}_floatcmp" for op in ("FCMP", "FCMPE") for zero in ("", "Z")]
     FP_NAMES += [f"FCSEL_{tag}_floatsel", f"FMOV_{tag}_floatimm"]

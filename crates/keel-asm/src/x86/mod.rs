@@ -333,13 +333,7 @@ impl Assembler {
             self.current = i;
             return Ok(());
         }
-        let flags = flags.unwrap_or(match name {
-            ".text" => 6,
-            ".data" | ".bss" | ".data.rel.ro" => 3,
-            ".rodata" => 2,
-            ".tbss" | ".tdata" => 0x403,
-            _ => 0,
-        });
+        let flags = flags.unwrap_or_else(|| sections::default_flags(name));
         sections::validate(name, flags, nobits, entry_size, group.as_deref())?;
         self.current = self.sections.len();
         self.sections.push(Section {
@@ -797,7 +791,18 @@ impl Assembler {
                     _ => 8,
                 };
                 for p in parts {
-                    self.integer(width, x86::address(p)?, line)?
+                    let address = x86::address(p)?;
+                    let e = &address.expression;
+                    // LLVM accepts a literal that fits the width as either signed or
+                    // unsigned. Values it would wrap at 64 bits are rejected here.
+                    let bits = u32::from(width) * 8;
+                    if e.add.is_none()
+                        && e.subtract.is_none()
+                        && (e.constant < -(1i128 << (bits - 1)) || e.constant >= 1i128 << bits)
+                    {
+                        return Err(format!("out of range literal value for `{op}`"));
+                    }
+                    self.integer(width, address, line)?
                 }
                 Ok(())
             }

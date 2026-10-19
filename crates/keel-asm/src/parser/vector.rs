@@ -389,7 +389,9 @@ fn immediate_fields(imm: u32) -> Vec<(FieldId, u32)> {
 }
 
 /// Apple's mnemonic-suffix syntax carries the destination arrangement. Source
-/// arrangements for widening and dot products must be derived, not copied.
+/// arrangements for widening, narrowing, dot products, element duplicates and
+/// tables are derived per `apple_role`, not copied. The rewritten standard
+/// spelling then goes through ordinary operand and feature validation.
 pub(super) fn apple_syntax<'a, 'b>(
     op: &'b str,
     args: super::storage::Operands<'a>,
@@ -427,7 +429,10 @@ pub(super) fn apple_syntax<'a, 'b>(
         }
         return Ok((root, result));
     }
-    if matches!(op, "mov.s" | "mov.d")
+    let element = op.split_once('.').filter(|(root, size)| {
+        matches!(*root, "mov" | "umov" | "smov" | "ins") && matches!(*size, "b" | "h" | "s" | "d")
+    });
+    if element.is_some()
         || op == "mov"
             && args.first().is_some_and(|s| s.starts_with(['s', 'd']))
             && args
@@ -435,8 +440,10 @@ pub(super) fn apple_syntax<'a, 'b>(
                 .is_some_and(|s| s.starts_with('v') && s.contains('[') && !s.contains('.'))
     {
         count(&args, 2, 2)?;
-        let scalar = op == "mov";
-        let size = if scalar { &args[0][..1] } else { &op[4..] };
+        let size = match element {
+            Some((_, size)) => size,
+            None => &args[0][..1],
+        };
         let mut result = super::storage::Operands::new();
         for arg in args.iter() {
             if arg.starts_with('v') && arg.contains('[') {
@@ -450,7 +457,7 @@ pub(super) fn apple_syntax<'a, 'b>(
                 result.push(arg);
             }
         }
-        return Ok((if scalar { "dup" } else { "mov" }, result));
+        return Ok((element.map_or("dup", |(root, _)| root), result));
     }
     let Some((root, shape)) = op.split_once('.').filter(|(_, shape)| {
         matches!(
@@ -460,78 +467,65 @@ pub(super) fn apple_syntax<'a, 'b>(
     }) else {
         return Ok((op, args));
     };
-    if !matches!(
-        root,
-        "movi"
-            | "mov"
-            | "fmov"
-            | "add"
-            | "sub"
-            | "and"
-            | "orr"
-            | "eor"
-            | "cmtst"
-            | "ucvtf"
-            | "scvtf"
-            | "fdiv"
-            | "fmul"
-            | "fadd"
-            | "fsub"
-            | "sdot"
-            | "udot"
-            | "addv"
-            | "addp"
-            | "ushll"
-            | "ushll2"
-            | "sshll"
-            | "sshll2"
-            | "zip1"
-            | "zip2"
-            | "ld1r"
-    ) {
-        return Err("unsupported Apple SIMD mnemonic suffix".into());
-    }
+    let role = apple_role(root).ok_or("unsupported Apple SIMD mnemonic suffix")?;
+    let upper = root.ends_with('2');
     let mut result = super::storage::Operands::new();
     let mut vectors = 0;
     for (index, arg) in args.iter().enumerate() {
-        let arg_shape = if index > 0 && matches!(root, "sdot" | "udot") {
-            match shape {
+        let arg_shape = match role {
+            _ if index == 0 => shape,
+            Apple::Dot => match shape {
                 "2s" => "8b",
                 "4s" => "16b",
                 _ => return Err("invalid dot-product suffix".into()),
-            }
-        } else if index > 0 && matches!(root, "ushll" | "ushll2" | "sshll" | "sshll2") {
-            match (shape, root.ends_with('2')) {
-                ("8h", false) => "8b",
-                ("8h", true) => "16b",
-                ("4s", false) => "4h",
-                ("4s", true) => "8h",
-                ("2d", false) => "2s",
-                ("2d", true) => "4s",
-                _ => return Err("invalid widening suffix".into()),
-            }
-        } else {
-            shape
+            },
+            Apple::Long => half(shape, upper)?,
+            Apple::Wide if index == 2 => half(shape, upper)?,
+            Apple::Narrow => match (shape, upper) {
+                ("8b", false) | ("16b", true) => "8h",
+                ("4h", false) | ("8h", true) => "4s",
+                ("2s", false) | ("4s", true) => "2d",
+                _ => return Err("invalid narrowing suffix".into()),
+            },
+            // Table registers are always full 16B vectors.
+            Apple::Table if index == 1 => "16b",
+            _ => shape,
         };
         let arg = arg.trim();
         let text = if let Some(number) = arg.strip_prefix(['v', 'V']) {
-            if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
-                return Err("Apple suffix requires unqualified vector registers".into());
+            if let Some((number, lane)) = number.split_once('[').filter(|_| role == Apple::Dup) {
+                // dup.<T> Vd, Vn[i] names the element size of <T>.
+                register_number(number)?;
+                let element = &shape[shape.len() - 1..];
+                vectors += 1;
+                bumpalo::format!(in arena, "v{number}.{element}[{lane}",).into_bump_str() as &str
+            } else {
+                register_number(number)?;
+                vectors += 1;
+                bumpalo::format!(in arena, "v{number}.{arg_shape}",).into_bump_str()
             }
-            vectors += 1;
-            bumpalo::format!(in arena, "v{number}.{arg_shape}",).into_bump_str() as &str
-        } else if root == "ld1r" && index == 0 {
-            let number = arg
-                .strip_prefix('{')
-                .and_then(|s| s.strip_suffix('}'))
-                .map(str::trim)
-                .and_then(|s| s.strip_prefix(['v', 'V']))
-                .ok_or("expected vector register list")?;
-            if !number.bytes().all(|b| b.is_ascii_digit()) {
-                return Err("invalid register list".into());
+        } else if let Some(list) = arg.strip_prefix('{') {
+            if !matches!(role, Apple::List | Apple::Table) || role == Apple::Table && index != 1 {
+                return Err("unexpected Apple SIMD register list".into());
             }
+            let list = list.strip_suffix('}').ok_or("expected register list")?;
+            let mut output = bumpalo::collections::String::new_in(arena);
+            use std::fmt::Write;
+            output.push('{');
+            for (position, reg) in list.split(',').enumerate() {
+                let number = reg
+                    .trim()
+                    .strip_prefix(['v', 'V'])
+                    .ok_or("expected vector register list")?;
+                register_number(number)?;
+                if position != 0 {
+                    output.push_str(", ");
+                }
+                write!(&mut output, "v{number}.{arg_shape}").unwrap();
+            }
+            output.push('}');
             vectors += 1;
-            bumpalo::format!(in arena, "{{v{number}.{arg_shape}}}",).into_bump_str()
+            output.into_bump_str()
         } else {
             arg
         };
@@ -541,4 +535,66 @@ pub(super) fn apple_syntax<'a, 'b>(
         return Err("Apple SIMD suffix requires vector operands".into());
     }
     Ok((root, result))
+}
+
+/// How Apple's suffix maps to each operand, following the `|` (Apple) asm
+/// variants of LLVM's AArch64InstrFormats.td. The suffix always names the
+/// destination arrangement; only these listed mnemonics are rewritten.
+#[derive(Clone, Copy, PartialEq)]
+enum Apple {
+    /// Every vector operand uses the suffix (also across-lane sources).
+    Same,
+    /// Sources are the half-width arrangement (lower or `2` upper half).
+    Long,
+    /// The second source alone is half width.
+    Wide,
+    /// Sources are the double-width arrangement.
+    Narrow,
+    Dot,
+    /// `dup` from a general register or from a `vN[i]` element.
+    Dup,
+    /// A structure register list taking the suffix.
+    List,
+    /// `tbl`/`tbx`: the table list is 16B; destination and index use the suffix.
+    Table,
+}
+fn apple_role(root: &str) -> Option<Apple> {
+    Some(match root {
+        "movi" | "mvni" | "mov" | "fmov" | "add" | "sub" | "mul" | "mla" | "mls" | "neg"
+        | "and" | "orr" | "orn" | "eor" | "bic" | "bit" | "bif" | "bsl" | "cmeq" | "cmge"
+        | "cmgt" | "cmhi" | "cmhs" | "cmle" | "cmlt" | "cmtst" | "umax" | "umin" | "smax"
+        | "smin" | "ushl" | "sshl" | "ushr" | "sshr" | "shl" | "sli" | "sri" | "ext" | "uzp1"
+        | "uzp2" | "zip1" | "zip2" | "trn1" | "trn2" | "rev16" | "rev32" | "rev64" | "ucvtf"
+        | "scvtf" | "fdiv" | "fmul" | "fadd" | "fsub" | "fneg" | "addv" | "addp" | "umaxv"
+        | "uminv" | "smaxv" | "sminv" => Apple::Same,
+        "ushll" | "ushll2" | "sshll" | "sshll2" | "umull" | "umull2" | "smull" | "smull2" => {
+            Apple::Long
+        }
+        "saddw" | "saddw2" | "ssubw" | "ssubw2" | "uaddw" | "uaddw2" | "usubw" | "usubw2" => {
+            Apple::Wide
+        }
+        "xtn" | "xtn2" | "shrn" | "shrn2" => Apple::Narrow,
+        "sdot" | "udot" => Apple::Dot,
+        "dup" => Apple::Dup,
+        "ld1r" | "ld1" | "ld2" | "ld3" | "ld4" | "st1" | "st2" | "st3" | "st4" => Apple::List,
+        "tbl" | "tbx" => Apple::Table,
+        _ => return None,
+    })
+}
+fn half(shape: &str, upper: bool) -> Result<&'static str, String> {
+    Ok(match (shape, upper) {
+        ("8h", false) => "8b",
+        ("8h", true) => "16b",
+        ("4s", false) => "4h",
+        ("4s", true) => "8h",
+        ("2d", false) => "2s",
+        ("2d", true) => "4s",
+        _ => return Err("invalid widening suffix".into()),
+    })
+}
+fn register_number(number: &str) -> Result<(), String> {
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return Err("Apple suffix requires unqualified vector registers".into());
+    }
+    Ok(())
 }

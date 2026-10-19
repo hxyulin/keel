@@ -88,7 +88,7 @@ fn malformed_metadata_is_diagnosed() {
         ".file 1 \"foo\"\n.file 1 \"bar\"",
         ".loc 1 1 0",
         ".data\n.cfi_startproc",
-        ".file 1 \"foo\"\n.loc 1 1 0 is_stmt 0",
+        ".file 1 \"foo\"\n.loc 1 1 0 is_stmt 2",
         ".asciz \"bad\\q\"",
         ".uleb128 -1",
         ".sleb128 9223372036854775808",

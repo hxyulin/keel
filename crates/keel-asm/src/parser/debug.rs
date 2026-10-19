@@ -9,17 +9,48 @@ use std::collections::BTreeMap;
 
 pub(super) struct Debug<'a> {
     arena: &'a Bump,
-    files: BTreeMap<u32, Vec<u8>>,
+    files: BTreeMap<u32, File>,
+    /// DWARF 4 include_directories, in first-use order; entry `n` is index `n + 1`.
+    directories: Vec<Vec<u8>>,
+    /// LLVM carries only is_stmt from one `.loc` to the next; it starts set.
+    is_stmt: bool,
     rows: BumpVec<'a, Row>,
     frames: BumpVec<'a, Frame<'a>>,
     active: Option<Frame<'a>>,
+}
+struct File {
+    directory: u32,
+    name: Vec<u8>,
 }
 struct Row {
     address: u64,
     file: u32,
     line: u32,
     column: u32,
-    prologue: bool,
+    flags: u8,
+    isa: u32,
+    discriminator: u32,
+}
+const IS_STMT: u8 = 1;
+const BASIC_BLOCK: u8 = 2;
+const PROLOGUE_END: u8 = 4;
+const EPILOGUE_BEGIN: u8 = 8;
+/// Splits one leading quoted string, honoring backslash escapes.
+fn quoted(s: &str) -> Result<(&str, &str), String> {
+    let s = s.trim_fast();
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'"') {
+        return Err("expected quoted string".into());
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'"' => return Ok((&s[..=i], &s[i + 1..])),
+            _ => i += 1,
+        }
+    }
+    Err("unterminated string".into())
 }
 struct Frame<'a> {
     start: u64,
@@ -146,18 +177,42 @@ impl<'a> Debug<'a> {
         Self {
             arena,
             files: BTreeMap::new(),
+            directories: Vec::new(),
+            is_stmt: true,
             rows: BumpVec::new_in(arena),
             frames: BumpVec::new_in(arena),
             active: None,
         }
     }
     pub(super) fn file(&mut self, index: u32, path: Vec<u8>) -> Result<(), String> {
-        if index == 0 || self.files.insert(index, path).is_some() {
+        self.file_in(index, None, path)
+    }
+    /// Like Clang's DWARF 4 tables, an explicit directory is kept verbatim as
+    /// an include directory and the name is stored unsplit. An empty directory
+    /// string means none, so the name keeps directory index 0.
+    fn file_in(
+        &mut self,
+        index: u32,
+        directory: Option<Vec<u8>>,
+        name: Vec<u8>,
+    ) -> Result<(), String> {
+        if index == 0 || self.files.contains_key(&index) {
             return Err("duplicate or zero file number".into());
         }
-        if self.files[&index].contains(&0) {
+        if name.contains(&0) || directory.as_ref().is_some_and(|d| d.contains(&0)) {
             return Err("file path contains NUL".into());
         }
+        let directory = match directory.filter(|d| !d.is_empty()) {
+            None => 0,
+            Some(d) => match self.directories.iter().position(|e| *e == d) {
+                Some(n) => n as u32 + 1,
+                None => {
+                    self.directories.push(d);
+                    self.directories.len() as u32
+                }
+            },
+        };
+        self.files.insert(index, File { directory, name });
         Ok(())
     }
     pub(super) fn loc(
@@ -172,16 +227,25 @@ impl<'a> Debug<'a> {
         if section != 0 {
             return Err(".loc requires __text".into());
         }
-        if !self.files.contains_key(&file) {
-            return Err(".loc references undeclared file".into());
-        }
-        self.rows.push(Row {
+        self.row(Row {
             address,
             file,
             line: row,
             column,
-            prologue,
-        });
+            flags: if prologue { PROLOGUE_END } else { 0 },
+            isa: 0,
+            discriminator: 0,
+        })
+    }
+    /// `row.flags` holds the per-directive bits; is_stmt comes from `self.is_stmt`.
+    fn row(&mut self, mut row: Row) -> Result<(), String> {
+        if !self.files.contains_key(&row.file) {
+            return Err(".loc references undeclared file".into());
+        }
+        if self.is_stmt {
+            row.flags |= IS_STMT;
+        }
+        self.rows.push(row);
         Ok(())
     }
     pub(super) fn cfi(
@@ -304,31 +368,85 @@ impl<'a> Debug<'a> {
         line: usize,
     ) -> Result<bool, String> {
         if op == ".file" {
-            let (id, path) = operands
+            // DWARF 4 forms only: `.file N "path"` and `.file N "dir" "name"`.
+            let operands = operands.trim_fast();
+            if operands.starts_with('"') {
+                return Err(
+                    "unnumbered .file is unsupported; expected .file number and path".into(),
+                );
+            }
+            let (id, rest) = operands
                 .split_once(char::is_whitespace)
                 .ok_or("expected .file number and path")?;
             let id: u32 = id.parse().map_err(|_| "invalid file number")?;
-            self.file(id, string(path)?)?;
+            if id == 0 {
+                return Err(".file 0 requires DWARF 5 line tables, which are unsupported".into());
+            }
+            let (first, rest) = quoted(rest)?;
+            let (directory, name, rest) = if rest.trim_fast().starts_with('"') {
+                let (name, rest) = quoted(rest)?;
+                (Some(string(first)?), string(name)?, rest)
+            } else {
+                (None, string(first)?, rest)
+            };
+            match rest.split_whitespace().next() {
+                None => {}
+                Some("md5" | "source") => {
+                    return Err(".file md5/source operands require DWARF 5 line tables, which are unsupported".into());
+                }
+                Some(_) => return Err("unexpected token in .file directive".into()),
+            }
+            self.file_in(id, directory, name)?;
             return Ok(true);
         }
         if op == ".loc" {
             if section != 0 {
                 return Err(".loc requires __text".into());
             }
-            let args: Vec<_> = operands.split_whitespace().collect();
-            if !(3..=4).contains(&args.len()) || (args.len() == 4 && args[3] != "prologue_end") {
-                return Err("expected .loc file line column [prologue_end]".into());
+            // LLVM's grammar: file [line [column]] followed by sub-directives.
+            let mut args = operands.split_whitespace().peekable();
+            let number = |s: Option<&str>, what: &str| {
+                s.and_then(|s| s.parse::<u32>().ok())
+                    .ok_or_else(|| format!("invalid .loc {what}"))
+            };
+            let file = number(args.next(), "file number")?;
+            if file == 0 {
+                return Err(".loc file number must be at least one".into());
             }
-            let number = |s: &str| s.parse::<u32>().map_err(|_| "invalid .loc number");
-            let file = number(args[0])?;
-            self.loc(
-                file,
-                number(args[1])?,
-                number(args[2])?,
-                args.len() == 4,
-                section,
+            let mut position = [0; 2];
+            for slot in &mut position {
+                if args
+                    .peek()
+                    .is_some_and(|s| s.starts_with(|c: char| c.is_ascii_digit() || c == '-'))
+                {
+                    *slot = number(args.next(), "line or column")?;
+                }
+            }
+            let (mut flags, mut isa, mut discriminator) = (0, 0, 0);
+            while let Some(name) = args.next() {
+                match name {
+                    "basic_block" => flags |= BASIC_BLOCK,
+                    "prologue_end" => flags |= PROLOGUE_END,
+                    "epilogue_begin" => flags |= EPILOGUE_BEGIN,
+                    "is_stmt" => match args.next() {
+                        Some("0") => self.is_stmt = false,
+                        Some("1") => self.is_stmt = true,
+                        _ => return Err(".loc is_stmt value must be 0 or 1".into()),
+                    },
+                    "isa" => isa = number(args.next(), "isa value")?,
+                    "discriminator" => discriminator = number(args.next(), "discriminator")?,
+                    _ => return Err(format!("unknown .loc sub-directive `{name}`")),
+                }
+            }
+            self.row(Row {
                 address,
-            )?;
+                file,
+                line: position[0],
+                column: position[1],
+                flags,
+                isa,
+                discriminator,
+            })?;
             return Ok(true);
         }
         if !op.starts_with(".cfi_") {
@@ -631,11 +749,17 @@ impl<'a> Debug<'a> {
                 0,
                 0,
                 1,
-                0,
             ]);
-            for path in self.files.values() {
-                bytes.extend(path);
-                bytes.extend_from_slice(&[0, 0, 0, 0]);
+            for directory in &self.directories {
+                bytes.extend(directory);
+                bytes.push(0);
+            }
+            bytes.push(0);
+            for file in self.files.values() {
+                bytes.extend(&file.name);
+                bytes.push(0);
+                uleb(file.directory.into(), &mut bytes);
+                bytes.extend_from_slice(&[0, 0]);
             }
             bytes.push(0);
             let len = (bytes.len() - header) as u32;
@@ -643,6 +767,7 @@ impl<'a> Debug<'a> {
             bytes.extend_from_slice(&[0, 9, 2]);
             references.address(&mut bytes, section, 0, false, a);
             let (mut address, mut file, mut line, mut column) = (0, 1, 1i64, 0);
+            let (mut is_stmt, mut isa) = (true, 0);
             for row in self.rows {
                 if row.address != address {
                     bytes.push(2);
@@ -664,8 +789,27 @@ impl<'a> Debug<'a> {
                     uleb(row.column.into(), &mut bytes);
                     column = row.column;
                 }
-                if row.prologue {
-                    bytes.push(10);
+                if row.discriminator != 0 {
+                    let mut operand = Vec::new();
+                    uleb(row.discriminator.into(), &mut operand);
+                    bytes.push(0);
+                    uleb(operand.len() as u64 + 1, &mut bytes);
+                    bytes.push(4);
+                    bytes.extend(operand);
+                }
+                if row.isa != isa {
+                    bytes.push(12);
+                    uleb(row.isa.into(), &mut bytes);
+                    isa = row.isa;
+                }
+                if (row.flags & IS_STMT != 0) != is_stmt {
+                    bytes.push(6);
+                    is_stmt = !is_stmt;
+                }
+                for (flag, opcode) in [(BASIC_BLOCK, 7), (PROLOGUE_END, 10), (EPILOGUE_BEGIN, 11)] {
+                    if row.flags & flag != 0 {
+                        bytes.push(opcode);
+                    }
                 }
                 bytes.push(1);
             }

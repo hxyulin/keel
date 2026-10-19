@@ -73,7 +73,9 @@ pub(super) fn section(a: &mut Assembly, args: &[&str]) -> Result<usize, String> 
         (
             "__DWARF",
             "__debug_info" | "__debug_abbrev" | "__debug_line" | "__debug_ranges" | "__debug_str"
-            | "__debug_loc",
+            | "__debug_loc"
+            // Clang's DWARF 4 Apple accelerator tables (16-byte section names).
+            | "__apple_names" | "__apple_objc" | "__apple_namespac" | "__apple_types",
         ) => SectionKind::Debug,
         ("__TEXT", "__eh_frame") => SectionKind::EhFrame,
         _ => return Err("unsupported Mach-O section".into()),
@@ -263,20 +265,25 @@ pub(super) fn width(op: &str) -> Option<u8> {
         _ => None,
     }
 }
-pub(super) fn allocation<'a>(args: &[&'a str], tls: bool) -> Result<(&'a str, u64, u32), String> {
+/// Returns the zero-fill section name, symbol, size and log2 alignment.
+/// Clang places `-fno-common` tentative definitions in `__DATA,__common`.
+pub(super) fn allocation<'a>(
+    args: &[&'a str],
+    tls: bool,
+) -> Result<(&'a str, &'a str, u64, u32), String> {
     count(args, if tls { 3 } else { 5 }, if tls { 3 } else { 5 })?;
-    let values = if tls {
-        args
+    let (section, values) = if tls {
+        ("__thread_bss", args)
     } else {
-        if args[..2] != ["__DATA", "__bss"] {
-            return Err("zerofill requires __DATA,__bss".into());
+        if args[0] != "__DATA" || !matches!(args[1], "__bss" | "__common") {
+            return Err("zerofill requires __DATA,__bss or __DATA,__common".into());
         }
-        &args[2..]
+        (args[1], &args[2..])
     };
     symbol(values[0])?;
     let size = u64::from(unsigned(values[1], u32::MAX as i64)?);
     let alignment = unsigned(values[2], 16)?;
-    Ok((values[0], size, alignment))
+    Ok((section, values[0], size, alignment))
 }
 
 /// Clang emits the SDK clause after whitespace, without a comma delimiter.

@@ -1636,7 +1636,7 @@ are range-checked against W/X width. `mov #imm` chooses `movz`, `movn`, or
 still be written as `movz`/`movk` sequences.
 
 Other integer operations are `adc/adcs/sbc/sbcs`; `mul/mneg/madd/msub`,
-`smulh/umulh`, `smull/umull/smaddl/umaddl`; `sdiv/udiv`; register and
+`smulh/umulh`, `smull/umull/smaddl/umaddl/smsubl/umsubl`; `sdiv/udiv`; register and
 immediate `lsl/lsr/asr/ror`; `clz/cls/rbit/rev/rev16`, and X-only `rev32`.
 Bitfield forms include `sbfm/ubfm/bfm/extr`, `bfi/bfxil/ubfx/sbfx`,
 `sxtb/sxth/sxtw`, and W-only `uxtb/uxth`. `neg/negs/mvn/tst` aliases are
@@ -1655,8 +1655,8 @@ Out-of-range branches are errors; the assembler does not relax them.
 operands including zero registers.
 
 **Floating-point and population count.** Scalar S/D forms include
-`fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz`,
-`fadd/fsub/fmul/fdiv/fmin/fmax`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
+`fmov/fabs/fneg/fsqrt/frintn/frintp/frintm/frintz/frinta/frintx`,
+`fadd/fsub/fmul/fdiv/fmin/fmax/fminnm/fmaxnm`, `fmadd/fmsub/fnmadd/fnmsub`, `fcmp/fcmpe`
 (register or `#0.0`), and `fcsel`. `fcvt` converts S ↔ D; `scvtf/ucvtf`
 and `fcvtzs/fcvtzu` convert W/X ↔ S/D. S/D fixed-point GPR conversions
 remain unsupported in this baseline path.
@@ -2058,7 +2058,8 @@ accepts those names with their regular/zerofill types, and
 `__DATA,__thread_data,thread_local_regular`,
 `__DATA,__thread_bss,thread_local_zerofill`, and
 `__DATA,__thread_vars,thread_local_variables` for TLS definitions.
-`.zerofill __DATA,__bss,symbol,size,log2_align` and
+`.zerofill __DATA,__bss,symbol,size,log2_align` (or `__DATA,__common`, where
+Clang places `-fno-common` tentative definitions) and
 `.tbss symbol,size,log2_align` allocate named zero-fill storage without
 switching the current section. Zero-fill storage reserves virtual space
 without allocating or writing bytes; nonzero initializers and relocations
@@ -2204,11 +2205,19 @@ cleanup/rethrow, and propagation across a plain assembled frame containing
 an address-taken interior label. LSDA bytes and GOT relocation records are
 compared with Clang; unresolved GOT placeholder bytes are normalized.
 
-`.file number "path"` and `.loc file line column [prologue_end]` generate a
-DWARF 4 line-number program in `__DWARF,__debug_line`. File numbers are
-contiguous from 1. The line program covers the text section and terminates
+`.file number "path"`, `.file number "directory" "name"`, and
+`.loc file [line [column]] [basic_block] [prologue_end] [epilogue_begin]
+[is_stmt 0|1] [isa N] [discriminator N]` generate a DWARF 4 line-number
+program in `__DWARF,__debug_line`. As in LLVM, `is_stmt` persists across
+`.loc` directives while the other options apply to one row. A directory is
+kept verbatim as an include directory and its name unsplit, matching Clang's
+DWARF 4 tables; a one-string path keeps directory index 0. DWARF 5 forms
+(`.file 0`, `md5`, `source`) and unnumbered `.file` are errors. File numbers
+are contiguous from 1. The line program covers the text section and terminates
 at its end. Explicit debug sections support `__debug_info`, `__debug_abbrev`,
-`__debug_line`, `__debug_ranges`, `__debug_str`, and `__debug_loc`, with
+`__debug_line`, `__debug_ranges`, `__debug_str`, `__debug_loc`, and Clang's
+DWARF 4 accelerator tables (`__apple_names`, `__apple_objc`,
+`__apple_namespac`, `__apple_types`), with
 `regular,debug` attributes. Their Mach-O `S_ATTR_DEBUG` flag excludes them
 from the loaded image. Local debug address relocations use section ordinals
 and preserve original addresses in the data, allowing tools to read unlinked
@@ -2218,8 +2227,8 @@ newline/tab/carriage-return, quote/backslash, and octal escapes.
 differences, including forward labels. Symbolic LEB128 lengths affect label
 positions, so assembly repeats layout passes until positions stabilize, with
 a 32-pass limit that diagnoses cyclic layouts. Constant-only input takes one
-pass. Undefined/cross-section LEB128 expressions, additional `.loc` options,
-and arbitrary string concatenation remain errors.
+pass. Undefined/cross-section LEB128 expressions, other `.loc` options
+(such as `view`), and arbitrary string concatenation remain errors.
 Constant assignments (`name = expression` or `.set name, expression`) accept
 constants and same-section differences, including forward labels; they can
 be used in fixed-width numeric directives.
@@ -2289,7 +2298,11 @@ symbols (including alignment), and all eight `.loh` kinds in
 LC_LINKER_OPTIMIZATION_HINT. LOH labels must resolve to aligned text within one
 linker atom. Optional `.p2align` fill/maximum operands, CFI W and FP register
 aliases, C string backspace/form-feed escapes, local shifted symbol differences
-and the audited Apple SIMD suffix/lane spellings are supported. Shifted
+and the audited Apple SIMD suffix/lane spellings are supported. The suffix
+names the destination arrangement; listed mnemonics derive each source from
+LLVM's Apple asm variants (same-width, long, wide, narrow, dot product,
+`dup` from a GPR or `vN[i]`, structure lists, and 16B tables), then use the
+ordinary operand and feature checks. Other suffixed mnemonics are errors. Shifted
 expressions follow LLVM's logical 64-bit right-shift semantics; unresolved
 shifted relocations remain errors. `.cfi_negate_ra_state` emits the AArch64
 DWARF opcode and forces DWARF unwind retention so signed-RA state is preserved.

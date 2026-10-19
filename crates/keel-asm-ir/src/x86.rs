@@ -595,12 +595,22 @@ pub fn integer(s: &str) -> Result<i128, String> {
         (16, s)
     } else if let Some(s) = s.strip_prefix("0b") {
         (2, s)
+    } else if s.len() > 1 && s.starts_with('0') {
+        // GAS and LLVM MC read a leading zero as octal, so `010` is 8 and `08` is invalid.
+        (8, &s[1..])
     } else {
         (10, s)
     };
-    i128::from_str_radix(s, radix)
-        .map(|n| sign * n)
-        .map_err(|_| format!("invalid integer `{s}`"))
+    // from_str_radix accepts its own sign; only the leading one parsed above is valid.
+    if s.starts_with(['+', '-']) {
+        return Err(format!("invalid integer `{s}`"));
+    }
+    let n = i128::from_str_radix(s, radix).map_err(|_| format!("invalid integer `{s}`"))?;
+    // LLVM MC rejects integer literals wider than 64 bits in every expression.
+    if n > i128::from(u64::MAX) {
+        return Err(format!("integer literal `{s}` exceeds 64 bits"));
+    }
+    Ok(sign * n)
 }
 pub fn unquote(s: &str) -> Result<Vec<u8>, String> {
     let s = s.trim();

@@ -102,7 +102,8 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 _ => Err("fmov requires a floating-point register".into()),
             }
         }
-        "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" => {
+        "fabs" | "fneg" | "fsqrt" | "frintn" | "frintp" | "frintm" | "frintz" | "frinta"
+        | "frintx" => {
             count(args, 2, 2)?;
             let (r, tag) = registers(args)?;
             encode_named(
@@ -110,7 +111,7 @@ pub(super) fn instruction(op: &str, args: &[&str]) -> Result<u32, String> {
                 &[(FieldId::Rd, r[0]), (FieldId::Rn, r[1])],
             )
         }
-        "fadd" | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fcsel" => {
+        "fadd" | "fsub" | "fmul" | "fdiv" | "fmin" | "fmax" | "fminnm" | "fmaxnm" | "fcsel" => {
             count(
                 args,
                 if op == "fcsel" { 4 } else { 3 },
