@@ -279,7 +279,9 @@ fn lex(src: &str) -> Result<Vec<(Tok, Loc)>, ParseError> {
                 let start = if c == b'@' { i + 1 } else { i };
                 i = start;
                 while i < bytes.len()
-                    && (bytes[i].is_ascii_alphanumeric() || matches!(bytes[i], b'_' | b'.'))
+                    && (bytes[i].is_ascii_alphanumeric()
+                        || matches!(bytes[i], b'_' | b'.')
+                        || (c == b'@' && bytes[i] == b'$'))
                 {
                     i += 1;
                 }
