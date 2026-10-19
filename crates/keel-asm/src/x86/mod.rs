@@ -34,8 +34,9 @@ struct Sym {
     weak: bool,
     hidden: bool,
     kind: SymbolKind,
-    size: Option<Expression>,
-    alias: Option<Expression>,
+    // Boxed: most symbols are plain labels, and one table entry exists per name.
+    size: Option<Box<Expression>>,
+    alias: Option<Box<Expression>>,
     common: Option<(u64, u64)>,
 }
 impl Default for Sym {
@@ -81,10 +82,9 @@ pub fn assemble_object_with_features(
     source: &str,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
-    let mut items = Vec::new();
-    parse_source(source, 1, &mut items)?;
-    validate_features(&items, features)?;
-    assemble_items(&items)
+    let mut items = Items::new(features);
+    items.parse(source, 1)?;
+    assemble_items(items.finish()?)
 }
 /// Consume x86 instructions and shared directives. Diagnostic positions refer
 /// to program items; positions inside explicit text refer to its source lines.
@@ -95,52 +95,187 @@ pub fn assemble_program_object_with_features(
     program: &Program,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
-    let mut items = Vec::with_capacity(program.items.len());
+    let mut items = Items::new(features);
+    items.entries.reserve(program.items.len());
     for (index, item) in program.items.iter().enumerate() {
-        if let Item::Text(source) = item {
-            let mut parsed = Vec::new();
-            parse_source(source, index + 1, &mut parsed)?;
-            items.extend(
-                parsed
-                    .into_iter()
-                    .map(|(item, line)| (std::borrow::Cow::Owned(item), line)),
-            );
-        } else {
-            items.push((std::borrow::Cow::Borrowed(item), index + 1));
+        match item {
+            Item::Text(source) => items.parse(source, index + 1)?,
+            Item::X86Instruction(i) => {
+                if !items.encode(i, index + 1) {
+                    items.instruction(Ref::Borrowed(i), index + 1)
+                }
+            }
+            _ => items.push(Entry::Item {
+                item: Ref::Borrowed(item),
+                line: index + 1,
+            }),
         }
     }
-    validate_features(&items, features)?;
-    assemble_items(&items)
+    assemble_items(items.finish()?)
 }
-fn validate_features<T: std::borrow::Borrow<Item>>(
-    items: &[(T, usize)],
+
+/// Borrowed from a caller's program, or owned after parsing explicit text.
+enum Ref<'a, T> {
+    Borrowed(&'a T),
+    Owned(Box<T>),
+}
+impl<T> std::ops::Deref for Ref<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        match self {
+            Self::Borrowed(t) => t,
+            Self::Owned(t) => t,
+        }
+    }
+}
+/// One layout unit. Diagnostics use `line`.
+enum Entry<'a> {
+    /// Consecutive symbol-free instructions, encoded once at collection: their
+    /// bytes are `encoded[previous run end..end]`. `line` is the first one's;
+    /// only it can fail layout, as the section cannot change within a run.
+    Encoded {
+        end: usize,
+        line: usize,
+    },
+    /// `short` is a direct jump still assumed to fit rel8.
+    Instruction {
+        instruction: Ref<'a, x86::Instruction>,
+        line: usize,
+        short: bool,
+    },
+    Label {
+        name: Box<str>,
+        line: usize,
+    },
+    /// Directive lines from explicit text, applied in order.
+    Text {
+        text: Box<str>,
+        line: usize,
+    },
+    Item {
+        item: Ref<'a, Item>,
+        line: usize,
+    },
+}
+/// Layout input. Most instructions in ordinary assembly are symbol-free and
+/// encode identically on every relaxation pass; retaining their parsed
+/// operands for each pass would cost far more than their bytes.
+struct Items<'a> {
+    entries: Vec<Entry<'a>>,
+    encoded: Vec<u8>,
     features: x86::Features,
-) -> Result<(), Error> {
-    for (item, line) in items {
-        if let Item::X86Instruction(i) = item.borrow() {
-            let required = i.opcode.required_features();
-            if !features.contains(required) {
-                return Err(Error::new(
-                    *line,
+    // Parse errors anywhere take precedence over feature errors.
+    unsupported: Option<Error>,
+    parsed: usize,
+}
+impl<'a> Items<'a> {
+    fn new(features: x86::Features) -> Self {
+        Self {
+            entries: Vec::new(),
+            encoded: Vec::new(),
+            features,
+            unsupported: None,
+            parsed: 0,
+        }
+    }
+    fn parse(&mut self, source: &str, first: usize) -> Result<(), Error> {
+        for (index, source) in source.lines().enumerate() {
+            let line = first + index;
+            let p = x86::parse_program(source)
+                .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
+            for item in p.items {
+                match item {
+                    Item::X86Instruction(mut i) => {
+                        if !self.encode(&i, line) {
+                            // Parsed operand lists can have spare capacity.
+                            i.operands.shrink_to_fit();
+                            self.instruction(Ref::Owned(Box::new(i)), line)
+                        }
+                    }
+                    Item::Label(name) => self.push(Entry::Label {
+                        name: name.into_boxed_str(),
+                        line,
+                    }),
+                    Item::Text(text) => self.push(Entry::Text {
+                        text: text.into_boxed_str(),
+                        line,
+                    }),
+                    item => self.push(Entry::Item {
+                        item: Ref::Owned(Box::new(item)),
+                        line,
+                    }),
+                }
+            }
+        }
+        Ok(())
+    }
+    fn push(&mut self, entry: Entry<'a>) {
+        self.parsed += 1;
+        self.entries.push(entry);
+    }
+    /// Encode a symbol-free instruction into the current run, if possible.
+    /// Otherwise the caller retains it for per-pass layout.
+    fn encode(&mut self, i: &x86::Instruction, line: usize) -> bool {
+        let required = i.opcode.required_features();
+        if !self.features.contains(required) {
+            self.unsupported.get_or_insert_with(|| {
+                Error::new(
+                    line,
                     format!(
                         "{} requires x86 target features: {}",
                         i.opcode,
                         required.names().collect::<Vec<_>>().join(",")
                     ),
-                ));
-            }
+                )
+            });
+            return false;
+        }
+        if self.unsupported.is_some()
+            || !i.operands.iter().all(|o| match o {
+                x86::Operand::Register(_) => true,
+                x86::Operand::Immediate(a) => symbol_free(a),
+                x86::Operand::Memory(m) => symbol_free(&m.displacement),
+            })
+        {
+            return false;
+        }
+        // Without a symbol nothing folds and no branch is short, so layout
+        // would reencode exactly this. Failures are left for layout to report.
+        let Ok(e) = encode::encode(i, false) else {
+            return false;
+        };
+        if !e.fixups.is_empty() {
+            return false;
+        }
+        self.parsed += 1;
+        self.encoded.extend_from_slice(&e.bytes);
+        let end = self.encoded.len();
+        match self.entries.last_mut() {
+            Some(Entry::Encoded { end: run, .. }) => *run = end,
+            _ => self.entries.push(Entry::Encoded { end, line }),
+        }
+        true
+    }
+    fn instruction(&mut self, i: Ref<'a, x86::Instruction>, line: usize) {
+        let short = matches!(i.opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_))
+            && matches!(i.operands.as_slice(), [x86::Operand::Immediate(address)]
+                if address.modifier == Modifier::None && address.expression.add.is_some()
+                    && address.expression.subtract.is_none());
+        self.push(Entry::Instruction {
+            instruction: i,
+            line,
+            short,
+        });
+    }
+    fn finish(self) -> Result<Self, Error> {
+        match self.unsupported {
+            Some(e) => Err(e),
+            None => Ok(self),
         }
     }
-    Ok(())
 }
-fn parse_source(source: &str, first: usize, items: &mut Vec<(Item, usize)>) -> Result<(), Error> {
-    for (index, source) in source.lines().enumerate() {
-        let line = first + index;
-        let p = x86::parse_program(source)
-            .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
-        items.extend(p.items.into_iter().map(|item| (item, line)));
-    }
-    Ok(())
+fn symbol_free(a: &Address) -> bool {
+    a.expression.add.is_none() && a.expression.subtract.is_none()
 }
 
 /// In-process diagnostic timings. Normal assembly compiles out stage timing.
@@ -164,61 +299,56 @@ pub fn profile_object_with_features(
 ) -> Result<(Vec<u8>, Profile), Error> {
     let mut profile = Profile::default();
     let start = std::time::Instant::now();
-    let mut items = Vec::new();
-    parse_source(source, 1, &mut items)?;
-    validate_features(&items, features)?;
+    let mut items = Items::new(features);
+    items.parse(source, 1)?;
+    let mut items = items.finish()?;
     profile.parse_ms = start.elapsed().as_secs_f64() * 1000.0;
-    profile.items = items.len();
-    let object = assemble_items_inner::<true, _>(&items, &mut profile)?;
+    profile.items = items.parsed;
+    let object = assemble_items_inner::<true>(&mut items, &mut profile)?;
     Ok((object, profile))
 }
-fn assemble_items<T: std::borrow::Borrow<Item>>(items: &[(T, usize)]) -> Result<Vec<u8>, Error> {
-    assemble_items_inner::<false, _>(items, &mut Profile::default())
+fn assemble_items(mut items: Items) -> Result<Vec<u8>, Error> {
+    assemble_items_inner::<false>(&mut items, &mut Profile::default())
 }
-fn assemble_items_inner<const PROFILE: bool, T: std::borrow::Borrow<Item>>(
-    items: &[(T, usize)],
+fn assemble_items_inner<const PROFILE: bool>(
+    items: &mut Items,
     profile: &mut Profile,
 ) -> Result<Vec<u8>, Error> {
     // Start optimistically short, then only widen. Alignment (especially max-skip)
     // is not monotonic: recheck *every* remaining short branch after each layout.
     // At least one branch widens per retry, so this terminates without cycles.
-    let mut short: Vec<bool> = items
-        .iter()
-        .map(|(item, _)| {
-            matches!(item.borrow(),
-        Item::X86Instruction(i) if matches!(i.opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_))
-            && matches!(i.operands.as_slice(), [x86::Operand::Immediate(address)]
-                if address.modifier == Modifier::None && address.expression.add.is_some()
-                    && address.expression.subtract.is_none()))
-        })
-        .collect();
-    let mut encodings = vec![None; items.len()];
-    let mut encoded_bytes = Vec::new();
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
         let mut branches = Vec::new();
-        for (index, (item, line)) in items.iter().enumerate() {
-            let item = item.borrow();
+        let mut run = 0;
+        for (index, entry) in items.entries.iter().enumerate() {
             let fix = a.fixes.len();
-            let result = if let Item::Text(t) = item {
-                t.lines()
-                    .try_for_each(|directive| a.directive(directive, *line))
-            } else if let Item::X86Instruction(i) = item {
-                a.instruction_encoding(
-                    i,
-                    *line,
-                    short[index],
-                    &mut encodings[index],
-                    &mut encoded_bytes,
-                )
-            } else {
-                a.item(item, *line)
+            let (result, line) = match entry {
+                Entry::Encoded { end, line } => {
+                    let bytes = &items.encoded[run..*end];
+                    run = *end;
+                    (a.encoded(bytes), line)
+                }
+                Entry::Instruction {
+                    instruction,
+                    line,
+                    short,
+                } => {
+                    if *short {
+                        branches.push((index, fix));
+                    }
+                    (a.instruction(instruction, *line, *short), line)
+                }
+                Entry::Label { name, line } => (a.label(name), line),
+                Entry::Text { text, line } => (
+                    text.lines()
+                        .try_for_each(|directive| a.directive(directive, *line)),
+                    line,
+                ),
+                Entry::Item { item, line } => (a.item(item, *line), line),
             };
             result.map_err(|e| Error::new(*line, e))?;
-            if short[index] {
-                branches.push((index, fix));
-            }
         }
         if let Some(start) = start {
             profile
@@ -236,8 +366,8 @@ fn assemble_items_inner<const PROFILE: bool, T: std::borrow::Borrow<Item>>(
                         section == Some(f.section)
                             && (-128..=127).contains(&(value - i128::from(f.offset)))
                     });
-            if !fits {
-                short[index] = false;
+            if !fits && let Entry::Instruction { short, .. } = &mut items.entries[index] {
+                *short = false;
                 changed += 1;
             }
         }
@@ -387,19 +517,20 @@ impl Assembler {
         sym.value = value;
         Ok(())
     }
-    fn instruction_encoding(
+    fn encoded(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if self.sections[self.current].nobits {
+            return Err("instruction in NOBITS section".into());
+        }
+        self.bytes(bytes)
+    }
+    fn instruction(
         &mut self,
         i: &x86::Instruction,
         line: usize,
         short: bool,
-        cached: &mut Option<std::ops::Range<usize>>,
-        encoded_bytes: &mut Vec<u8>,
     ) -> Result<(), String> {
         if self.sections[self.current].nobits {
             return Err("instruction in NOBITS section".into());
-        }
-        if let Some(range) = cached {
-            return self.bytes(&encoded_bytes[range.clone()]);
         }
         // Intel operands known to be absolute at this point are constants.
         // Forward references remain symbolic, including later absolute aliases.
@@ -430,16 +561,9 @@ impl Assembler {
                 address.expression = Expression::constant(value);
             }
         }
+        // Symbolic instructions are reencoded on each pass: folded absolute
+        // expressions and short branches can depend on layout.
         let e = encode::encode(folded.as_ref().unwrap_or(i), short)?;
-        // Cache only symbol-free encodings, in one compact byte arena. Keeping
-        // a heap allocation and symbolic fixups for every instruction costs
-        // more memory/cache traffic than reencoding the symbolic minority.
-        // Folded absolute expressions can depend on layout and are never cached.
-        if folded.is_none() && e.fixups.is_empty() {
-            let start = encoded_bytes.len();
-            encoded_bytes.extend_from_slice(&e.bytes);
-            *cached = Some(start..encoded_bytes.len());
-        }
         let at = self.offset();
         for f in e.fixups {
             self.fixes.push(Fix {
@@ -520,7 +644,7 @@ impl Assembler {
             }
             Directive::Size { name, expression } => {
                 let e = self.capture_dot(expression.clone())?;
-                self.symbols.entry(name.clone()).or_default().size = Some(e);
+                self.symbols.entry(name.clone()).or_default().size = Some(Box::new(e));
                 Ok(())
             }
 
@@ -587,7 +711,7 @@ impl Assembler {
                 self.align(u32::from(*alignment), None)?;
                 self.label(symbol)?;
                 self.symbols.get_mut(symbol).unwrap().size =
-                    Some(Expression::constant(i128::from(*size)));
+                    Some(Box::new(Expression::constant(i128::from(*size))));
                 self.zero(*size, 0)?;
                 self.current = old;
                 Ok(())
@@ -655,7 +779,7 @@ impl Assembler {
         if sym.section.is_some() || sym.alias.is_some() {
             return Err(format!("duplicate symbol `{name}`"));
         }
-        sym.alias = Some(e);
+        sym.alias = Some(Box::new(e));
         Ok(())
     }
     fn leb(&mut self, n: i128, signed: bool) -> Result<(), String> {
@@ -723,7 +847,7 @@ impl Assembler {
             ".size" if parts.len() == 2 => {
                 let name = x86::symbol(parts[0])?;
                 let expr = self.capture_dot(x86::address(parts[1])?.expression)?;
-                self.symbols.entry(name).or_default().size = Some(expr);
+                self.symbols.entry(name).or_default().size = Some(Box::new(expr));
                 Ok(())
             }
             ".set" | ".equ" if parts.len() == 2 => {
@@ -756,7 +880,7 @@ impl Assembler {
                     self.symbols.get_mut(&name).unwrap().common = None;
                     self.label(&name)?;
                     self.symbols.get_mut(&name).unwrap().size =
-                        Some(Expression::constant(size.into()));
+                        Some(Box::new(Expression::constant(size.into())));
                     self.zero(size, 0)?;
                     self.current = old
                 }
@@ -958,7 +1082,8 @@ impl Assembler {
                 .chain(
                     self.symbols
                         .values()
-                        .flat_map(|s| s.alias.iter().chain(s.size.iter())),
+                        .flat_map(|s| s.alias.iter().chain(s.size.iter()))
+                        .map(|e| &**e),
                 )
                 .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
                 .map(String::as_str)
@@ -999,10 +1124,9 @@ impl Assembler {
             };
             let id = object.add_section(Vec::new(), s.name.as_bytes().to_vec(), kind);
             object.section_mut(id).flags = SectionFlags::Elf { sh_flags: s.flags };
+            // Initialized data moves in after relocation patching below.
             if s.nobits {
                 object.append_section_bss(id, s.size, s.align);
-            } else {
-                object.append_section_data(id, &s.data, s.align);
             }
             sections.push(id);
         }
@@ -1225,13 +1349,11 @@ impl Assembler {
                 )
                 .map_err(|e| Error::new(f.line, e.to_string()))?;
         }
-        // Patches resolved above must replace the section data already copied to Object.
-        for (i, s) in self.sections.iter().enumerate() {
+        // Move rather than copy the patched data: large sections would
+        // otherwise be resident twice before serialization makes a third copy.
+        for (i, s) in self.sections.iter_mut().enumerate() {
             if !s.nobits {
-                object
-                    .section_mut(sections[i])
-                    .data_mut()
-                    .copy_from_slice(&s.data);
+                object.set_section_data(sections[i], std::mem::take(&mut s.data), s.align);
             }
         }
         let mut bytes = object.write().map_err(|e| err(e.to_string()))?;
