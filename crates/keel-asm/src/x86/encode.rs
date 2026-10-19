@@ -1,5 +1,6 @@
 #[path = "bmi.rs"]
 mod bmi;
+mod sse2;
 mod vex;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
@@ -254,6 +255,17 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             | Pdep | Mulx,
             _,
         ) => bmi::encode(&mut e, op, o)?,
+        (
+            Movdqa | Movdqu | Pxor | Pand | Pandn | Por | Pcmpeqb | Pcmpeqw | Pcmpeqd | Pcmpgtb
+            | Pcmpgtw | Pcmpgtd | Pshufd | Pshuflw | Pshufhw | Punpcklbw | Punpcklwd | Punpckldq
+            | Punpcklqdq | Punpckhbw | Punpckhwd | Punpckhdq | Punpckhqdq | Unpcklps | Unpckhps
+            | Unpcklpd | Unpckhpd | Shufps | Shufpd | Andnps | Andnpd | Minps | Minpd | Maxps
+            | Maxpd | Cmpps | Cmppd | Cmpss | Cmpsd | Cmpltss | Cmpnltps | Pmovmskb | Movmskps
+            | Movmskpd | Pmaddwd | Pmulhuw | Pmulhw | Pmuludq | Psllw | Pslld | Psllq | Psrlw
+            | Psrld | Psrlq | Psraw | Psrad | Pslldq | Psrldq | Cvtdq2ps | Cvtps2dq | Cvttps2dq
+            | Cvtps2pd | Cvtpd2ps | Cvtdq2pd | Cvtpd2dq | Cvttpd2dq,
+            _,
+        ) => sse2::encode(&mut e, i)?,
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
@@ -563,6 +575,20 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
                 small || r.width == 64,
             )?;
         }
+        (Shl | Shr | Sar | Rol | Ror, [a]) => {
+            let w = width(a);
+            if !(gpr(a) || matches!(a, M(_))) || !matches!(w, 8 | 16 | 32 | 64) {
+                return Err(err());
+            }
+            let group = match op {
+                Rol => 0,
+                Ror => 1,
+                Shl => 4,
+                Shr => 5,
+                _ => 7,
+            };
+            e.rm(0, &[0xd0 + u8::from(w != 8)], w, group, a, None)?;
+        }
         (Shl | Shr | Sar | Rol | Ror, [a, b]) => {
             let w = width(a);
             if !matches!(w, 8 | 16 | 32 | 64) {
@@ -682,6 +708,15 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
                 encode_sse(&mut e, i).map_err(|_| err())?;
             }
         }
+    }
+    if i.lock {
+        // Match LLVM's canonical segment/operand-size/LOCK ordering. The
+        // prefix length is unchanged, so recorded fixup offsets remain valid.
+        let end = 1 + e.bytes[1..]
+            .iter()
+            .take_while(|b| matches!(b, 0x64 | 0x65 | 0x66))
+            .count();
+        e.bytes[..end].rotate_left(1);
     }
     // PC-relative relocation addends are measured from the relocated field,
     // but the CPU uses the end of the entire instruction (including immediates).
