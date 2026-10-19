@@ -141,7 +141,6 @@ fn unsupported_widths_signed_division_and_trapping_zero_are_unchanged() {
             ("sdiv", 10),
             ("srem", 10),
             ("sdiv", u64::MAX),
-            ("srem", u64::MAX),
         ] {
             let mut module = keel_ir::parse(&source(ty, d, op)).unwrap();
             keel_opt::optimize_with_tier(&mut module, OptimizationTier::Full).unwrap();

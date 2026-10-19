@@ -1921,10 +1921,22 @@ impl<'a> FunctionCompiler<'a> {
                         BrifTest::Flags("eq")
                     }
                 };
-                // Block arguments are copied on the edge, so a branch with
-                // else-arguments needs its own landing pad. The copies only
-                // move data, so the flags survive them.
-                if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
+                // Copy block arguments only on their own edge. A fallthrough
+                // edge can copy inline; otherwise it needs a landing pad.
+                if self.next_block == Some(else_dest.block)
+                    && then_dest.args.is_empty()
+                    && self.edge_moves(0).is_empty()
+                {
+                    match &test {
+                        BrifTest::Flags(condition) => {
+                            self.conditional(invert_cond(condition), self.label(then_dest.block));
+                        }
+                        BrifTest::Zero(register) => {
+                            self.compare_branch(*register, true, self.label(then_dest.block));
+                        }
+                    }
+                    self.block_args(&else_dest, 1);
+                } else if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
                     self.brif_false(&test, self.label(else_dest.block));
                     self.block_args(&then_dest, 0);
                     self.branch_unless_next(then_dest.block);
@@ -3569,10 +3581,17 @@ impl<'a> FunctionCompiler<'a> {
                 let signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
                 let a = reg(self.extend(S0, a, ty, signed), ty);
                 let b = reg(self.extend(S1, b, ty, signed), ty);
-                let trap = self.trap_label();
+                let width = ty.bytes().unwrap() * 8;
+                let mask = u64::MAX >> (64 - width);
+                // Iconst's immediate wraps to the IR width, even if it spells
+                // zero or -1 with a noncanonical bit pattern.
+                let divisor = iconst(self.func, args[1]).map(|n| n as u64 & mask);
                 // Hardware division returns 0 for a zero divisor; the IR traps.
-                self.compare_branch(b, false, trap.clone());
-                if op == BinaryOp::Sdiv {
+                if divisor.is_none_or(|n| n == 0) {
+                    let trap = self.trap_label();
+                    self.compare_branch(b, false, trap);
+                }
+                if op == BinaryOp::Sdiv && divisor.is_none_or(|n| n == mask) {
                     // MIN / -1 overflows. Hardware wraps; the IR traps.
                     let min = reg(S2, ty);
                     self.materialize(S2, min_value(ty), ty == Type::I64);
@@ -3581,7 +3600,8 @@ impl<'a> FunctionCompiler<'a> {
                         "ccmp",
                         [(a).into(), (min).into(), Arg::imm(0), Arg::from("eq")],
                     );
-                    self.conditional("eq", trap.clone());
+                    let trap = self.trap_label();
+                    self.conditional("eq", trap);
                 }
                 let div = if signed { "sdiv" } else { "udiv" };
                 match op {

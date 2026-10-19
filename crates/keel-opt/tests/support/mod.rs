@@ -49,6 +49,19 @@ pub fn execute(func: &Function, inputs: &[u64]) -> u64 {
                     BinaryOp::Xor => read(args[0]) ^ read(args[1]),
                     BinaryOp::Udiv => read(args[0]) / read(args[1]),
                     BinaryOp::Urem => read(args[0]) % read(args[1]),
+                    BinaryOp::Sdiv | BinaryOp::Srem => {
+                        let width = func.value_type(args[0]).bytes().unwrap() * 8;
+                        let shift = 64 - width;
+                        let a = (read(args[0]) << shift) as i64 >> shift;
+                        let b = (read(args[1]) << shift) as i64 >> shift;
+                        assert_ne!(b, 0, "division by zero");
+                        if *op == BinaryOp::Sdiv {
+                            assert!(a != (-1i64 << (width - 1)) || b != -1, "signed overflow");
+                            (a / b) as u64
+                        } else {
+                            a.wrapping_rem(b) as u64
+                        }
+                    }
                     BinaryOp::Shl | BinaryOp::Ushr | BinaryOp::Sshr => {
                         let width = func.value_type(args[0]).bytes().unwrap() * 8;
                         let shift = read(args[1]) % u64::from(width);

@@ -285,6 +285,8 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
                 }
                 BinaryOp::Udiv | BinaryOp::Sdiv if y == Some(1) => return Some(Fold::Value(a)),
                 BinaryOp::Urem | BinaryOp::Srem if y == Some(1) => return Some(zero(ty)),
+                // Unlike signed division, MIN % -1 is defined and equals zero.
+                BinaryOp::Srem if y == Some(mask(ty)) => return Some(zero(ty)),
                 BinaryOp::Shl
                 | BinaryOp::Ushr
                 | BinaryOp::Sshr
@@ -493,7 +495,51 @@ fn simplify(func: &mut Function, inst: Inst, users: &[Vec<Inst>]) -> Option<Fold
     canonicalized.then_some(Fold::Data(data))
 }
 
+/// Reuse only a quotient already executed earlier in this block. Keeping that
+/// division preserves zero-divisor traps and signed MIN/-1 overflow traps;
+/// introducing a signed division for a standalone remainder would not.
+fn reuse_quotients(func: &mut Function) -> bool {
+    let mut quotients = std::collections::HashMap::new();
+    let mut changed = false;
+    for block in func.blocks().collect::<Vec<_>>() {
+        quotients.clear();
+        for inst in func.block_insts(block).to_vec() {
+            let InstData::Binary { op, args } = *func.inst_data(inst) else {
+                continue;
+            };
+            let args = args.map(|v| func.resolve(v));
+            let division = match op {
+                BinaryOp::Sdiv | BinaryOp::Udiv => {
+                    quotients.insert((op, args), func.first_result(inst));
+                    continue;
+                }
+                BinaryOp::Srem => BinaryOp::Sdiv,
+                BinaryOp::Urem => BinaryOp::Udiv,
+                _ => continue,
+            };
+            let Some(&quotient) = quotients.get(&(division, args)) else {
+                continue;
+            };
+            let product = func.insert_inst(
+                InsertPoint::Before(inst),
+                InstData::Binary {
+                    op: BinaryOp::Imul,
+                    args: [quotient, args[1]],
+                },
+            );
+            func.set_inst_loc(product, func.inst_loc(inst));
+            *func.inst_data_mut(inst) = InstData::Binary {
+                op: BinaryOp::Isub,
+                args: [args[0], func.first_result(product)],
+            };
+            changed = true;
+        }
+    }
+    changed
+}
+
 pub fn run(func: &mut Function) -> bool {
+    let reused_quotients = reuse_quotients(func);
     let mut users: Vec<Vec<Inst>> = vec![Vec::new(); func.num_values()];
     let mut work: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
     for &inst in &work {
@@ -504,7 +550,7 @@ pub fn run(func: &mut Function) -> bool {
     // notifications make the final result independent of layout order.
     work.reverse();
     let mut queued = vec![true; func.num_insts()];
-    let mut changed = false;
+    let mut changed = reused_quotients;
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
         if func.is_removed(inst) {

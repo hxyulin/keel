@@ -93,17 +93,27 @@ fn full_width_truth_edges_and_spills_use_register_branches_in_all_tiers() {
                             let (text, _) =
                                 compile(&source(bits, reverse, edges), tier, allocation, pools);
                             let width = if bits == 32 { 'w' } else { 'x' };
-                            assert!(text.contains(&format!("\tcbz\t{width}")), "{text}");
+                            assert!(
+                                text.contains(&format!(
+                                    "\t{}\t{width}",
+                                    if edges { "cbz" } else { "cbnz" }
+                                )),
+                                "{text}"
+                            );
                             assert!(!text.contains("\tcmp\t"), "{text}");
                             assert!(!text.contains("\tb.eq\t"), "{text}");
                             if edges {
                                 assert!(text.contains("_else:"), "false-edge landing pad: {text}");
                             } else {
-                                let target = if reverse { "block1" } else { "block2" };
+                                let target = if reverse { "block2" } else { "block1" };
                                 assert!(
                                     text.lines()
-                                        .any(|l| { l.contains("\tcbz\t") && l.ends_with(target) }),
+                                        .any(|l| { l.contains("\tcbnz\t") && l.ends_with(target) }),
                                     "{text}"
+                                );
+                                assert!(
+                                    !text.contains("\tb\t"),
+                                    "redundant fallthrough jump: {text}"
                                 );
                             }
                         }
@@ -125,7 +135,7 @@ fn narrow_and_wide_truth_tests_keep_mask_and_pair_semantics() {
         );
         assert!(text.contains(instruction), "{text}");
         assert!(!text.contains("\tcbz\t"), "{text}");
-        assert!(text.contains("\tb.eq\t"), "{text}");
+        assert!(text.contains("\tb.ne\t"), "{text}");
     }
     // The IR has no i1 type, and floating truth is invalid rather than
     // bit-testing -0.0. Floating comparisons remain on their existing path.
@@ -165,7 +175,7 @@ fn successor_inline_assembly_keeps_old_flags_even_without_cc_clobber() {
         );
         let (text, _) = compile(&src, SelectionTier::Full, AllocationTier::Full, &SPILLED);
         assert!(text.contains("\tcmp\tw"), "{text}");
-        assert!(text.contains("\tb.eq\t"), "{text}");
+        assert!(text.contains("\tb.ne\t"), "{text}");
         assert!(!text.contains("\tcbz\t"), "{text}");
     }
 }
@@ -192,10 +202,10 @@ fn aliases_locations_and_call_result_use_the_original_truth_width() {
     func.replace_all_uses(results[1], results[0]);
     let (text, _) = compile_module(&module, SelectionTier::Full, AllocationTier::Full, &SPILLED);
     assert!(text.contains("\tbl\t_poll"), "{text}");
-    assert!(text.contains("\tcbz\tw"), "{text}");
+    assert!(text.contains("\tcbnz\tw"), "{text}");
     assert!(text.contains(".loc\t1 8 3"), "{text}");
     assert!(text.contains(".cfi_startproc"), "{text}");
-    assert!(text.find("\tbl\t_poll").unwrap() < text.find("\tcbz\tw").unwrap());
+    assert!(text.find("\tbl\t_poll").unwrap() < text.find("\tcbnz\tw").unwrap());
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
