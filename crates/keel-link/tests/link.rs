@@ -445,3 +445,78 @@ fn tlvp_requires_a_descriptor_and_debug_paths_are_explicit() {
             .contains("absolute")
     );
 }
+
+#[test]
+fn discarded_debug_payload_preserves_image_and_requested_archive_snapshots() {
+    let source = ".text\n.globl _main\n_main:\nmov w0,#0\nret\n";
+    let plain = object(source);
+    let debug = object(&format!(
+        "{source}.section __DWARF,__debug_str,regular,debug\n.asciz \"retained debug bytes\"\n"
+    ));
+    let build = |bytes: &[u8], opts| {
+        keel_link::link(
+            &[Input {
+                name: "memory.o",
+                bytes,
+            }],
+            opts,
+        )
+        .unwrap()
+    };
+    let expected = build(&plain, options());
+    let omitted = build(&debug, options());
+    assert_eq!(expected.bytes, omitted.bytes);
+    assert!(omitted.debug_objects.is_empty());
+    assert_eq!(omitted.warnings.len(), 1);
+
+    let unused = object(
+        ".text\n.globl _unused\n_unused:\nret\n.section __DWARF,__debug_str,regular,debug\n.asciz \"unused\"\n",
+    );
+    let ar = archive(&[("entry.o", debug.clone()), ("unused.o", unused)]);
+    let mut opts = options();
+    opts.debug_directory = Some(std::env::temp_dir().join("keel-memory-debug-snapshots"));
+    let retained = build(&ar, opts);
+    assert!(retained.warnings.is_empty());
+    assert_eq!(retained.debug_objects.len(), 1);
+    assert_eq!(retained.debug_objects[0].bytes, debug);
+}
+
+#[test]
+fn discarded_debug_payload_still_requires_valid_file_bounds() {
+    let mut bytes = object(
+        ".text\n.globl _main\n_main:\nret\n.section __DWARF,__debug_str,regular,debug\n.asciz \"debug\"\n",
+    );
+    let read =
+        |bytes: &[u8], at| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    let mut at = 32;
+    let mut found = false;
+    for _ in 0..read(&bytes, 16) {
+        if read(&bytes, at) == 0x19 {
+            for i in 0..read(&bytes, at + 64) {
+                let section = at + 72 + i * 80;
+                if &bytes[section..section + 11] == b"__debug_str" {
+                    bytes[section + 48..section + 52].copy_from_slice(&u32::MAX.to_le_bytes());
+                    found = true;
+                }
+            }
+        }
+        at += read(&bytes, at + 4);
+    }
+    assert!(found);
+    for retain in [false, true] {
+        let mut opts = options();
+        if retain {
+            opts.debug_directory = Some(std::env::temp_dir().join("keel-invalid-debug"));
+        }
+        let error = keel_link::link(
+            &[Input {
+                name: "bad-debug.o",
+                bytes: &bytes,
+            }],
+            opts,
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("truncated Mach-O input"), "{error}");
+    }
+}

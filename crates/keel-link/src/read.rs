@@ -60,10 +60,10 @@ pub(crate) struct Object {
     pub debug_bytes: Option<Vec<u8>>,
 }
 impl Object {
-    pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
-        Self::read(name, bytes).map_err(|e| format!("{name}: {e}"))
+    pub fn parse(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
+        Self::read(name, bytes, retain_debug).map_err(|e| format!("{name}: {e}"))
     }
-    fn read(name: &str, bytes: &[u8]) -> Result<Self> {
+    fn read(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
         let r = Reader(bytes);
         if r.u32(0)? != 0xfeedfacf || r.u32(4)? != 0x100000c || r.u32(12)? != 1 {
             return fail("expected a thin little-endian arm64 MH_OBJECT");
@@ -120,10 +120,18 @@ impl Object {
                         if len > 512 * 1024 * 1024 {
                             return fail("section exceeds basic linker's 512 MiB limit");
                         }
+                        let segment = r.string(s + 16, 16)?;
                         let data = if zero {
                             Vec::new()
                         } else {
-                            r.bytes(r.u32(s + 48)? as usize, len)?.to_vec()
+                            // DWARF is omitted from the image. Its exact bytes, when
+                            // requested, live in the object snapshot instead.
+                            let data = r.bytes(r.u32(s + 48)? as usize, len)?;
+                            if segment == "__DWARF" {
+                                Vec::new()
+                            } else {
+                                data.to_vec()
+                            }
                         };
                         let nr = r.u32(s + 60)? as usize;
                         let ro = r.u32(s + 56)? as usize;
@@ -150,7 +158,7 @@ impl Object {
                         }
                         sections.push(Section {
                             name: r.string(s, 16)?,
-                            segment: r.string(s + 16, 16)?,
+                            segment,
                             address: r.u64(s + 32)?,
                             size: len,
                             alignment,
@@ -243,9 +251,7 @@ impl Object {
                 value,
             });
         }
-        let debug_bytes = sections
-            .iter()
-            .any(|s| s.segment == "__DWARF")
+        let debug_bytes = (retain_debug && sections.iter().any(|s| s.segment == "__DWARF"))
             .then(|| bytes.to_vec());
         Ok(Self {
             name: name.into(),
@@ -258,7 +264,7 @@ impl Object {
 }
 
 /// BSD/Darwin ar members; archive indexes are hints, never trusted for resolution.
-pub(crate) fn archive(name: &str, bytes: &[u8]) -> Result<Vec<Object>> {
+pub(crate) fn archive(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Vec<Object>> {
     let r = Reader(bytes);
     if r.bytes(0, 8)? != b"!<arch>\n" {
         return fail("expected BSD ar archive");
@@ -289,7 +295,11 @@ pub(crate) fn archive(name: &str, bytes: &[u8]) -> Result<Vec<Object>> {
             (raw.trim_end_matches('/').into(), data)
         };
         if !member.starts_with("__.SYMDEF") && !matches!(member.as_str(), "" | "/" | "/SYM64") {
-            members.push(Object::parse(&format!("{name}({member})"), body)?);
+            members.push(Object::parse(
+                &format!("{name}({member})"),
+                body,
+                retain_debug,
+            )?);
         }
         at = (at + 60 + size + 1) & !1;
     }

@@ -442,7 +442,12 @@ impl Linker {
         if 32 + commands.len() + 16 > PAGE {
             return fail("load commands exceed reserved header page");
         }
-        let mut bytes = Vec::new();
+        // Layout already includes all file-backed data and linkedit. Reserve
+        // the final size so appending linkedit cannot grow/copy the whole image.
+        let image_size = file
+            .checked_add(linkedit.len())
+            .ok_or("image size overflow")?;
+        let mut bytes = Vec::with_capacity(image_size);
         let mut flags = 0x200085; // MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL | MH_PIE
         if self
             .weak_names
@@ -492,10 +497,15 @@ impl Linker {
     /// Darwin's debug map relocates object DWARF via N_OSO/N_FUN/N_GSYM
     /// records. Retain exact input snapshots, including archive members, so the
     /// reusable byte-oriented API never depends on diagnostic input names.
-    fn debug_map(&self, symbols: &mut Vec<u8>, strings: &mut Vec<u8>) -> Result<Vec<DebugObject>> {
+    fn debug_map(
+        &mut self,
+        symbols: &mut Vec<u8>,
+        strings: &mut Vec<u8>,
+    ) -> Result<Vec<DebugObject>> {
         let mut debug_objects = Vec::new();
         if let Some(directory) = &self.options.debug_directory {
-            for (oi, object) in self.objects.iter().enumerate() {
+            for oi in 0..self.objects.len() {
+                let object = &self.objects[oi];
                 let Some(bytes) = &object.debug_bytes else {
                     continue;
                 };
@@ -590,7 +600,7 @@ impl Linker {
                 nlist(symbols, strings, "", 0x64, 1, 0, 0);
                 debug_objects.push(DebugObject {
                     path,
-                    bytes: bytes.clone(),
+                    bytes: self.objects[oi].debug_bytes.take().unwrap(),
                 });
             }
         }
@@ -635,9 +645,11 @@ impl Linker {
         Ok(())
     }
     fn relocate_section(&mut self, oi: usize, si: usize) -> Result<()> {
-        let s = self.objects[oi].sections[si].clone();
+        // Relocation consumes this section's payload. Symbol resolution uses
+        // section addresses and sizes, so it does not need the resident bytes.
+        let mut data = std::mem::take(&mut self.objects[oi].sections[si].data);
+        let s = &self.objects[oi].sections[si];
         let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
-        let mut data = s.data.clone();
         let mut i = 0;
         let mut patched = BTreeSet::new();
         while i < s.relocs.len() {
@@ -881,7 +893,11 @@ impl Linker {
         if let Some(id) = s.output.filter(|_| !data.is_empty()) {
             self.outputs[id].data[s.offset..s.offset + data.len()].copy_from_slice(&data);
         }
-        self.objects[oi].sections[si].data = data;
+        // Only the unwind builder reads relocated input payloads afterward.
+        // All other bytes are now in their merged output sections.
+        if metadata || s.name == "__eh_frame" {
+            self.objects[oi].sections[si].data = data;
+        }
         Ok(())
     }
     fn make_got_stubs(&mut self) -> Result<()> {

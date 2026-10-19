@@ -132,9 +132,17 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     let mut archives = Vec::new();
     for input in inputs {
         if input.bytes.starts_with(b"!<arch>\n") {
-            archives.extend(read::archive(input.name, input.bytes)?);
+            archives.extend(read::archive(
+                input.name,
+                input.bytes,
+                options.debug_directory.is_some(),
+            )?);
         } else {
-            objects.push(Object::parse(input.name, input.bytes)?);
+            objects.push(Object::parse(
+                input.name,
+                input.bytes,
+                options.debug_directory.is_some(),
+            )?);
         }
     }
     // Fixed-point extraction supports archive dependency chains independent of
@@ -258,7 +266,7 @@ impl Linker {
         }
         for oi in 0..self.objects.len() {
             for si in 0..self.objects[oi].sections.len() {
-                let s = self.objects[oi].sections[si].clone();
+                let s = &self.objects[oi].sections[si];
                 if s.flags & 255 == 0x13 && !s.size.is_multiple_of(24) {
                     return fail(
                         "arm64 TLS descriptors must be 8-byte aligned triples of pointers",
@@ -290,16 +298,16 @@ impl Linker {
                     &s.segment
                 }
                 .to_owned();
-                let id = self.output(
-                    &seg,
-                    &s.name.clone(),
-                    s.flags & !(0x300 | 0x02000000),
-                    if s.flags & 255 == 0x13 {
-                        s.alignment.max(3)
-                    } else {
-                        s.alignment
-                    },
-                )?;
+                // Only metadata crosses the mutable output lookup; cloning
+                // Section here would also duplicate its payload and relocations.
+                let name = s.name.clone();
+                let flags = s.flags & !(0x300 | 0x02000000);
+                let alignment = if s.flags & 255 == 0x13 {
+                    s.alignment.max(3)
+                } else {
+                    s.alignment
+                };
+                let id = self.output(&seg, &name, flags, alignment)?;
                 let s = &mut self.objects[oi].sections[si];
                 let out = &mut self.outputs[id];
                 let offset = align(out.size, 1 << s.alignment);
