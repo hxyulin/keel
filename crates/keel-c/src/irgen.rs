@@ -455,6 +455,8 @@ impl<'p> Gen<'p> {
             scopes: Vec::new(),
             loc: None,
             scope: None,
+            loop_depth: 0,
+            labels_placed: false,
         };
         for local in &def.locals {
             let storage = if !fg.g.debug && !local.in_memory && local.ty.is_scalar() {
@@ -760,6 +762,241 @@ enum Place {
     },
 }
 
+// ---- constants known while the tree is lowered ----
+//
+// Macros leave operations on literals (`(t) | ((v) << 4)`, `-1`) that are
+// not in a constant-expression context, so the parser keeps them. Folding
+// them here, before any operand is emitted, avoids creating the operand
+// constants at all. Only literals and operations on them are folded, so no
+// evaluation is skipped; operations that trap at run time are left alone.
+
+/// How deep `fold_int` looks, bounding the work for any tree. Flag masks
+/// spelled `A | B | C | ...` are long left-leaning chains.
+const FOLD_DEPTH: u32 = 32;
+
+/// An integer of at most 64 bits: the type whose values `fold_int` gives.
+fn small_int(ty: &Ty) -> bool {
+    ty.int_kind().is_some_and(|k| k.size() <= 8)
+}
+
+/// The value of integer expression `e` if it is made of literals alone,
+/// normalized to its type as the parser normalizes literals.
+fn fold_int(e: &Expr<'_>, depth: u32) -> Option<i64> {
+    if !small_int(&e.ty) {
+        return None;
+    }
+    let depth = depth.checked_sub(1)?;
+    let v = match &e.kind {
+        ExprKind::Int(v) => *v,
+        ExprKind::Cast(a) if small_int(&a.ty) => fold_int(a, depth)?,
+        ExprKind::Unary(op, a) if small_int(&a.ty) => {
+            let x = fold_int(a, depth)?;
+            match op {
+                UnOp::Neg => x.wrapping_neg(),
+                UnOp::BitNot => !x,
+                UnOp::Not => i64::from(x == 0),
+            }
+        }
+        ExprKind::Binary(op, a, b) if small_int(&a.ty) && small_int(&b.ty) => {
+            let x = fold_int(a, depth)?;
+            let y = fold_int(b, depth)?;
+            let signed = a.ty.is_signed();
+            let bits = a.ty.int_kind()?.size() as i64 * 8;
+            let (ux, uy) = (x as u64, y as u64);
+            let min = i64::MIN >> (64 - bits);
+            match op {
+                BinOp::Add => x.wrapping_add(y),
+                BinOp::Sub => x.wrapping_sub(y),
+                BinOp::Mul => x.wrapping_mul(y),
+                // Division by zero and the signed overflow trap at run time.
+                BinOp::Div | BinOp::Rem if y == 0 || (signed && x == min && y == -1) => {
+                    return None;
+                }
+                BinOp::Div if signed => x / y,
+                BinOp::Div => (ux / uy) as i64,
+                BinOp::Rem if signed => x % y,
+                BinOp::Rem => (ux % uy) as i64,
+                // Out-of-range amounts are left to the target's semantics.
+                BinOp::Shl | BinOp::Shr if !(0..bits).contains(&y) => return None,
+                BinOp::Shl => x << y,
+                BinOp::Shr if signed => x >> y,
+                BinOp::Shr => (ux >> y) as i64,
+                BinOp::And => x & y,
+                BinOp::Or => x | y,
+                BinOp::Xor => x ^ y,
+                BinOp::Eq => i64::from(x == y),
+                BinOp::Ne => i64::from(x != y),
+                BinOp::Lt if signed => i64::from(x < y),
+                BinOp::Le if signed => i64::from(x <= y),
+                BinOp::Gt if signed => i64::from(x > y),
+                BinOp::Ge if signed => i64::from(x >= y),
+                BinOp::Lt => i64::from(ux < uy),
+                BinOp::Le => i64::from(ux <= uy),
+                BinOp::Gt => i64::from(ux > uy),
+                BinOp::Ge => i64::from(ux >= uy),
+            }
+        }
+        // `sizeof(size_t) < sizeof(long) ? A : B`: the other arm is not
+        // evaluated, whatever it is.
+        ExprKind::Cond(c, a, b) if small_int(&c.ty) => {
+            let arm = if fold_int(c, depth)? != 0 { a } else { b };
+            if arm.ty != e.ty {
+                return None;
+            }
+            fold_int(arm, depth)?
+        }
+        _ => return None,
+    };
+    Some(crate::eval::normalize(v, &e.ty))
+}
+
+/// Whether `x op k` is `x` for integer `x` of type `ty`.
+fn right_identity(op: BinOp, k: i64, ty: &Ty) -> bool {
+    match op {
+        BinOp::Add | BinOp::Sub | BinOp::Or | BinOp::Xor | BinOp::Shl | BinOp::Shr => k == 0,
+        BinOp::Mul | BinOp::Div => k == 1,
+        BinOp::And => k == crate::eval::normalize(-1, ty),
+        _ => false,
+    }
+}
+
+/// Whether `k op x` is `x`.
+fn left_identity(op: BinOp, k: i64, ty: &Ty) -> bool {
+    match op {
+        BinOp::Add | BinOp::Or | BinOp::Xor => k == 0,
+        BinOp::Mul => k == 1,
+        BinOp::And => k == crate::eval::normalize(-1, ty),
+        _ => false,
+    }
+}
+
+/// A literal, or an operation on literals, whose evaluation does nothing
+/// and cannot fail.
+fn inert(e: &Expr<'_>) -> bool {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) => true,
+        ExprKind::Cast(a) => convertible(&a.ty, &e.ty) && inert(a),
+        _ => fold_int(e, FOLD_DEPTH).is_some(),
+    }
+}
+
+/// Whether `FnGen::convert` (or a cast to `void`) accepts this conversion.
+fn convertible(from: &Ty, to: &Ty) -> bool {
+    let wide = |t: &Ty| t.int_kind().is_some_and(|k| k.size() == 16);
+    *to == Ty::Void
+        || from.is_scalar()
+            && to.is_scalar()
+            && from.unusable().is_none()
+            && to.unusable().is_none()
+            && !(from.is_float() && (to.is_ptr() || wide(to)))
+            && !(to.is_float() && (from.is_ptr() || wide(from)))
+}
+
+/// An expression that is non-zero exactly when `e` is, and evaluates the
+/// same way: conversions to `_Bool`, between pointers and to an integer at
+/// least as wide, and `__builtin_expect` with inert expectations.
+fn same_truth<'e, 'a>(e: &'e Expr<'a>) -> Option<&'e Expr<'a>> {
+    match &e.kind {
+        ExprKind::Cast(a) => {
+            let to_bool = e.ty == Ty::Int(IntKind::Bool)
+                && (a.ty.is_integer() || a.ty.is_ptr() || matches!(a.ty, Ty::Float | Ty::Double));
+            let keeps = to_bool
+                || e.ty.is_ptr() && a.ty.is_ptr()
+                || matches!((e.ty.int_kind(), a.ty.int_kind()),
+                    (Some(to), Some(from)) if to.size() >= from.size());
+            keeps.then_some(&**a)
+        }
+        ExprKind::Builtin(Builtin::Hint, args) if args[1..].iter().all(inert) => Some(&args[0]),
+        _ => None,
+    }
+}
+
+/// `e` with `same_truth` applied as far as it goes.
+fn strip_truth<'e, 'a>(mut e: &'e Expr<'a>) -> &'e Expr<'a> {
+    while let Some(inner) = same_truth(e) {
+        e = inner;
+    }
+    e
+}
+
+/// An integer comparison `a op b` under truth-preserving wrappers, so that
+/// `(a op b) != 0` is `a op b`. Float comparisons are excluded: with NaN,
+/// negating one is not the opposite comparison.
+fn int_comparison<'e, 'a>(e: &'e Expr<'a>) -> Option<(BinOp, &'e Expr<'a>, &'e Expr<'a>)> {
+    match &strip_truth(e).kind {
+        ExprKind::Binary(op, a, b) if op.is_comparison() && !a.ty.is_float() => Some((*op, a, b)),
+        _ => None,
+    }
+}
+
+/// Whether `e` contains no statement (so no label) and no compound literal,
+/// looking at most `budget` nodes deep.
+fn no_statements(e: &Expr<'_>, budget: u32) -> bool {
+    let Some(budget) = budget.checked_sub(1) else {
+        return false;
+    };
+    let all = |es: &[&Expr<'_>]| es.iter().all(|e| no_statements(e, budget));
+    match &e.kind {
+        ExprKind::Unary(_, a)
+        | ExprKind::Cast(a)
+        | ExprKind::Deref(a)
+        | ExprKind::Addr(a)
+        | ExprKind::VaStart(a)
+        | ExprKind::VaArg(a)
+        | ExprKind::IncDec { lhs: a, .. }
+        | ExprKind::Member { base: a, .. } => all(&[a]),
+        ExprKind::Binary(_, a, b)
+        | ExprKind::PtrAdd(a, b, _)
+        | ExprKind::PtrDiff(a, b, _)
+        | ExprKind::LogAnd(a, b)
+        | ExprKind::LogOr(a, b)
+        | ExprKind::Assign(a, b)
+        | ExprKind::Comma(a, b)
+        | ExprKind::OpAssign { lhs: a, rhs: b, .. }
+        | ExprKind::PtrOpAssign { lhs: a, rhs: b, .. } => all(&[a, b]),
+        ExprKind::Cond(a, b, c) => all(&[a, b, c]),
+        ExprKind::Call(callee, args) => {
+            no_statements(callee, budget) && args.iter().all(|a| no_statements(a, budget))
+        }
+        ExprKind::Builtin(_, args) => args.iter().all(|a| no_statements(a, budget)),
+        ExprKind::CompoundLit(..) | ExprKind::StmtExpr { .. } => false,
+        ExprKind::Int(_)
+        | ExprKind::Float(_)
+        | ExprKind::Str(_)
+        | ExprKind::LabelAddr(_)
+        | ExprKind::Local(_)
+        | ExprKind::Global(_) => true,
+    }
+}
+
+/// The comparison true exactly when `op` is false.
+fn negated(op: BinOp) -> BinOp {
+    match op {
+        BinOp::Eq => BinOp::Ne,
+        BinOp::Ne => BinOp::Eq,
+        BinOp::Lt => BinOp::Ge,
+        BinOp::Ge => BinOp::Lt,
+        BinOp::Le => BinOp::Gt,
+        BinOp::Gt => BinOp::Le,
+        _ => unreachable!("not a comparison"),
+    }
+}
+
+/// `x != 0` or `x == 0` with integer `x` and a literal zero: whether it is
+/// `!=`, and `x`.
+fn zero_test<'e, 'a>(e: &'e Expr<'a>) -> Option<(bool, &'e Expr<'a>)> {
+    match &e.kind {
+        ExprKind::Binary(op, x, z) => Some((zero_test_op(*op, x, z)?, x)),
+        _ => None,
+    }
+}
+
+/// `zero_test` of `x op z`.
+fn zero_test_op(op: BinOp, x: &Expr<'_>, z: &Expr<'_>) -> Option<bool> {
+    (matches!(op, BinOp::Ne | BinOp::Eq) && x.ty.is_integer() && matches!(z.kind, ExprKind::Int(0)))
+        .then_some(op == BinOp::Ne)
+}
+
 /// A bounded fusion of `goto *constant_table[index]` into the existing
 /// shared switch. Numeric label values and ordinary table uses never change.
 struct DispatchTable {
@@ -1018,6 +1255,11 @@ struct FnGen<'g, 'p, 'f> {
     /// The location being given to instructions, and their scope.
     loc: Option<SourceLoc>,
     scope: Option<DebugScope>,
+    /// How many loops the statement being built is in.
+    loop_depth: u32,
+    /// Whether a label has been placed: a `goto` after it may run what
+    /// follows the label again.
+    labels_placed: bool,
 }
 
 impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
@@ -1101,11 +1343,21 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     // ---- statements ----
 
     fn stmt(&mut self, s: &Stmt<'p>) -> R<()> {
+        // A loop's condition and step run again too, statement
+        // expressions in them included.
+        let looping = matches!(s, Stmt::While(..) | Stmt::DoWhile(..) | Stmt::For { .. });
+        self.loop_depth += u32::from(looping);
+        let result = self.stmt_kind(s);
+        self.loop_depth -= u32::from(looping);
+        result
+    }
+
+    fn stmt_kind(&mut self, s: &Stmt<'p>) -> R<()> {
         match s {
             Stmt::Expr(e) => {
                 self.ensure_block();
                 self.set_loc(e.loc);
-                self.emit(e)?;
+                self.discard(e)?;
             }
             Stmt::Init(id, init, loc) => {
                 self.ensure_block();
@@ -1115,9 +1367,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             // Without this, a variable read on a path that did not assign it
             // in this iteration would read the last iteration's value: a
             // block parameter live around the whole loop. Zero starts a new
-            // value here instead.
+            // value here instead. A declaration that runs at most once, in
+            // no loop and with no label before it, needs no zero: a read
+            // that no assignment reaches already reads as zero.
             Stmt::Declare(id) => {
-                if let Storage::Var(var) = self.locals[*id] {
+                if let Storage::Var(var) = self.locals[*id]
+                    && (self.loop_depth > 0 || self.labels_placed)
+                {
                     self.ensure_block();
                     let zero = self.zero(self.def.locals[*id].ty.ir());
                     self.b.def_var(var, zero);
@@ -1267,9 +1523,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.seal_block(exit);
                 self.switch_to(exit);
             }
+            // A case block's branches are the switch's, built already, and
+            // the fall-through into it: sealing it now resolves its reads
+            // directly instead of through parameters filled in later.
             Stmt::Case(label) => {
                 let block = self.cases.last().unwrap()[*label];
                 self.jump_to(block);
+                self.b.seal_block(block);
                 self.switch_to(block);
             }
             Stmt::Break => {
@@ -1334,6 +1594,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.terminated = true;
             }
             Stmt::Label(label) => {
+                self.labels_placed = true;
                 let block = self.label_block(label);
                 self.jump_to(block);
                 self.switch_to(block);
@@ -1411,6 +1672,24 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.branch(b, t, f)
             }
             ExprKind::Unary(UnOp::Not, a) => self.branch(a, f, t),
+            _ if let Some(inner) = same_truth(cond) => self.branch(inner, t, f),
+            _ if let Some((ne, x)) = zero_test(cond) => {
+                if ne {
+                    self.branch(x, t, f)
+                } else {
+                    self.branch(x, f, t)
+                }
+            }
+            // A literal condition (`if (sizeof(long) == 8)`): one constant.
+            // Both edges stay: code built into the other block would
+            // otherwise be an unreached predecessor of the join, passing
+            // it values of its own.
+            _ if let Some(v) = fold_int(cond, FOLD_DEPTH) => {
+                let c = self.b.ins().iconst(Type::I8, i64::from(v != 0));
+                self.b.ins().brif(c, t, &[], f, &[]);
+                self.terminated = true;
+                Ok(())
+            }
             _ => {
                 let c = self.truth(cond)?;
                 self.b.ins().brif(c, t, &[], f, &[]);
@@ -1459,7 +1738,37 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         matches!(ty, Ty::Struct(_) | Ty::Array(..) | Ty::Func(_))
     }
 
+    /// Evaluates `e` for its effects only. Literals, and reads of local
+    /// variables that are not volatile, have none.
+    fn discard(&mut self, e: &Expr<'p>) -> R<()> {
+        let mut inner = e;
+        while let ExprKind::Cast(a) = &inner.kind
+            && convertible(&a.ty, &inner.ty)
+        {
+            inner = a;
+        }
+        match &inner.kind {
+            ExprKind::Comma(a, b) => {
+                self.discard(a)?;
+                self.discard(b)
+            }
+            ExprKind::Local(_) if !self.object_flags(&inner.ty, &inner.sugar).volatile => Ok(()),
+            _ if inert(inner) => Ok(()),
+            _ => self.emit(e).map(drop),
+        }
+    }
+
     fn emit(&mut self, e: &Expr<'p>) -> R<Option<Value>> {
+        // Operations on literals that macros leave outside constant
+        // expressions: one constant instead of the operands and the
+        // operation.
+        if matches!(
+            e.kind,
+            ExprKind::Unary(..) | ExprKind::Binary(..) | ExprKind::Cast(_)
+        ) && let Some(v) = fold_int(e, FOLD_DEPTH)
+        {
+            return Ok(Some(self.b.ins().iconst(e.ty.ir(), v)));
+        }
         let v = match &e.kind {
             ExprKind::LabelAddr(n) => {
                 let n = self.b.ins().iconst(Type::I64, *n as i64);
@@ -1491,6 +1800,11 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     self.load_place(&place)
                 }
             },
+            // `!(a < b)` is `a >= b` for integers and pointers.
+            ExprKind::Unary(UnOp::Not, a) if let Some((op, x, y)) = int_comparison(a) => {
+                let c = self.compare(negated(op), x, y)?;
+                self.b.ins().uext(Type::I32, c)
+            }
             ExprKind::Unary(op, a) => {
                 let v = self.val(a)?;
                 match op {
@@ -1512,14 +1826,34 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let c = self.compare(*op, a, b)?;
                 self.b.ins().uext(Type::I32, c)
             }
+            // `n * sizeof(char)`, `x << 0`, `0 | x` from macros: no
+            // operation, and no evaluation skipped but the literal's.
+            ExprKind::Binary(op, a, b)
+                if small_int(&e.ty)
+                    && fold_int(b, FOLD_DEPTH).is_some_and(|k| right_identity(*op, k, &e.ty)) =>
+            {
+                self.val(a)?
+            }
+            ExprKind::Binary(op, a, b)
+                if small_int(&e.ty)
+                    && fold_int(a, FOLD_DEPTH).is_some_and(|k| left_identity(*op, k, &e.ty)) =>
+            {
+                self.val(b)?
+            }
             ExprKind::Binary(op, a, b) => {
                 let (x, y) = (self.val(a)?, self.val(b)?);
                 self.arith(*op, &e.ty, x, y, e.loc)?
             }
             ExprKind::PtrAdd(p, n, size) => {
-                let base = self.val(p)?;
-                let offset = self.scaled(n, *size)?;
-                self.b.ins().ptradd(base, offset)
+                if fold_int(n, FOLD_DEPTH).is_some() {
+                    let (base, off) = self.ptr_parts(e)?;
+                    self.offset_by(base, off)
+                } else {
+                    let (base, off) = self.ptr_parts(p)?;
+                    let base = self.offset_by(base, off);
+                    let offset = self.scaled(n, *size)?;
+                    self.b.ins().ptradd(base, offset)
+                }
             }
             ExprKind::PtrDiff(a, b, size) => {
                 let (x, y) = (self.val(a)?, self.val(b)?);
@@ -1624,6 +1958,20 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.store_place(&place, new);
                 if *prefix { new } else { old }
             }
+            // `sizeof(x) == sizeof(float) ? f(x) : g(x)`, as <math.h>
+            // macros dispatch on the type: only the selected arm. The other
+            // is never evaluated, and has no statement a jump could reach.
+            ExprKind::Cond(c, a, b)
+                if let Some(v) = fold_int(c, FOLD_DEPTH)
+                    && no_statements(if v != 0 { b } else { a }, 64) =>
+            {
+                let arm = if v != 0 { a } else { b };
+                if e.ty == Ty::Void {
+                    self.emit(arm)?;
+                    return Ok(None);
+                }
+                self.val(arm)?
+            }
             ExprKind::Cond(c, a, b) => {
                 let (t, f, end) = (self.new_block(), self.new_block(), self.new_block());
                 self.branch(c, t, f)?;
@@ -1656,7 +2004,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.b.use_var(var)
             }
             ExprKind::Comma(a, b) => {
-                self.emit(a)?;
+                self.discard(a)?;
                 return self.emit(b);
             }
             ExprKind::StmtExpr {
@@ -1681,10 +2029,33 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             ExprKind::Call(f, args) => return self.call(f, args, e),
             ExprKind::Cast(inner) => {
-                let v = self.emit(inner)?;
                 if e.ty == Ty::Void {
+                    self.discard(inner)?;
                     return Ok(None);
                 }
+                // Null pointers and other integer constants made pointers:
+                // the constant already has the 64 bits the conversion gives.
+                if e.ty.is_ptr()
+                    && let Some(n) = fold_int(inner, FOLD_DEPTH)
+                {
+                    let n = self.b.ins().iconst(Type::I64, n);
+                    let p = self.b.ins().convert(ConvertOp::IntToPtr, Type::Ptr, n);
+                    return Ok(Some(p));
+                }
+                // `x > 0` with a floating `x`: the converted constant,
+                // rounded once to nearest as the conversion rounds.
+                if matches!(e.ty, Ty::Float | Ty::Double)
+                    && let Some(n) = fold_int(inner, FOLD_DEPTH)
+                {
+                    let signed = inner.ty.is_signed();
+                    return Ok(Some(match (&e.ty, signed) {
+                        (Ty::Float, true) => self.b.ins().f32const(n as f32),
+                        (Ty::Float, false) => self.b.ins().f32const(n as u64 as f32),
+                        (_, true) => self.b.ins().f64const(n as f64),
+                        (_, false) => self.b.ins().f64const(n as u64 as f64),
+                    }));
+                }
+                let v = self.emit(inner)?;
                 let v = v.ok_or_else(|| Error::new(e.loc, "a void expression has no value"))?;
                 self.convert(v, &inner.ty, &e.ty, e.loc)?
             }
@@ -1718,7 +2089,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// `n * size` as an `i64`, for pointer arithmetic.
     fn scaled(&mut self, n: &Expr<'p>, size: u64) -> R<Value> {
-        if let ExprKind::Int(k) = n.kind {
+        if let Some(k) = fold_int(n, FOLD_DEPTH) {
             return Ok(self.b.ins().iconst(Type::I64, k.wrapping_mul(size as i64)));
         }
         let v = self.val(n)?;
@@ -1730,6 +2101,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     fn compare(&mut self, op: BinOp, a: &Expr<'p>, b: &Expr<'p>) -> R<Value> {
+        // `(x < y) != 0` (as `__builtin_expect` and `!!` spell it) is
+        // `x < y`, and `(x < y) == 0` is `x >= y`.
+        if let Some(ne) = zero_test_op(op, a, b)
+            && let Some((inner, x, y)) = int_comparison(a)
+        {
+            return self.compare(if ne { inner } else { negated(inner) }, x, y);
+        }
         let (x, y) = (self.val(a)?, self.val(b)?);
         let ty = &a.ty;
         if ty.is_float() {
@@ -1910,8 +2288,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             ..
         } = &e.kind
         {
-            let base = self.addr(base)?;
-            let addr = self.offset(base, *offset);
+            let (base, off) = self.addr_parts(base)?;
+            let addr = self.offset_by(base, off.wrapping_add(*offset as i64));
             return Ok(Some(Place::Bits {
                 flags: self.object_flags(&e.ty, &e.sugar),
                 addr,
@@ -1969,8 +2347,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let bits = i64::from(unit.bytes().unwrap() * 8);
                 let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let left = bits - i64::from(field.shift) - i64::from(field.width);
-                let l = self.b.ins().iconst(unit, left);
-                let up = self.b.ins().shl(word, l);
+                // A field in the top bits needs no shift up.
+                let up = if left == 0 {
+                    word
+                } else {
+                    let l = self.b.ins().iconst(unit, left);
+                    self.b.ins().shl(word, l)
+                };
                 let r = self.b.ins().iconst(unit, bits - i64::from(field.width));
                 if signed {
                     self.b.ins().sshr(up, r)
@@ -2003,8 +2386,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let word = self.b.ins().load_with_flags(unit, addr, flags);
                 let keep = self.b.ins().iconst(unit, !mask as i64);
                 let kept = self.b.ins().and(word, keep);
-                let shift = self.b.ins().iconst(unit, i64::from(field.shift));
-                let moved = self.b.ins().shl(v, shift);
+                // A field in the low bits needs no shift into place.
+                let moved = if field.shift == 0 {
+                    v
+                } else {
+                    let shift = self.b.ins().iconst(unit, i64::from(field.shift));
+                    self.b.ins().shl(v, shift)
+                };
                 let m = self.b.ins().iconst(unit, mask as i64);
                 let new = self.b.ins().and(moved, m);
                 let merged = self.b.ins().or(kept, new);
@@ -2014,11 +2402,43 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     fn offset(&mut self, base: Value, offset: u64) -> Value {
+        self.offset_by(base, offset as i64)
+    }
+
+    fn offset_by(&mut self, base: Value, offset: i64) -> Value {
         if offset == 0 {
             return base;
         }
-        let n = self.b.ins().iconst(Type::I64, offset as i64);
+        let n = self.b.ins().iconst(Type::I64, offset);
         self.b.ins().ptradd(base, n)
+    }
+
+    /// Pointer value `e` as a base and a constant byte offset, so that a
+    /// chain of constant steps (`&p[2]`, `(char *)q + 8`, a member of a
+    /// member) adds one offset rather than one per step. Every operand
+    /// that is not a literal is still evaluated, once and in order.
+    fn ptr_parts(&mut self, e: &Expr<'p>) -> R<(Value, i64)> {
+        match &e.kind {
+            ExprKind::PtrAdd(p, n, size) if let Some(k) = fold_int(n, FOLD_DEPTH) => {
+                let (base, off) = self.ptr_parts(p)?;
+                Ok((base, off.wrapping_add(k.wrapping_mul(*size as i64))))
+            }
+            ExprKind::Cast(p) if e.ty.is_ptr() && p.ty.is_ptr() => self.ptr_parts(p),
+            ExprKind::Addr(lvalue) => self.addr_parts(lvalue),
+            _ => Ok((self.val(e)?, 0)),
+        }
+    }
+
+    /// `ptr_parts` of the address of lvalue `e`.
+    fn addr_parts(&mut self, e: &Expr<'p>) -> R<(Value, i64)> {
+        match &e.kind {
+            ExprKind::Member { base, offset, .. } => {
+                let (base, off) = self.addr_parts(base)?;
+                Ok((base, off.wrapping_add(*offset as i64)))
+            }
+            ExprKind::Deref(p) => self.ptr_parts(p),
+            _ => Ok((self.addr(e)?, 0)),
+        }
     }
 
     /// The address of an lvalue (or of an aggregate rvalue's bytes).
@@ -2047,10 +2467,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 let data = self.b.import_data(&name);
                 self.b.ins().symbol_addr(Symbol::Data(data))
             }
-            ExprKind::Deref(p) => self.val(p)?,
-            ExprKind::Member { base, offset, .. } => {
-                let base = self.addr(base)?;
-                self.offset(base, *offset)
+            ExprKind::Deref(_) | ExprKind::Member { .. } => {
+                let (base, off) = self.addr_parts(e)?;
+                self.offset_by(base, off)
             }
             ExprKind::CompoundLit(id, init) => {
                 self.init_local(*id, init)?;
@@ -2407,6 +2826,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     fn builtin(&mut self, op: Builtin, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
+        // The expectation is usually a literal, with nothing to evaluate.
+        if op == Builtin::Hint {
+            let v = self.val(&args[0])?;
+            for a in &args[1..] {
+                self.discard(a)?;
+            }
+            return Ok(Some(v));
+        }
         let mut vals = Vec::new();
         for a in args {
             vals.push(self.val(a)?);
