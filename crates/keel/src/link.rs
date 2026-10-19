@@ -114,20 +114,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
             PathBuf::from(String::from_utf8_lossy(&result.stdout).trim())
         }
     };
-    let mut dylibs = Vec::new();
-    for library in libraries {
-        if library.is_empty() || library.contains('/') {
-            return Err("library names must be nonempty basenames".into());
-        }
-        let path = root.join("usr/lib").join(format!("lib{library}.tbd"));
-        let interface = keel_link::Dylib::from_tbd(&path, &root)?;
-        if !dylibs
-            .iter()
-            .any(|d: &keel_link::Dylib| d.install_name == interface.install_name)
-        {
-            dylibs.push(interface);
-        }
-    }
+    let dylibs = load_dylibs(&root, &libraries, keel_link::Dylib::from_tbd)?;
     let owned: Vec<_> = inputs
         .iter()
         .map(|p| {
@@ -189,6 +176,43 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     Ok(())
 }
+
+fn load_dylibs(
+    root: &Path,
+    libraries: &[String],
+    mut read: impl FnMut(&Path, &Path) -> Result<keel_link::Dylib, String>,
+) -> Result<Vec<keel_link::Dylib>, String> {
+    let mut dylibs = Vec::new();
+    // This set belongs to one link with one sysroot and the parser's fixed
+    // macOS arm64 target. Reuse the entire successfully parsed reexport graph
+    // for aliases of that file, never for another file with the same install
+    // name. Keep parsing the requested path so diagnostics retain its spelling.
+    let mut parsed_files = std::collections::BTreeSet::new();
+    for library in libraries {
+        if library.is_empty() || library.contains('/') {
+            return Err("library names must be nonempty basenames".into());
+        }
+        let path = root.join("usr/lib").join(format!("lib{library}.tbd"));
+        // Identity lookup is only an optimization. Let the reader report any
+        // failure using its existing error handling rather than canonicalize's.
+        let identity = path.canonicalize().ok();
+        if identity.as_ref().is_some_and(|p| parsed_files.contains(p)) {
+            continue;
+        }
+        let interface = read(&path, root)?;
+        if let Some(identity) = identity {
+            parsed_files.insert(identity);
+        }
+        if !dylibs
+            .iter()
+            .any(|d: &keel_link::Dylib| d.install_name == interface.install_name)
+        {
+            dylibs.push(interface);
+        }
+    }
+    Ok(dylibs)
+}
+
 fn version(s: &str) -> Result<u32, String> {
     let parts = s
         .split('.')
@@ -378,4 +402,230 @@ fn run_elf(args: &[String]) -> Result<(), String> {
         let _ = std::fs::remove_file(&temporary);
     }
     result.map_err(|e| format!("{}: {e}", output.display()))
+}
+
+#[cfg(test)]
+mod tbd_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Sdk(PathBuf);
+    impl Sdk {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "keel-cli-tbd-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir_all(root.join("usr/lib")).unwrap();
+            Self(root)
+        }
+        fn path(&self, name: &str) -> PathBuf {
+            self.0.join("usr/lib").join(format!("lib{name}.tbd"))
+        }
+        fn write(&self, name: &str, install: &str, symbol: &str) {
+            std::fs::write(
+                self.path(name),
+                format!(
+                    "--- !tapi-tbd\ntbd-version: 4\ntargets: [arm64-macos]\ninstall-name: '{install}'\nexports:\n  - targets: [arm64-macos]\n    symbols: [{symbol}]\n"
+                ),
+            )
+            .unwrap();
+        }
+        fn load(&self, names: &[&str]) -> Result<(Vec<keel_link::Dylib>, Vec<PathBuf>), String> {
+            let mut reads = Vec::new();
+            let libraries = names.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+            let dylibs = load_dylibs(&self.0, &libraries, |path, root| {
+                reads.push(path.to_owned());
+                keel_link::Dylib::from_tbd(path, root)
+            })?;
+            Ok((dylibs, reads))
+        }
+    }
+    impl Drop for Sdk {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_aliases_parse_one_interface_graph_in_request_order() {
+        let sdk = Sdk::new();
+        sdk.write("System.B", "/usr/lib/libSystem.B.dylib", "_system");
+        for (alias, target) in [
+            ("System", "System.B"),
+            ("m", "System"),
+            ("pthread", "System.B"),
+        ] {
+            std::os::unix::fs::symlink(format!("lib{target}.tbd"), sdk.path(alias)).unwrap();
+        }
+        sdk.write("other", "/usr/lib/libother.dylib", "_other");
+        let (dylibs, reads) = sdk
+            .load(&["System", "m", "other", "pthread", "System"])
+            .unwrap();
+        assert_eq!(reads, [sdk.path("System"), sdk.path("other")]);
+        assert_eq!(dylibs.len(), 2);
+        assert_eq!(dylibs[0].install_name, "/usr/lib/libSystem.B.dylib");
+        assert_eq!(dylibs[1].install_name, "/usr/lib/libother.dylib");
+    }
+
+    #[test]
+    fn distinct_files_with_same_install_name_are_validated_and_first_exports_win() {
+        let sdk = Sdk::new();
+        sdk.write("first", "/usr/lib/libsame.dylib", "_first");
+        sdk.write("second", "/usr/lib/libsame.dylib", "_second");
+        for (names, selected, absent) in [
+            (["first", "second", "second"], "_first", "_second"),
+            (["second", "first", "first"], "_second", "_first"),
+        ] {
+            let (dylibs, reads) = sdk.load(&names).unwrap();
+            assert_eq!(reads, [sdk.path(names[0]), sdk.path(names[1])]);
+            assert_eq!(dylibs.len(), 1);
+            assert_eq!(dylibs[0].exports, BTreeSet::from([selected.into()]));
+            let object = keel_asm::assemble(&format!(".globl _main\n_main:\nb {absent}\n"))
+                .unwrap()
+                .to_macho()
+                .unwrap();
+            let error = keel_link::link(
+                &[keel_link::Input {
+                    name: "missing.o",
+                    bytes: &object,
+                }],
+                keel_link::Options {
+                    dylibs,
+                    ..Default::default()
+                },
+            )
+            .err()
+            .unwrap();
+            assert!(
+                error.contains(&format!("undefined symbol `{absent}`")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn distinct_files_with_same_install_name_still_report_parser_failures() {
+        let sdk = Sdk::new();
+        sdk.write("first", "/usr/lib/libsame.dylib", "_first");
+        for text in [
+            "--- !tapi-tbd\ntbd-version: 4\ntargets: [x86_64-macos]\ninstall-name: '/usr/lib/libsame.dylib'\n",
+            "--- !tapi-tbd\ntbd-version: 4\ntargets: [arm64-macos]\ninstall-name: '/usr/lib/libsame.dylib'\nexports: [\n",
+            "--- !tapi-tbd\ntbd-version: 3\ninstall-name: '/usr/lib/libsame.dylib'\n",
+        ] {
+            std::fs::write(sdk.path("second"), text).unwrap();
+            let expected = keel_link::Dylib::from_tbd(&sdk.path("second"), &sdk.0).unwrap_err();
+            assert_eq!(sdk.load(&["first", "second"]).unwrap_err(), expected);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn aliases_preserve_requested_path_diagnostics_and_missing_file_errors() {
+        let sdk = Sdk::new();
+        std::fs::write(sdk.path("bad"), "exports: [").unwrap();
+        std::os::unix::fs::symlink("libbad.tbd", sdk.path("alias")).unwrap();
+        std::os::unix::fs::symlink("libabsent.tbd", sdk.path("dangling")).unwrap();
+        for name in ["alias", "missing", "dangling"] {
+            let path = sdk.path(name);
+            let expected = keel_link::Dylib::from_tbd(&path, &sdk.0).unwrap_err();
+            assert!(expected.starts_with(&format!("{}:", path.display())));
+            assert_eq!(sdk.load(&[name]).unwrap_err(), expected);
+        }
+        for name in ["", "../bad"] {
+            assert_eq!(
+                sdk.load(&[name]).unwrap_err(),
+                "library names must be nonempty basenames"
+            );
+        }
+    }
+
+    #[test]
+    fn reexports_keep_sysroot_target_filtering_and_weak_exports_per_invocation() {
+        let sdk = Sdk::new();
+        let other_sdk = Sdk::new();
+        // Both roots deliberately reference the exact same umbrella file. Its
+        // external reexports must be resolved separately against each sysroot.
+        let umbrella = r#"--- !tapi-tbd
+tbd-version: 4
+targets: [arm64e-macos]
+install-name: '/usr/lib/libumbrella.dylib'
+exports:
+  - targets: [arm64-macos]
+    symbols: [_right]
+    weak-symbols: [_weak]
+    thread-local-symbols: [_thread]
+  - targets: [x86_64-macos, arm64-ios, arm64e.x1-macos]
+    symbols: [_wrong]
+reexported-libraries:
+  - targets: [arm64-macos]
+    libraries: ['/usr/lib/libchild.dylib', '/usr/lib/libembedded.dylib']
+  - targets: [arm64-ios]
+    libraries: ['/usr/lib/libmissing.dylib']
+--- !tapi-tbd
+tbd-version: 4
+targets: [arm64-macos]
+install-name: '/usr/lib/libembedded.dylib'
+exports:
+  - targets: [arm64-macos]
+    symbols: [_embedded]
+--- !tapi-tbd
+tbd-version: 4
+targets: [arm64-macos]
+install-name: '/usr/lib/libunreachable.dylib'
+exports:
+  - targets: [arm64-macos]
+    symbols: [_unreachable]
+"#;
+        std::fs::write(sdk.path("umbrella"), umbrella).unwrap();
+        std::fs::hard_link(sdk.path("umbrella"), other_sdk.path("umbrella")).unwrap();
+        for (root, symbol) in [(&sdk, "_child"), (&other_sdk, "_other_child")] {
+            root.write("child", "/usr/lib/libchild.dylib", symbol);
+            let (dylibs, reads) = root.load(&["umbrella", "umbrella"]).unwrap();
+            assert_eq!(reads, [root.path("umbrella")]);
+            assert_eq!(
+                dylibs[0].exports,
+                BTreeSet::from([
+                    "_right".into(),
+                    "_weak".into(),
+                    "_thread".into(),
+                    "_embedded".into(),
+                    symbol.into(),
+                ])
+            );
+            assert_eq!(dylibs[0].weak_exports, BTreeSet::from(["_weak".into()]));
+        }
+        sdk.write("child", "/usr/lib/libchild.dylib", "_updated");
+        let (dylibs, _) = sdk.load(&["umbrella"]).unwrap();
+        assert!(dylibs[0].exports.contains("_updated"));
+        assert!(!dylibs[0].exports.contains("_child"));
+    }
+
+    #[test]
+    fn missing_and_cyclic_reexport_failures_are_preserved() {
+        let sdk = Sdk::new();
+        sdk.write("parent", "/usr/lib/libparent.dylib", "_parent");
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(sdk.path("parent"))
+            .unwrap();
+        writeln!(file, "reexported-libraries:\n  - targets: [arm64-macos]\n    libraries: ['/usr/lib/libchild.dylib']").unwrap();
+        for cycle in [false, true] {
+            if cycle {
+                sdk.write("child", "/usr/lib/libchild.dylib", "_child");
+                let mut child = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(sdk.path("child"))
+                    .unwrap();
+                writeln!(child, "reexported-libraries:\n  - targets: [arm64-macos]\n    libraries: ['/usr/lib/libparent.dylib']").unwrap();
+            }
+            let expected = keel_link::Dylib::from_tbd(&sdk.path("parent"), &sdk.0).unwrap_err();
+            assert_eq!(sdk.load(&["parent", "parent"]).unwrap_err(), expected);
+        }
+    }
 }
