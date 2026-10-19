@@ -16,6 +16,88 @@ fn section(bytes: &[u8], name: &str) -> Vec<u8> {
     let file = object::File::parse(bytes).unwrap();
     file.section_by_name(name).unwrap().data().unwrap().to_vec()
 }
+
+#[test]
+fn literal_data_preserves_signed_unsigned_radix_and_alias_bytes() {
+    let source = ".data\n.byte -128\n.byte +255\n.short -32768\n.word 0Xffff\n\
+                  .long -2147483648\n.int 0xffffffff\n.quad -9223372036854775808\n\
+                  .quad 18446744073709551615\n.byte 010\n.byte 0b101\nret";
+    let object = assert_paths_agree(source);
+    let mut expected = vec![0x80, 0xff, 0, 0x80, 0xff, 0xff];
+    expected.extend_from_slice(&i32::MIN.to_le_bytes());
+    expected.extend_from_slice(&u32::MAX.to_le_bytes());
+    expected.extend_from_slice(&i64::MIN.to_le_bytes());
+    expected.extend_from_slice(&u64::MAX.to_le_bytes());
+    expected.extend_from_slice(&[8, 5, 0xc3]);
+    assert_eq!(section(&object, ".data"), expected);
+}
+
+#[test]
+fn literal_data_keeps_locations_sections_and_relaxation_order() {
+    let source = format!(
+        ".file 1 \"literal.c\"\n.text\n.loc 1 3 0\n.byte 0x90\n\
+         start: jmp far\n{}\n.loc 1 4 0\n.data\n.byte 7\n.text\n\
+         .byte 0x90\nfar: ret\n.long far-start\n.long .-start\n\
+         .uleb128 far-start\n.bss\n.quad 0\n.text\n.byte 0\n",
+        ".byte 0\n".repeat(130)
+    );
+    let object = assert_paths_agree(&source);
+    // Adding an expression term forces the original per-pass text path.
+    // Whole-object equality covers pending .loc, branch widening, dot capture,
+    // symbols, LEB stabilization, NOBITS size, and section selection.
+    let fallback = source
+        .replace(".byte 0x90", ".byte 0x90+0")
+        .replace(".byte 0\n", ".byte 0+0\n")
+        .replace(".byte 7", ".byte 7+0")
+        .replace(".quad 0", ".quad 0+0");
+    assert_eq!(object, assemble_object(&fallback).unwrap());
+    assert_eq!(section(&object, ".text")[1], 0xe9);
+}
+
+#[test]
+fn literal_data_fallbacks_keep_complete_diagnostics_and_precedence() {
+    for (source, line, message) in [
+        (".bss\n.byte 1", 2, "nonzero initializer in NOBITS section"),
+        (".byte 256", 1, "out of range literal value for `.byte`"),
+        (
+            ".short -32769",
+            1,
+            "out of range literal value for `.short`",
+        ),
+        (".byte 08", 1, "invalid symbol `08`"),
+        (
+            ".quad 18446744073709551616",
+            1,
+            "invalid symbol `18446744073709551616`",
+        ),
+        (".byte 1,256", 1, "out of range literal value for `.byte`"),
+        (
+            ".bss\n.byte 0\n.short 0\n.word 0\n.long 0\n.int 0\n.quad 0\n.byte 1,256",
+            8,
+            "nonzero initializer in NOBITS section",
+        ),
+        (
+            ".bss\n.byte 256\n.byte 1",
+            2,
+            "out of range literal value for `.byte`",
+        ),
+    ] {
+        assert_eq!(
+            error(assemble_object(source)),
+            (line, message.into()),
+            "{source}"
+        );
+    }
+    let (line, message) = error(assemble_object(".byte 256\nunknown_instruction"));
+    assert_eq!(line, 2);
+    assert!(message.contains("unknown_instruction"), "{message}");
+    let (line, message) = error(assemble_object(".byte 256\nandn eax, ebx, ecx"));
+    assert_eq!(line, 2);
+    assert!(
+        message.contains("requires x86 target features"),
+        "{message}"
+    );
+}
 fn error(result: Result<Vec<u8>, keel_asm::Error>) -> (usize, String) {
     let e = result.unwrap_err();
     (e.line, e.message)

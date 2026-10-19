@@ -172,6 +172,13 @@ enum Entry<'a> {
         name: Box<str>,
         line: usize,
     },
+    /// A single, in-range literal data operand, decoded once. Keep bytes rather
+    /// than i128 so this variant does not increase Entry's alignment or size.
+    LiteralData {
+        bytes: [u8; 8],
+        width: u8,
+        line: usize,
+    },
     /// Directive lines from explicit text, applied in order.
     Text {
         text: Box<str>,
@@ -225,10 +232,16 @@ impl<'a> Items<'a> {
                         name: name.into_boxed_str(),
                         line,
                     }),
-                    Item::Text(text) => self.push(Entry::Text {
-                        text: text.into_boxed_str(),
-                        line,
-                    }),
+                    Item::Text(text) => {
+                        self.push(if let Some((bytes, width)) = literal_data(&text) {
+                            Entry::LiteralData { bytes, width, line }
+                        } else {
+                            Entry::Text {
+                                text: text.into_boxed_str(),
+                                line,
+                            }
+                        });
+                    }
                     item => self.push(Entry::Item {
                         item: Ref::Owned(Box::new(item)),
                         line,
@@ -307,6 +320,55 @@ fn symbol_free(a: &Address) -> bool {
     a.expression.add.is_none() && a.expression.subtract.is_none()
 }
 
+/// Recognize only single literals whose address parsing and width check would
+/// succeed. Every other spelling stays on the text path, including errors:
+/// collection must not change parse/feature/layout diagnostic precedence.
+fn literal_data(text: &str) -> Option<([u8; 8], u8)> {
+    let (op, args) = text.trim().split_once(char::is_whitespace)?;
+    let width = match op {
+        ".byte" => 1,
+        ".short" | ".word" => 2,
+        ".long" | ".int" => 4,
+        ".quad" => 8,
+        _ => return None,
+    };
+    let args = args.trim();
+    let (negative, digits) = if let Some(s) = args.strip_prefix('-') {
+        (true, s)
+    } else {
+        (false, args.strip_prefix('+').unwrap_or(args))
+    };
+    // Match x86::integer's radix rules, but use a nonallocating failure path.
+    // Do not call integer(...).ok(): symbolic/multioperand probes would format
+    // discarded diagnostics. Additional signs and expression terms fall back.
+    let (radix, digits) = if let Some(s) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        (16, s)
+    } else if let Some(s) = digits.strip_prefix("0b") {
+        (2, s)
+    } else if digits.len() > 1 && digits.starts_with('0') {
+        (8, &digits[1..])
+    } else {
+        (10, digits)
+    };
+    if digits.starts_with(['+', '-']) {
+        return None;
+    }
+    let magnitude = u64::from_str_radix(digits, radix).ok()?;
+    let value = if negative {
+        -i128::from(magnitude)
+    } else {
+        i128::from(magnitude)
+    };
+    let bits = u32::from(width) * 8;
+    if value < -(1i128 << (bits - 1)) || value >= 1i128 << bits {
+        return None;
+    }
+    Some(((value as u64).to_le_bytes(), width))
+}
+
 /// In-process diagnostic timings. Normal assembly compiles out stage timing.
 #[derive(Default, Debug)]
 pub struct Profile {
@@ -380,6 +442,9 @@ fn assemble_items_inner<const PROFILE: bool>(
                     (a.instruction(instruction, *line, *short), line)
                 }
                 Entry::Label { name, line } => (a.label(name), line),
+                Entry::LiteralData { bytes, width, line } => {
+                    (a.data_bytes(&bytes[..usize::from(*width)]), line)
+                }
                 Entry::Text { text, line } => (
                     text.lines()
                         .try_for_each(|directive| a.directive(directive, *line)),
@@ -1646,5 +1711,53 @@ impl Assembler {
         )
         .map_err(err)?;
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literal_probe_only_retains_valid_single_operands() {
+        for (op, width) in [
+            (".byte", 1),
+            (".short", 2),
+            (".word", 2),
+            (".long", 4),
+            (".int", 4),
+            (".quad", 8),
+        ] {
+            for literal in ["0", "+1", "-1", "010", "0Xf", "0b11"] {
+                let (bytes, actual_width) = literal_data(&format!("{op} {literal}\n")).unwrap();
+                let address = x86::address(literal).unwrap();
+                assert_eq!(actual_width, width);
+                assert_eq!(
+                    &bytes[..usize::from(width)],
+                    &address.expression.constant.to_le_bytes()[..usize::from(width)]
+                );
+            }
+        }
+        for text in [
+            ".byte symbol",
+            ".byte .",
+            ".byte 1,2",
+            ".byte 1+0",
+            ".byte --1",
+            ".byte + 1",
+            ".byte 0x+1",
+            ".byte 08",
+            ".byte 0B1",
+            ".byte 256",
+            ".byte -129",
+            ".short -32769",
+            ".quad 18446744073709551616",
+            ".quad -9223372036854775809",
+            ".byte 1\n.byte 2\n",
+            ".byte",
+            ".ascii \"a\"",
+        ] {
+            assert!(literal_data(text).is_none(), "{text}");
+        }
     }
 }
