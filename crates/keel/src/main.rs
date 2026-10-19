@@ -4,8 +4,8 @@
 //! keel compile [-O] [-g] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.keel> [-o <output.s>]   IR to assembly
 //! keel cc [-O] [-g] [-E [-dM]|--emit-ir] [-I dir] [-D name[=value]] [-U name] [--sysroot dir] [-isystem dir] [-mmacosx-version-min=version] [-p <pass,pass,..>] [--opt-tier <tier>] [--regalloc <tier>] [--tune <cpu>] [--target-features <avx,bmi1,bmi2>] [--isel-tier <tier>] [--isel <passes>] [--target <triple>] <input.c|input.i> [-o <output>]  C to assembly
 //! keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
-//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 A64 assembly to Mach-O
-//! keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch A64 assembly
+//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>                 assembly to native object
+//! keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>      batch assembly
 //! keel asm-metrics <input.s> [-o <metrics.json>]     exact instruction locations and sizes
 //! keel passes                                      list the passes
 //! ```
@@ -39,8 +39,8 @@ const USAGE: &str = "usage:
   keel opt [--opt-tier <tier>] [--target <triple>] [-p <pass,pass,..>] <input.keel> [-o <output.keel>]
   keel compile|cc|opt [--verify-each | --no-verify-each] [--opt-report <new-report.json>] <input> [-o <output>]
   keel compile|cc [--emit-object] <input> -o <output.o>  (AArch64 Mach-O or x86-64 ELF)
-  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
-  keel asm [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
+  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s> -o <output.o>
+  keel asm [--x86-syntax <intel|att>] [--target <triple>] [--cpu <baseline|apple-m5>] [--target-features <avx,bmi1,bmi2>] <input.s>... --out-dir <directory>
   keel asm-metrics <input.s> [-o <metrics.json>]
   keel link [--system] [--target <triple>] [-e entry] [-L DIR] [--rpath PATH] [--sysroot SDK] [-l NAME] [--debug-map DIR] [--dsym PATH] <input.o|input.a|input.so>... -o executable
   keel archive [--target <triple>] -o <output.a> <member.o>...

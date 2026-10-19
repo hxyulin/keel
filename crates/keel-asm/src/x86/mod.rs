@@ -1,10 +1,10 @@
-//! Native x86-64 ELF assembler. Intel syntax is parsed once into `keel-asm-ir`.
+//! Native x86-64 ELF assembler. Intel/AT&T source is parsed once into `keel-asm-ir`.
 //! Parsed items are laid out until optimistic short branches fit their final layout.
 mod encode;
 mod metadata;
 mod sections;
 use crate::Error;
-pub use keel_asm_ir::x86::Features;
+pub use keel_asm_ir::x86::{Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
     x86::{self, Address, Modifier},
@@ -74,7 +74,7 @@ struct Assembler {
     locations: Vec<metadata::Location>,
 }
 
-/// Assemble standalone Intel syntax as a Linux relocatable ELF64 object.
+/// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
 pub fn assemble_object(source: &str) -> Result<Vec<u8>, Error> {
     assemble_object_with_features(source, x86::Features::default())
 }
@@ -82,7 +82,17 @@ pub fn assemble_object_with_features(
     source: &str,
     features: x86::Features,
 ) -> Result<Vec<u8>, Error> {
+    assemble_object_with_syntax_and_features(source, Syntax::Intel, features)
+}
+/// Assemble source with an explicit initial dialect. In-source syntax directives
+/// override this selection. Existing APIs retain their Intel default.
+pub fn assemble_object_with_syntax_and_features(
+    source: &str,
+    syntax: Syntax,
+    features: x86::Features,
+) -> Result<Vec<u8>, Error> {
     let mut items = Items::new(features);
+    items.parser = x86::SourceParser::new(syntax);
     items.parse(source, 1)?;
     assemble_items(items.finish()?)
 }
@@ -164,6 +174,7 @@ struct Items<'a> {
     entries: Vec<Entry<'a>>,
     encoded: Vec<u8>,
     features: x86::Features,
+    parser: x86::SourceParser,
     // Parse errors anywhere take precedence over feature errors.
     unsupported: Option<Error>,
     parsed: usize,
@@ -174,6 +185,7 @@ impl<'a> Items<'a> {
             entries: Vec::new(),
             encoded: Vec::new(),
             features,
+            parser: x86::SourceParser::default(),
             unsupported: None,
             parsed: 0,
         }
@@ -181,7 +193,9 @@ impl<'a> Items<'a> {
     fn parse(&mut self, source: &str, first: usize) -> Result<(), Error> {
         for (index, source) in source.lines().enumerate() {
             let line = first + index;
-            let p = x86::parse_program(source)
+            let p = self
+                .parser
+                .parse(source)
                 .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
             for item in p.items {
                 match item {

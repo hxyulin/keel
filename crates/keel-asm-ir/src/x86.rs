@@ -869,8 +869,11 @@ pub fn address(s: &str) -> Result<Address, String> {
     }
     Ok(out)
 }
-fn operand(s: &str) -> Result<Operand, String> {
-    if let Some(reg) = Register::parse(s) {
+fn intel_register(s: &str, prefix: bool) -> Option<Register> {
+    Register::parse(if prefix { s.strip_prefix('%')? } else { s })
+}
+fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
+    if let Some(reg) = intel_register(s, prefix) {
         return Ok(Operand::Register(reg));
     }
     let mut s = s.trim();
@@ -889,8 +892,12 @@ fn operand(s: &str) -> Result<Operand, String> {
         }
     }
     let mut segment = None;
-    for (prefix, byte) in [("fs:", 0x64), ("gs:", 0x65)] {
-        if let Some(rest) = s.strip_prefix(prefix) {
+    for (name, byte) in if prefix {
+        [("%fs:", 0x64), ("%gs:", 0x65)]
+    } else {
+        [("fs:", 0x64), ("gs:", 0x65)]
+    } {
+        if let Some(rest) = s.strip_prefix(name) {
             segment = Some(byte);
             s = rest.trim();
             break;
@@ -941,9 +948,9 @@ fn operand(s: &str) -> Result<Operand, String> {
         for (sign, term) in terms {
             let factors = split_inline(term, '*');
             let scaled = if factors.len() == 2 {
-                if let Some(r) = Register::parse(factors[0]) {
+                if let Some(r) = intel_register(factors[0], prefix) {
                     Some((r, integer(factors[1])?))
-                } else if let Some(r) = Register::parse(factors[1]) {
+                } else if let Some(r) = intel_register(factors[1], prefix) {
                     Some((r, integer(factors[0])?))
                 } else {
                     return Err("memory scale requires a register".into());
@@ -959,7 +966,7 @@ fn operand(s: &str) -> Result<Operand, String> {
                 }
                 mem.index = Some(r);
                 mem.scale = scale as u8;
-            } else if let Some(r) = Register::parse(term) {
+            } else if let Some(r) = intel_register(term, prefix) {
                 if sign < 0 {
                     return Err("cannot subtract an address register".into());
                 }
@@ -1002,6 +1009,9 @@ fn operand(s: &str) -> Result<Operand, String> {
 }
 impl Instruction {
     pub fn parse_intel(s: &str) -> Result<Self, String> {
+        Self::parse_intel_prefix(s, false)
+    }
+    fn parse_intel_prefix(s: &str, prefix: bool) -> Result<Self, String> {
         let s = s.trim();
         let (mnemonic, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
         let lock = mnemonic.eq_ignore_ascii_case("lock");
@@ -1021,7 +1031,7 @@ impl Instruction {
         } else {
             split_inline(operands, ',')
                 .into_iter()
-                .map(operand)
+                .map(|s| operand(s, prefix))
                 .collect::<Result<_, _>>()?
         };
         Ok(Self {
@@ -1032,79 +1042,96 @@ impl Instruction {
     }
 }
 
-/// Parse Intel source into shared program items. Directives retain their ELF
+/// Parse source (initially Intel) into shared program items. Directives retain their ELF
 /// spelling; instructions have architecture-specific identities and operands.
 pub fn parse_program(source: &str) -> Result<crate::Program, String> {
-    let mut p = crate::Program::new();
-    for (line, source) in source.lines().enumerate() {
-        let mut quote = false;
-        let mut escaped = false;
-        let mut end = source.len();
-        for (i, c) in source.char_indices() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if quote && c == '\\' {
-                escaped = true;
-                continue;
-            }
-            if c == '"' {
-                quote = !quote
-            }
-            if !quote && (c == '#' || source[i..].starts_with("//")) {
-                end = i;
-                break;
-            }
-        }
-        for statement in split_inline(&source[..end], ';') {
-            let mut s = statement.trim();
-            if s.is_empty() {
-                continue;
-            }
-            // A colon in fs:/gs: is part of an instruction, not a label.
-            let labels = split_inline(s, ':');
-            if labels.len() > 1
-                && (labels[0].starts_with('"') || !labels[0].contains(char::is_whitespace))
-            {
-                let name = symbol(labels[0]).map_err(|e| format!("line {}: {e}", line + 1))?;
-                p.label(name);
-                let mut quote = false;
-                let mut escaped = false;
-                let colon = s
-                    .char_indices()
-                    .find_map(|(i, c)| {
-                        if escaped {
-                            escaped = false;
-                            return None;
-                        }
-                        if quote && c == '\\' {
-                            escaped = true;
-                            return None;
-                        }
-                        if c == '"' {
-                            quote = !quote
-                        }
-                        if c == ':' && !quote { Some(i) } else { None }
-                    })
-                    .unwrap();
-                s = s[colon + 1..].trim();
-            }
-            if s.is_empty() {
-                continue;
-            }
-            if s.starts_with('.') || split_inline(s, '=').len() == 2 {
-                p.text(s);
-                p.text("\n")
-            } else {
-                p.x86_instruction(
-                    Instruction::parse_intel(s).map_err(|e| format!("line {}: {e}", line + 1))?,
-                )
-            }
-        }
-    }
-    Ok(p)
+    SourceParser::default().parse(source)
 }
+
+impl SourceParser {
+    /// Parse a fragment while retaining syntax directives for the next fragment.
+    pub fn parse(&mut self, source: &str) -> Result<crate::Program, String> {
+        let mut p = crate::Program::new();
+        for (line, source) in source.lines().enumerate() {
+            let mut quote = false;
+            let mut escaped = false;
+            let mut end = source.len();
+            for (i, c) in source.char_indices() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                if quote && c == '\\' {
+                    escaped = true;
+                    continue;
+                }
+                if c == '"' {
+                    quote = !quote
+                }
+                if !quote && (c == '#' || source[i..].starts_with("//")) {
+                    end = i;
+                    break;
+                }
+            }
+            for statement in split_inline(&source[..end], ';') {
+                let mut s = statement.trim();
+                if s.is_empty() {
+                    continue;
+                }
+                // A colon in fs:/gs: is part of an instruction, not a label.
+                let labels = split_inline(s, ':');
+                if labels.len() > 1
+                    && (labels[0].starts_with('"') || !labels[0].contains(char::is_whitespace))
+                {
+                    let name = symbol(labels[0]).map_err(|e| format!("line {}: {e}", line + 1))?;
+                    p.label(name);
+                    let mut quote = false;
+                    let mut escaped = false;
+                    let colon = s
+                        .char_indices()
+                        .find_map(|(i, c)| {
+                            if escaped {
+                                escaped = false;
+                                return None;
+                            }
+                            if quote && c == '\\' {
+                                escaped = true;
+                                return None;
+                            }
+                            if c == '"' {
+                                quote = !quote
+                            }
+                            if c == ':' && !quote { Some(i) } else { None }
+                        })
+                        .unwrap();
+                    s = s[colon + 1..].trim();
+                }
+                if s.is_empty() {
+                    continue;
+                }
+                if self
+                    .syntax_directive(s)
+                    .map_err(|e| format!("line {}: {e}", line + 1))?
+                {
+                    continue;
+                }
+                if s.starts_with('.') || split_inline(s, '=').len() == 2 {
+                    p.text(s);
+                    p.text("\n")
+                } else {
+                    p.x86_instruction(
+                        self.instruction(s)
+                            .map_err(|e| format!("line {}: {e}", line + 1))?,
+                    )
+                }
+            }
+        }
+        Ok(p)
+    }
+}
+
+mod att;
+pub use att::{SourceParser, Syntax};
 
 mod format;
 

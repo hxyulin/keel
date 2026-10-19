@@ -15,6 +15,7 @@ struct Options {
     features: TargetFeatures,
     x86_features: keel_asm::x86::Features,
     x86: bool,
+    x86_syntax: Option<keel_asm::x86::Syntax>,
 }
 
 impl Options {
@@ -48,6 +49,13 @@ impl Options {
                         _ => return Err("assembler --target expects x86_64-unknown-linux-gnu or aarch64-apple-darwin".into()),
                     };
                 }
+                "--x86-syntax" => {
+                    opts.x86_syntax = Some(match args.next().map(String::as_str) {
+                        Some("intel") => keel_asm::x86::Syntax::Intel,
+                        Some("att") => keel_asm::x86::Syntax::Att,
+                        _ => return Err("--x86-syntax expects intel or att".into()),
+                    });
+                }
                 "--target-features" => {
                     opts.x86_features = keel_asm::x86::Features::parse(
                         args.next()
@@ -74,6 +82,9 @@ impl Options {
         }
         if opts.x86 && opts.features != TargetFeatures::default() {
             return Err("--cpu apple-m5 requires the AArch64 assembler target".into());
+        }
+        if !opts.x86 && opts.x86_syntax.is_some() {
+            return Err("--x86-syntax requires the x86 assembler target".into());
         }
         if !opts.x86 && !opts.x86_features.is_empty() {
             return Err("x86 target features require the x86 assembler target".into());
@@ -183,7 +194,11 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             Err(e) => return Err(format!("{}: {e}", input.display())),
         };
         let object = if opts.x86 {
-            keel_asm::x86::assemble_object_with_features(&text, opts.x86_features)
+            keel_asm::x86::assemble_object_with_syntax_and_features(
+                &text,
+                opts.x86_syntax.unwrap_or_default(),
+                opts.x86_features,
+            )
         } else {
             keel_asm::assemble_object_with_features(&text, opts.features)
         }
@@ -281,6 +296,37 @@ mod tests {
                 keel_asm::assemble_object_with_features(source, TargetFeatures::apple_m5())
                     .unwrap()
             );
+        }
+    }
+
+    #[test]
+    fn x86_source_dialect_is_explicit_and_resets_per_input() {
+        let temp = Temp::new();
+        std::fs::write(temp.0.join("default.s"), "movq %r10,%r9\nretq\n").unwrap();
+        std::fs::write(
+            temp.0.join("switch.s"),
+            ".intel_syntax noprefix\nmov r9,r10\nret\n",
+        )
+        .unwrap();
+        temp.invoke(
+            &["switch.s", "default.s"],
+            &["--x86-syntax", "att", "--target", "x86_64-linux-gnu"],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(temp.0.join("objects/default.o")).unwrap(),
+            std::fs::read(temp.0.join("objects/switch.o")).unwrap()
+        );
+        assert!(
+            temp.invoke(&["default.s"], &["--target", "x86_64-linux-gnu"])
+                .is_err()
+        );
+        for flags in [
+            vec!["--x86-syntax", "att"],
+            vec!["--target", "x86_64-linux-gnu", "--x86-syntax", "unknown"],
+            vec!["--target", "x86_64-linux-gnu", "--x86-syntax"],
+        ] {
+            assert!(temp.invoke(&["default.s"], &flags).is_err());
         }
     }
 
