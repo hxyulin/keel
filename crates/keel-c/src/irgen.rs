@@ -54,6 +54,9 @@ pub struct Gen<'p> {
     /// Non-declaration objects emitted while functions are built. The
     /// first module object wins, matching Module::data_object.
     generated_alignments: HashMap<String, u32>,
+    /// Whether each struct has a volatile member at any depth, once asked.
+    /// Struct definitions no longer change after parsing.
+    volatile_members: Vec<std::cell::Cell<Option<bool>>>,
 }
 
 impl<'p> Gen<'p> {
@@ -72,7 +75,29 @@ impl<'p> Gen<'p> {
             dtypes: DebugTypes::default(),
             global_alignments: None,
             generated_alignments: HashMap::new(),
+            volatile_members: vec![std::cell::Cell::new(None); p.structs.len()],
         }
+    }
+
+    /// Whether an object of type `ty` is or contains anything volatile.
+    /// Pointer pointee qualifiers do not qualify the pointer object itself.
+    fn object_volatile(&self, ty: &Ty, sugar: &Sugar) -> bool {
+        sugar.is_volatile(&self.p.typedefs)
+            || match ty {
+                Ty::Array(elem, _) => self.object_volatile(elem, &sugar.pointee(&self.p.typedefs)),
+                Ty::Struct(id) => {
+                    if let Some(volatile) = self.volatile_members[*id].get() {
+                        return volatile;
+                    }
+                    let volatile = self.p.structs[*id]
+                        .members
+                        .iter()
+                        .any(|m| self.object_volatile(&m.ty, &m.sugar));
+                    self.volatile_members[*id].set(Some(volatile));
+                    volatile
+                }
+                _ => false,
+            }
     }
 
     pub fn run(mut self) -> R<Module> {
@@ -310,8 +335,13 @@ impl<'p> Gen<'p> {
     /// Preserve proven address alignment on every emitted access, including
     /// byte copies and initializer chunks. No pointee-type inference: packed
     /// members and pointers cast from byte buffers may be unaligned.
-    fn preserve_access_alignment(&mut self, func: &mut Function, mut known: HashMap<Value, u32>) {
-        // StackSlot and DataRef are append-only dense arena indices.
+    fn preserve_access_alignment(&mut self, func: &mut Function, seeds: HashMap<Value, u32>) {
+        // StackSlot, DataRef and Value are append-only dense arena indices.
+        // Memoized results (including seeds) are kept by value index.
+        let mut known = vec![None; func.num_values()];
+        for (value, align) in seeds {
+            known[value.index()] = Some(align);
+        }
         let slots: Vec<_> = func.stack_slots().map(|(_, d)| d.align).collect();
         let symbols: Vec<_> = func
             .data_symbols()
@@ -320,13 +350,13 @@ impl<'p> Gen<'p> {
         fn alignment(
             func: &Function,
             value: Value,
-            known: &mut HashMap<Value, u32>,
+            known: &mut [Option<u32>],
             slots: &[u32],
             symbols: &[u32],
             depth: usize,
         ) -> u32 {
             let value = func.resolve(value);
-            if let Some(&a) = known.get(&value) {
+            if let Some(a) = known[value.index()] {
                 return a;
             }
             // Block parameters (including cyclic loop phis) and excessively
@@ -357,7 +387,7 @@ impl<'p> Gen<'p> {
                 }
                 _ => 1,
             };
-            known.insert(value, result);
+            known[value.index()] = Some(result);
             result
         }
         let accesses: Vec<_> = func
@@ -1841,22 +1871,9 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     // ---- places ----
 
     /// Conservatively retain volatile subobjects during aggregate copies.
-    /// Pointer pointee qualifiers do not qualify the pointer object itself.
     fn object_flags(&self, ty: &Ty, sugar: &Sugar) -> MemoryFlags {
-        let volatile = sugar.is_volatile(&self.g.p.typedefs)
-            || match ty {
-                Ty::Array(elem, _) => {
-                    self.object_flags(elem, &sugar.pointee(&self.g.p.typedefs))
-                        .volatile
-                }
-                Ty::Struct(id) => self.g.p.structs[*id]
-                    .members
-                    .iter()
-                    .any(|m| self.object_flags(&m.ty, &m.sugar).volatile),
-                _ => false,
-            };
         MemoryFlags {
-            volatile,
+            volatile: self.g.object_volatile(ty, sugar),
             ..MemoryFlags::default()
         }
     }
@@ -2142,7 +2159,12 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             vals.push(value);
         }
-        let extra: Vec<Ty> = args.iter().map(|a| a.ty.clone()).collect();
+        // Argument types decide the signature only without a prototype.
+        let extra: Vec<Ty> = if fty.prototyped {
+            Vec::new()
+        } else {
+            args.iter().map(|a| a.ty.clone()).collect()
+        };
         self.set_loc(e.loc);
         let direct = match &f.kind {
             ExprKind::Addr(inner) => match inner.kind {
@@ -2161,8 +2183,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             None => {
                 let callee = self.val(f)?;
-                let extra = if fty.prototyped { &[][..] } else { &extra[..] };
-                let sig = self.g.signature(&fty, usize::MAX, extra)?;
+                let sig = self.g.signature(&fty, usize::MAX, &extra)?;
                 let sig = self.b.import_signature(sig);
                 self.b.ins().call_indirect(sig, callee, &vals)
             }
@@ -2832,5 +2853,142 @@ mod alignment_tests {
             })
             .collect();
         assert_eq!(alignments, [16, 8, 8, 1, 2]);
+    }
+
+    /// The previous map-memoized walk, kept verbatim as the reference for
+    /// the dense value-indexed memo (including its depth-limited caching).
+    fn old_alignments(
+        func: &Function,
+        mut known: HashMap<Value, u32>,
+        slots: &[u32],
+        symbols: &[u32],
+    ) -> Vec<u32> {
+        fn alignment(
+            func: &Function,
+            value: Value,
+            known: &mut HashMap<Value, u32>,
+            slots: &[u32],
+            symbols: &[u32],
+            depth: usize,
+        ) -> u32 {
+            let value = func.resolve(value);
+            if let Some(&a) = known.get(&value) {
+                return a;
+            }
+            if depth == 64 {
+                return 1;
+            }
+            let ValueDef::Result(inst, _) = func.value_def(value) else {
+                return 1;
+            };
+            let result = match func.inst_data(inst) {
+                InstData::StackAddr { slot } => slots[slot.index()],
+                InstData::SymbolAddr {
+                    symbol: Symbol::Data(data),
+                } => symbols[data.index()],
+                InstData::Iconst { imm, .. } => 1u32 << (*imm as u64).trailing_zeros().min(31),
+                InstData::Binary {
+                    op: op @ (BinaryOp::Ptradd | BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::Imul),
+                    args,
+                } => {
+                    let a = alignment(func, args[0], known, slots, symbols, depth + 1);
+                    let b = alignment(func, args[1], known, slots, symbols, depth + 1);
+                    if *op == BinaryOp::Imul {
+                        u64::from(a).saturating_mul(u64::from(b)).min(1 << 31) as u32
+                    } else {
+                        a.min(b)
+                    }
+                }
+                _ => 1,
+            };
+            known.insert(value, result);
+            result
+        }
+        let accesses: Vec<_> = func
+            .layout_insts()
+            .filter_map(|(_, inst)| match func.inst_data(inst) {
+                InstData::Load { addr, flags, .. } | InstData::Store { addr, flags, .. } => {
+                    Some((*addr, flags.align))
+                }
+                _ => None,
+            })
+            .collect();
+        accesses
+            .into_iter()
+            .map(|(addr, align)| align.max(alignment(func, addr, &mut known, slots, symbols, 0)))
+            .collect()
+    }
+
+    fn access_alignments(f: &Function) -> Vec<u32> {
+        f.layout_insts()
+            .filter_map(|(_, inst)| match f.inst_data(inst) {
+                InstData::Load { flags, .. } | InstData::Store { flags, .. } => Some(flags.align),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dense_memo_matches_map_memo_with_seeds_aliases_and_depth_limit() {
+        use keel_ir::InsertPoint::End;
+        let arena = bumpalo::Bump::new();
+        let p = parser(&arena);
+        let mut g = Gen::new(&p, &[], false);
+        let mut f = Function::new("f", Signature::new(&[Type::Ptr], &[]));
+        let entry = f.create_block();
+        let param = f.append_block_param(entry, Type::Ptr);
+        let next = f.create_block();
+        let merged = f.append_block_param(next, Type::Ptr);
+        let slot = f.create_stack_slot(256, 16);
+        let shared = f.import_data("shared");
+        let base = f.ins(End(entry)).stack_addr(slot);
+        let data = f.ins(End(entry)).symbol_addr(Symbol::Data(shared));
+        let four = f.ins(End(entry)).iconst(Type::I64, 4);
+        let six = f.ins(End(entry)).iconst(Type::I64, 6);
+        // A seed on an otherwise unaligned value, as __builtin_assume_aligned.
+        let zero = f.ins(End(entry)).iconst(Type::I64, 0);
+        let assumed = f.ins(End(entry)).ptradd(param, zero);
+        // A chain deeper than the walk's limit. Visiting its tail first caches
+        // depth-limited answers that later, shallower queries then reuse.
+        let mut chain = vec![base];
+        for i in 0..80 {
+            let step = if i % 2 == 0 { four } else { six };
+            let last = *chain.last().unwrap();
+            chain.push(f.ins(End(entry)).ptradd(last, step));
+        }
+        let scaled = f.ins(End(entry)).imul(four, six);
+        let mixed = f.ins(End(entry)).ptradd(data, scaled);
+        f.ins(End(entry)).jump(next, &[assumed]);
+        let mut addresses = vec![chain[80], chain[70], chain[10], chain[1], base];
+        addresses.extend([data, mixed, assumed, merged, param]);
+        for &addr in &addresses {
+            let v = f.ins(End(next)).load(Type::I8, addr);
+            f.ins(End(next)).store(v, addr);
+        }
+        // An alias, as a removed trivial SSA parameter leaves behind.
+        let alias = f.append_block_param(next, Type::Ptr);
+        f.replace_all_uses(alias, chain[3]);
+        f.ins(End(next)).load(Type::I32, alias);
+        f.ins(End(next)).return_(&[]);
+        let mut seeds = HashMap::new();
+        seeds.insert(assumed, 32);
+        let slots: Vec<_> = f.stack_slots().map(|(_, d)| d.align).collect();
+        let symbols: Vec<_> = f
+            .data_symbols()
+            .map(|(_, name)| g.symbol_alignment(name))
+            .collect();
+        let expected = old_alignments(&f, seeds.clone(), &slots, &symbols);
+        g.preserve_access_alignment(&mut f, seeds);
+        let got = access_alignments(&f);
+        assert_eq!(got, expected);
+        // Sanity: the cases above really differ from one another.
+        // Each address has a load and a store; the alias load is last.
+        assert_eq!(&got[..4], [1, 1, 1, 1], "depth-limited answers cached");
+        assert_eq!(got[4], 2, "a shallow chain value: stack + 4 + 6 + ...");
+        assert_eq!(got[6], 4, "stack + 4");
+        assert_eq!(got[8], 16, "the stack slot base");
+        assert_eq!(got[14], 32, "seeded value");
+        assert_eq!(got[16], 1, "block parameter");
+        assert_eq!(*got.last().unwrap(), 2, "alias resolves to its target");
     }
 }

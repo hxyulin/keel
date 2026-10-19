@@ -49,20 +49,32 @@ impl Module {
     }
 
     /// Refresh direct callee contracts after constructing a complete module.
+    /// A name defined more than once takes its last entry: functions after
+    /// declarations, later ones after earlier ones.
     pub fn sync_function_attrs(&mut self) {
-        let attrs: std::collections::HashMap<_, _> = self
+        let mut attrs =
+            std::collections::HashMap::with_capacity(self.decls.len() + self.functions.len());
+        for (name, a) in self
             .decls
             .iter()
-            .map(|d| (d.name.clone(), d.attrs))
-            .chain(self.functions.iter().map(|f| (f.name.clone(), f.attrs)))
+            .map(|d| (d.name.as_str(), d.attrs))
+            .chain(self.functions.iter().map(|f| (f.name.as_str(), f.attrs)))
+        {
+            attrs.insert(name, a);
+        }
+        // Only callee tables change, so every lookup sees the original attrs.
+        let attrs = &attrs;
+        let updates: Vec<_> = self
+            .functions
+            .iter()
+            .enumerate()
+            .flat_map(|(i, f)| {
+                f.callees()
+                    .filter_map(move |(r, d)| attrs.get(d.name.as_str()).map(|&a| (i, r, a)))
+            })
             .collect();
-        for f in &mut self.functions {
-            let refs: Vec<_> = f.callees().map(|(r, d)| (r, d.name.clone())).collect();
-            for (r, name) in refs {
-                if let Some(a) = attrs.get(&name) {
-                    f.callee_mut(r).attrs = *a;
-                }
-            }
+        for (i, r, a) in updates {
+            self.functions[i].callee_mut(r).attrs = a;
         }
     }
 
@@ -128,5 +140,63 @@ impl fmt::Display for Module {
             write!(f, "{func}")?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{FuncDecl, FunctionAttrs, Type};
+
+    fn attrs(noreturn: bool, noinline: bool) -> FunctionAttrs {
+        FunctionAttrs {
+            noreturn,
+            noinline,
+            ..FunctionAttrs::default()
+        }
+    }
+
+    #[test]
+    fn synced_callee_attrs_take_the_last_entry_for_a_name() {
+        let sig = Signature::new(&[Type::I64], &[]);
+        let decl = |name: &str, a| FuncDecl {
+            attrs: a,
+            name: name.into(),
+            sig: sig.clone(),
+        };
+        let mut caller = Function::new("caller", sig.clone());
+        caller.attrs = attrs(false, true);
+        let stale = attrs(true, true);
+        for name in ["both", "twice", "only_decl", "elsewhere", "caller"] {
+            let r = caller.import_function(name, sig.clone());
+            caller.callee_mut(r).attrs = stale;
+        }
+        let mut both = Function::new("both", sig.clone());
+        both.attrs = attrs(false, true);
+        let mut module = Module {
+            decls: vec![
+                decl("both", attrs(true, false)),
+                decl("twice", attrs(true, false)),
+                decl("twice", attrs(false, true)),
+                decl("only_decl", FunctionAttrs::default()),
+            ],
+            functions: vec![caller, both],
+            ..Module::default()
+        };
+        module.sync_function_attrs();
+        let got: Vec<_> = module.functions[0]
+            .callees()
+            .map(|(_, d)| (d.name.as_str(), d.attrs))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("both", attrs(false, true)),
+                ("twice", attrs(false, true)),
+                ("only_decl", FunctionAttrs::default()),
+                ("elsewhere", stale),
+                ("caller", attrs(false, true)),
+            ]
+        );
     }
 }

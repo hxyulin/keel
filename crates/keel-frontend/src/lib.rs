@@ -341,19 +341,31 @@ impl<'f> FunctionBuilder<'f> {
     /// Passes each predecessor's value of `var` to `param`, then removes
     /// `param` if it is trivial. Returns what `param` stands for.
     fn add_param_args(&mut self, var: Variable, block: Block, param: Value) -> Value {
-        // Reading can add/remove SSA parameters, but sealed predecessor
-        // edges stay fixed. Copy one edge at a time instead of allocating a
-        // clone of the predecessor vector for every new parameter.
-        for edge in 0..self.blocks[block.index()].preds.len() {
-            let (branch, i) = self.blocks[block.index()].preds[edge];
+        // Reading can add/remove SSA parameters of other blocks, but sealed
+        // predecessor edges stay fixed. `var` already has a definition in
+        // this block, so no read reaches this parameter's branch arguments.
+        // Read every edge first, and write arguments only for a parameter
+        // that stays; most are trivial and then need none.
+        let edges = self.blocks[block.index()].preds.len();
+        let mut values: SmallVec<[Value; 8]> = SmallVec::with_capacity(edges);
+        for edge in 0..edges {
+            let (branch, _) = self.blocks[block.index()].preds[edge];
             let pred = self.func.inst_block(branch);
-            let value = self.read(var, pred);
-            let index = self.param_index(block, param);
-            let args = &mut self.func.inst_data_mut(branch).branch_dests_mut()[i].args;
-            debug_assert_eq!(args.len(), index, "arguments are added in parameter order");
-            args.push(value);
+            values.push(self.read(var, pred));
         }
-        self.try_remove_trivial(block, param)
+        let index = self.param_index(block, param);
+        match self.trivial_value(param, values.iter().copied()) {
+            Some(same) => self.remove_trivial(block, index, param, same, false),
+            None => {
+                for (edge, value) in values.into_iter().enumerate() {
+                    let (branch, i) = self.blocks[block.index()].preds[edge];
+                    let args = &mut self.func.inst_data_mut(branch).branch_dests_mut()[i].args;
+                    debug_assert_eq!(args.len(), index, "arguments are added in parameter order");
+                    args.push(value);
+                }
+                param
+            }
+        }
     }
 
     fn param_index(&self, block: Block, param: Value) -> usize {
@@ -364,31 +376,62 @@ impl<'f> FunctionBuilder<'f> {
             .expect("parameter of its block")
     }
 
-    /// If every argument for `param` is the same value (ignoring `param`
-    /// itself, passed around a loop), removes it and returns that value.
-    fn try_remove_trivial(&mut self, block: Block, param: Value) -> Value {
-        let index = self.param_index(block, param);
+    /// `Some(value)` if every argument for `param` is that value (ignoring
+    /// `param` itself, passed around a loop); `Some(None)` if there is no
+    /// such other value; `None` if `param` merges different values.
+    fn trivial_value(
+        &self,
+        param: Value,
+        args: impl Iterator<Item = Value>,
+    ) -> Option<Option<Value>> {
         let mut same = None;
-        for &(branch, i) in &self.blocks[block.index()].preds {
-            let arg = self
-                .func
-                .resolve(self.func.inst_data(branch).branch_dests()[i].args[index]);
+        for arg in args {
+            let arg = self.func.resolve(arg);
             if arg == param || Some(arg) == same {
                 continue;
             }
             if same.is_some() {
-                return param;
+                return None;
             }
             same = Some(arg);
         }
-        // No value besides itself: no branch into the block defines it.
+        Some(same)
+    }
+
+    /// If every argument for `param` is the same value (ignoring `param`
+    /// itself, passed around a loop), removes it and returns that value.
+    fn try_remove_trivial(&mut self, block: Block, param: Value) -> Value {
+        let index = self.param_index(block, param);
+        let preds = &self.blocks[block.index()].preds;
+        let args = preds
+            .iter()
+            .map(|&(branch, i)| self.func.inst_data(branch).branch_dests()[i].args[index]);
+        match self.trivial_value(param, args) {
+            Some(same) => self.remove_trivial(block, index, param, same, true),
+            None => param,
+        }
+    }
+
+    /// Removes trivial `param`, parameter `index` of `block`, and its branch
+    /// arguments if they were written. `same` is the value it stands for;
+    /// none means no branch into the block defines it.
+    fn remove_trivial(
+        &mut self,
+        block: Block,
+        index: usize,
+        param: Value,
+        same: Option<Value>,
+        written: bool,
+    ) -> Value {
         let ty = self.func.value_type(param);
         let same = same.unwrap_or_else(|| self.zero(block, ty));
         self.func.remove_block_param(block, index);
-        for &(branch, i) in &self.blocks[block.index()].preds {
-            self.func.inst_data_mut(branch).branch_dests_mut()[i]
-                .args
-                .remove(index);
+        if written {
+            for &(branch, i) in &self.blocks[block.index()].preds {
+                self.func.inst_data_mut(branch).branch_dests_mut()[i]
+                    .args
+                    .remove(index);
+            }
         }
         self.func.replace_all_uses(param, same);
         same

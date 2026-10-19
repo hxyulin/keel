@@ -12,7 +12,9 @@ use crate::{
     Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type, UnaryOp, Value,
     ValueDef,
 };
-use crate::{DataInit, DataItem, DebugScope, DebugType, DebugTypeData, Module};
+use crate::{
+    DataInit, DataItem, DataObject, DebugScope, DebugType, DebugTypeData, FunctionAttrs, Module,
+};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -29,11 +31,59 @@ impl fmt::Display for VerifierError {
     }
 }
 
+/// Module name lookups for verification, built once. Each lookup answers
+/// exactly as the corresponding linear `Module` method does, including for
+/// duplicate names (which are reported separately): `signature` and
+/// `function_attrs` take the first `decl`, else the first function; and
+/// `data_object` takes the first data object.
+struct Names<'m> {
+    functions: HashMap<&'m str, (&'m Signature, FunctionAttrs)>,
+    data: HashMap<&'m str, &'m DataObject>,
+}
+
+impl<'m> Names<'m> {
+    fn new(module: &'m Module) -> Self {
+        let mut functions = HashMap::with_capacity(module.decls.len() + module.functions.len());
+        for decl in &module.decls {
+            functions
+                .entry(decl.name.as_str())
+                .or_insert((&decl.sig, decl.attrs));
+        }
+        for func in &module.functions {
+            functions
+                .entry(func.name.as_str())
+                .or_insert((&func.sig, func.attrs));
+        }
+        let mut data = HashMap::with_capacity(module.data.len());
+        for object in &module.data {
+            data.entry(object.name.as_str()).or_insert(object);
+        }
+        Self { functions, data }
+    }
+
+    fn signature(&self, name: &str) -> Option<&'m Signature> {
+        self.functions.get(name).map(|&(sig, _)| sig)
+    }
+
+    fn function_attrs(&self, name: &str) -> Option<FunctionAttrs> {
+        self.functions.get(name).map(|&(_, attrs)| attrs)
+    }
+
+    fn data_object(&self, name: &str) -> Option<&'m DataObject> {
+        self.data.get(name).copied()
+    }
+
+    fn has_symbol(&self, name: &str) -> bool {
+        self.signature(name).is_some() || self.data_object(name).is_some()
+    }
+}
+
 /// Verifies every function and data object, that names are unique, that
 /// each function's callees and data match the module's declarations, and
 /// that instruction locations name the module's source files.
 pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
+    let lookup = Names::new(module);
     let mut seen = HashSet::new();
     let names = module
         .decls
@@ -76,7 +126,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             });
         }
         if let Some(init) = &data.init {
-            for message in check_data(module, init) {
+            for message in check_data(&lookup, init) {
                 errors.push(VerifierError {
                     location: format!("@{}", data.name),
                     message,
@@ -84,10 +134,10 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             }
         }
     }
-    errors.extend(check_debug_info(module));
+    errors.extend(check_debug_info(module, &lookup));
     for func in &module.functions {
         if let Some(personality) = &func.personality
-            && module.signature(personality).is_none()
+            && lookup.signature(personality).is_none()
         {
             errors.push(VerifierError {
                 location: format!("@{}", func.name),
@@ -108,7 +158,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             }
         }
         for (_, name) in func.data_symbols() {
-            if module.data_object(name).is_none() {
+            if lookup.data_object(name).is_none() {
                 errors.push(VerifierError {
                     location: format!("@{}", func.name),
                     message: format!("uses data @{name}, which is not declared"),
@@ -122,7 +172,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
             }));
         }
         for (_, callee) in func.callees() {
-            if module
+            if lookup
                 .function_attrs(&callee.name)
                 .is_some_and(|a| a != callee.attrs)
             {
@@ -131,7 +181,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
                     message: format!("callee @{} attributes disagree with module", callee.name),
                 });
             }
-            let message = match module.signature(&callee.name) {
+            let message = match lookup.signature(&callee.name) {
                 None => format!("calls @{}, which is not declared", callee.name),
                 Some(sig) if *sig != callee.sig => {
                     format!(
@@ -156,7 +206,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
 
 /// Debug types refer only to types in the table, variables live in slots
 /// of their function, and globals name data objects.
-fn check_debug_info(module: &Module) -> Vec<VerifierError> {
+fn check_debug_info(module: &Module, lookup: &Names<'_>) -> Vec<VerifierError> {
     let mut errors = Vec::new();
     let known = |ty: DebugType| ty.index() < module.debug_types.len();
     for (i, data) in module.debug_types.iter().enumerate() {
@@ -187,7 +237,7 @@ fn check_debug_info(module: &Module) -> Vec<VerifierError> {
                 message: format!("has type {}, which is not defined", global.ty),
             });
         }
-        if module.data_object(&global.symbol).is_none() {
+        if lookup.data_object(&global.symbol).is_none() {
             errors.push(VerifierError {
                 location,
                 message: format!("@{} is not a data object", global.symbol),
@@ -275,7 +325,7 @@ fn check_debug_info(module: &Module) -> Vec<VerifierError> {
 /// much as the linker can guarantee.
 const MAX_DATA_ALIGN: u32 = 4096;
 
-fn check_data(module: &Module, init: &DataInit) -> Vec<String> {
+fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
     let mut errors = Vec::new();
     if !init.align.is_power_of_two() || init.align > MAX_DATA_ALIGN {
         errors.push(format!(
@@ -304,14 +354,14 @@ fn check_data(module: &Module, init: &DataInit) -> Vec<String> {
                 _ => errors.push(format!("data integers must be i8 to i64, got {ty}")),
             },
             DataItem::Ptr { symbol, addend } => {
-                if !module.has_symbol(symbol) {
+                if !lookup.has_symbol(symbol) {
                     errors.push(format!("points to @{symbol}, which is not declared"));
-                } else if module.data_object(symbol).is_some_and(|d| d.thread_local) {
+                } else if lookup.data_object(symbol).is_some_and(|d| d.thread_local) {
                     errors.push(format!(
                         "points to thread-local @{symbol}, whose address differs per thread"
                     ));
                 } else if let Some(target) =
-                    module.data_object(symbol).and_then(|d| d.init.as_ref())
+                    lookup.data_object(symbol).and_then(|d| d.init.as_ref())
                     && u64::from(*addend) > target.size()
                 {
                     errors.push(format!(
@@ -1437,4 +1487,131 @@ fn type_list(tys: &[Type]) -> String {
         .map(Type::to_string)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    use crate::{FuncDecl, Function};
+
+    fn data(name: &str, thread_local: bool, init: Option<u32>) -> DataObject {
+        DataObject {
+            name: name.into(),
+            thread_local,
+            local: false,
+            init: init.map(|n| DataInit {
+                constant: false,
+                align: 8,
+                items: vec![DataItem::Zero(n)],
+            }),
+        }
+    }
+
+    /// Duplicated names across and within every table, so precedence
+    /// decides each answer.
+    fn module() -> Module {
+        let sig = |n: usize| Signature::new(&vec![Type::I64; n], &[]);
+        let attrs = |noreturn| FunctionAttrs {
+            noreturn,
+            ..FunctionAttrs::default()
+        };
+        let decl = |name: &str, n, noreturn| FuncDecl {
+            attrs: attrs(noreturn),
+            name: name.into(),
+            sig: sig(n),
+        };
+        let func = |name: &str, n, noreturn| {
+            let mut f = Function::new(name, sig(n));
+            f.attrs = attrs(noreturn);
+            f
+        };
+        Module {
+            decls: vec![
+                decl("both", 1, false),
+                decl("both", 2, true),
+                decl("only_decl", 3, true),
+            ],
+            functions: vec![
+                func("both", 4, true),
+                func("only_func", 5, false),
+                func("only_func", 6, true),
+                func("shared", 7, true),
+            ],
+            data: vec![
+                data("dup", true, Some(8)),
+                data("dup", false, Some(64)),
+                data("shared", false, None),
+                data("only_data", false, Some(16)),
+            ],
+            ..Module::default()
+        }
+    }
+
+    #[test]
+    fn index_matches_linear_module_lookups() {
+        let module = module();
+        let names = Names::new(&module);
+        for name in [
+            "both",
+            "only_decl",
+            "only_func",
+            "shared",
+            "dup",
+            "only_data",
+            "missing",
+            "",
+        ] {
+            assert_eq!(names.signature(name), module.signature(name), "{name}");
+            assert_eq!(
+                names.function_attrs(name),
+                module.function_attrs(name),
+                "{name}"
+            );
+            assert_eq!(names.data_object(name), module.data_object(name), "{name}");
+            assert_eq!(names.has_symbol(name), module.has_symbol(name), "{name}");
+        }
+        // The first entries win, not the last.
+        assert_eq!(names.signature("both").unwrap().params.len(), 1);
+        assert_eq!(names.signature("only_func").unwrap().params.len(), 5);
+        assert!(names.data_object("dup").unwrap().thread_local);
+    }
+
+    #[test]
+    fn data_checks_use_the_first_duplicate_object() {
+        let module = module();
+        let names = Names::new(&module);
+        let init = |addend| DataInit {
+            constant: false,
+            align: 8,
+            items: vec![DataItem::Ptr {
+                symbol: "dup".into(),
+                addend,
+            }],
+        };
+        // The first `dup` is thread-local, so this is reported before size.
+        assert_eq!(
+            check_data(&names, &init(32)),
+            ["points to thread-local @dup, whose address differs per thread"]
+        );
+        let ptr = |symbol: &str, addend| DataInit {
+            constant: false,
+            align: 8,
+            items: vec![DataItem::Ptr {
+                symbol: symbol.into(),
+                addend,
+            }],
+        };
+        assert_eq!(
+            check_data(&names, &ptr("only_data", 17)),
+            ["@only_data + 17 is past the end of @only_data (16 bytes)"]
+        );
+        assert!(check_data(&names, &ptr("only_data", 16)).is_empty());
+        // A function, and a name that is both a function and declared data.
+        assert!(check_data(&names, &ptr("only_func", 0)).is_empty());
+        assert!(check_data(&names, &ptr("shared", 0)).is_empty());
+        assert_eq!(
+            check_data(&names, &ptr("missing", 0)),
+            ["points to @missing, which is not declared"]
+        );
+    }
 }
