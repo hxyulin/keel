@@ -1,4 +1,4 @@
-# Selected PAC/BTI, system/prefetch, CASP, crypto and CRC forms.
+# Selected PAC/BTI, system/prefetch, CASP, crypto, CRC and scalar LRCPC/LRCPC2 forms.
 ABS_32_dp_1src
 ABS_64_dp_1src
 AESD_B_cryptoaes
@@ -96,6 +96,15 @@ LDAPRB_32L_memop
 LDAPRH_32L_memop
 LDAPR_32L_memop
 LDAPR_64L_memop
+LDAPURB_32_ldapstl_unscaled
+LDAPURH_32_ldapstl_unscaled
+LDAPURSB_32_ldapstl_unscaled
+LDAPURSB_64_ldapstl_unscaled
+LDAPURSH_32_ldapstl_unscaled
+LDAPURSH_64_ldapstl_unscaled
+LDAPURSW_64_ldapstl_unscaled
+LDAPUR_32_ldapstl_unscaled
+LDAPUR_64_ldapstl_unscaled
 LDPSW_64_ldstpair_off
 LDPSW_64_ldstpair_post
 LDPSW_64_ldstpair_pre
@@ -144,6 +153,10 @@ SMIN_32_dp_2src
 SMIN_32_minmax_imm
 SMIN_64_dp_2src
 SMIN_64_minmax_imm
+STLURB_32_ldapstl_unscaled
+STLURH_32_ldapstl_unscaled
+STLUR_32_ldapstl_unscaled
+STLUR_64_ldapstl_unscaled
 SYS_CR_systeminstrs
 UCVTF_D32_float2fix
 UCVTF_D64_float2fix

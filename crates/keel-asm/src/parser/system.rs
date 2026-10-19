@@ -161,6 +161,8 @@ pub(super) fn instruction(
             )
             .map(Some);
         }
+        "ldapur" | "ldapurb" | "ldapurh" | "ldapursb" | "ldapursh" | "ldapursw" | "stlur"
+        | "stlurb" | "stlurh" => return super::memory::lrcpc2(op, a, features).map(Some),
         "prfm" | "prfum" => return super::memory::prefetch(op, a).map(Some),
         _ => return crypto(op, a, features),
     }

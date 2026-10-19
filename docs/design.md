@@ -2282,6 +2282,25 @@ and fixed-point conversions. Optional features have separate library builders;
 `apple_m5()` selects them. Default FP/NEON/LSE behavior stays gated as before.
 New instruction fields use stack arrays and stack-formatted encoding names.
 
+Compiler-output compatibility also includes all 13 scalar LRCPC2 unscaled
+acquire-load/release-store encodings (`ldapur`, `ldapurb/h`, `ldapursb/sh/sw`,
+`stlur`, `stlurb/h`). `with_lrcpc2()` enables them and implies `with_lrcpc()`;
+LRCPC alone does not enable LRCPC2. `apple_m5()` includes both. The default
+FP/NEON/LSE profile is unchanged. Their offsets are signed byte offsets in
+`-256..255`, with no scaling, register offset or writeback. Loads preserve the
+specified destination width and sign extension; stores preserve access width
+and release semantics. They are never lowered to ordinary loads/stores or to a
+different acquire ordering. LRCPC3 FP/SIMD transfers remain unsupported.
+
+Apple SIMD destination suffixes also normalize the widening multiply,
+accumulate and subtract families (including saturating doubled variants and
+upper halves), with indexed multipliers using the narrow source element.
+FP comparisons preserve register versus positive-zero-immediate forms and
+existing FP16 feature gates. Normalization uses the ordinary operand validators
+and encoders. Differential tests cover every signed LRCPC2 offset; native tests
+check access width/sign extension, SIMD signed/unsigned arithmetic, upper halves,
+lane selection, saturation, NaNs, infinities and signed zero against C oracles.
+
 The instruction layouts and feature predicates are imported through the same
 checksum-verified Arm archive. `isa/m5-compat.txt` inventories selected records.
 `isa/system.json` retains selected Registers.json names, architecture conditions

@@ -440,6 +440,40 @@ pub(super) fn atomic_base(text: &str) -> Result<Reg, String> {
     Ok(a.base)
 }
 
+/// LRCPC2 uses a signed, unscaled byte offset, independently of transfer width.
+/// Preserve its RCpc acquire/release encodings rather than substituting LDAR,
+/// LDAPR, or ordinary unscaled transfers with different ordering semantics.
+pub(super) fn lrcpc2(
+    op: &str,
+    args: &[&str],
+    features: crate::TargetFeatures,
+) -> Result<u32, String> {
+    count(args, 2, 2)?;
+    let t = reg(args[0], false, true)?;
+    if matches!(op, "ldapurb" | "ldapurh" | "stlurb" | "stlurh") && t.bits != 32 {
+        return Err("byte/halfword unsigned transfers require a W register".into());
+    }
+    if op == "ldapursw" && t.bits != 64 {
+        return Err("LDAPURSW requires an X register".into());
+    }
+    let address = address(&args[1..])?;
+    let Offset::Immediate(offset) = address.offset else {
+        return Err("LRCPC2 requires a signed immediate byte offset".into());
+    };
+    if address.mode != Mode::Offset || !(-256..=255).contains(&offset) {
+        return Err("LRCPC2 requires an offset in -256..255 without writeback".into());
+    }
+    super::storage::encode_named_features(
+        format_args!("{}_{}_ldapstl_unscaled", upper(op), t.bits),
+        &[
+            (FieldId::Rt, t.number),
+            (FieldId::Rn, address.base.number),
+            (FieldId::imm9, (offset as u32) & 511),
+        ],
+        features,
+    )
+}
+
 /// Literal loads share signed imm19 PC-relative fixups with conditional branches.
 /// Mach-O has no relocation for these forms, so symbols must stay in one atom.
 pub(super) fn literal<'a>(

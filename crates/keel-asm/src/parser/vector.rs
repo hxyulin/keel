@@ -496,14 +496,31 @@ pub(super) fn apple_syntax<'a, 'b>(
             if let Some((number, lane)) = number.split_once('[').filter(|_| {
                 role == Apple::Dup
                     || index == 2
-                        && matches!(root, "fmla" | "fmls" | "fmul" | "fmulx")
-                        && matches!(shape, "4h" | "8h" | "2s" | "4s" | "2d")
+                        && matches!(
+                            root.trim_end_matches('2'),
+                            "fmla"
+                                | "fmls"
+                                | "fmul"
+                                | "fmulx"
+                                | "mul"
+                                | "mla"
+                                | "mls"
+                                | "smull"
+                                | "umull"
+                                | "smlal"
+                                | "umlal"
+                                | "smlsl"
+                                | "umlsl"
+                                | "sqdmull"
+                                | "sqdmlal"
+                                | "sqdmlsl"
+                        )
             }) {
-                // Duplicate and indexed FP forms name a single element,
+                // Duplicate and indexed arithmetic forms name a single element,
                 // while the other vector operands use the full arrangement.
                 // Ordinary lane parsing retains index/register validation.
                 register_number(number)?;
-                let element = &shape[shape.len() - 1..];
+                let element = &arg_shape[arg_shape.len() - 1..];
                 vectors += 1;
                 bumpalo::format!(in arena, "v{number}.{element}[{lane}",).into_bump_str() as &str
             } else {
@@ -573,12 +590,11 @@ fn apple_role(root: &str) -> Option<Apple> {
         | "smin" | "ushl" | "sshl" | "ushr" | "sshr" | "shl" | "sli" | "sri" | "ext" | "uzp1"
         | "uzp2" | "zip1" | "zip2" | "trn1" | "trn2" | "rev16" | "rev32" | "rev64" | "ucvtf"
         | "scvtf" | "fdiv" | "fmul" | "fmulx" | "fmla" | "fmls" | "fadd" | "fsub" | "fneg"
-        | "cnt" | "addv" | "saddlv" | "uaddlv" | "addp" | "umaxv" | "uminv" | "smaxv" | "sminv" => {
-            Apple::Same
-        }
-        "ushll" | "ushll2" | "sshll" | "sshll2" | "umull" | "umull2" | "smull" | "smull2" => {
-            Apple::Long
-        }
+        | "cnt" | "addv" | "saddlv" | "uaddlv" | "addp" | "umaxv" | "uminv" | "smaxv" | "sminv"
+        | "fcmeq" | "fcmgt" | "fcmge" | "fcmlt" | "fcmle" | "facge" | "facgt" => Apple::Same,
+        "ushll" | "ushll2" | "sshll" | "sshll2" | "umull" | "umull2" | "smull" | "smull2"
+        | "smlal" | "smlal2" | "umlal" | "umlal2" | "smlsl" | "smlsl2" | "umlsl" | "umlsl2"
+        | "sqdmull" | "sqdmull2" | "sqdmlal" | "sqdmlal2" | "sqdmlsl" | "sqdmlsl2" => Apple::Long,
         "saddw" | "saddw2" | "ssubw" | "ssubw2" | "uaddw" | "uaddw2" | "usubw" | "usubw2" => {
             Apple::Wide
         }

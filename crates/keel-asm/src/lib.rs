@@ -325,7 +325,7 @@ impl TargetFeatures {
     }
     /// Select the M5 features currently modeled by this assembler: the Apple
     /// baseline, numeric extensions, SME/SME2 and optional matrix element types,
-    /// PAC/BTI, AES/PMULL, SHA-1/SHA-256, CRC32, CSSC and RCpc loads. This does
+    /// PAC/BTI, AES/PMULL, SHA-1/SHA-256, CRC32, CSSC and LRCPC/LRCPC2. This does
     /// not enable ordinary SVE or claim coverage of unimplemented M5 families.
     /// Selection is for encoding only; execution still needs OS/hardware checks.
     pub const fn apple_m5() -> Self {
@@ -333,7 +333,7 @@ impl TargetFeatures {
             sve: false,
             sme: true,
             numeric: (1 << 9) - 1,
-            compat: 511,
+            compat: 1023,
             matrix: 31,
         }
     }
@@ -382,6 +382,13 @@ impl TargetFeatures {
         self.compat |= 256;
         self
     }
+    /// Permit LRCPC2 unscaled RCpc acquire loads and release stores, including
+    /// sign-extending loads. Also permits the LRCPC base-only acquire loads.
+    /// This does not permit LRCPC3 SIMD transfers.
+    pub const fn with_lrcpc2(mut self) -> Self {
+        self.compat |= 256 | 512;
+        self
+    }
     fn supports(self, feature: &str) -> bool {
         TARGET_FEATURES.contains(&feature)
             || [
@@ -394,6 +401,7 @@ impl TargetFeatures {
                 "FEAT_PMULL",
                 "FEAT_CSSC",
                 "FEAT_LRCPC",
+                "FEAT_LRCPC2",
             ]
             .iter()
             .position(|f| *f == feature)
