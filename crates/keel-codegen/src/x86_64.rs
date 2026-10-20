@@ -1420,10 +1420,16 @@ impl<'a> FunctionCompiler<'a> {
                         "e"
                     }
                 };
-                // Block arguments are copied on the edge, so a branch with
-                // else-arguments needs its own landing pad. The copies are
-                // `mov`s, which leave the flags alone.
-                if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
+                // Branch directly to a copy-free true edge when the false
+                // successor is next, copying its arguments on fallthrough.
+                // Otherwise keep copies on their own edges with landing pads.
+                if self.next_block == Some(else_dest.block) && self.block_args_noop(&then_dest, 0) {
+                    self.emit(
+                        Opcode::Jcc(condition(invert_cond(not))),
+                        [asm_arg(&(self.label(then_dest.block)))],
+                    );
+                    self.block_args(&else_dest, 1);
+                } else if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
                     self.emit(
                         Opcode::Jcc(condition(not)),
                         [asm_arg(&(self.label(else_dest.block)))],
@@ -3498,6 +3504,30 @@ impl<'a> FunctionCompiler<'a> {
         let c = self.use_reg(value, S0);
         let r = reg(c, ty);
         self.emit(Opcode::Test, [asm_arg(&(r)), asm_arg(&(r))]);
+    }
+
+    /// Whether an edge can branch directly without executing any copies.
+    /// Include allocator transfers and both halves of wide block arguments;
+    /// parameters without locations are aliases and need no copy.
+    fn block_args_noop(&self, call: &BlockCall, successor: usize) -> bool {
+        self.edge_moves(successor)
+            .iter()
+            .all(|(dst, src)| dst == src)
+            && self
+                .func
+                .block_params(call.block)
+                .iter()
+                .zip(&call.args)
+                .all(|(&param, &arg)| {
+                    let low = self
+                        .alloc
+                        .param_loc(call.block, crate::regalloc::ValuePart::low(param));
+                    let high = self
+                        .alloc
+                        .param_loc(call.block, crate::regalloc::ValuePart::high(param));
+                    low.is_none_or(|dst| dst == self.loc(arg))
+                        && high.is_none_or(|dst| dst == self.hi(arg))
+                })
     }
 
     /// Copies block-call arguments into the target's parameters, all at
