@@ -229,6 +229,9 @@ pub enum Opcode {
     Cmpss,
     Cmpsd,
     Cmpltss,
+    Cmpltsd,
+    /// Load an explicitly sized 32/64/80-bit floating-point memory operand.
+    Fld,
     Cmpnltps,
     Pmovmskb,
     Movmskps,
@@ -472,6 +475,8 @@ impl Opcode {
             "cmpss" => Cmpss,
             "cmpsd" => Cmpsd,
             "cmpltss" => Cmpltss,
+            "cmpltsd" => Cmpltsd,
+            "fld" => Fld,
             "cmpnltps" => Cmpnltps,
             "pmovmskb" => Pmovmskb,
             "movmskps" => Movmskps,
@@ -890,6 +895,7 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
         ("word ptr ", 16),
         ("dword ptr ", 32),
         ("qword ptr ", 64),
+        ("tbyte ptr ", 80),
         ("xmmword ptr ", 128),
     ] {
         if let Some(rest) = s.strip_prefix(prefix) {

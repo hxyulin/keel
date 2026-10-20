@@ -219,6 +219,8 @@ impl fmt::Display for Opcode {
             Opcode::Cmpss => f.write_str("cmpss"),
             Opcode::Cmpsd => f.write_str("cmpsd"),
             Opcode::Cmpltss => f.write_str("cmpltss"),
+            Opcode::Cmpltsd => f.write_str("cmpltsd"),
+            Opcode::Fld => f.write_str("fld"),
             Opcode::Cmpnltps => f.write_str("cmpnltps"),
             Opcode::Pmovmskb => f.write_str("pmovmskb"),
             Opcode::Movmskps => f.write_str("movmskps"),
@@ -344,6 +346,7 @@ impl fmt::Display for Operand {
                         16 => "word ptr ",
                         32 => "dword ptr ",
                         64 => "qword ptr ",
+                        80 => "tbyte ptr ",
                         128 => "xmmword ptr ",
                         _ => return Err(fmt::Error),
                     })?;

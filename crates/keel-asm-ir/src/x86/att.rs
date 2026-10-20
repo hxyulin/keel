@@ -388,6 +388,17 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         width(a, dst)?;
         width(b, src)?;
         op
+    } else if let Some(w) = match name {
+        "flds" => Some(32),
+        "fldl" => Some(64),
+        "fldt" => Some(80),
+        _ => None,
+    } {
+        let [Operand::Memory(m)] = ops.as_mut_slice() else {
+            return Err("x87 load requires one memory operand".into());
+        };
+        m.width = w;
+        Fld
     } else if let Some(op) = match name {
         "cbtw" => Some(Cbw),
         "cwtl" => Some(Cwde),

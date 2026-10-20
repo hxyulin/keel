@@ -260,12 +260,21 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             | Pcmpgtw | Pcmpgtd | Pshufd | Pshuflw | Pshufhw | Punpcklbw | Punpcklwd | Punpckldq
             | Punpcklqdq | Punpckhbw | Punpckhwd | Punpckhdq | Punpckhqdq | Unpcklps | Unpckhps
             | Unpcklpd | Unpckhpd | Shufps | Shufpd | Andnps | Andnpd | Minps | Minpd | Maxps
-            | Maxpd | Cmpps | Cmppd | Cmpss | Cmpsd | Cmpltss | Cmpnltps | Pmovmskb | Movmskps
-            | Movmskpd | Pmaddwd | Pmulhuw | Pmulhw | Pmuludq | Psllw | Pslld | Psllq | Psrlw
-            | Psrld | Psrlq | Psraw | Psrad | Pslldq | Psrldq | Cvtdq2ps | Cvtps2dq | Cvttps2dq
-            | Cvtps2pd | Cvtpd2ps | Cvtdq2pd | Cvtpd2dq | Cvttpd2dq,
+            | Maxpd | Cmpps | Cmppd | Cmpss | Cmpsd | Cmpltss | Cmpltsd | Cmpnltps | Pmovmskb
+            | Movmskps | Movmskpd | Pmaddwd | Pmulhuw | Pmulhw | Pmuludq | Psllw | Pslld | Psllq
+            | Psrlw | Psrld | Psrlq | Psraw | Psrad | Pslldq | Psrldq | Cvtdq2ps | Cvtps2dq
+            | Cvttps2dq | Cvtps2pd | Cvtpd2ps | Cvtdq2pd | Cvtpd2dq | Cvttpd2dq,
             _,
         ) => sse2::encode(&mut e, i)?,
+        (Fld, [m @ M(memory)]) if matches!(memory.width, 32 | 64 | 80) => {
+            let (byte, group) = match memory.width {
+                32 => (0xd9, 0),
+                64 => (0xdd, 0),
+                _ => (0xdb, 5),
+            };
+            // The data width selects the opcode; x87 memory forms have no REX.W.
+            e.rm(0, &[byte], 32, group, m, None)?;
+        }
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
@@ -936,7 +945,8 @@ fn validate(i: &Instruction) -> Result<(), String> {
                 return Err("invalid operand register".into());
             }
             M(m) => {
-                if !matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128)
+                if !(matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128)
+                    || i.opcode == Fld && m.width == 80)
                     || !matches!(m.scale, 1 | 2 | 4 | 8)
                     || m.segment.is_some_and(|s| !matches!(s, 0x64 | 0x65))
                 {

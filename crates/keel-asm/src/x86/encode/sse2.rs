@@ -107,6 +107,7 @@ pub(super) fn encode(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
         Cmpss => (0xf3, 0xc2, 0, 32, Some(None)),
         Cmpsd => (0xf2, 0xc2, 0, 64, Some(None)),
         Cmpltss => (0xf3, 0xc2, 0, 32, Some(Some(1))),
+        Cmpltsd => (0xf2, 0xc2, 0, 64, Some(Some(1))),
         Cmpnltps => (0, 0xc2, 0, 128, Some(Some(5))),
         Pmaddwd => (0x66, 0xf5, 0, 128, None),
         Pmulhuw => (0x66, 0xe4, 0, 128, None),

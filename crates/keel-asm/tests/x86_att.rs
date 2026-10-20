@@ -621,3 +621,59 @@ int main(void) {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+#[test]
+fn evidenced_x87_memory_loads_and_scalar_less_than_match_clang() {
+    let att = ".text\nflds (%rax)\nfldl -128(%r13,%r12,4)\nfldt external(%rip)\n\
+               flds %fs:4096(,%r14,8)\nfldl 128(%r15)\nfldt (%r8)\n\
+               cmpltsd %xmm15, %xmm8\ncmpltsd external(%rip), %xmm12\n\
+               cmpltsd %gs:8(%r13,%r12,2), %xmm0\n";
+    let intel = ".intel_syntax noprefix\n.text\nfld dword ptr [rax]\n\
+                 fld qword ptr [r13+r12*4-128]\nfld tbyte ptr [rip+external]\n\
+                 fld dword ptr fs:[r14*8+4096]\nfld qword ptr [r15+128]\n\
+                 fld tbyte ptr [r8]\ncmpltsd xmm8, xmm15\n\
+                 cmpltsd xmm12, qword ptr [rip+external]\n\
+                 cmpltsd xmm0, qword ptr gs:[r13+r12*2+8]\n";
+    let expected = clang(att);
+    let att_object = assemble(att);
+    let intel_object = assemble_object(intel).unwrap();
+    assert_eq!(att_object, intel_object);
+    assert_eq!(text(&att_object), text(&expected));
+    // RIP fixups before an implicit compare predicate must account for imm8.
+    let relocations = |bytes: &[u8]| {
+        let file = object::File::parse(bytes).unwrap();
+        file.section_by_name(".text")
+            .unwrap()
+            .relocations()
+            .map(|(offset, r)| (offset, r.addend(), r.flags()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(relocations(&att_object), relocations(&expected));
+    let program = keel_asm_ir::x86::parse_program(intel).unwrap();
+    assert_eq!(assemble_program_object(&program).unwrap(), intel_object);
+    for instruction in program.items.iter().filter_map(|item| match item {
+        keel_asm_ir::Item::X86Instruction(i) => Some(i),
+        _ => None,
+    }) {
+        assert_eq!(
+            Instruction::parse_intel(&instruction.to_string()).unwrap(),
+            *instruction
+        );
+    }
+    for bad in [
+        "fld [rax]",
+        "fld word ptr [rax]",
+        "fld xmm0",
+        "fld rax",
+        "fld 1",
+        "fld qword ptr [rax], xmm0",
+        "cmpltsd xmm0, dword ptr [rax]",
+        "cmpltsd xmm0, xmm1, 1",
+        "lock fld qword ptr [rax]",
+    ] {
+        assert!(assemble_object(bad).is_err(), "{bad}");
+    }
+    for bad in ["flds %eax", "fldt $1", "fldl (%rax), (%rbx)"] {
+        assert!(Instruction::parse_att(bad).is_err(), "{bad}");
+    }
+}
