@@ -41,6 +41,18 @@ pub(super) fn encode_named(
 ) -> Result<u32, String> {
     encode_named_features(name, fields, crate::TargetFeatures::default())
 }
+/// Direct identity for common source families; retain the shared field and
+/// feature validator without constructing an owned structured instruction.
+pub(super) fn encode_opcode(
+    opcode: keel_asm_ir::Opcode,
+    fields: &[(FieldId, u32)],
+) -> Result<u32, String> {
+    crate::encode_record(
+        &crate::generated::ENCODINGS[opcode.index()],
+        fields,
+        crate::TargetFeatures::default(),
+    )
+}
 pub(super) fn encode_named_features(
     name: fmt::Arguments<'_>,
     fields: &[(FieldId, u32)],

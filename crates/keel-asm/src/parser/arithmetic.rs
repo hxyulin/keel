@@ -1,5 +1,5 @@
 use super::control::condition;
-use super::storage::{Operands, encode_named, lower, upper};
+use super::storage::{Operands, encode_named, encode_opcode, lower, upper};
 use super::text::Trim;
 use super::{
     Kind, Reg, count, instruction as base_instruction, is_integer, reg, same_width, shift, unsigned,
@@ -75,11 +75,11 @@ pub(super) fn move_immediate(args: &[&str]) -> Result<u32, String> {
     let value = bits_immediate(args[1], d.bits)?;
     let mask = u64::MAX >> (64 - d.bits);
     if d.kind != Kind::Sp {
-        for (op, pattern) in [("MOVZ", value), ("MOVN", !value & mask)] {
+        for (op, pattern) in [("movz", value), ("movn", !value & mask)] {
             for lane in (0..d.bits).step_by(16) {
                 if pattern & !(0xffffu64 << lane) == 0 {
-                    return encode_named(
-                        format_args!("{op}_{}_movewide", d.bits),
+                    return encode_opcode(
+                        super::move_wide_opcode(op, d.bits),
                         &[
                             (FieldId::Rd, d.number),
                             (FieldId::hw, lane / 16),

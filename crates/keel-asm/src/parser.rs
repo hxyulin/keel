@@ -53,8 +53,9 @@ mod vector;
 
 use super::{Assembly, Error, InstructionLocation, Symbol, encode};
 use bumpalo::{Bump, collections::Vec as BumpVec};
+use keel_asm_ir::Opcode;
 use std::collections::BTreeMap;
-use storage::{Operands, encode_named, lower, upper};
+use storage::{Operands, encode_opcode, lower};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
@@ -178,6 +179,19 @@ fn is_integer(s: &str) -> bool {
     s.starts_with(['#', '-', '+']) || s.as_bytes().first().is_some_and(u8::is_ascii_digit)
 }
 
+fn move_wide_opcode(op: &str, bits: u32) -> Opcode {
+    use Opcode::*;
+    match (op, bits) {
+        ("movz", 32) => MOVZ_32_movewide,
+        ("movz", _) => MOVZ_64_movewide,
+        ("movn", 32) => MOVN_32_movewide,
+        ("movn", _) => MOVN_64_movewide,
+        ("movk", 32) => MOVK_32_movewide,
+        ("movk", _) => MOVK_64_movewide,
+        _ => unreachable!("move-wide dispatch"),
+    }
+}
+
 fn instruction(op: &str, a: &[&str]) -> Result<u32, String> {
     instruction_with_features(op, a, crate::TargetFeatures::default())
 }
@@ -222,8 +236,8 @@ fn instruction_with_features(
                         .into(),
                 );
             }
-            encode_named(
-                format_args!("{}_{}_movewide", upper(op), d.bits),
+            encode_opcode(
+                move_wide_opcode(op, d.bits),
                 &[
                     (FieldId::Rd, d.number),
                     (FieldId::imm16, imm),
@@ -249,6 +263,21 @@ fn instruction_with_features(
             let d = reg(a[0], immediate && !flags, !immediate || flags)?;
             let n = reg(a[1], immediate, !immediate)?;
             same_width(d, n)?;
+            let (word32, word64) = {
+                use Opcode::*;
+                match (op, immediate) {
+                    ("add", true) => (ADD_32_addsub_imm, ADD_64_addsub_imm),
+                    ("adds", true) => (ADDS_32S_addsub_imm, ADDS_64S_addsub_imm),
+                    ("sub", true) => (SUB_32_addsub_imm, SUB_64_addsub_imm),
+                    ("subs", true) => (SUBS_32S_addsub_imm, SUBS_64S_addsub_imm),
+                    ("add", false) => (ADD_32_addsub_shift, ADD_64_addsub_shift),
+                    ("adds", false) => (ADDS_32_addsub_shift, ADDS_64_addsub_shift),
+                    ("sub", false) => (SUB_32_addsub_shift, SUB_64_addsub_shift),
+                    ("subs", false) => (SUBS_32_addsub_shift, SUBS_64_addsub_shift),
+                    _ => unreachable!("add/sub dispatch"),
+                }
+            };
+            let opcode = if d.bits == 32 { word32 } else { word64 };
             if immediate {
                 let imm = unsigned(a[2], 4095)?;
                 let (kind, amount) = if a.len() == 4 {
@@ -259,13 +288,8 @@ fn instruction_with_features(
                 if kind != "lsl" || ![0, 12].contains(&amount) {
                     return Err("add/sub immediate shift must be lsl #0 or lsl #12".into());
                 }
-                encode_named(
-                    format_args!(
-                        "{}_{}{}_addsub_imm",
-                        upper(op),
-                        d.bits,
-                        if flags { "S" } else { "" }
-                    ),
+                encode_opcode(
+                    opcode,
                     &[
                         (FieldId::Rd, d.number),
                         (FieldId::Rn, n.number),
@@ -290,8 +314,8 @@ fn instruction_with_features(
                 if amount >= d.bits {
                     return Err("shift exceeds register width".into());
                 }
-                encode_named(
-                    format_args!("{}_{}_addsub_shift", upper(op), d.bits),
+                encode_opcode(
+                    opcode,
                     &[
                         (FieldId::Rd, d.number),
                         (FieldId::Rn, n.number),
@@ -323,8 +347,12 @@ fn instruction_with_features(
             if d.kind == Kind::Sp || n.kind == Kind::Sp {
                 instruction("add", &[a[0], a[1], "#0"])
             } else {
-                encode_named(
-                    format_args!("ORR_{}_log_shift", d.bits),
+                encode_opcode(
+                    if d.bits == 32 {
+                        Opcode::ORR_32_log_shift
+                    } else {
+                        Opcode::ORR_64_log_shift
+                    },
                     &[
                         (FieldId::Rd, d.number),
                         (FieldId::Rn, 31),
