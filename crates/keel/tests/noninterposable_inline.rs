@@ -95,6 +95,8 @@ fn explicit_pass_removes_narrow_calls_on_both_targets_and_retains_exports() {
                 assert!(!header.contains("local"));
             }
             assert!(function(&optimized, "stay_call").contains("call @stay("));
+            assert!(function(&original, "classify_call").contains("call @classify("));
+            assert!(!function(&optimized, "classify_call").contains("call @classify("));
             assert!(!function(&optimized, "aggregate").contains("call @adjust("));
             assert!(!function(&optimized, "effects_call").contains("call @effects("));
             assert!(!function(&optimized, "capture_call").contains("call @captured("));
@@ -116,7 +118,7 @@ fn explicit_pass_removes_narrow_calls_on_both_targets_and_retains_exports() {
                 } else {
                     "\tcall\t\""
                 };
-                for helper in ["clamp_i8", "mix_u16"] {
+                for helper in ["clamp_i8", "mix_u16", "classify"] {
                     assert_eq!(
                         asm.contains(&format!("{call}{helper}")),
                         stage == "before",
@@ -152,7 +154,7 @@ fn explicit_pass_removes_narrow_calls_on_both_targets_and_retains_exports() {
                     .current_dir(&dir)
                     .args(["-g", &obj]),
                 );
-                for helper in ["clamp_i8", "mix_u16"] {
+                for helper in ["clamp_i8", "mix_u16", "classify"] {
                     assert!(
                         symbols
                             .lines()
@@ -222,6 +224,7 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
                 "captured",
                 "ordered_fault",
                 "stay",
+                "classify",
             ] {
                 assert!(
                     symbols

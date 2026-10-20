@@ -58,3 +58,16 @@ BIND int ordered_fault(volatile int *p,int x,int d) {
 int fault_call(volatile int *p,int x,int d) { return ordered_fault(p,x,d); }
 __attribute__((noinline)) BIND int stay(int x) { return x+1; }
 int stay_call(int x) { return stay(x); }
+BIND int classify(int v) {
+    switch(v) {
+    case -1000: return 1;
+    case -7: return 2;
+    case 0: return 3;
+    case 3: return 4;
+    case 64: return 5;
+    case 1048576: return 6;
+    case 2147483647: return 7;
+    default: return v & 1 ? -1 : -2;
+    }
+}
+int classify_call(int v) { return classify(v); }

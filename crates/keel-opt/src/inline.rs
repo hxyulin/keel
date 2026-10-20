@@ -8,8 +8,8 @@
 use crate::{InlineSite, Pass};
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
-    BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic, Module,
-    Purpose, Symbol, Type,
+    BinaryOp, BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic,
+    Module, Purpose, Symbol, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -122,6 +122,75 @@ const MAX_CALLS: usize = 128;
 const MAX_MODULE_GROWTH: usize = 16_384;
 const HARD_STACK: u64 = 65_536;
 
+// Switches spend blocks on cheap returns. Admit only a small, acyclic integer
+// leaf, charging every branch destination as well as every instruction. This
+// is a structural exception to MAX_BLOCKS, not to binding or growth budgets.
+fn cheap_leaf_switch(f: &Function) -> bool {
+    const BLOCKS: usize = 16;
+    const EDGES: usize = 32;
+    if f.blocks().take(BLOCKS + 1).count() > BLOCKS
+        || f.layout_insts().take(MAX_INSTS + 1).count() > MAX_INSTS
+        || f.stack_slots().next().is_some()
+    {
+        return false;
+    }
+    let mut weighted = 0;
+    let mut edges = 0;
+    let mut switch = false;
+    for (_, i) in f.layout_insts() {
+        let data = f.inst_data(i);
+        match data {
+            InstData::Iconst { .. }
+            | InstData::Icmp { .. }
+            | InstData::Return { .. }
+            | InstData::Jump { .. }
+            | InstData::Brif { .. } => {}
+            InstData::Binary { op, .. }
+                if matches!(
+                    op,
+                    BinaryOp::Iadd | BinaryOp::Isub | BinaryOp::And | BinaryOp::Or | BinaryOp::Xor
+                ) => {}
+            InstData::Switch { .. } => switch = true,
+            _ => return false,
+        }
+        let destinations = data.branch_dests().len();
+        edges += destinations;
+        weighted += 1 + destinations;
+        if edges > EDGES || weighted > MAX_INSTS {
+            return false;
+        }
+    }
+    if !switch {
+        return false;
+    }
+    // Check all laid-out blocks, including unreachable cycles. Use compact
+    // layout indices rather than arena IDs: deleted blocks can leave holes.
+    let blocks: Vec<_> = f.blocks().collect();
+    let mut successors = vec![Vec::new(); blocks.len()];
+    let mut indegree = vec![0; blocks.len()];
+    for (index, &block) in blocks.iter().enumerate() {
+        for &i in f.block_insts(block) {
+            for dest in f.inst_data(i).branch_dests() {
+                let j = blocks.iter().position(|&b| b == dest.block).unwrap();
+                successors[index].push(j);
+                indegree[j] += 1;
+            }
+        }
+    }
+    let mut ready: Vec<_> = (0..blocks.len()).filter(|&i| indegree[i] == 0).collect();
+    let mut visited = 0;
+    while let Some(i) = ready.pop() {
+        visited += 1;
+        for &j in &successors[i] {
+            indegree[j] -= 1;
+            if indegree[j] == 0 {
+                ready.push(j);
+            }
+        }
+    }
+    visited == blocks.len()
+}
+
 fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
     let mut offset = 0;
     std::iter::from_fn(move || {
@@ -167,7 +236,7 @@ fn profitability_reason(f: &Function) -> Option<&'static str> {
     if f.attrs.alwaysinline {
         return None;
     }
-    if f.blocks().count() > MAX_BLOCKS * scale {
+    if f.blocks().count() > MAX_BLOCKS * scale && !cheap_leaf_switch(f) {
         Some("profitability_blocks")
     } else if f.layout_insts().count() > MAX_INSTS * scale {
         Some("profitability_instructions")

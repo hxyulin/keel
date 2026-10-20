@@ -15,6 +15,12 @@ extern unsigned long effects(unsigned long*,unsigned long*,volatile unsigned*,_A
 extern unsigned long effects_call(unsigned long*,unsigned long*,volatile unsigned*,_Atomic unsigned*);
 extern unsigned long captured(unsigned long),capture_call(unsigned long);
 extern int ordered_fault(volatile int*,int,int),fault_call(volatile int*,int,int),stay(int),stay_call(int);
+extern int classify(int),classify_call(int);
+static int expected_class(int v) {
+    const int cases[]={-1000,-7,0,3,64,1048576,INT_MAX};
+    for(unsigned i=0;i<7;i++) if(v==cases[i]) return (int)i+1;
+    return (v&1)?-1:-2;
+}
 volatile unsigned *trace;
 static unsigned captures;
 void capture(unsigned long *p) { *p+=37; captures++; }
@@ -59,6 +65,22 @@ int main(int argc,char **argv) {
         assert(k_narrow(input,sizes[j])==sum);
     }
     assert(k_narrow(0,0)==0);
+    const int cases[]={INT_MIN,INT_MAX,-1000,-7,0,3,64,1048576};
+    for(unsigned i=0;i<sizeof(cases)/sizeof(*cases);i++) {
+        for(int delta=-1;delta<=1;delta++) {
+            int64_t wide=(int64_t)cases[i]+delta;
+            if(wide<INT_MIN||wide>INT_MAX) continue;
+            int v=(int)wide;
+            assert(classify(v)==expected_class(v));
+            assert(classify_call(v)==expected_class(v));
+        }
+    }
+    uint32_t state=1;
+    for(unsigned i=0;i<100000;i++) {
+        state=state*1664525u+1013904223u;
+        int v=(int32_t)state;
+        assert(classify_call(v)==expected_class(v));
+    }
     uint64_t values[]={0,1,127,128,255,65535,1ul<<63,~0ul};
     for(unsigned i=0;i<8;i++) {
         uint64_t x=values[i];
