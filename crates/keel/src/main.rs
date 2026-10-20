@@ -357,8 +357,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                     Some("split") => keel_codegen::regalloc::AllocationTier::Split,
                     #[cfg(feature = "experimental-regalloc")]
                     Some("weighted") => keel_codegen::regalloc::AllocationTier::Weighted,
+                    #[cfg(feature = "experimental-regalloc")]
+                    Some("full-affinity") => keel_codegen::regalloc::AllocationTier::FullAffinity,
                     Some("full") => keel_codegen::regalloc::AllocationTier::Full,
-                    _ => return Err("`--regalloc` needs fast or full (local/split/weighted require experimental-regalloc)".into()),
+                    _ => return Err("`--regalloc` needs fast or full (local/split/weighted/full-affinity require experimental-regalloc)".into()),
                 };
             }
             "--isel-tier" => {
@@ -428,6 +430,10 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
     // IR tier changes and explicit pipelines do not reset selection.
     if optimize_preset && !explicit_selection {
         opts.selection = keel_codegen::SelectionOptions::ALL;
+    }
+    #[cfg(feature = "experimental-regalloc")]
+    if opts.remat != 0 && opts.allocation == keel_codegen::regalloc::AllocationTier::FullAffinity {
+        return Err("--remat is not proven with --regalloc full-affinity".into());
     }
     #[cfg(feature = "experimental-regalloc")]
     if opts.remat & (4 | 8) != 0
@@ -973,6 +979,23 @@ mod tests {
     }
 
     #[test]
+    fn full_affinity_is_explicit_and_feature_gated() {
+        #[cfg(feature = "experimental-regalloc")]
+        {
+            let opts = options(&["--regalloc", "full-affinity"]).unwrap();
+            assert_eq!(
+                opts.allocation,
+                keel_codegen::regalloc::AllocationTier::FullAffinity
+            );
+            for remat in ["constants", "stack", "all", "pressure", "null"] {
+                assert!(options(&["--regalloc", "full-affinity", "--remat", remat]).is_err());
+            }
+        }
+        #[cfg(not(feature = "experimental-regalloc"))]
+        assert!(options(&["--regalloc", "full-affinity"]).is_err());
+    }
+
+    #[test]
     fn default_tiers_and_invalid_values() {
         let opts = options(&[]).unwrap();
         assert_eq!(opts.optimization, keel_opt::OptimizationTier::None);
@@ -1238,7 +1261,14 @@ mod x86_feature_option_tests {
     }
     #[test]
     fn null_remat_is_an_independent_experimental_fast_full_mode() {
-        for tier in ["fast", "full", "local", "split", "weighted"] {
+        for tier in [
+            "fast",
+            "full",
+            "local",
+            "split",
+            "weighted",
+            "full-affinity",
+        ] {
             let args = ["--remat", "null", "--regalloc", tier].map(str::to_owned);
             let result = parse_options(&args, &["--remat", "--regalloc"]);
             #[cfg(feature = "experimental-regalloc")]

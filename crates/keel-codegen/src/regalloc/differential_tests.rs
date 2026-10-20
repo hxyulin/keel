@@ -1,4 +1,5 @@
 //! Keep the original algorithms as an independent differential oracle.
+//! FullAffinity adds only the declared scalar consensus preference to its register choices.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -64,6 +65,7 @@ fn reference_linear_scan(
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
     hints: &std::collections::HashMap<Value, Vec<Value>>,
+    affinity_func: Option<&Function>,
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();
     sorted.sort_by_key(|iv| (iv.start(), iv.value, iv.half));
@@ -140,7 +142,58 @@ fn reference_linear_scan(
             .flatten()
             .filter_map(|v| locs[cur.half][v.index()])
             .find(|&r| available(r));
-        let free = preferred.or_else(|| allowed.iter().copied().find(|&r| available(r)));
+        // Deliberately gather edges independently here rather than sharing the
+        // production precomputed table or consensus helper.
+        let consensus = || {
+            let func = affinity_func?;
+            let ValueDef::Param(block, index) = func.value_def(cur.value) else {
+                return None;
+            };
+            if Some(block) == func.entry_block()
+                || cur.half != 0
+                || !matches!(
+                    func.value_type(cur.value),
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+                )
+            {
+                return None;
+            }
+            let cfg = ControlFlowGraph::compute(func);
+            let mut candidate = None;
+            for pred in cfg.reverse_postorder(func) {
+                let Some(&term) = func.block_insts(pred).last() else {
+                    continue;
+                };
+                let data = func.inst_data(term);
+                for dest in data.branch_dests().iter().filter(|d| d.block == block) {
+                    if matches!(data, InstData::Invoke { .. }) {
+                        return None;
+                    }
+                    let arg = func.resolve(dest.args[index as usize]);
+                    let loc = locs[0][arg.index()]?;
+                    if !matches!(loc, Loc::Reg(_)) {
+                        return None;
+                    }
+                    if candidate.is_some_and(|old| old != loc) {
+                        return None;
+                    }
+                    candidate = Some(loc);
+                }
+            }
+            candidate.filter(|&r| {
+                available(r)
+                    && match r {
+                        Loc::Reg(n) => {
+                            pools.caller_saved.contains(&n)
+                                || locs[0].iter().any(|&loc| loc == Some(r))
+                        }
+                        _ => false,
+                    }
+            })
+        };
+        let free = preferred
+            .or_else(consensus)
+            .or_else(|| allowed.iter().copied().find(|&r| available(r)));
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
             active.push((cur, reg));
@@ -273,21 +326,38 @@ fn assert_reference_equivalence(
             float_callee_saved: &[],
         },
     ] {
-        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+        for tier in [
+            AllocationTier::Fast,
+            AllocationTier::Full,
+            #[cfg(feature = "experimental-regalloc")]
+            AllocationTier::FullAffinity,
+        ] {
             let intervals = if tier == AllocationTier::Fast {
                 &collapsed
             } else {
                 &full
             };
             let empty_hints = Default::default();
-            let hints = if tier == AllocationTier::Full {
+            let hints = if tier != AllocationTier::Fast {
                 &selection.hints
             } else {
                 &empty_hints
             };
             let mut expected = [vec![None; func.num_values()], vec![None; func.num_values()]];
-            let mut reference_spills =
-                reference_linear_scan(intervals, &pools, &mut expected, hints);
+            let mut reference_spills = reference_linear_scan(
+                intervals,
+                &pools,
+                &mut expected,
+                hints,
+                (tier.name() == "full-affinity"
+                    && !func.sig.returns_twice
+                    && !order.iter().any(|&b| {
+                        func.block_insts(b)
+                            .iter()
+                            .any(|&i| returns_twice(func.inst_data(i)))
+                    }))
+                .then_some(func),
+            );
             let expected_slots = reference_assign_spill_slots(&mut reference_spills, &mut expected);
             let actual = allocate_tier(func, &pools, &is_call, &returns_twice, selection, tier);
             assert_eq!(actual.order, order);

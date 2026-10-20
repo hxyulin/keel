@@ -177,6 +177,7 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                         AllocationTier::Local,
                         AllocationTier::Split,
                         AllocationTier::Weighted,
+                        AllocationTier::FullAffinity,
                     ]);
                     tiers
                 };
@@ -185,26 +186,30 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                     #[cfg(feature = "experimental-regalloc")]
                     let allocations = {
                         let mut allocations = allocations;
-                        allocations.push(
-                            RematerializingAllocator {
-                                base: &tier,
-                                prefer_spilling: false,
-                                constants: true,
-                                stack_addresses: true,
-                                null_pointers: false,
-                            }
-                            .allocate(&input),
-                        );
-                        allocations.push(
-                            RematerializingAllocator {
-                                base: &tier,
-                                prefer_spilling: false,
-                                constants: false,
-                                stack_addresses: false,
-                                null_pointers: true,
-                            }
-                            .allocate(&input),
-                        );
+                        if tier != AllocationTier::FullAffinity {
+                            allocations.push(
+                                RematerializingAllocator {
+                                    base: &tier,
+                                    prefer_spilling: false,
+                                    constants: true,
+                                    stack_addresses: true,
+                                    null_pointers: false,
+                                }
+                                .allocate(&input),
+                            );
+                        }
+                        if matches!(tier, AllocationTier::Fast | AllocationTier::Full) {
+                            allocations.push(
+                                RematerializingAllocator {
+                                    base: &tier,
+                                    prefer_spilling: false,
+                                    constants: false,
+                                    stack_addresses: false,
+                                    null_pointers: true,
+                                }
+                                .allocate(&input),
+                            );
+                        }
                         if matches!(tier, AllocationTier::Fast | AllocationTier::Full) {
                             allocations.push(
                                 RematerializingAllocator {

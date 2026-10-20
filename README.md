@@ -467,6 +467,19 @@ Full allocator's range construction and inactive-interval handling. Both obey
 the same ABI, call-clobber, returns-twice, and i128 rules. `--isel-tier` and
 IR optimization settings remain independent.
 
+With `experimental-regalloc`, explicitly select `--regalloc full-affinity`
+to try unanimous incoming scalar GPR homes for non-entry block parameters.
+Selection hints win; unavailable or conflicting homes fall back to Full's
+ordinary choices. Invoke targets and returns-twice functions/calls are excluded,
+and affinity alone cannot introduce a callee save. Only this tier builds the
+incoming-edge table. Ordinary Full and every optimization preset are unchanged.
+The CLI rejects combining this tier with `--remat`; null-only rematerialization
+also restricts its base to Fast/Full. This is a
+correctness-tested experiment with no measured performance or promotion claim.
+The independent `-p stack-forward-cfg` pass is also opt-in; it runs existing
+stack forwarding (including cross-block forwarding), then CFG cleanup only if
+forwarding directly exposes a previously nonconstant conditional as constant.
+
 The profiler accepts `--regalloc-fast` and records static instruction counts,
 code bytes, aggregate spill slots and callee saves, and explicit spill-helper
 load/store calls. Those helper counts exclude other memory accesses and are

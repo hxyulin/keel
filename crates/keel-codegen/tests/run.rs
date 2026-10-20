@@ -804,6 +804,11 @@ fn changing_allocation_locations() {
 
 #[test]
 #[cfg(feature = "experimental-regalloc")]
+fn full_affinity_allocator_programs() {
+    experimental_allocator_programs(&AllocationTier::FullAffinity, "full-affinity");
+}
+#[test]
+#[cfg(feature = "experimental-regalloc")]
 fn local_allocator_programs() {
     experimental_allocator_programs(&AllocationTier::Local, "local");
 }
