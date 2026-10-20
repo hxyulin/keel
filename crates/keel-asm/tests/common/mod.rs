@@ -33,6 +33,19 @@ pub fn run(command: &mut Command) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+/// Apple and upstream LLVM ship the same decoder under different names.
+#[allow(dead_code)] // Each integration test compiles its own copy of this module.
+pub fn dwarfdump() -> Command {
+    static TOOL: std::sync::OnceLock<&str> = std::sync::OnceLock::new();
+    let tool = TOOL.get_or_init(|| {
+        ["dwarfdump", "llvm-dwarfdump"]
+            .into_iter()
+            .find(|tool| Command::new(tool).arg("--version").output().is_ok())
+            .expect("dwarfdump or llvm-dwarfdump is required for assembler tests")
+    });
+    Command::new(tool)
+}
+
 pub fn compare_clang(source: &str) {
     compare_clang_with_features(source, keel_asm::TargetFeatures::default(), &[]);
 }

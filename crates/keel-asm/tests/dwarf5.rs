@@ -19,7 +19,7 @@ struct Table {
 }
 
 fn table(path: &Path) -> Table {
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg("--debug-line")
         .arg(path)
         .output()
@@ -59,7 +59,7 @@ fn section(path: &Path, name: &str) -> Option<Vec<u8>> {
 }
 
 fn verify(path: &Path) {
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg("--verify")
         .arg(path)
         .output()

@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod common;
 use keel_asm::x86::assemble_object;
 use object::{Object, ObjectSection, ObjectSymbol, RelocationTarget, SymbolKind};
 use std::{collections::BTreeMap, process::Command};
@@ -318,9 +320,9 @@ DW.ref.personality: .quad personality
             .collect::<BTreeMap<_, _>>()
     };
     assert_eq!(symbols(&a), symbols(&b));
-    if Command::new("dwarfdump").arg("--version").output().is_ok() {
+    if common::dwarfdump().arg("--version").output().is_ok() {
         let dump = |path: &std::path::Path| {
-            let output = Command::new("dwarfdump")
+            let output = common::dwarfdump()
                 .arg("--debug-line")
                 .arg(path)
                 .output()
@@ -491,11 +493,7 @@ fn decoded_object(source: &str, option: &str, tag: &str) -> String {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("fixture.o");
     std::fs::write(&path, assemble_object(source).unwrap()).unwrap();
-    let output = Command::new("dwarfdump")
-        .arg(option)
-        .arg(&path)
-        .output()
-        .unwrap();
+    let output = common::dwarfdump().arg(option).arg(&path).output().unwrap();
     assert!(
         output.status.success(),
         "{}",

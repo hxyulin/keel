@@ -5,11 +5,7 @@ mod common;
 use common::{Temp, run};
 
 fn dump(path: &std::path::Path, flag: &str) -> String {
-    let output = Command::new("dwarfdump")
-        .arg(flag)
-        .arg(path)
-        .output()
-        .unwrap();
+    let output = common::dwarfdump().arg(flag).arg(path).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -36,7 +32,7 @@ Lsize = Lend-Lbegin
     let reference = temp.0.join("clang.o");
     std::fs::write(&input, source).unwrap();
     run(Command::new("clang")
-        .arg("-c")
+        .args(["-target", "arm64-apple-macos11", "-c"])
         .arg(input)
         .arg("-o")
         .arg(&reference));
@@ -59,7 +55,7 @@ fn line_rows_match_clang() {
     let ours = temp.0.join("ours.o");
     std::fs::write(&input, source).unwrap();
     run(Command::new("clang")
-        .arg("-c")
+        .args(["-target", "arm64-apple-macos11", "-c"])
         .arg(input)
         .arg("-o")
         .arg(&reference));
@@ -74,7 +70,7 @@ fn line_rows_match_clang() {
         normalize(dump(&ours, "--debug-line")),
         normalize(dump(&reference, "--debug-line"))
     );
-    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+    run(common::dwarfdump().arg("--verify").arg(&ours));
 }
 #[test]
 fn malformed_metadata_is_diagnosed() {
@@ -147,9 +143,8 @@ fn keel_debug_info_verifies_and_builds_dsym() {
     let source = keel_codegen::compile(&module, keel_codegen::Target::Aarch64AppleDarwin).unwrap();
     let temp = Temp::new();
     let obj = temp.0.join("linkage.o");
-    let exe = temp.0.join("run");
     std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();
-    let verified = Command::new("dwarfdump")
+    let verified = common::dwarfdump()
         .arg("--verify")
         .arg(&obj)
         .output()
@@ -162,17 +157,23 @@ fn keel_debug_info_verifies_and_builds_dsym() {
     let info = dump(&obj, "--debug-info");
     assert!(info.contains("DW_TAG_subprogram"));
 
-    run(Command::new("clang")
-        .arg(repo.join("linkage.c"))
-        .arg(&obj)
-        .arg("-o")
-        .arg(&exe));
-    run(Command::new("dsymutil").arg(&exe));
-    run(Command::new("dwarfdump")
-        .arg("--verify")
-        .arg(temp.0.join("run.dSYM")));
-    let info = dump(&temp.0.join("run.dSYM"), "--debug-info");
-    assert!(info.contains("DW_TAG_subprogram"));
+    // Object DWARF verification above is portable; linking and dSYM creation
+    // need the native Mach-O linker and Apple SDK.
+    #[cfg(target_os = "macos")]
+    {
+        let exe = temp.0.join("run");
+        run(Command::new("clang")
+            .arg(repo.join("linkage.c"))
+            .arg(&obj)
+            .arg("-o")
+            .arg(&exe));
+        run(Command::new("dsymutil").arg(&exe));
+        run(common::dwarfdump()
+            .arg("--verify")
+            .arg(temp.0.join("run.dSYM")));
+        let info = dump(&temp.0.join("run.dSYM"), "--debug-info");
+        assert!(info.contains("DW_TAG_subprogram"));
+    }
 }
 
 #[test]
@@ -184,7 +185,7 @@ fn keel_types_scopes_and_variables_verify() {
     let temp = Temp::new();
     let obj = temp.0.join("types.o");
     std::fs::write(&obj, assemble_object(&source).unwrap()).unwrap();
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg("--verify")
         .arg(&obj)
         .output()
@@ -215,7 +216,7 @@ fn compact_cfi_forms_match_clang_size_and_decoded_rules() {
     let ours = temp.0.join("ours.o");
     std::fs::write(&input, source).unwrap();
     run(Command::new("clang")
-        .arg("-c")
+        .args(["-target", "arm64-apple-macos11", "-c"])
         .arg(&input)
         .arg("-o")
         .arg(&reference));
@@ -294,7 +295,7 @@ fn wsp_cfi_alias_matches_sp_and_clang() {
     let got = rules(&ours);
     assert!(!got.is_empty());
     assert_eq!(got, rules(&reference));
-    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+    run(common::dwarfdump().arg("--verify").arg(&ours));
 }
 
 #[test]
@@ -311,8 +312,47 @@ fn unwind_addresses_target_each_executable_section() {
         .arg(&input)
         .arg("-o")
         .arg(&reference));
-    // Object-file FDE addresses still contain linker relocations, so compare
-    // their final destinations after the native linker has applied them.
+    // Check the serialized object references on every host, before the native
+    // linker resolves them. Each compact record must point at its own code
+    // section, with the exact start offset and four-byte function extent.
+    for path in [&ours, &reference] {
+        use object::{ObjectSymbol, RelocationTarget};
+        let bytes = std::fs::read(path).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        let compact = file.section_by_name("__compact_unwind").unwrap();
+        let data = compact.data().unwrap();
+        assert_eq!(data.len(), 64);
+        let mut targets = Vec::new();
+        for (offset, relocation) in compact.relocations() {
+            assert_eq!(offset % 32, 0);
+            assert_eq!(relocation.kind(), object::RelocationKind::Absolute);
+            assert_eq!(relocation.size(), 64);
+            let at = offset as usize;
+            let value = u64::from_le_bytes(data[at..at + 8].try_into().unwrap());
+            let (section, address) = match relocation.target() {
+                RelocationTarget::Symbol(index) => {
+                    let symbol = file.symbol_by_index(index).unwrap();
+                    (symbol.section_index().unwrap(), symbol.address() + value)
+                }
+                RelocationTarget::Section(index) => (index, value),
+                target => panic!("unexpected unwind relocation: {target:?}"),
+            };
+            let section = file.section_by_index(section).unwrap();
+            targets.push((
+                section.name().unwrap().to_string(),
+                address - section.address(),
+                u32::from_le_bytes(data[at + 8..at + 12].try_into().unwrap()),
+            ));
+        }
+        targets.sort();
+        assert_eq!(
+            targets,
+            [("__StaticInit".into(), 0, 4), ("__text".into(), 0, 4)]
+        );
+    }
+    // Object-file FDE addresses still contain linker relocations. Retain the
+    // final linked-address check wherever the native Mach-O linker is available.
+    #[cfg(target_os = "macos")]
     for object in [&ours, &reference] {
         let linked = object.with_extension("dylib");
         run(Command::new("clang")
@@ -348,7 +388,7 @@ fn unwind_addresses_target_each_executable_section() {
             );
         }
     }
-    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+    run(common::dwarfdump().arg("--verify").arg(&ours));
     for directive in [".cfi_def_cfa wsp,16", ".cfi_restore_state", ".cfi_endproc"] {
         let invalid = format!(
             ".text\n.cfi_startproc\nnop\n.section __TEXT,__StaticInit,regular,pure_instructions\n{directive}\n"

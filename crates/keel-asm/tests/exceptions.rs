@@ -20,7 +20,7 @@ fn generated_lsda_matches_clang() {
     let ours = temp.0.join("ours.o");
     std::fs::write(&input, &source).unwrap();
     run(Command::new("clang")
-        .arg("-c")
+        .args(["-target", "arm64-apple-macos11", "-c"])
         .arg(&input)
         .arg("-o")
         .arg(&reference));
@@ -78,7 +78,7 @@ fn generated_lsda_matches_clang() {
             r_length: 2
         }
     )));
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg("--eh-frame")
         .arg(&ours)
         .output()

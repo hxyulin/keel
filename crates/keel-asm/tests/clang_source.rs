@@ -146,6 +146,7 @@ fn unchanged_clang_pac_call_frame() {
             "arm64-apple-macosx11.0.0",
             "-mcpu=apple-m5",
             "-mbranch-protection=standard",
+            "-fasynchronous-unwind-tables",
         ])
         .arg(input)
         .arg("-o")
@@ -158,7 +159,69 @@ fn unchanged_clang_pac_call_frame() {
     );
     let result =
         keel_asm::assemble_with_features(&source, keel_asm::TargetFeatures::apple_m5()).unwrap();
-    assert!(source.contains(".cfi_negate_ra_state"));
+    assert!(
+        source.contains("paciasp") && source.contains("retaa"),
+        "{source}"
+    );
+    // Upstream LLVM intentionally omits negate_ra_state for Mach-O; Apple
+    // clang emits it. Compare the producer's actual unwind rules, including
+    // signed-RA state when present, rather than assuming Apple's producer.
+    compare_unwind(&temp, &source, &result);
+}
+
+fn compare_unwind(temp: &Temp, source: &str, result: &keel_asm::Assembly) {
+    use object::{Object, ObjectSection};
+    let input = temp.0.join("unwind.s");
+    let reference = temp.0.join("clang.o");
+    let ours = temp.0.join("ours.o");
+    std::fs::write(&input, source).unwrap();
+    run(Command::new("clang")
+        .args(["-target", "arm64-apple-macos11", "-mcpu=apple-m5", "-c"])
+        .arg(&input)
+        .arg("-o")
+        .arg(&reference));
+    std::fs::write(&ours, result.to_macho().unwrap()).unwrap();
+    let compact = |path: &std::path::Path| {
+        let bytes = std::fs::read(path).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        file.section_by_name("__compact_unwind")
+            .unwrap()
+            .data()
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(compact(&ours), compact(&reference));
+    let rows = |path: &std::path::Path| {
+        let output = common::dwarfdump()
+            .arg("--eh-frame")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let decoded = String::from_utf8(output.stdout).unwrap();
+        let mut first = None;
+        decoded
+            .lines()
+            .filter_map(|line| {
+                let (address, rule) = line.trim().strip_prefix("0x")?.split_once(": ")?;
+                let address = u64::from_str_radix(address, 16).ok()?;
+                let start = *first.get_or_insert(address);
+                Some((address - start, rule.to_string()))
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = rows(&reference);
+    assert!(!expected.is_empty());
+    assert_eq!(rows(&ours), expected);
+}
+
+#[test]
+fn explicit_pac_call_frame_retains_signed_ra_state() {
+    // Keep signed-RA DWARF coverage unconditional even when the installed
+    // Clang producer omits that directive for Mach-O.
+    let source = ".text\n.globl _f\n_f:\n.cfi_startproc\npaciasp\n.cfi_negate_ra_state\nstp x29,x30,[sp,#-16]!\nmov x29,sp\n.cfi_def_cfa w29,16\n.cfi_offset w30,-8\n.cfi_offset w29,-16\nbl _g\nldp x29,x30,[sp],#16\nretaa\n.cfi_endproc\n";
+    let result =
+        keel_asm::assemble_with_features(source, keel_asm::TargetFeatures::apple_m5()).unwrap();
     assert!(
         result
             .sections
@@ -168,7 +231,19 @@ fn unchanged_clang_pac_call_frame() {
             .data()
             .contains(&0x2d)
     );
-    result.to_macho().unwrap();
+    let temp = Temp::new();
+    compare_unwind(&temp, source, &result);
+    let output = common::dwarfdump()
+        .arg("--eh-frame")
+        .arg(temp.0.join("ours.o"))
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("DW_CFA_AARCH64_negate_ra_state")
+    );
 }
 
 #[test]

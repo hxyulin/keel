@@ -164,7 +164,7 @@ fn malformed_apple_suffix_operands_are_diagnosed() {
 }
 
 fn dump(path: &std::path::Path, flag: &str) -> String {
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg(flag)
         .arg(path)
         .output()
@@ -240,7 +240,7 @@ ret
         "{expected:?}"
     );
     assert_eq!(line_table(&ours), expected);
-    run(Command::new("dwarfdump").arg("--verify").arg(&ours));
+    run(common::dwarfdump().arg("--verify").arg(&ours));
 }
 
 #[test]

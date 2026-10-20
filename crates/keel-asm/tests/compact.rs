@@ -58,7 +58,7 @@ fn every_canonical_register_pair_subset_matches_clang() {
     let reference = temp.0.join("clang.o");
     std::fs::write(&input, &source).unwrap();
     run(Command::new("clang")
-        .arg("-c")
+        .args(["-target", "arm64-apple-macos11", "-c"])
         .arg(input)
         .arg("-o")
         .arg(&reference));
@@ -125,7 +125,7 @@ fn directive_order_does_not_change_frame_semantics() {
     let temp = Temp::new();
     let obj = temp.0.join("mixed.o");
     std::fs::write(&obj, a.to_macho().unwrap()).unwrap();
-    let output = Command::new("dwarfdump")
+    let output = common::dwarfdump()
         .arg("--eh-frame")
         .arg(obj)
         .output()
