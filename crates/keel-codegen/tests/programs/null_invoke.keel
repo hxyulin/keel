@@ -1,0 +1,20 @@
+; target: aarch64-apple-darwin
+; expect: exit 0
+; Both the normal and exceptional continuation consume the same null recipe.
+decl @null_may_throw(i32) -> i32
+decl @__gxx_personality_v0()
+decl @__cxa_begin_catch(ptr) -> ptr
+decl @__cxa_end_catch()
+func @null_invoke(i32) -> ptr personality @__gxx_personality_v0 {
+block0(v0: i32):
+ v1 = iconst.i64 0
+ v2 = inttoptr.ptr v1
+ v3 = invoke @null_may_throw(v0), block1, block2
+block1:
+ return v2
+block2:
+ v4, v5 = landingpad catch null
+ v6 = call @__cxa_begin_catch(v4)
+ call @__cxa_end_catch()
+ return v2
+}

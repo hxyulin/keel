@@ -329,6 +329,7 @@ fn compact_frame_storage() {
             prefer_spilling: true,
             constants: true,
             stack_addresses: true,
+            null_pointers: false,
         };
         run_program(
             &path,
@@ -521,6 +522,7 @@ fn rematerialization_debug_info() {
             prefer_spilling: true,
             constants: true,
             stack_addresses: true,
+            null_pointers: false,
         };
         debug_info_with_allocator(&allocator);
     }
@@ -825,10 +827,48 @@ fn rematerialization_programs() {
             prefer_spilling: false,
             constants: true,
             stack_addresses: true,
+            null_pointers: false,
         };
         experimental_allocator_programs(&allocator, &format!("remat-{tier:?}"));
     }
 }
+#[test]
+#[cfg(feature = "experimental-regalloc")]
+fn null_rematerialization_programs() {
+    for base in [AllocationTier::Fast, AllocationTier::Full] {
+        let allocator = keel_codegen::regalloc::RematerializingAllocator {
+            base: &base,
+            prefer_spilling: false,
+            constants: false,
+            stack_addresses: false,
+            null_pointers: true,
+        };
+        for name in ["null_rematerialization", "null_invoke"] {
+            let path =
+                Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/programs/{name}.keel"));
+            for pools in [
+                &REGISTERS,
+                &Pools {
+                    caller_saved: &[],
+                    callee_saved: &[],
+                    float_caller_saved: &[],
+                    float_callee_saved: &[],
+                },
+            ] {
+                run_program(
+                    &path,
+                    pools,
+                    false,
+                    &format!("-null-{base:?}"),
+                    keel_codegen::SelectionOptions::default(),
+                    &allocator,
+                )
+                .unwrap();
+            }
+        }
+    }
+}
+
 #[test]
 #[cfg(feature = "experimental-regalloc")]
 fn pressure_rematerialization_programs() {
@@ -839,6 +879,7 @@ fn pressure_rematerialization_programs() {
             prefer_spilling: true,
             constants: true,
             stack_addresses: true,
+            null_pointers: false,
         };
         experimental_allocator_programs(&allocator, &format!("pressure-remat-{tier:?}"));
     }
@@ -854,6 +895,7 @@ fn rematerialization_objects_match_text_assembly() {
                 prefer_spilling,
                 constants: true,
                 stack_addresses: true,
+                null_pointers: false,
             };
             let pipeline = keel_codegen::CodegenPipeline {
                 selector: &keel_codegen::SelectionTier::Baseline,
@@ -931,6 +973,7 @@ fn rematerialization_all_spilled() {
         prefer_spilling: false,
         constants: true,
         stack_addresses: true,
+        null_pointers: false,
     };
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/rematerialization.keel");
     run_program(

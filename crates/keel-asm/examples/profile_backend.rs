@@ -153,6 +153,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         prefer_spilling: remat_pressure,
         constants: remat_constants,
         stack_addresses: remat_stack,
+        null_pointers: false,
     };
     #[cfg(feature = "experimental-regalloc")]
     let allocator: &dyn keel_codegen::regalloc::RegisterAllocator =

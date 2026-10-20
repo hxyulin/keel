@@ -339,7 +339,12 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
                         Some("stack") => 2,
                         Some("all") => 3,
                         Some("pressure") => 7,
-                        _ => return Err("--remat needs constants, stack, all, or pressure".into()),
+                        Some("null") => 8,
+                        _ => {
+                            return Err(
+                                "--remat needs constants, stack, all, pressure, or null".into()
+                            );
+                        }
                     };
                 }
             }
@@ -425,14 +430,19 @@ fn parse_options(args: &[String], allowed: &[&str]) -> Result<Options, String> {
         opts.selection = keel_codegen::SelectionOptions::ALL;
     }
     #[cfg(feature = "experimental-regalloc")]
-    if opts.remat & 4 != 0
+    if opts.remat & (4 | 8) != 0
         && !matches!(
             opts.allocation,
             keel_codegen::regalloc::AllocationTier::Fast
                 | keel_codegen::regalloc::AllocationTier::Full
         )
     {
-        return Err("--remat pressure requires --regalloc fast or full".into());
+        return Err(if opts.remat & 8 != 0 {
+            "--remat null requires --regalloc fast or full"
+        } else {
+            "--remat pressure requires --regalloc fast or full"
+        }
+        .into());
     }
     if let Some(report) = &opts.opt_report {
         if opts.preprocess_only {
@@ -713,6 +723,7 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
         prefer_spilling: opts.remat & 4 != 0,
         constants: opts.remat & 1 != 0,
         stack_addresses: opts.remat & 2 != 0,
+        null_pointers: opts.remat & 8 != 0,
     };
     let allocator: &dyn keel_codegen::regalloc::RegisterAllocator = &opts.allocation;
     #[cfg(feature = "experimental-regalloc")]
@@ -1222,6 +1233,31 @@ mod x86_feature_option_tests {
                     &["--target-features"]
                 )
                 .is_err()
+            );
+        }
+    }
+    #[test]
+    fn null_remat_is_an_independent_experimental_fast_full_mode() {
+        for tier in ["fast", "full", "local", "split", "weighted"] {
+            let args = ["--remat", "null", "--regalloc", tier].map(str::to_owned);
+            let result = parse_options(&args, &["--remat", "--regalloc"]);
+            #[cfg(feature = "experimental-regalloc")]
+            if matches!(tier, "fast" | "full") {
+                assert_eq!(result.unwrap().remat, 8);
+            } else {
+                assert!(result.is_err());
+            }
+            #[cfg(not(feature = "experimental-regalloc"))]
+            assert!(result.is_err());
+        }
+        #[cfg(feature = "experimental-regalloc")]
+        for (mode, bits) in [("constants", 1), ("stack", 2), ("all", 3), ("pressure", 7)] {
+            let args = ["--remat", mode, "--regalloc", "fast"].map(str::to_owned);
+            assert_eq!(
+                parse_options(&args, &["--remat", "--regalloc"])
+                    .unwrap()
+                    .remat,
+                bits
             );
         }
     }

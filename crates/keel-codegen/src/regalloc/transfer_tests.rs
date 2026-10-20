@@ -191,6 +191,17 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                                 prefer_spilling: false,
                                 constants: true,
                                 stack_addresses: true,
+                                null_pointers: false,
+                            }
+                            .allocate(&input),
+                        );
+                        allocations.push(
+                            RematerializingAllocator {
+                                base: &tier,
+                                prefer_spilling: false,
+                                constants: false,
+                                stack_addresses: false,
+                                null_pointers: true,
                             }
                             .allocate(&input),
                         );
@@ -201,6 +212,7 @@ fn selected_corpus_transfers_preserve_values_across_calls_and_edges() {
                                     prefer_spilling: true,
                                     constants: true,
                                     stack_addresses: true,
+                                    null_pointers: false,
                                 }
                                 .allocate(&input),
                             );

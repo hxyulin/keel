@@ -1065,6 +1065,17 @@ impl<'a> FunctionCompiler<'a> {
                     self.folded_values.contains(&r)
                         || matches!(self.defined(r), Some(Loc::Remat(_)))
                 }) => {}
+            InstData::Convert {
+                op: ConvertOp::IntToPtr,
+                ty: Type::Ptr,
+                ..
+            } if result.is_some_and(|r| {
+                matches!(self.defined(r), Some(Loc::Remat(v)) if v == r)
+                    && matches!(
+                        crate::regalloc::remat_recipe(self.func, r),
+                        Some(crate::regalloc::RematRecipe::NullPtr)
+                    )
+            }) => {}
             InstData::Icmp { .. } | InstData::Fcmp { .. }
                 if result.is_some_and(|r| self.fused_compares.contains(&r)) => {}
             InstData::Iconst { ty, imm } => {
@@ -3658,6 +3669,11 @@ impl<'a> FunctionCompiler<'a> {
                 } else {
                     self.emit(Opcode::Movabs, [asm_arg(&r64(d)), asm_arg(&bits)]);
                 }
+            }
+            RematRecipe::NullPtr => {
+                #[cfg(feature = "backend-profile")]
+                crate::backend_profile::count(crate::backend_profile::Counter::RematConstants);
+                self.emit(Opcode::Mov, [asm_arg(&r32(d)), asm_arg(&0u32)]);
             }
             RematRecipe::StackAddr(slot) => {
                 #[cfg(feature = "backend-profile")]

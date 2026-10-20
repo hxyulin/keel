@@ -1,0 +1,81 @@
+; expect: exit 0
+; Null is live through a clobber, select, ABI register/stack arguments and edges.
+decl @clobber()
+decl @null_observe(ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr, ptr) -> i64
+func @null_probe(i64, i64, ptr) -> i64 {
+block0(v0: i64, v1: i64, v2: ptr):
+ v3 = iconst.i64 0
+ v4 = inttoptr.ptr v3
+ call @clobber()
+ v5 = icmp.slt v0, v1
+ v6 = select v5, v4, v2
+ v7 = call @null_observe(v4, v6, v4, v4, v4, v4, v4, v4, v4, v4)
+ brif v5, block1(v4, v6), block1(v6, v4)
+block1(v8: ptr, v9: ptr):
+ v10 = ptrtoint.i64 v8
+ v11 = ptrtoint.i64 v9
+ v12 = iadd v10, v11
+ v13 = iadd v12, v7
+ return v13
+}
+func @null_return() -> ptr {
+block0:
+ v0 = iconst.i64 0
+ v1 = inttoptr.ptr v0
+ return v1
+}
+func @null_cycle(i64, i64, i64) -> i64 {
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = iconst.i64 0
+ v4 = inttoptr.ptr v3
+ jump block1(v0, v1, v2, v4)
+block1(v5: i64, v6: i64, v7: i64, v8: ptr):
+ v9 = iconst.i64 1
+ v10 = isub v7, v9
+ brif v10, block1(v6, v5, v10, v4), block2(v5, v6, v8)
+block2(v11: i64, v12: i64, v13: ptr):
+ v14 = ptrtoint.i64 v13
+ v15 = isub v11, v12
+ v16 = iadd v15, v14
+ return v16
+}
+
+func @null_branch(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = iconst.i64 0
+ v2 = inttoptr.ptr v1
+ v3 = icmp.eq v0, v2
+ brif v3, block1, block2
+block1:
+ v4 = iconst.i64 37
+ return v4
+block2:
+ v5 = iconst.i64 91
+ return v5
+}
+decl @setjmp(ptr) -> i32 cc(c) returns_twice
+decl @longjmp(ptr, i32)
+func @null_setjmp(ptr) -> ptr {
+block0(v0: ptr):
+ v1 = iconst.i64 0
+ v2 = inttoptr.ptr v1
+ v3 = call @setjmp(v0)
+ brif v3, block2, block1
+block1:
+ v4 = iconst.i32 1
+ call @longjmp(v0, v4)
+ trap
+block2:
+ return v2
+}
+func @null_stackrestore(i64) -> ptr {
+block0(v0: i64):
+ v1 = iconst.i64 0
+ v2 = inttoptr.ptr v1
+ v3 = intrinsic stack_save()
+ v4 = intrinsic stack_alloc(v0)
+ store v2, v4
+ call @clobber()
+ intrinsic stack_restore(v3)
+ return v2
+}

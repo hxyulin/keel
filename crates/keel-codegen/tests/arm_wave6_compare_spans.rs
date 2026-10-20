@@ -118,6 +118,7 @@ fn spans_rematerialize_constants_without_losing_compare_uses() {
             prefer_spilling: true,
             constants: true,
             stack_addresses: true,
+            null_pointers: false,
         };
         for pools in [&EMPTY, &keel_codegen::aarch64::REGISTERS] {
             let (text, _) = compile(
