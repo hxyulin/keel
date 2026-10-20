@@ -1,0 +1,33 @@
+; expect: exit 0
+; opt-passes: simplify-cfg
+; Reduced from Lua statlist: sparse case landing pads precede a default
+; block chosen as the next machine block. Default must skip those pads.
+func @sparse_default(i32, ptr, ptr) -> i32 cc(c) {
+block0(v0: i32, v1: ptr, v2: ptr):
+    v3 = iconst.i32 17
+    v4 = iconst.i32 29
+    switch v0, block1, [259: block2(v3), 260: block2(v4), 288: block2(v0)]
+block1:
+    v5 = iconst.i32 41
+    jump block2(v5)
+block2(v7: i32):
+    store v7, v1
+    v8 = load.i32 v2
+    return v8
+}
+
+; A default trap must remain reachable on the unmatched path.
+func @trap_default(i32) -> i32 cc(c) {
+block0(v0: i32):
+    v1 = iconst.i32 1
+    switch v0, block1, [259: block2(v1), 288: block2(v1)]
+block1:
+    v2 = iconst.i32 0
+    jump block2(v2)
+block2(v3: i32):
+    brif v3, block3, block4
+block3:
+    return v0
+block4:
+    trap
+}

@@ -3390,7 +3390,13 @@ impl<'a> FunctionCompiler<'a> {
                 );
                 self.emit(Opcode::Jcc(4), [asm_arg(&(targets[i + 1]))]);
             }
-            if dests[0].args.is_empty() && self.edge_moves(0).is_empty() {
+            // Case landing pads are emitted before the next IR block. The
+            // default may fall through only when none of those pads intervene.
+            if dests
+                .iter()
+                .enumerate()
+                .all(|(i, dest)| dest.args.is_empty() && self.edge_moves(i).is_empty())
+            {
                 self.branch_unless_next(dests[0].block);
             } else {
                 self.emit(Opcode::Jmp, [asm_arg(&(targets[0]))]);

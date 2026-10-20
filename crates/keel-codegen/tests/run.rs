@@ -384,6 +384,16 @@ fn optimized_regressions_spills() {
 }
 
 #[test]
+fn switch_default_skips_case_landing_pads() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/switch_default_edges.keel");
+    for (pools, optimize, suffix, selection, allocation) in &CONFIGS {
+        let suffix = format!("{suffix}-switch-default-focused");
+        run_program(&path, pools, *optimize, &suffix, *selection, allocation).unwrap();
+    }
+}
+
+#[test]
 fn programs() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
