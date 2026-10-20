@@ -1,0 +1,45 @@
+func @k_isort(ptr, i64) cc(c) {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 1
+    jump block1(v2)
+block1(v3: i64):
+    v5 = icmp.ugt v1, v3
+    brif v5, block2, block4
+block2:
+    v41 = iconst.i64 2
+    v8 = shl v3, v41
+    v9 = ptradd v0, v8
+    v10 = load.i32 v9
+    jump block5(v3)
+block4:
+    return
+block5(v11: i64):
+    v12 = iconst.i64 0
+    v13 = icmp.ne v11, v12
+    brif v13, block8, block7
+block6:
+    v58 = iconst.i64 2
+    v24 = shl v11, v58
+    v25 = ptradd v0, v24
+    v31 = load.i32 v19
+    store v31, v25
+    jump block5(v16)
+block7:
+    v57 = iconst.i64 2
+    v35 = shl v11, v57
+    v36 = ptradd v0, v35
+    store v10, v36
+    v60 = iconst.i64 1
+    v39 = iadd v3, v60
+    jump block1(v39)
+block8:
+    v59 = iconst.i64 1
+    v16 = isub v11, v59
+    v56 = iconst.i64 2
+    v18 = shl v16, v56
+    v19 = ptradd v0, v18
+    v20 = load.i32 v19
+    v22 = icmp.slt v10, v20
+    brif v22, block6, block7
+}
+

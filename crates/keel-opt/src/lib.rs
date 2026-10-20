@@ -32,6 +32,7 @@ mod known_bits;
 mod load_narrow;
 mod load_reuse;
 mod loop_memory;
+mod loop_rotate;
 mod loop_strength_reduce;
 mod loop_unroll;
 mod loop_vectorize;
@@ -227,6 +228,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &load_reuse::LoadReuse,
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
+    &loop_rotate::LoopRotate,
     &loop_strength_reduce::LoopStrengthReduce,
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
