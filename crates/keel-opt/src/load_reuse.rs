@@ -20,7 +20,7 @@ impl crate::Pass for LoadReuse {
         "load-reuse"
     }
     fn description(&self) -> &'static str {
-        "reuse successful ordinary loads across bounded unique-predecessor chains (opt-in)"
+        "reuse successful ordinary loads across bounded unique-predecessor chains"
     }
     fn run(&self, func: &mut Function) -> bool {
         run(func)

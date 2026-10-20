@@ -1,9 +1,9 @@
 # Bounded cross-block load reuse
 
-`load-reuse` is an explicitly registered opt-in function pass. No default,
-Full or Fast pipeline includes it. Run it after GVN when independently computed
+`load-reuse` runs in Full's late memory/loop epilogue and requires explicit
+scheduling in other tiers. Run it after GVN when independently computed
 addresses need to become identical SSA values (the current Fast isort needs
-this preparation; the Full isort does not).
+this preparation; Full already performs both passes).
 
 The pass never introduces or moves loads. An ordinary, successful load makes
 its value available for an exact type and canonical address. Availability flows
@@ -35,11 +35,12 @@ notrap, noalias or integer-overflow flags are introduced.
 Regression tests are in `keel-opt/tests/load_reuse.rs` and
 `keel-codegen/tests/load_reuse.rs`. The latter exercises both targets, Fast/Full
 IR tiers, baseline/full selection and Fast/Full allocation with object encoding.
-For native macOS ARM validation, first build a worktree-local CLI, then run
+For native macOS ARM or Linux x86 validation, first build a worktree-local CLI, then run
 `suite/check_load_reuse.py --keel <binary> --output <evidence-directory>` under
 the shared `suite/fast_opt_locked.py` lock. It emits both targets, checks all 795
-kernel driver lines against Clang O2, asserts isort's three loads become two,
+kernel driver lines against fresh Clang O0/O2, asserts Fast isort's three loads
+become two and Full's two-load result is retained,
 and runs an independent C oracle at Clang O0/O2 for each IR/allocation tier.
 The oracle checks aliasing/partial writes, unaligned accesses, integer edge
 patterns, call mutations, widths and protected-page first-fault/untaken paths.
-It performs no performance measurement and makes no native x86 claim.
+It performs no performance measurement.

@@ -13,7 +13,7 @@ preconditions.
 | Integer facts | `known-bits` proves zero/one bits through bit operations, carry-aware add/subtract/negate, shifts, casts, selects and block arguments; `branch-ranges` derives intervals from guarded edges | Combined bit/interval/relational domains, propagation of path ranges through block arguments and arithmetic |
 | Constant propagation | SCCP follows executable edges and propagates constants through parameters | Combining executable-edge information with nonconstant bit/range facts |
 | CFG | Constant branches/switches, unreachable removal, forwarding and block merging | Branch threading using path facts, richer switch simplification, additional merge/selection forms |
-| SSA parameters | Simple uniform/dominating and anchored self-loop parameters via opt-in `phi-simplify` | General mutually recursive redundant parameter components |
+| SSA parameters | Simple uniform/dominating and anchored self-loop parameters via late Full `phi-simplify` (explicit in other tiers) | General mutually recursive redundant parameter components |
 | Memory | Exact-address local forwarding, explicit access/effect contracts | Escape-aware stack promotion, aggregate scalar replacement, alias-disambiguated forwarding and dead stores |
 | Normal forms | Explicit initial canonicalization, shared local normalization and declared consumer entry requirements; integer literals last, deterministic interchangeable operand order, reversed comparison predicates | Boolean/cast/associative expression forms, precise invalidation to reduce restoration scans |
 

@@ -1,6 +1,7 @@
 # Private fixed-field promotion
 
-`stack-promote` is an opt-in function pass. No default tier or allocator changes.
+`stack-promote` runs in Full's late memory/loop epilogue and requires explicit
+scheduling in other tiers. Allocator defaults are unchanged.
 Run it after inlining, CFG cleanup and, for small intrinsic initialization,
 `small-memory`; follow it with `phi-simplify,dce`.
 

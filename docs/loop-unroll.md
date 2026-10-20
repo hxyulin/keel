@@ -1,9 +1,9 @@
 # Wrapping integer reduction unrolling
 
 `loop-unroll` is an explicitly named function pass. It is registered in the pass
-catalog and is absent from every optimization tier/default pipeline. Root owns
-any future activation after combined correctness, runtime, code-size, and
-compile-cost gates. It has no dependency on `AliasInfo` and makes no IR, ABI,
+catalog and runs in Full's late memory/loop epilogue, before
+`loop-reduce-multi` and `loop-rotate`. Other tiers require explicit scheduling.
+It has no dependency on `AliasInfo` and makes no IR, ABI,
 calling-convention, memory-contract, or verifier changes.
 
 The motivation is the retained measured `hot` kernel: unsigned
@@ -63,9 +63,9 @@ computations, including their modular behavior, are cloned without alteration.
 The old header cannot be selected again because its new incoming IV is a dynamic
 paired-header parameter, rather than literal zero. The paired header has three
 parameters and cannot match. Idempotence is checked both immediately and after
-default cleanup; the default vectorizer continues to see the original scalar
-fallback. Reductions remain unsupported by the current vectorizer; activation
-order should be reconsidered if a reduction vectorizer is added.
+default cleanup. Full runs its original vectorization/reduction rounds before
+unrolling and the extended `loop-reduce-multi` pass afterward. These passes
+retain their own eligibility checks and scalar fallbacks.
 
 ## Bounds and validation
 

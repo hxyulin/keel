@@ -6,7 +6,8 @@ Full optimization (`-O`) runs it immediately before `stack-forward`. Basic
 and unoptimized compilation do not run it. Explicit `-p` pipelines continue
 to select their own passes; for example,
 `keel cc -O -p canonicalize,instcombine,small-memory,dce input.c`.
-`memory-forward`, `loop-memory` and `loop-unroll` remain opt-in.
+`memory-forward` and `loop-memory` remain opt-in. Full runs `loop-unroll`
+in its late memory/loop epilogue.
 
 The 32-byte cap bounds each expansion to at most six exact chunks. Greedy
 8/4/2/1-byte integer accesses never reach outside the original extent. Loads
