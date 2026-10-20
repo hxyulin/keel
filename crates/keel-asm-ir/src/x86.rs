@@ -234,8 +234,24 @@ pub enum Opcode {
     Cmplesd,
     Cmpneqsd,
     Cmpordsd,
-    /// Load an explicitly sized 32/64/80-bit floating-point memory operand.
+    /// Load a stack register or explicitly sized 32/64/80-bit memory operand.
     Fld,
+    Fstp,
+    Fxch,
+    Fucomi,
+    Fucomip,
+    Fadd,
+    Fmul,
+    Fmulp,
+    Fsubp,
+    Fsubrp,
+    Fcmovnb,
+    Fild,
+    Fistp,
+    Fldcw,
+    Fnstcw,
+    Fldz,
+
     Cmpnltps,
     Pmovmskb,
     Movmskps,
@@ -485,6 +501,21 @@ impl Opcode {
             "cmpneqsd" => Cmpneqsd,
             "cmpordsd" => Cmpordsd,
             "fld" => Fld,
+            "fstp" => Fstp,
+            "fxch" => Fxch,
+            "fucomi" => Fucomi,
+            "fadd" => Fadd,
+            "fmul" => Fmul,
+            "fmulp" => Fmulp,
+            "fsubp" => Fsubp,
+            "fsubrp" => Fsubrp,
+            "fcmovnb" => Fcmovnb,
+            "fild" => Fild,
+            "fistp" => Fistp,
+            "fldcw" => Fldcw,
+            "fnstcw" => Fnstcw,
+            "fldz" => Fldz,
+            "fucomip" | "fucompi" => Fucomip,
             "cmpnltps" => Cmpnltps,
             "pmovmskb" => Pmovmskb,
             "movmskps" => Movmskps,
@@ -553,6 +584,8 @@ impl Opcode {
 pub enum RegisterClass {
     Gpr,
     Xmm,
+    /// x87 floating-point stack register ST(0)..ST(7), always 80 bits.
+    X87,
     Rip,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -566,6 +599,23 @@ impl Register {
     pub fn parse(s: &str) -> Option<Self> {
         let s = lowercase(s);
         let s = s.as_ref();
+        if let Some(number) = if s == "st" {
+            Some(0)
+        } else {
+            s.strip_prefix("st(")
+                .and_then(|s| s.strip_suffix(')'))
+                .and_then(|s| {
+                    (s.len() == 1 && matches!(s.as_bytes()[0], b'0'..=b'7'))
+                        .then(|| s.as_bytes()[0] - b'0')
+                })
+        } {
+            return Some(Self {
+                class: RegisterClass::X87,
+                number,
+                width: 80,
+                high_byte: false,
+            });
+        }
         if s == "rip" {
             return Some(Self {
                 class: RegisterClass::Rip,
@@ -1011,7 +1061,7 @@ fn operand(s: &str, prefix: bool) -> Result<Operand, String> {
             mem.displacement = address(&remaining)?
         }
         for r in [mem.base, mem.index].into_iter().flatten() {
-            if r.width != 64 || r.class == RegisterClass::Xmm {
+            if r.width != 64 || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip) {
                 return Err("addresses require 64-bit general registers".into());
             }
         }

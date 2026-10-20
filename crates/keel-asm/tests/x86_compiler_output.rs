@@ -174,3 +174,247 @@ fn scalar_compare_aliases_reject_invalid_operands() {
         }
     }
 }
+
+#[test]
+fn x87_stack_operands_and_pop_subtraction_dialects_match_clang() {
+    let mut intel = Vec::new();
+    let mut att = Vec::new();
+    for n in 0..8 {
+        for op in [
+            "fld", "fstp", "fxch", "fucomi", "fucomip", "fucompi", "fadd", "fmul", "fmulp",
+        ] {
+            intel.push(format!("{op} st({n})"));
+            att.push(format!("{op} %st({n})"));
+        }
+        for op in ["fucomi", "fucomip", "fucompi", "fcmovnb", "fadd", "fmul"] {
+            intel.push(format!("{op} st, st({n})"));
+            att.push(format!("{op} %st({n}), %st"));
+        }
+        for (op_i, op_a) in [
+            ("fmulp", "fmulp"),
+            ("fsubp", "fsubrp"),
+            ("fsubrp", "fsubp"),
+            ("fadd", "fadd"),
+            ("fmul", "fmul"),
+        ] {
+            intel.push(format!("{op_i} st({n}), st"));
+            att.push(format!("{op_a} %st, %st({n})"));
+            if op_i.starts_with("fsub") {
+                intel.push(format!("{op_i} st({n})"));
+                att.push(format!("{op_a} %st({n})"));
+            }
+        }
+    }
+    for (op_i, op_a) in [
+        ("fxch", "fxch"),
+        ("fucomi", "fucomi"),
+        ("fucomip", "fucomip"),
+        ("fucompi", "fucompi"),
+        ("fmulp", "fmulp"),
+        ("fsubp", "fsubrp"),
+        ("fsubrp", "fsubp"),
+        ("fldz", "fldz"),
+    ] {
+        intel.push(op_i.into());
+        att.push(op_a.into());
+    }
+    differential(&intel.join("\n"), &att.join("\n"));
+    // Register-prefix modes still apply to ST names, including ST(0)'s alias.
+    let reference = assemble_object("fld st\nfucompi st, st(7)\nfstp st").unwrap();
+    for source in [
+        ".intel_syntax prefix\nfld %st\nfucompi %st, %st(7)\nfstp %st",
+        ".att_syntax noprefix\nfld st\nfucompi st(7), st\nfstp st",
+    ] {
+        assert_eq!(reference, assemble_object(source).unwrap());
+    }
+}
+
+#[test]
+fn x87_explicit_memory_widths_addresses_and_relocations_match_clang() {
+    let mut intel = Vec::new();
+    let mut att = Vec::new();
+    for (op, sizes) in [
+        ("fld", &[("dword", "s"), ("qword", "l"), ("tbyte", "t")][..]),
+        (
+            "fstp",
+            &[("dword", "s"), ("qword", "l"), ("tbyte", "t")][..],
+        ),
+        ("fadd", &[("dword", "s"), ("qword", "l")][..]),
+        ("fmul", &[("dword", "s"), ("qword", "l")][..]),
+        (
+            "fild",
+            &[("word", "s"), ("dword", "l"), ("qword", "ll")][..],
+        ),
+        (
+            "fistp",
+            &[("word", "s"), ("dword", "l"), ("qword", "ll")][..],
+        ),
+        ("fldcw", &[("word", "")][..]),
+        ("fnstcw", &[("word", "")][..]),
+    ] {
+        for (size, suffix) in sizes {
+            for (i, a) in [
+                ("[rax]", "(%rax)"),
+                ("[r13]", "(%r13)"),
+                ("[r13+r12*4-128]", "-128(%r13,%r12,4)"),
+                ("[rsp+128]", "128(%rsp)"),
+                ("fs:[r14*8+4096]", "%fs:4096(,%r14,8)"),
+                ("gs:[r15+127]", "%gs:127(%r15)"),
+                ("[rip+external+19]", "external+19(%rip)"),
+                ("[rip+external@GOTPCREL]", "external@GOTPCREL(%rip)"),
+                ("[external+7]", "external+7"),
+            ] {
+                intel.push(format!("{op} {size} ptr {i}"));
+                att.push(format!("{op}{suffix} {a}"));
+            }
+        }
+    }
+    differential(&intel.join("\n"), &att.join("\n"));
+}
+
+#[test]
+fn x87_rejects_invalid_operands_and_typed_registers() {
+    for bad in [
+        "fld st(8)",
+        "fld st(-1)",
+        "fld st(00)",
+        "fld xmm0",
+        "fstp rax",
+        "fucomi st(2), st(1)",
+        "fucompi st(1), st",
+        "fucomip qword ptr [rax]",
+        "fxch st, st(1)",
+        "fmulp st, st(2)",
+        "fsubp st, st(2)",
+        "fsubrp st, st(2)",
+        "fadd st(2), st(3)",
+        "fmul st(2), st(3)",
+        "fcmovnb st(1), st",
+        "fld qword ptr [rax], st",
+        "fstp st, st(1)",
+        "fldz st",
+        "fild tbyte ptr [rax]",
+        "fistp byte ptr [rax]",
+        "fadd tbyte ptr [rax]",
+        "fmul word ptr [rax]",
+        "fnstcw qword ptr [rax]",
+        "fldcw dword ptr [rax]",
+        "fld [rax]",
+        "fstp [rax]",
+        "fild [rax]",
+        "fistp [rax]",
+        "fadd [rax]",
+        "fmul [rax]",
+        "fldcw [rax]",
+        "fnstcw [rax]",
+        "lock fxch st(1)",
+        "fld qword ptr [st(0)]",
+        "mov rax, st(0)",
+        "add st, st(1)",
+    ] {
+        assert!(assemble_object(bad).is_err(), "{bad}");
+    }
+    for bad in [
+        "fldl %st",
+        "fstpt %st(1)",
+        "fildll %rax",
+        "fistps $1",
+        "fldcw %st",
+        "faddl %st(1), %st",
+        "flds (%st)",
+        "fucomi %st, %st(1)",
+        "fmulp %st(2), %st",
+        "fcmovnb %st, %st(1)",
+    ] {
+        assert!(
+            assemble_object(&format!(".att_syntax prefix\n{bad}")).is_err(),
+            "{bad}"
+        );
+    }
+    for (number, width, high_byte) in [(8, 80, false), (0, 64, false), (0, 80, true)] {
+        let mut instruction = Instruction::parse_intel("fld st(0)").unwrap();
+        let keel_asm_ir::x86::Operand::Register(r) = &mut instruction.operands[0] else {
+            unreachable!()
+        };
+        r.number = number;
+        r.width = width;
+        r.high_byte = high_byte;
+        let mut program = keel_asm_ir::Program::new();
+        program.x86_instruction(instruction);
+        assert!(assemble_program_object(&program).is_err());
+    }
+    // A typed caller must not smuggle a stack register into an address either.
+    let mut instruction = Instruction::parse_intel("fld qword ptr [rax]").unwrap();
+    let keel_asm_ir::x86::Operand::Memory(m) = &mut instruction.operands[0] else {
+        unreachable!()
+    };
+    m.base = keel_asm_ir::x86::Register::parse("st(0)");
+    let mut program = keel_asm_ir::Program::new();
+    program.x86_instruction(instruction);
+    assert!(assemble_program_object(&program).is_err());
+    for unsupported in ["fsin", "fdiv st, st(1)", ".unknown_x87_directive"] {
+        let error = assemble_object(&format!("nop\n{unsupported}\nret")).unwrap_err();
+        assert_eq!(error.line, 2, "{error}");
+    }
+}
+
+#[test]
+fn clang_also_rejects_invalid_x87_register_and_width_forms() {
+    let scratch = Scratch::new();
+    let input = scratch.0.join("invalid.s");
+    let output = scratch.0.join("invalid.o");
+    for (directive, cases) in [
+        (
+            ".intel_syntax noprefix",
+            vec![
+                "fld st(8)",
+                "fucomi st(2),st(1)",
+                "fxch st,st(1)",
+                "fmulp st(2),st(3)",
+                "fsubrp st(2),st(3)",
+                "fadd st(2),st(3)",
+                "fcmovnb st(1),st",
+                "fild tbyte ptr [rax]",
+                "fistp byte ptr [rax]",
+                "fldcw dword ptr [rax]",
+                "fnstcw qword ptr [rax]",
+            ],
+        ),
+        (
+            ".att_syntax prefix",
+            vec![
+                "fldl %st",
+                "fstpt %st(1)",
+                "fildll %rax",
+                "fistps $1",
+                "fucomi %st,%st(1)",
+                "fmulp %st(2),%st(3)",
+                "fcmovnb %st,%st(1)",
+            ],
+        ),
+    ] {
+        for bad in cases {
+            let source = format!("{directive}\n{bad}\n");
+            assert!(assemble_object(&source).is_err());
+            std::fs::write(&input, source).unwrap();
+            let p = Command::new("clang")
+                .args(["-c", "-target", "x86_64-unknown-linux-gnu"])
+                .arg(&input)
+                .arg("-o")
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert!(!p.status.success(), "Clang accepted {bad}");
+            if let Some(tool) = gnu() {
+                let p = Command::new(tool)
+                    .arg("--64")
+                    .arg(&input)
+                    .arg("-o")
+                    .arg(&output)
+                    .output()
+                    .unwrap();
+                assert!(!p.status.success(), "GNU accepted {bad}");
+            }
+        }
+    }
+}

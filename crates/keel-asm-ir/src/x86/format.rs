@@ -225,6 +225,22 @@ impl fmt::Display for Opcode {
             Opcode::Cmpneqsd => f.write_str("cmpneqsd"),
             Opcode::Cmpordsd => f.write_str("cmpordsd"),
             Opcode::Fld => f.write_str("fld"),
+            Opcode::Fstp => f.write_str("fstp"),
+            Opcode::Fxch => f.write_str("fxch"),
+            Opcode::Fucomi => f.write_str("fucomi"),
+            Opcode::Fucomip => f.write_str("fucomip"),
+            Opcode::Fadd => f.write_str("fadd"),
+            Opcode::Fmul => f.write_str("fmul"),
+            Opcode::Fmulp => f.write_str("fmulp"),
+            Opcode::Fsubp => f.write_str("fsubp"),
+            Opcode::Fsubrp => f.write_str("fsubrp"),
+            Opcode::Fcmovnb => f.write_str("fcmovnb"),
+            Opcode::Fild => f.write_str("fild"),
+            Opcode::Fistp => f.write_str("fistp"),
+            Opcode::Fldcw => f.write_str("fldcw"),
+            Opcode::Fnstcw => f.write_str("fnstcw"),
+            Opcode::Fldz => f.write_str("fldz"),
+
             Opcode::Cmpnltps => f.write_str("cmpnltps"),
             Opcode::Pmovmskb => f.write_str("pmovmskb"),
             Opcode::Movmskps => f.write_str("movmskps"),
@@ -262,6 +278,12 @@ impl fmt::Display for Register {
         match self.class {
             RegisterClass::Rip => f.write_str("rip"),
             RegisterClass::Xmm => write!(f, "xmm{}", self.number),
+            RegisterClass::X87 => {
+                if self.number >= 8 || self.width != 80 || self.high_byte {
+                    return Err(fmt::Error);
+                }
+                write!(f, "st({})", self.number)
+            }
             RegisterClass::Gpr => {
                 if self.number >= 16 || !matches!(self.width, 8 | 16 | 32 | 64) {
                     return Err(fmt::Error);

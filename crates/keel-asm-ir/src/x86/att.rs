@@ -215,7 +215,7 @@ fn memory(s: &str, prefix: bool) -> Result<Operand, String> {
         m.displacement = expression(s)?;
     }
     for r in [m.base, m.index].into_iter().flatten() {
-        if r.width != 64 || r.class == RegisterClass::Xmm {
+        if r.width != 64 || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip) {
             return Err("addresses require 64-bit general registers".into());
         }
     }
@@ -388,17 +388,43 @@ fn parse(s: &str, prefix: bool) -> Result<Instruction, String> {
         width(a, dst)?;
         width(b, src)?;
         op
-    } else if let Some(w) = match name {
-        "flds" => Some(32),
-        "fldl" => Some(64),
-        "fldt" => Some(80),
+    } else if let Some((op, w)) = match name {
+        "flds" => Some((Fld, 32)),
+        "fldl" => Some((Fld, 64)),
+        "fldt" => Some((Fld, 80)),
+        "fstps" => Some((Fstp, 32)),
+        "fstpl" => Some((Fstp, 64)),
+        "fstpt" => Some((Fstp, 80)),
+        "fadds" => Some((Fadd, 32)),
+        "faddl" => Some((Fadd, 64)),
+        "fmuls" => Some((Fmul, 32)),
+        "fmull" => Some((Fmul, 64)),
+        "filds" => Some((Fild, 16)),
+        "fildl" => Some((Fild, 32)),
+        "fildll" => Some((Fild, 64)),
+        "fistps" => Some((Fistp, 16)),
+        "fistpl" => Some((Fistp, 32)),
+        "fistpll" => Some((Fistp, 64)),
+        "fldcw" => Some((Fldcw, 16)),
+        "fnstcw" => Some((Fnstcw, 16)),
         _ => None,
     } {
         let [Operand::Memory(m)] = ops.as_mut_slice() else {
-            return Err("x87 load requires one memory operand".into());
+            return Err(if op == Fld {
+                "x87 load requires one memory operand"
+            } else {
+                "x87 memory form requires one memory operand"
+            }
+            .into());
         };
         m.width = w;
-        Fld
+        op
+    } else if name == "fsubp" {
+        // GAS/LLVM AT&T reverse the Intel subtraction-pop mnemonics. Keep
+        // the shared model in Intel destination/source semantics.
+        Fsubrp
+    } else if name == "fsubrp" {
+        Fsubp
     } else if let Some(op) = match name {
         "cbtw" => Some(Cbw),
         "cwtl" => Some(Cwde),

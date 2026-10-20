@@ -2,6 +2,7 @@
 mod bmi;
 mod sse2;
 mod vex;
+mod x87;
 
 use Operand::{Immediate as I, Memory as M, Register as R};
 use keel_asm_ir::x86::{
@@ -267,15 +268,11 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             | Cvtpd2dq | Cvttpd2dq,
             _,
         ) => sse2::encode(&mut e, i)?,
-        (Fld, [m @ M(memory)]) if matches!(memory.width, 32 | 64 | 80) => {
-            let (byte, group) = match memory.width {
-                32 => (0xd9, 0),
-                64 => (0xdd, 0),
-                _ => (0xdb, 5),
-            };
-            // The data width selects the opcode; x87 memory forms have no REX.W.
-            e.rm(0, &[byte], 32, group, m, None)?;
-        }
+        (
+            Fld | Fstp | Fxch | Fucomi | Fucomip | Fadd | Fmul | Fmulp | Fsubp | Fsubrp | Fcmovnb
+            | Fild | Fistp | Fldcw | Fnstcw | Fldz,
+            _,
+        ) => x87::encode(&mut e, i)?,
         (Ret, []) => e.bytes.push(0xc3),
         (Ret, [I(a)]) => {
             e.bytes.push(0xc2);
@@ -937,6 +934,7 @@ fn validate(i: &Instruction) -> Result<(), String> {
                         && (!r.high_byte || r.width == 8 && (4..8).contains(&r.number))
                 }
                 RegisterClass::Xmm => r.width == 128 && !r.high_byte,
+                RegisterClass::X87 => r.number < 8 && r.width == 80 && !r.high_byte,
                 RegisterClass::Rip => r.number == 0 && r.width == 64 && !r.high_byte,
             }
     }
@@ -947,14 +945,17 @@ fn validate(i: &Instruction) -> Result<(), String> {
             }
             M(m) => {
                 if !(matches!(m.width, 0 | 8 | 16 | 32 | 64 | 128)
-                    || i.opcode == Fld && m.width == 80)
+                    || matches!(i.opcode, Fld | Fstp) && m.width == 80)
                     || !matches!(m.scale, 1 | 2 | 4 | 8)
                     || m.segment.is_some_and(|s| !matches!(s, 0x64 | 0x65))
                 {
                     return Err("invalid memory width/scale/segment".into());
                 }
                 for r in [m.base, m.index].into_iter().flatten() {
-                    if !register(r) || r.width != 64 || r.class == RegisterClass::Xmm {
+                    if !register(r)
+                        || r.width != 64
+                        || !matches!(r.class, RegisterClass::Gpr | RegisterClass::Rip)
+                    {
                         return Err("invalid address register".into());
                     }
                 }
