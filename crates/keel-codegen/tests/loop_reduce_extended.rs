@@ -1,13 +1,19 @@
 use keel_codegen::{CodegenPipeline, SelectionTier, Target, regalloc::AllocationTier};
 
-fn source() -> &'static str {
-    include_str!("fixtures/reduction_affine.ir")
+#[path = "fixtures/reduction_casts.rs"]
+mod casts;
+fn source() -> String {
+    format!(
+        "{}{}",
+        include_str!("fixtures/reduction_affine.ir"),
+        casts::source()
+    )
 }
 fn module(tier: keel_opt::OptimizationTier) -> keel_ir::Module {
-    let mut m = keel_ir::parse(source()).unwrap();
+    let mut m = keel_ir::parse(&source()).unwrap();
     // Apply the new named pass first: tier passes may recognize the scalar
     // tail, but must preserve the extended pass's guards and seed merge.
-    keel_opt::run_passes(&mut m, &["loop-reduce-affine"]).unwrap();
+    keel_opt::run_passes(&mut m, &["loop-reduce-affine", "loop-reduce-casts"]).unwrap();
     keel_opt::optimize_with_tier(&mut m, tier).unwrap();
     keel_ir::verify_module(&m).unwrap();
     assert!(
@@ -63,7 +69,12 @@ fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("driver.c"),
-        include_str!("fixtures/reduction_affine.c"),
+        format!(
+            "{}\n{}",
+            include_str!("fixtures/reduction_casts.c"),
+            include_str!("fixtures/reduction_affine.c")
+                .replace("return 0;", "return casts_oracle(region, page);")
+        ),
     )
     .unwrap();
     for tier in [

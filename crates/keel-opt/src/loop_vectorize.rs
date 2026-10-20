@@ -89,7 +89,24 @@ impl crate::Pass for AffineLoopReduce {
         self.run_for_target(f, VectorTarget::Portable)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target)
+        run_extended(f, target, false)
+    }
+}
+
+/// Packed truncate/extend round trips, using only the portable integer ISA.
+pub(crate) struct CastLoopReduce;
+impl crate::Pass for CastLoopReduce {
+    fn name(&self) -> &'static str {
+        "loop-reduce-casts"
+    }
+    fn description(&self) -> &'static str {
+        "vectorize integer reduction truncate/extend round trips with packed masks"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        self.run_for_target(f, VectorTarget::Portable)
+    }
+    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+        run_extended(f, target, true)
     }
 }
 
@@ -129,6 +146,13 @@ struct Candidate {
     addresses: HashMap<Value, Value>,
     vectors: HashSet<Value>,
     offsets: HashMap<Value, Value>,
+    casts: HashMap<Value, NarrowRoundTrip>,
+}
+#[derive(Clone, Copy)]
+struct NarrowRoundTrip {
+    input: Value,
+    bits: u32,
+    signed: bool,
 }
 #[derive(Clone, Copy)]
 enum Output {
@@ -166,6 +190,7 @@ struct Analyze<'a> {
     target: VectorTarget,
     allowed: HashSet<Inst>,
     affine: bool,
+    casts: bool,
 }
 impl Analyze<'_> {
     fn index(&mut self, v: Value) -> Option<Option<Value>> {
@@ -287,6 +312,46 @@ impl Analyze<'_> {
                     self.expression(arg, depth + 1)?;
                 }
             }
+            D::Convert {
+                op: ConvertOp::Uext | ConvertOp::Sext,
+                arg,
+                ..
+            } if self.casts => {
+                // Keep lane count and address stride unchanged. A narrow value
+                // may only occur as the private intermediate of a round trip.
+                let narrow = def(self.f, arg)?;
+                let D::Convert {
+                    op: ConvertOp::Trunc,
+                    arg: input,
+                    ty,
+                } = *self.f.inst_data(narrow)
+                else {
+                    return None;
+                };
+                if self.f.inst_block(narrow) != self.c.body
+                    || self.f.value_type(input) != self.c.shape.lane_type()
+                    || !matches!(ty, Type::I8 | Type::I16 | Type::I32)
+                    || ty.bytes()? >= self.c.shape.lane_type().bytes()?
+                {
+                    return None;
+                }
+                self.expression(input, depth + 1)?;
+                self.allowed.insert(narrow);
+                self.c.casts.insert(
+                    v,
+                    NarrowRoundTrip {
+                        input: self.f.resolve(input),
+                        bits: ty.bytes()? * 8,
+                        signed: matches!(
+                            self.f.inst_data(i),
+                            D::Convert {
+                                op: ConvertOp::Sext,
+                                ..
+                            }
+                        ),
+                    },
+                );
+            }
             D::Iconst { .. } | D::Fconst { .. } => {}
             _ => return None,
         }
@@ -301,6 +366,7 @@ fn analyze(
     target: VectorTarget,
     analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
     affine: bool,
+    casts: bool,
 ) -> Option<Candidate> {
     let params = f.block_params(header);
     if !(1..=2).contains(&params.len()) || params.iter().any(|&v| f.resolve(v) != v) {
@@ -476,6 +542,7 @@ fn analyze(
         addresses: HashMap::new(),
         vectors: HashSet::new(),
         offsets: HashMap::new(),
+        casts: HashMap::new(),
     };
     let mut a = Analyze {
         f,
@@ -484,6 +551,7 @@ fn analyze(
         target,
         allowed: HashSet::from([back, step, root]),
         affine,
+        casts,
     };
     if let Output::Store(store) = output {
         let D::Store { addr, .. } = *f.inst_data(store) else {
@@ -666,6 +734,25 @@ fn reduce_body(
         );
         invariants.insert(v, splat);
     }
+    let mut cast_masks = HashMap::new();
+    let mut casts: Vec<_> = c.casts.iter().collect();
+    casts.sort_by_key(|(v, _)| **v);
+    for (&v, cast) in casts {
+        let splat = |f: &mut Function, n| {
+            let scalar = iconst(f, setup, c.shape.lane_type(), n);
+            emit(
+                f,
+                setup,
+                D::VectorSplat {
+                    ty: Type::Vector(c.shape),
+                    arg: scalar,
+                },
+            )
+        };
+        let mask = splat(f, (1i64 << cast.bits) - 1);
+        let sign = cast.signed.then(|| splat(f, 1i64 << (cast.bits - 1)));
+        cast_masks.insert(v, (mask, sign));
+    }
     let mut bases: Vec<_> = c.addresses.values().copied().collect();
     bases.sort();
     bases.dedup();
@@ -739,6 +826,39 @@ fn reduce_body(
                     op: target.binary(op, c.shape.lane_type()).unwrap(),
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
+                D::Convert { .. } if c.casts.contains_key(&result.unwrap()) => {
+                    let v = result.unwrap();
+                    let cast = c.casts[&v];
+                    let (mask, sign) = cast_masks[&v];
+                    let masked = emit(
+                        f,
+                        vector,
+                        D::VectorBinary {
+                            op: V::And,
+                            args: [mapping[&cast.input], mask],
+                        },
+                    );
+                    // Sign extension in the destination ring:
+                    // ((x & low_mask) ^ sign_bit) - sign_bit.
+                    // No cross-lane packing or saturating conversion occurs.
+                    if let Some(sign) = sign {
+                        let biased = emit(
+                            f,
+                            vector,
+                            D::VectorBinary {
+                                op: V::Xor,
+                                args: [masked, sign],
+                            },
+                        );
+                        D::VectorBinary {
+                            op: V::Isub,
+                            args: [biased, sign],
+                        }
+                    } else {
+                        mapping.insert(v, masked);
+                        continue;
+                    }
+                }
                 _ => continue,
             };
             let new = f.append_inst(vector, data);
@@ -1087,7 +1207,7 @@ fn run_candidates_with_budget(
         if f.block_params(header).len() != if reductions { 2 } else { 1 } {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, false) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, false, false) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
             }
@@ -1103,7 +1223,7 @@ pub fn run(f: &mut Function, target: VectorTarget) -> bool {
     scan::run(f) || changed
 }
 
-fn run_extended(f: &mut Function, target: VectorTarget) -> bool {
+fn run_extended(f: &mut Function, target: VectorTarget, casts: bool) -> bool {
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
     let mut analysis = None;
@@ -1111,7 +1231,7 @@ fn run_extended(f: &mut Function, target: VectorTarget) -> bool {
         if f.block_params(header).len() != 2 {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, true) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts) {
             transform(f, c, target);
             analysis = None;
             changed = true;
