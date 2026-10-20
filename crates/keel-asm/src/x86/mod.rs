@@ -213,43 +213,37 @@ impl<'a> Items<'a> {
         }
     }
     fn parse(&mut self, source: &str, first: usize) -> Result<(), Error> {
-        for (index, source) in source.lines().enumerate() {
+        // Move syntax state out while the callback collects directly into self.
+        let mut parser = std::mem::take(&mut self.parser);
+        let result = source.lines().enumerate().try_for_each(|(index, source)| {
             let line = first + index;
-            let p = self
-                .parser
-                .parse(source)
-                .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))?;
-            for item in p.items {
-                match item {
-                    Item::X86Instruction(mut i) => {
+            parser
+                .parse_with(source, |_, item| match item {
+                    x86::SourceItem::Instruction(mut i) => {
                         if !self.encode(&i, line) {
-                            // Parsed operand lists can have spare capacity.
                             i.operands.shrink_to_fit();
                             self.instruction(Ref::Owned(Box::new(i)), line)
                         }
                     }
-                    Item::Label(name) => self.push(Entry::Label {
+                    x86::SourceItem::Label(name) => self.push(Entry::Label {
                         name: name.into_boxed_str(),
                         line,
                     }),
-                    Item::Text(text) => {
-                        self.push(if let Some((bytes, width)) = literal_data(&text) {
+                    x86::SourceItem::Text(text) => {
+                        self.push(if let Some((bytes, width)) = literal_data(text) {
                             Entry::LiteralData { bytes, width, line }
                         } else {
                             Entry::Text {
-                                text: text.into_boxed_str(),
+                                text: text.into(),
                                 line,
                             }
                         });
                     }
-                    item => self.push(Entry::Item {
-                        item: Ref::Owned(Box::new(item)),
-                        line,
-                    }),
-                }
-            }
-        }
-        Ok(())
+                })
+                .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))
+        });
+        self.parser = parser;
+        result
     }
     fn push(&mut self, entry: Entry<'a>) {
         self.parsed += 1;

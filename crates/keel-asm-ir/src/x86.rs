@@ -754,7 +754,9 @@ pub fn unquote(s: &str) -> Result<Vec<u8>, String> {
     let mut bytes = s.as_bytes()[1..s.len() - 1].iter().copied().peekable();
     while let Some(b) = bytes.next() {
         if b != b'\\' {
-            if b == b'"' { return Err("unexpected quote inside string".into()); }
+            if b == b'"' {
+                return Err("unexpected quote inside string".into());
+            }
             out.push(b);
             continue;
         }
@@ -1053,10 +1055,36 @@ pub fn parse_program(source: &str) -> Result<crate::Program, String> {
     SourceParser::default().parse(source)
 }
 
+/// A parsed source statement. Directive text borrows the input so consumers can
+/// decode it without first allocating a temporary program or string.
+pub enum SourceItem<'a> {
+    Instruction(Instruction),
+    Label(String),
+    Text(&'a str),
+}
+
 impl SourceParser {
     /// Parse a fragment while retaining syntax directives for the next fragment.
     pub fn parse(&mut self, source: &str) -> Result<crate::Program, String> {
         let mut p = crate::Program::new();
+        self.parse_with(source, |_, item| match item {
+            SourceItem::Instruction(i) => p.x86_instruction(i),
+            SourceItem::Label(name) => p.label(name),
+            SourceItem::Text(text) => {
+                p.text(text);
+                p.text("\n");
+            }
+        })?;
+        Ok(p)
+    }
+
+    /// Emit statements in source order with one-based source lines. Syntax
+    /// state and items preceding an error are consumed, as with `parse`.
+    pub fn parse_with<'a>(
+        &mut self,
+        source: &'a str,
+        mut emit: impl FnMut(usize, SourceItem<'a>),
+    ) -> Result<(), String> {
         for (line, source) in source.lines().enumerate() {
             let mut quote = false;
             let mut escaped = false;
@@ -1089,7 +1117,7 @@ impl SourceParser {
                     && (labels[0].starts_with('"') || !labels[0].contains(char::is_whitespace))
                 {
                     let name = symbol(labels[0]).map_err(|e| format!("line {}: {e}", line + 1))?;
-                    p.label(name);
+                    emit(line + 1, SourceItem::Label(name));
                     let mut quote = false;
                     let mut escaped = false;
                     let colon = s
@@ -1121,17 +1149,19 @@ impl SourceParser {
                     continue;
                 }
                 if s.starts_with('.') || split_inline(s, '=').len() == 2 {
-                    p.text(s);
-                    p.text("\n")
+                    emit(line + 1, SourceItem::Text(s));
                 } else {
-                    p.x86_instruction(
-                        self.instruction(s)
-                            .map_err(|e| format!("line {}: {e}", line + 1))?,
-                    )
+                    emit(
+                        line + 1,
+                        SourceItem::Instruction(
+                            self.instruction(s)
+                                .map_err(|e| format!("line {}: {e}", line + 1))?,
+                        ),
+                    );
                 }
             }
         }
-        Ok(p)
+        Ok(())
     }
 }
 

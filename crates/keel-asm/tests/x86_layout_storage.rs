@@ -327,3 +327,23 @@ fn profile_counts_parsed_items_not_runs() {
     assert_eq!(profile.items, 6);
     assert_eq!(profile.widened, [0]);
 }
+
+#[test]
+fn streamed_statements_keep_inline_syntax_quotes_and_directive_order() {
+    let source = r#".data; .byte 1; .byte -1; .ascii "a;#//b"
+"label:;#": .quad 3; .text; .att_syntax prefix; movl $7, %eax
+.intel_syntax noprefix; add eax, 2; .byte 0x90; ret
+"#;
+    let bytes = assert_paths_agree(source);
+    assert_eq!(
+        section(&bytes, ".text"),
+        [0xb8, 7, 0, 0, 0, 0x83, 0xc0, 2, 0x90, 0xc3]
+    );
+    assert_eq!(&section(&bytes, ".data")[..8], b"\x01\xffa;#//b");
+    let (line, message) = error(assemble_object(".byte 256; .att_syntax prefix\nunknown"));
+    assert_eq!(line, 2);
+    assert!(message.contains("unknown"));
+    let (line, message) = error(assemble_object("andn eax, ebx, ecx; .byte 256; unknown"));
+    assert_eq!(line, 1);
+    assert!(message.contains("unknown"));
+}
