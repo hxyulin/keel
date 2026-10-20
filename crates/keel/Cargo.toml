@@ -22,3 +22,6 @@ keel-codegen = { path = "../keel-codegen" }
 keel-opt = { path = "../keel-opt" }
 keel-asm = { path = "../keel-asm" }
 keel-link = { path = "../keel-link" }
+
+[dev-dependencies]
+object = { version = "0.36", default-features = false, features = ["read", "std"] }

@@ -1,5 +1,17 @@
 //! Explicit exported-definition inlining: both-target emission and native ABI oracle.
+use object::{Object, ObjectSymbol, SymbolKind};
 use std::{fs, path::Path, process::Command};
+
+fn global_functions(path: &Path) -> Vec<String> {
+    let bytes = fs::read(path).unwrap();
+    let object = object::File::parse(bytes.as_slice()).unwrap();
+    object
+        .symbols()
+        .filter(|s| s.is_global() && s.is_definition() && s.kind() == SymbolKind::Text)
+        .map(|s| s.name().unwrap().to_owned())
+        .collect()
+}
+
 const SOURCE: &str = include_str!("fixtures/noninterposable.c");
 const ORACLE: &str = include_str!("fixtures/noninterposable_oracle.c");
 fn command(c: &mut Command) -> String {
@@ -145,22 +157,9 @@ fn explicit_pass_removes_narrow_calls_on_both_targets_and_retains_exports() {
                     ],
                 );
                 assert!(fs::metadata(dir.join(&obj)).unwrap().len() > 0);
-                let symbols = command(
-                    Command::new(if cfg!(target_os = "linux") {
-                        "llvm-nm"
-                    } else {
-                        "nm"
-                    })
-                    .current_dir(&dir)
-                    .args(["-g", &obj]),
-                );
+                let symbols = global_functions(&dir.join(&obj));
                 for helper in ["clamp_i8", "mix_u16", "classify"] {
-                    assert!(
-                        symbols
-                            .lines()
-                            .any(|l| l.contains(" T ") && l.ends_with(helper)),
-                        "{symbols}"
-                    );
+                    assert!(symbols.iter().any(|l| l.ends_with(helper)), "{symbols:?}");
                 }
             }
         }
@@ -206,15 +205,7 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
                     &obj,
                 ],
             );
-            let symbols = command(
-                Command::new(if cfg!(target_os = "linux") {
-                    "llvm-nm"
-                } else {
-                    "nm"
-                })
-                .current_dir(&dir)
-                .args(["-g", &obj]),
-            );
+            let symbols = global_functions(&dir.join(&obj));
             for name in [
                 "clamp_i8",
                 "mix_u16",
@@ -226,12 +217,7 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
                 "stay",
                 "classify",
             ] {
-                assert!(
-                    symbols
-                        .lines()
-                        .any(|l| l.contains(" T ") && l.ends_with(name)),
-                    "{symbols}"
-                );
+                assert!(symbols.iter().any(|l| l.ends_with(name)), "{symbols:?}");
             }
             command(
                 Command::new("clang")

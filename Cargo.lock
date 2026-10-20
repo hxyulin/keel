@@ -350,6 +350,7 @@ dependencies = [
  "keel-link",
  "keel-opt",
  "memmap2",
+ "object",
  "profiling",
  "simdutf8",
  "tracy-client",
