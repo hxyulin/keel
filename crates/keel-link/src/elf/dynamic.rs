@@ -563,9 +563,9 @@ impl Dynamic {
             0,
             24,
         );
-        // DT_NEEDED + eight basic tags + version tags + RUNPATH + NULL.
+        // DT_NEEDED + eight basic tags + DT_DEBUG + version tags + RUNPATH + NULL.
         let count = libraries.len()
-            + 9
+            + 10
             + lifecycle_tags
             + if version_indices.is_empty() { 0 } else { 3 }
             + usize::from(runpath.is_some());
@@ -735,6 +735,9 @@ impl Dynamic {
             (9, 24),
             (10, self.strings.len() as u64),
             (11, 24),
+            // The loader fills this writable slot with its r_debug rendezvous.
+            // GDB's probes interface needs it even though PLT binding is eager.
+            (u64::from(object::elf::DT_DEBUG), 0),
         ]);
         if !self.version_indices.is_empty() {
             tags.extend([

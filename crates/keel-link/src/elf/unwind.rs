@@ -1,6 +1,6 @@
 //! Bounded .eh_frame record parsing and a runtime-discoverable search index.
 //! CFI instructions remain opaque; this is not an unwind instruction validator.
-use super::{BASE, Section, end, put32};
+use super::{BASE, Section, Unit, align, end, put32};
 use crate::Result;
 use std::collections::BTreeMap;
 
@@ -110,12 +110,14 @@ struct Frame {
 pub(super) struct Frames {
     frames: Vec<Frame>,
     fields: BTreeMap<u64, Pointer>,
+    last_record: Option<usize>,
 }
 impl Frames {
     pub fn parse(data: &[u8]) -> Result<Self> {
         let mut result = Self {
             frames: Vec::new(),
             fields: BTreeMap::new(),
+            last_record: None,
         };
         let mut cies = BTreeMap::new();
         let mut at = 0;
@@ -132,6 +134,7 @@ impl Frames {
             if length == 0xffff_ffff {
                 return Err("DWARF64 unwind records are unsupported".into());
             }
+            result.last_record = Some(record);
             at =
                 r.at.checked_add(length)
                     .filter(|end| *end <= data.len())
@@ -250,6 +253,98 @@ impl Frames {
         }
         Ok(())
     }
+}
+
+/// GDB reads one .eh_frame section rather than the runtime search index.
+/// Merge validated contributions before layout, retaining their CIE/FDE offsets
+/// within each contribution. Extend the last record with DW_CFA_nop bytes over
+/// any terminator/alignment gap so discovery can reach the next contribution.
+/// No CFI instruction, pointer field, or intra-contribution CIE reference moves.
+pub(super) fn merge(
+    sections: &mut Vec<Section>,
+    units: &mut [Unit],
+    frames: &mut BTreeMap<usize, Frames>,
+) -> Result<Vec<usize>> {
+    let mut remap: Vec<_> = (0..sections.len()).collect();
+    if frames.len() < 2 {
+        return Ok(remap);
+    }
+    let mut merged = Section {
+        name: ".eh_frame".into(),
+        flags: 2,
+        kind: object::elf::SHT_PROGBITS,
+        align: 4,
+        size: 0,
+        bss: false,
+        data: Vec::new(),
+        offset: 0,
+    };
+    let mut bases = vec![0; sections.len()];
+    let mut last = None;
+    for (&index, records) in frames.iter() {
+        let section = &sections[index];
+        // Leading empty/terminator-only contributions need a record whose CFI
+        // can absorb their zero bytes. Keep their symbols/addressable offsets.
+        if last.is_none() && records.last_record.is_none() {
+            merged
+                .data
+                .extend_from_slice(&[12, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0x78, 16, 0, 0, 0]);
+            last = Some(0);
+        }
+        // Even an empty contribution becomes the end of the preceding record.
+        // Its input alignment may be 1 or 2, but every rewritten record length
+        // must still span a multiple of four bytes.
+        let base = align(merged.data.len() as u64, section.align.max(4))?;
+        merged.data.resize(base as usize, 0);
+        if let Some(record) = last {
+            let length = u32::try_from(base as usize - record - 4)
+                .map_err(|_| "merged unwind record length overflow")?;
+            put32(&mut merged.data, record, length);
+        }
+        bases[index] = base;
+        end(base, section.size)?;
+        merged.data.extend_from_slice(&section.data);
+        if let Some(record) = records.last_record {
+            last = Some(base as usize + record);
+        }
+        merged.align = merged.align.max(section.align);
+    }
+    merged.size = merged.data.len() as u64;
+    let records = Frames::parse(&merged.data)?;
+    let first = *frames.first_key_value().unwrap().0;
+    let mut output = Vec::with_capacity(sections.len() - frames.len() + 1);
+    let mut merged = Some(merged);
+    for (index, section) in std::mem::take(sections).into_iter().enumerate() {
+        if frames.contains_key(&index) {
+            remap[index] = first;
+            if index == first {
+                output.push(merged.take().unwrap());
+            }
+        } else {
+            remap[index] = output.len();
+            output.push(section);
+        }
+    }
+    for unit in units {
+        for symbol in unit.symbols.values_mut() {
+            if let object::SymbolSection::Section(index) = symbol.section
+                && let Some(&output) = unit.sections.get(&index.0)
+            {
+                symbol.value += bases[output];
+            }
+        }
+        for output in unit.sections.values_mut() {
+            *output = remap[*output];
+        }
+        for reloc in &mut unit.relocs {
+            reloc.offset += bases[reloc.section];
+            reloc.section = remap[reloc.section];
+        }
+    }
+    *sections = output;
+    frames.clear();
+    frames.insert(first, records);
+    Ok(remap)
 }
 
 pub(super) fn prepare(

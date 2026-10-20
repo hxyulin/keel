@@ -51,7 +51,55 @@ fn symbol(file: &object::File<'_>, name: &str) -> u64 {
 }
 
 #[test]
-fn retains_types_alignment_and_relocations_and_indexes_multiple_sections() {
+fn empty_frame_contributions_keep_extended_records_aligned() {
+    for fde in [false, true] {
+        for padding in 0..8 {
+            let records = object(&format!(
+                ".text\n.globl _start\n_start: ret\n.section .eh_frame,\"a\",@progbits\n.p2align 2\n.long 12,0\n.byte 1,0,1,120,16,0,0,0\n{}\n.long 0\n.space {padding}\n",
+                if fde {
+                    ".long 20,20\n.quad _start,1"
+                } else {
+                    ""
+                }
+            ));
+            assert!(link(std::slice::from_ref(&records)).is_ok());
+            for alignment in [1, 2, 4, 64] {
+                // The assembler omits empty sections, so retain the section
+                // header and its offset-zero symbol while making it empty.
+                let mut empty = object(
+                    ".section .eh_frame,\"a\",@progbits\n.globl empty_frame_anchor\nempty_frame_anchor: .byte 0\n",
+                );
+                let file = object::File::parse(empty.as_slice()).unwrap();
+                let section = file.section_by_name(".eh_frame").unwrap();
+                let header = u64_at(&empty, 40) as usize + section.index().0 * 64;
+                put64(&mut empty, header + 32, 0);
+                put64(&mut empty, header + 48, alignment);
+                for inputs in [
+                    [records.clone(), empty.clone()],
+                    [empty.clone(), records.clone()],
+                ] {
+                    let exe = link(&inputs).unwrap_or_else(|error| {
+                        panic!("fde={fde} padding={padding} alignment={alignment}: {error}")
+                    });
+                    let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+                    let section = file.section_by_name(".eh_frame").unwrap();
+                    assert_eq!(symbol(&file, "empty_frame_anchor") % alignment, 0);
+                    let data = section.data().unwrap();
+                    let mut at = 0;
+                    while at < data.len() && u32_at(data, at) != 0 {
+                        let length = u32_at(data, at) as usize;
+                        assert_eq!(length % 4, 0);
+                        at += 4 + length;
+                    }
+                    assert!(data[at..].iter().all(|&byte| byte == 0));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn merges_frame_contributions_and_indexes_relocated_records() {
     let a = fixture("_start");
     let mut b = fixture("second");
     let (header, _, _) = locations(&b);
@@ -65,26 +113,44 @@ fn retains_types_alignment_and_relocations_and_indexes_multiple_sections() {
             .sections()
             .filter(|s| s.name().unwrap() == ".eh_frame")
             .collect();
-        assert_eq!(frames.len(), 2);
+        assert_eq!(frames.len(), 1);
         let shoff = u64_at(&exe.bytes, 40) as usize;
-        for (input, section) in inputs.iter().zip(&frames) {
+        let section = &frames[0];
+        assert_eq!(section.align(), 64);
+        assert_eq!(section.address() % section.align(), 0);
+        let mut base = 0usize;
+        for (i, input) in inputs.iter().enumerate() {
             let (header, _, _) = locations(input);
             let out_header = shoff + section.index().0 * 64;
             assert_eq!(
                 u32_at(&exe.bytes, out_header + 4),
-                u32_at(input, header + 4)
+                object::elf::SHT_PROGBITS
             );
-            assert_eq!(section.align(), u64_at(input, header + 48));
-            assert_eq!(section.address() % section.align(), 0);
+            let alignment = u64_at(input, header + 48) as usize;
+            base = (base + alignment - 1) & !(alignment - 1);
+            assert_eq!((section.address() + base as u64) % alignment as u64, 0);
             assert_eq!(u64_at(&exe.bytes, out_header + 8), 2);
             let f = object::File::parse(input.as_slice()).unwrap();
             let original = f.section_by_name(".eh_frame").unwrap();
-            assert_eq!(original.size(), section.size());
             let mut expected = original.data().unwrap().to_vec();
             // Only the relocated FDE PC field changes; all CFI and padding survive.
             let rel = original.relocations().next().unwrap().0 as usize;
-            expected[rel..rel + 4].copy_from_slice(&section.data().unwrap()[rel..rel + 4]);
-            assert_eq!(expected, section.data().unwrap());
+            let data = section.data().unwrap();
+            expected[rel..rel + 4].copy_from_slice(&data[base + rel..base + rel + 4]);
+            if i + 1 < inputs.len() {
+                let next = object::File::parse(inputs[i + 1].as_slice()).unwrap();
+                let alignment = next.section_by_name(".eh_frame").unwrap().align() as usize;
+                let next_base = (base + expected.len() + alignment - 1) & !(alignment - 1);
+                let mut record = 0;
+                let mut last = 0;
+                while record < expected.len() && u32_at(&expected, record) != 0 {
+                    last = record;
+                    record += 4 + u32_at(&expected, record) as usize;
+                }
+                put32(&mut expected, last, (next_base - base - last - 4) as u32);
+            }
+            assert_eq!(expected, &data[base..base + expected.len()]);
+            base += expected.len();
         }
         let hdr = file.section_by_name(".eh_frame_hdr").unwrap();
         let data = hdr.data().unwrap();
@@ -187,6 +253,72 @@ fn malformed_unwind_sections_records_and_relocations_are_errors() {
             .unwrap_err()
             .contains(".eh_frame requires")
     );
+}
+
+#[test]
+fn merge_absorbs_terminators_and_padding_and_rebases_local_section_targets() {
+    let empty = object(".section .eh_frame,\"a\",@progbits\n.p2align 2\n.long 0\n");
+    let frame = |name| {
+        object(&format!(
+            ".text\n.globl {name}\n{name}: ret\n.section .eh_frame,\"a\",@progbits\n.p2align 6\n.long 12\n.long 0\n.byte 1,0,1,120,16,0,0,0\nlocal_fde: .long 20\n.long 20\n.quad {name}\n.quad 1\n.long 0,0\n.data\n.globl {name}_pointer\n{name}_pointer: .quad local_fde+8\n"
+        ))
+    };
+    for inputs in [
+        vec![
+            empty.clone(),
+            frame("_start"),
+            empty.clone(),
+            frame("second"),
+            empty.clone(),
+        ],
+        vec![frame("_start"), empty, frame("second")],
+    ] {
+        let exe = link(&inputs).unwrap();
+        let file = object::File::parse(exe.bytes.as_slice()).unwrap();
+        let sections: Vec<_> = file
+            .sections()
+            .filter(|s| s.name().unwrap() == ".eh_frame")
+            .collect();
+        assert_eq!(sections.len(), 1);
+        let section = &sections[0];
+        let hdr = file.section_by_name(".eh_frame_hdr").unwrap();
+        assert_eq!(u32_at(hdr.data().unwrap(), 8), 2);
+        let mut at = 0;
+        let mut fdes = 0;
+        while at < section.size() as usize {
+            let data = section.data().unwrap();
+            let len = u32_at(data, at) as usize;
+            if len == 0 {
+                break;
+            }
+            if u32_at(data, at + 4) != 0 {
+                let pc = u64_at(data, at + 8);
+                let name = if pc == symbol(&file, "_start") {
+                    "_start"
+                } else {
+                    "second"
+                };
+                let pointer = symbol(&file, &format!("{name}_pointer"));
+                assert_eq!(
+                    u64_at(&exe.bytes, (pointer - 0x400000) as usize),
+                    section.address() + at as u64 + 8
+                );
+                fdes += 1;
+            }
+            at += 4 + len;
+        }
+        assert_eq!(fdes, 2);
+        let locals: Vec<_> = file
+            .symbols()
+            .filter(|s| s.name().unwrap() == "local_fde")
+            .collect();
+        assert_eq!(locals.len(), 2);
+        assert!(
+            locals
+                .iter()
+                .all(|s| s.section_index() == Some(section.index()))
+        );
+    }
 }
 
 #[test]

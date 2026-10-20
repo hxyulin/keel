@@ -54,12 +54,15 @@ linker. `--system` continues to select the explicit Clang fallback.
   interpreter or dynamic relocation processing for static output. This output is not PIE.
 - ELF section headers and local/global symbol tables for `readelf`/`nm` and
   debugger function bounds. Named local symbols in retained sections and
-  absolute locals preserve their input identity; omitted metadata stays omitted. Input debug
-  sections are omitted with warnings. Read-only allocated `.eh_frame` inputs
-  accept both PROGBITS and x86-64 `SHT_X86_64_UNWIND`, preserving their types,
-  alignment, CFI bytes and supported pointer relocations. A generated read-only
+  absolute locals preserve their input identity; omitted metadata stays omitted.
+  Input debug sections are omitted with warnings. Read-only allocated `.eh_frame`
+  inputs accept both PROGBITS and x86-64 `SHT_X86_64_UNWIND`. Multiple contributions
+  merge into one PROGBITS section for debugger discovery, preserving input
+  alignment, symbol targets, CFI instructions and supported pointer relocations.
+  A generated read-only
   `.eh_frame_hdr` and `PT_GNU_EH_FRAME` advertise a sorted FDE search index to
-  the runtime unwinder, including frames spread across independent sections.
+  the runtime unwinder. Dynamic output includes a writable `DT_DEBUG` rendezvous
+  slot for the loader and debugger.
 
 The library API is `keel_link::elf::link(&[Input], elf::Options)`, returning
 image bytes and warnings without filesystem access. The CLI reads all inputs,
@@ -108,9 +111,8 @@ Linux `.note.ABI-tag`. Both require `SHT_NOTE`, `SHF_ALLOC` alone, zero
 entry size/link/info, and exact alignment eight/four respectively. Unknown
 allocated notes, malformed bounds, unexpected owners/types and note relocations
 are errors. ABI-tag bytes and original section/symbol address identities are
-preserved; additional ABI tags are rejected. The output symbol table still
-contains globals only, so internal local `__abi_tag` identity does not imply
-local symbols appear in `readelf -s`.
+preserved; additional ABI tags are rejected. Named local `__abi_tag` symbols
+retain their individual section identity in the output symbol table.
 
 All property records in each selected object are collected before merging.
 Unsorted arrays and duplicates are accepted for installed producer compatibility;
@@ -206,6 +208,10 @@ FDE ranges must lie within executable input sections, with distinct start
 addresses. Input `.eh_frame_hdr`, DWARF64, variable-width encoded pointers,
 and text/data/function-relative or aligned pointer applications are unsupported.
 CFI instructions are retained verbatim, not interpreted or exhaustively validated.
+When merging contributions, the preceding record length absorbs zero terminators
+and alignment gaps as `DW_CFA_nop` instructions. A leading empty contribution
+uses a synthetic CIE to absorb its zeros. CIE references remain within their
+original contribution; symbol values and relocation sites gain its merged offset.
 
 The Linux validator below tests `_Unwind_Backtrace` discovery through three
 independent assembly functions without frame pointers, with Keel/Clang C

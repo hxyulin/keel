@@ -102,6 +102,18 @@ fn dynamic_anchor_is_nonpreemptible_and_static_weak_reference_stays_zero() {
     let exe = link(&[source, interface()]).unwrap();
     let f = object::File::parse(exe.bytes.as_slice()).unwrap();
     let dynamic = f.section_by_name(".dynamic").unwrap();
+    let debug: Vec<_> = dynamic
+        .data()
+        .unwrap()
+        .chunks_exact(16)
+        .filter(|tag| word(tag, 0) == u64::from(object::elf::DT_DEBUG))
+        .collect();
+    assert_eq!(debug.len(), 1);
+    assert_eq!(word(debug[0], 8), 0);
+    assert!(matches!(
+        dynamic.flags(),
+        object::SectionFlags::Elf { sh_flags: 3 }
+    ));
     assert_eq!(
         pointer(&exe.bytes, &f, "dynamic_pointer"),
         dynamic.address()

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 
 
@@ -18,6 +19,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--libc", type=Path, default=Path("/usr/lib/libc.so.6"))
     parser.add_argument("--libgcc", type=Path, default=Path("/usr/lib/libgcc_s.so.1"))
+    parser.add_argument("--gdb", type=Path, help="also require debugger CFI discovery and a complete backtrace")
     args = parser.parse_args()
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         parser.error("run on x86-64 Linux")
@@ -125,9 +127,21 @@ int main(void) { return outer() == 7 ? 42 : 1; }
                 assert (result.returncode, result.stdout, result.stderr) == (42, b"", b""), (exe, result)
             headers = checked(["readelf", "-lWS", native]).stdout.decode()
             assert "GNU_EH_FRAME" in headers and " RWE " not in headers
-            assert headers.count(".eh_frame ") >= 4
+            assert sum("]" in line and ".eh_frame " in line for line in headers.splitlines()) == 1
             (out / (name + ".headers.txt")).write_text(headers)
             (out / (name + ".frames.txt")).write_bytes(checked(["readelf", "--debug-dump=frames", native]).stdout)
+            if args.gdb:
+                result = checked([
+                    args.gdb, "-nx", "-batch", "-ex", "set pagination off",
+                    "-ex", "set disable-randomization off", "-ex", "break probe",
+                    "-ex", "run", "-ex", "set debug frame 1", "-ex", "bt", "--args", native,
+                ])
+                backtrace = result.stdout.decode()
+                diagnostics = result.stderr.decode()
+                for function in ["probe", "leaf", "middle", "outer", "main"]:
+                    assert re.search(r" in " + function + r" \(", backtrace), (name, backtrace)
+                assert re.search(r'trying unwinder "dwarf2"\n[^\n]*: yes', diagnostics), (name, diagnostics)
+                assert "dynamic linker interface failed" not in diagnostics
             # Discovery control: retain every section byte, disable only the
             # generated program-header advertisement in a separate executable.
             data = bytearray(native.read_bytes())

@@ -453,6 +453,11 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         units.push(parse().map_err(|e| format!("{}: {e}", input.name))?);
         object_properties.push(properties);
     }
+    let section_remap = unwind::merge(&mut sections, &mut units, &mut unwind_sections)?;
+    note_plan.abi = note_plan.abi.map(|i| section_remap[i]);
+    if let Some((section, _)) = &mut sframe_section {
+        *section = section_remap[*section];
+    }
     let mut globals: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     let mut commons: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for (ui, u) in units.iter().enumerate() {
