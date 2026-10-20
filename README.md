@@ -592,6 +592,9 @@ inputs, not complete applications; the measurements use a warm filesystem cache.
   their test suites; `cargo suite run` builds them with clang and keel in
   every configuration and times them. Each program is a directory in
   `suite/`; see [suite/README.md](suite/README.md).
+- The [manual Darwin TLS alignment probe](tools/tls-alignment/README.md)
+  retains native alignment counterexamples across Clang and both Keel object
+  routes. It requires a prebuilt Keel on Apple arm64; captured failures exit 1.
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/),
   scoped by area: `feat(ir): ...`, `fix(codegen): ...`, `docs: ...`.
 
