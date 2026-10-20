@@ -13,6 +13,48 @@ const SPILLED: Pools = Pools {
     float_callee_saved: &[],
 };
 
+#[test]
+fn vector_constant_offsets_keep_effects_and_have_typed_object_parity() {
+    for shape in keel_ir::VectorType::ALL {
+        let src = format!(
+            "func @f(ptr,{shape}) -> {shape} cc(c) {{
+block0(v0: ptr,v1: {shape}):
+ v2 = iconst.i64 16
+ v3 = ptradd v0,v2
+ store v1,v3
+ v4 = ptradd v0,v2
+ v5 = load.{shape} v4
+ return v5
+}}"
+        );
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            for pools in [&SPILLED, &keel_codegen::aarch64::REGISTERS] {
+                let (text, _) = compile(
+                    &src,
+                    SelectionOptions {
+                        trees: true,
+                        folded_operands: true,
+                        register_hints: true,
+                    },
+                    allocation,
+                    pools,
+                );
+                assert_eq!(
+                    text.lines().filter(|line| line.contains(", #16]")).count(),
+                    2,
+                    "{text}"
+                );
+                assert!(
+                    !text
+                        .lines()
+                        .any(|line| line.contains("\tadd\t") && line.ends_with("#16")),
+                    "{text}"
+                );
+            }
+        }
+    }
+}
+
 fn source(ty: &str, shift: i64) -> String {
     format!(
         "func @f(ptr, i64, {ty}) -> {ty}{} cc(c) {{

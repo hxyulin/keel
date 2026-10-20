@@ -1972,10 +1972,7 @@ impl<'a> FunctionCompiler<'a> {
                 };
                 // Copy block arguments only on their own edge. A fallthrough
                 // edge can copy inline; otherwise it needs a landing pad.
-                if self.next_block == Some(else_dest.block)
-                    && then_dest.args.is_empty()
-                    && self.edge_moves(0).is_empty()
-                {
+                if self.next_block == Some(else_dest.block) && self.block_args_noop(&then_dest, 0) {
                     match &test {
                         BrifTest::Flags(condition) => {
                             self.conditional(invert_cond(condition), self.label(then_dest.block));
@@ -1985,7 +1982,7 @@ impl<'a> FunctionCompiler<'a> {
                         }
                     }
                     self.block_args(&else_dest, 1);
-                } else if else_dest.args.is_empty() && self.edge_moves(1).is_empty() {
+                } else if self.block_args_noop(&else_dest, 1) {
                     self.brif_false(&test, self.label(else_dest.block));
                     self.block_args(&then_dest, 0);
                     self.branch_unless_next(then_dest.block);
@@ -4135,6 +4132,27 @@ impl<'a> FunctionCompiler<'a> {
     /// Copies block-call arguments into the target's parameters. All copies
     /// happen at once (`jump block1(v4, v3)` may swap two parameters), so
     /// they go through the parallel-copy sequentializer.
+    fn block_args_noop(&self, call: &BlockCall, successor: usize) -> bool {
+        self.edge_moves(successor)
+            .iter()
+            .all(|(dst, src)| dst == src)
+            && self
+                .func
+                .block_params(call.block)
+                .iter()
+                .zip(&call.args)
+                .all(|(&param, &arg)| {
+                    let low = self
+                        .alloc
+                        .param_loc(call.block, crate::regalloc::ValuePart::low(param));
+                    let high = self
+                        .alloc
+                        .param_loc(call.block, crate::regalloc::ValuePart::high(param));
+                    low.is_none_or(|dst| dst == self.loc(arg))
+                        && high.is_none_or(|dst| dst == self.hi(arg))
+                })
+    }
+
     fn block_args(&mut self, call: &BlockCall, successor: usize) {
         let params = self.func.block_params(call.block);
         let mut moves = self.edge_moves(successor).to_vec();
