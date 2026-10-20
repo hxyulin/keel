@@ -254,6 +254,157 @@ fn publishes_lhs_and_duplicate_index_leaves_without_destructive_overlap() {
     }
 }
 
+// The lhs is the first argument and dies at the ALU, so normal and one-GPR
+// Fast/Full allocation can give the result the same register. In the index
+// case the lhs is also the actual selected address leaf; the base case derives
+// the pointer base from the lhs's integer bits through inttoptr.
+fn coalesced_source(kind: &str) -> String {
+    match kind {
+        "index" => "func @coalesce_index(i64,ptr) -> i64 cc(c) {
+block0(v0: i64,v1: ptr):
+ v2 = iconst.i64 3
+ v3 = shl v0,v2
+ v4 = ptradd v1,v3
+ v5 = load.i64 v4
+ v6 = isub v0,v5
+ return v6
+}"
+        .into(),
+        "base" => "func @coalesce_base(i64,i64) -> i64 cc(c) {
+block0(v0: i64,v1: i64):
+ v2 = inttoptr.ptr v0
+ v3 = iconst.i64 3
+ v4 = shl v1,v3
+ v5 = ptradd v2,v4
+ v6 = load.i64 v5
+ v7 = isub v0,v6
+ return v7
+}"
+        .into(),
+        ty @ ("i8" | "i16") => format!(
+            "func @coalesce_{ty}({ty},ptr,i64) -> i64 cc(c) {{
+block0(v0: {ty},v1: ptr,v2: i64):
+ v3 = iconst.i64 3
+ v4 = shl v2,v3
+ v5 = ptradd v1,v4
+ v6 = load.{ty} v5
+ v7 = isub v0,v6
+ v8 = uext.i64 v7
+ return v8
+}}"
+        ),
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn coalesced_lhs_avoids_rax_roundtrip_and_normalizes_its_own_register() {
+    use keel_codegen::regalloc::{Allocation, AllocationInput, Loc, OperandKind, ValuePart};
+    struct Coalesced<'a>(&'a dyn RegisterAllocator);
+    impl RegisterAllocator for Coalesced<'_> {
+        fn name(&self) -> &'static str {
+            "assert-coalesced"
+        }
+        fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+            let allocation = self.0.allocate(input);
+            for (_, inst) in input.func.layout_insts() {
+                if let keel_ir::InstData::Binary {
+                    op: keel_ir::BinaryOp::Isub,
+                    args,
+                } = *input.func.inst_data(inst)
+                {
+                    let index = allocation.edits.instruction_index(inst);
+                    let lhs = allocation.operand_loc(
+                        index,
+                        ValuePart::low(input.func.resolve(args[0])),
+                        OperandKind::Use,
+                    );
+                    let result = allocation.operand_loc(
+                        index,
+                        ValuePart::low(input.func.first_result(inst)),
+                        OperandKind::Def,
+                    );
+                    assert!(matches!(lhs, Some(Loc::Reg(_))), "{lhs:?}");
+                    assert_eq!(result, lhs, "fixture must exercise d == a");
+                }
+            }
+            allocation
+        }
+    }
+    let mut all = String::new();
+    for kind in ["index", "base", "i8", "i16"] {
+        all.push_str(&coalesced_source(kind));
+        all.push('\n');
+        let m = module(&coalesced_source(kind));
+        assert!(folded(&m));
+        for tier in [AllocationTier::Fast, AllocationTier::Full] {
+            for pools in [&ONE, &keel_codegen::x86_64::REGISTERS] {
+                let (text, _) = compile(&m, SelectionOptions::ALL, &Coalesced(&tier), pools);
+                let body = text
+                    .split(" = isub ")
+                    .nth(1)
+                    .unwrap()
+                    .split("\n\t#")
+                    .next()
+                    .unwrap();
+                assert!(!body.contains("rax") && !body.contains("eax"), "{text}");
+                let alu = body
+                    .lines()
+                    .find(|l| l.trim_start().starts_with("sub\t"))
+                    .unwrap()
+                    .trim();
+                assert!(alu.contains(" ptr ["), "{text}");
+                let accumulator = alu.split_once('\t').unwrap().1.split(',').next().unwrap();
+                if matches!(kind, "i8" | "i16") {
+                    assert!(
+                        body.lines().any(|l| l.trim_start().starts_with("movzx\t")
+                            && l.ends_with(&format!(", {accumulator}"))),
+                        "{text}"
+                    );
+                }
+            }
+        }
+    }
+    // Independent encoding parity for the allocated accumulators, including
+    // partial-register normalization and one-register address reloads.
+    use std::{fs, process::Command};
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("memory-rhs-coalesced");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("test.keel"), &all).unwrap();
+    let m = module(&all);
+    for (case, pools) in [&ONE, &keel_codegen::x86_64::REGISTERS]
+        .into_iter()
+        .enumerate()
+    {
+        let (text, obj) = compile(
+            &m,
+            SelectionOptions::ALL,
+            &Coalesced(&AllocationTier::Full),
+            pools,
+        );
+        let asm = dir.join(format!("test-{case}.s"));
+        let clang = dir.join(format!("clang-{case}.o"));
+        fs::write(&asm, text).unwrap();
+        fs::write(dir.join(format!("keel-{case}.o")), &obj).unwrap();
+        let out = Command::new("clang")
+            .args(["-target", "x86_64-unknown-linux-gnu", "-c"])
+            .arg(&asm)
+            .arg("-o")
+            .arg(&clang)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            text_bytes(&obj, ".text"),
+            text_bytes(&fs::read(clang).unwrap(), ".text")
+        );
+    }
+}
+
 #[cfg(any(
     all(target_os = "linux", target_arch = "x86_64"),
     all(target_os = "macos", target_arch = "aarch64")
@@ -319,6 +470,10 @@ fn native_independent_c_oracle_arithmetic_normalization_compares_and_fault_order
             faults.push_str(&format!("{{void*p=m+n-{size};memset(p,0xa5,{size});assert(f_{tag}(p,0,({cty})-1)==o_{tag}(p,0,({cty})-1));pid_t c=fork();assert(c>=0);if(!c){{f_{tag}(m+n-{size}+1,0,3);_exit(0);}}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);}}\n"));
         }
     }
+    for kind in ["index", "base", "i8", "i16"] {
+        ir.push_str(&coalesced_source(kind));
+        ir.push('\n');
+    }
     // Lhs duplicates an address index. Its allocated register may also be d.
     ir.push_str(
         &source("i64", "isub", INDEX)
@@ -351,9 +506,9 @@ fn native_independent_c_oracle_arithmetic_normalization_compares_and_fault_order
     // Rematerialized stack address and literal lhs, with an allocated result
     // potentially overlapping the address. The address is used at the ALU.
     ir.push_str("func @stack(i64) -> i64 cc(c) {\n ss0 = stack_slot 8, align 8\nblock0(v0: i64):\n v1 = stack_addr ss0\n store v0,v1\n v2 = iconst.i64 123\n v3 = load.i64 v1\n v4 = isub v2,v3\n return v4\n}\n");
-    driver.push_str("extern uint64_t same_base(void*,uint64_t,uint64_t);extern uint64_t shared_address(void*,uint64_t,uint64_t);extern uint64_t same_index(void*,uint64_t,uint64_t);extern int64_t signed16(void*,uint64_t,uint16_t);extern uint64_t branch(void*,uint32_t);extern uint32_t ordered(void*,void*,uint32_t);extern uint64_t stack(uint64_t);\nint main(void){struct rlimit lim={0,0};assert(!setrlimit(RLIMIT_CORE,&lim));\n#ifdef __linux__\nassert(!prctl(PR_SET_DUMPABLE,0));\n#endif\nuint64_t v[]={0,1,0x7f,0x80,0x7fff,0x8000,UINT64_C(0x7fffffff),UINT64_C(0x80000000),UINT64_C(0xffffffff),UINT64_C(0x7fffffffffffffff),UINT64_C(0x8000000000000000),UINT64_MAX};unsigned char buf[80];\n");
+    driver.push_str("extern uint64_t coalesce_index(uint64_t,void*);extern uint64_t coalesce_base(uint64_t,uint64_t);extern uint64_t coalesce_i8(uint8_t,void*,uint64_t);extern uint64_t coalesce_i16(uint16_t,void*,uint64_t);extern uint64_t same_base(void*,uint64_t,uint64_t);extern uint64_t shared_address(void*,uint64_t,uint64_t);extern uint64_t same_index(void*,uint64_t,uint64_t);extern int64_t signed16(void*,uint64_t,uint16_t);extern uint64_t branch(void*,uint32_t);extern uint32_t ordered(void*,void*,uint32_t);extern uint64_t stack(uint64_t);\nint main(void){struct rlimit lim={0,0};assert(!setrlimit(RLIMIT_CORE,&lim));\n#ifdef __linux__\nassert(!prctl(PR_SET_DUMPABLE,0));\n#endif\nuint64_t v[]={0,1,0x7f,0x80,0x7fff,0x8000,UINT64_C(0x7fffffff),UINT64_C(0x80000000),UINT64_C(0xffffffff),UINT64_C(0x7fffffffffffffff),UINT64_C(0x8000000000000000),UINT64_MAX};unsigned char buf[80];\n");
     driver.push_str(&checks);
-    driver.push_str("for(unsigned a=0;a<12;a++){assert(stack(v[a])==123-v[a]);for(unsigned b=0;b<12;b++){uint16_t y=(uint16_t)v[a];memcpy(buf+8,&y,2);assert(signed16(buf,0,(uint16_t)v[b])==(int16_t)((uint16_t)v[b]-y));uint32_t z=(uint32_t)v[a];memcpy(buf,&z,4);assert(branch(buf,(uint32_t)v[b])==((int32_t)v[b]<(int32_t)z?17:91));}for(int j=-1;j<=1;j++){uint64_t i=(uint64_t)(int64_t)j;memcpy(buf+32+j*8,&v[a],8);assert(same_index(buf+32,i,0)==i-v[a]+i);assert(same_base(buf+32,i,0)==(uintptr_t)(buf+32)-v[a]+i);uint64_t x=v[a]^UINT64_C(0xfedcba9876543210);assert(shared_address(buf+32,i,x)==x-v[a]+i);uint64_t stored;memcpy(&stored,buf+32+j*8,8);assert(stored==x-v[a]);}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);assert(!mprotect(m+n,n,PROT_NONE));\n");
+    driver.push_str("for(unsigned a=0;a<12;a++){assert(stack(v[a])==123-v[a]);for(unsigned b=0;b<12;b++){uint16_t y=(uint16_t)v[a];memcpy(buf+8,&y,2);assert(signed16(buf,0,(uint16_t)v[b])==(int16_t)((uint16_t)v[b]-y));uint32_t z=(uint32_t)v[a];memcpy(buf,&z,4);assert(branch(buf,(uint32_t)v[b])==((int32_t)v[b]<(int32_t)z?17:91));}for(int j=-1;j<=1;j++){uint64_t i=(uint64_t)(int64_t)j;memcpy(buf+32+j*8,&v[a],8);assert(coalesce_index(i,buf+32)==i-v[a]);assert(coalesce_base((uintptr_t)(buf+32),i)==(uintptr_t)(buf+32)-v[a]);assert(coalesce_i8((uint8_t)v[(a+1)%12],buf+32,i)==(uint8_t)((uint8_t)v[(a+1)%12]-(uint8_t)v[a]));assert(coalesce_i16((uint16_t)v[(a+1)%12],buf+32,i)==(uint16_t)((uint16_t)v[(a+1)%12]-(uint16_t)v[a]));assert(same_index(buf+32,i,0)==i-v[a]+i);assert(same_base(buf+32,i,0)==(uintptr_t)(buf+32)-v[a]+i);uint64_t x=v[a]^UINT64_C(0xfedcba9876543210);assert(shared_address(buf+32,i,x)==x-v[a]+i);uint64_t stored;memcpy(&stored,buf+32+j*8,8);assert(stored==x-v[a]);}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);assert(!mprotect(m+n,n,PROT_NONE));\n");
     driver.push_str(&faults);
     driver.push_str("{uint32_t*mark=(uint32_t*)m;*mark=0;pid_t c=fork();assert(c>=0);if(!c){ordered(m+n,mark,0);_exit(0);}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);assert(*mark==17);}assert(!munmap(m,2*n));return 0;}\n");
     fs::write(dir.join("oracle.c"), oracle).unwrap();

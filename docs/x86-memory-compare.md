@@ -42,9 +42,13 @@ the low IR-width bits.
 
 The selected ALU publishes its lhs and every selected address leaf before
 allocation, preserving duplicate occurrences when lhs also supplies the index.
-Its accumulator uses reserved RAX; only after the memory operation does it copy
-to the allocated destination. Thus a destination overlapping an address leaf
-cannot destroy the address before the read. This holds for Fast/Full allocation,
+When result and lhs coalesce to the same register, that register is the ALU
+accumulator. Memory address reloads touch only reserved RCX/RDX; the ALU reads
+all address inputs before writing its result, so a coalesced lhs may also supply
+an address leaf. Otherwise the accumulator uses reserved RAX and copies to the
+allocated destination only after the memory operation. Thus a distinct destination
+overlapping an address leaf cannot destroy the address before the read. Narrow
+normalization uses the actual accumulator. This holds for Fast/Full allocation,
 forced spills, and experimental rematerialization. Existing larger tree covers
 retain precedence. Trees disabled, unsupported widths, debug functions, or any
 intervening instruction retain the existing load and arithmetic lowering.
@@ -64,8 +68,8 @@ folding.
 
 Both address leaves are allocation operands at the memory consumer, including
 when that consumer becomes a comparison or fused branch. Indexed address reloads
-use reserved RCX and RDX separately; stores and comparisons can retain their
-integer data, ALU accumulator, or compare left operand in RAX. The backend validates that allocation pools
+use reserved RCX and RDX separately; integer store data, ALU accumulators, and
+compare left operands remain in RAX or allocated registers. The backend validates that allocation pools
 exclude these scratch registers, and rematerialization writes only its requested
 scratch. A load destination can overlap either allocated address leaf because
 the memory instruction reads its address before writing the result.

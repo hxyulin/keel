@@ -2474,11 +2474,14 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(args[0]);
         let a = self.use_reg(args[0], S0);
         if let Some(&addr) = self.selection.binary_memory.get(&inst) {
-            // Prepare the accumulator before mem reloads its distinct S1/S2
-            // leaves. Never write d until the access: d may alias either leaf,
-            // including when lhs and an address leaf are the same SSA value.
-            if a != S0 {
-                self.emit(Opcode::Mov, [asm_arg(&r64(S0)), asm_arg(&r64(a))]);
+            // A coalesced lhs already holds the accumulator. mem only reloads
+            // S1/S2, and the ALU reads the address before writing its result,
+            // so d == a is safe even when lhs also supplies an address leaf.
+            // Otherwise preserve the conservative S0/late-copy path: writing
+            // a distinct d early could destroy an allocated address leaf.
+            let accumulator = if d == a { a } else { S0 };
+            if a != accumulator {
+                self.emit(Opcode::Mov, [asm_arg(&r64(accumulator)), asm_arg(&r64(a))]);
             }
             let at = self.mem(addr, S1, ty);
             let mnemonic = match op {
@@ -2490,14 +2493,17 @@ impl<'a> FunctionCompiler<'a> {
                 BinaryOp::Imul => Opcode::Imul,
                 _ => unreachable!("selected integer memory RHS"),
             };
-            self.emit(mnemonic, [asm_arg(&reg(S0, ty)), asm_arg(&at)]);
+            self.emit(mnemonic, [asm_arg(&reg(accumulator, ty)), asm_arg(&at)]);
             // IR narrow arithmetic is modular. Normalize the partial-register
             // result explicitly before any subsequent extension or spill.
             if matches!(ty, Type::I8 | Type::I16) {
-                self.emit(Opcode::Movzx, [asm_arg(&r32(S0)), asm_arg(&reg(S0, ty))]);
+                self.emit(
+                    Opcode::Movzx,
+                    [asm_arg(&r32(accumulator)), asm_arg(&reg(accumulator, ty))],
+                );
             }
-            if d != S0 {
-                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S0))]);
+            if d != accumulator {
+                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(accumulator))]);
             }
             return;
         }
@@ -3770,12 +3776,12 @@ impl<'a> FunctionCompiler<'a> {
             .indexed_addresses
             .get(&self.func.resolve(addr))
         {
-            // All mem callers preserve at most S0 (integer data, ALU or CMP
-            // lhs). S1/S2 are reserved, never allocation destinations, and
-            // use_reg/rematerialize write only their requested scratch. Keep
-            // the reloads distinct even when both leaves spill. The memory
-            // instruction reads both leaves before writing a load result,
-            // so an allocated destination may overlap either leaf.
+            // Store/CMP data and ALU accumulators stay in S0 or allocated
+            // registers. S1/S2 are reserved, never allocation destinations,
+            // and use_reg/rematerialize write only their requested scratch.
+            // Keep reloads distinct even when both leaves spill. The memory
+            // instruction reads both leaves before writing a load/ALU result,
+            // so a coalesced lhs/destination may also supply an address leaf.
             let base = self.use_reg(address.base, S1);
             let index = self.use_reg(address.index, S2);
             return sized(
