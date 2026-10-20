@@ -55,8 +55,10 @@ order is: correctness gate, then compile timing, then exploratory runtime.
 - Calling convention: `apple_aarch64`.
 - Explicit settings: `opt_level`, `is_pic=true` (GOT access for
   non-colocated symbols), `unwind_info=false` and `enable_verifier`.
-  - Native Keel objects also carry no unwind info, and cranelift-object
-    0.136 cannot write Mach-O unwind info.
+  - Native Keel objects can carry `__compact_unwind` and `__eh_frame`;
+    this bridge emits neither. Compile time and object size therefore compare
+    the configured pipelines with different unwind services. They are not
+    equal-feature measurements.
   - All other shared and AArch64 flags are defaults. The defaults assume
     no LSE, PAuth or BTI, and keep backtracking register allocation.
 
