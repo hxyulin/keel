@@ -1,4 +1,5 @@
-//! Bounded direct-call inlining of private definitions. Templates are frozen at
+//! Bounded direct-call inlining of definitions with proven binding. Templates
+//! are frozen at
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
 //! cannot recursively reconsider cloned sites. The module budget is consumed in
 //! layout order. ABI by-value arguments get a fresh snapshot.
@@ -50,14 +51,40 @@ impl Pass for InlineAggregateReserve {
         false
     }
     fn run_module(&self, module: &mut Module) -> Option<bool> {
-        Some(run_observed_policy(module, None, true).changed)
+        Some(run_observed_policy(module, None, true, false).changed)
     }
     fn run_module_with_report(
         &self,
         module: &mut Module,
         sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
-        Some(run_observed_policy(module, Some(sites), true).changed)
+        Some(run_observed_policy(module, Some(sites), true, false).changed)
+    }
+}
+
+/// Explicit binding-aware integration. No tier schedules this pass. It shares
+/// ordinary inlining's legality, profitability, budgets and cloning machinery;
+/// only exported definitions with a producer binding promise gain admission.
+pub struct InlineNoninterposable;
+impl Pass for InlineNoninterposable {
+    fn name(&self) -> &'static str {
+        "inline-noninterposable"
+    }
+    fn description(&self) -> &'static str {
+        "inline bounded private or explicitly noninterposable direct-call functions"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(run_observed_policy(module, None, false, true).changed)
+    }
+    fn run_module_with_report(
+        &self,
+        module: &mut Module,
+        sites: &mut Vec<InlineSite>,
+    ) -> Option<bool> {
+        Some(run_observed_policy(module, Some(sites), false, true).changed)
     }
 }
 
@@ -153,8 +180,8 @@ fn profitability_reason(f: &Function) -> Option<&'static str> {
     }
 }
 
-fn eligibility_reason(f: &Function) -> Option<&'static str> {
-    if !f.local {
+fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'static str> {
+    if !f.local && !(admit_noninterposable && f.attrs.noninterposable) {
         return Some("public_definition");
     }
     if f.attrs.noinline {
@@ -319,13 +346,14 @@ fn recursive_members(graph: &[Vec<usize>]) -> Vec<bool> {
 }
 
 fn run_observed(module: &mut Module, sites: Option<&mut Vec<InlineSite>>) -> InlineReport {
-    run_observed_policy(module, sites, false)
+    run_observed_policy(module, sites, false, false)
 }
 
 fn run_observed_policy(
     module: &mut Module,
     mut sites: Option<&mut Vec<InlineSite>>,
     experimental: bool,
+    admit_noninterposable: bool,
 ) -> InlineReport {
     let recursive = recursive_definitions(module);
     let explicit_definitions = sites.as_ref().map(|_| {
@@ -342,7 +370,7 @@ fn run_observed_policy(
     let mut templates = HashMap::new();
     let mut rejected = HashMap::new();
     for (index, f) in module.functions.iter().enumerate() {
-        let legality = eligibility_reason(f);
+        let legality = eligibility_reason(f, admit_noninterposable);
         let profitability = if legality.is_none() {
             profitability_reason(f)
         } else {
@@ -829,7 +857,7 @@ mod report_tests {
             );
             let module = keel_ir::parse(&text).unwrap();
             assert_eq!(
-                eligibility_reason(&module.functions[0]),
+                eligibility_reason(&module.functions[0], false),
                 Some(expected),
                 "{text}"
             );
@@ -844,18 +872,21 @@ mod report_tests {
                 source.replace("local {", &format!("local {attrs} {{"))
             };
             let module = keel_ir::parse(&text).unwrap();
-            assert_eq!(eligibility_reason(&module.functions[0]), Some(expected));
+            assert_eq!(
+                eligibility_reason(&module.functions[0], false),
+                Some(expected)
+            );
         }
         let mut f = Function::new("empty", keel_ir::Signature::new(&[], &[]));
         f.local = true;
-        assert_eq!(eligibility_reason(&f), Some("callee_without_entry"));
+        assert_eq!(eligibility_reason(&f, false), Some("callee_without_entry"));
         let fields = vec!["i64"; 17].join(", ");
         let module = keel_ir::parse(&format!(
             "func @h(ptr byval {{{fields}}}) local {{\nblock0(v0: ptr):\n return\n}}"
         ))
         .unwrap();
         assert_eq!(
-            eligibility_reason(&module.functions[0]),
+            eligibility_reason(&module.functions[0], false),
             Some("byval_snapshot_size")
         );
         let mut module = keel_ir::parse(source).unwrap();
@@ -870,7 +901,7 @@ mod report_tests {
             }),
             args: vec![],
         };
-        assert_eq!(eligibility_reason(f), Some("callee_inline_asm"));
+        assert_eq!(eligibility_reason(f, false), Some("callee_inline_asm"));
         for indirect in [false, true] {
             let mut module = keel_ir::parse(source).unwrap();
             let f = &mut module.functions[0];
@@ -889,7 +920,10 @@ mod report_tests {
             };
             let inst = f.layout_insts().next().unwrap().1;
             *f.inst_data_mut(inst) = call;
-            assert_eq!(eligibility_reason(f), Some("callee_calls_returns_twice"));
+            assert_eq!(
+                eligibility_reason(f, false),
+                Some("callee_calls_returns_twice")
+            );
         }
     }
 }

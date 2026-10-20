@@ -234,6 +234,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_vectorize::FastLoopReduce,
     &inline::Inline,
     &inline::InlineAggregateReserve,
+    &inline::InlineNoninterposable,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

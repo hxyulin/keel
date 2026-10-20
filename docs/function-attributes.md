@@ -1,7 +1,7 @@
 # Function attributes
 
-`FunctionAttrs` carries `inlinehint`, `alwaysinline`, `noinline`, `noreturn`,
-and `nounwind` on IR definitions, external declarations, and each direct
+`FunctionAttrs` carries `noninterposable`, `inlinehint`, `alwaysinline`,
+`noinline`, `noreturn`, and `nounwind` on IR definitions, external declarations, and each direct
 callee record. These are separate from `Signature`: they do not participate
 in ABI or C function type compatibility. `returns_twice` retains its existing
 signature representation and behavior.
@@ -19,7 +19,7 @@ block0(v0: i32):
 }
 ```
 
-The printer uses the order `inlinehint alwaysinline noinline noreturn nounwind`.
+The printer uses the order `noninterposable inlinehint alwaysinline noinline noreturn nounwind`.
 The parser rejects duplicate and malformed tokens. The verifier rejects
 `alwaysinline` with `noinline`, and `noreturn` with `returns_twice`, on declarations,
 definitions and callee records. It requires direct callee attributes to agree
@@ -45,7 +45,8 @@ linkage is tracked independently and remains private. A definition declared only
 `inline` retains the existing private-copy emission behavior. Block-scope
 function declarations merge visibility/contracts but do not request a public
 definition. Inline policy does not change this determination; an externally emitted definition cannot pass the
-inliner's private-only boundary.
+ordinary inliner's private-only boundary. The explicit binding-aware integration
+is described below.
 
 GNU `always_inline`, `noinline`, `noreturn`, `nothrow`
 (including double-underscore spellings), and C `_Noreturn` map to their IR
@@ -148,8 +149,9 @@ as their single source of truth.
 
 ## Inliner policy and hard boundaries
 
-Only private, nonrecursive definitions and supported direct `call` sites are
-expanded. Public/interposable definitions, missing definitions, variadics,
+The ordinary `inline` pass expands only private, nonrecursive definitions and
+supported direct `call` sites. Public/interposable definitions, missing
+definitions, variadics,
 `returns_twice`, exception-handling bodies/callers, dynamic-frame intrinsics,
 inline assembly, tail-call sites, and other preexisting unsupported operations
 remain excluded. By-value parameters larger than 128 bytes remain unsupported.
@@ -222,3 +224,30 @@ Darwin's linker normally uses a two-level namespace, but supports
 Those different defaults do not establish a universal Keel frontend promise.
 Existing public definitions remain conservatively interposable on both targets;
 no new target configuration or CLI/library option is necessary.
+
+### Named binding-aware inliner integration
+
+`inline-noninterposable` admits private definitions and explicitly
+`noninterposable` public definitions. It uses the same cloning implementation,
+recursion rejection, ABI signature equality, `noinline` precedence, supported
+operations, byval snapshots, debug subtree handling, soft limits and hard budgets
+as `inline`. `alwaysinline` never supplies a binding proof or bypasses legality.
+The public body and its linkage remain intact, including when every direct call
+has been expanded. Calls and function addresses from other translation units can
+still reach the exported ABI entry. No alias/capture metadata is inferred or
+transferred onto the caller's parameters.
+
+This pass is registered by name and supports the normal optimization report's
+inline-site outcomes. It is absent from every tier preset, including Fast and
+Full. Neither `inline` nor `inline-aggregate-reserve` changes its private-only
+admission. A caller can explicitly schedule it before an existing tier pipeline;
+for a small CLI example:
+
+```sh
+keel cc -p inline-noninterposable,fast-cfg,fast-local,fast-cfg,dce,fast-loop-reduce source.c -o source.s
+```
+
+This removes the two per-element helper calls in `k_narrow` when its two exported
+helpers are explicitly marked. It does not provide mixed-width SIMD conversion
+support and does not establish any runtime speedup. Ordinary unmarked kernel
+sources retain their prior semantics and calls.
