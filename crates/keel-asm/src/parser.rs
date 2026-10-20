@@ -430,9 +430,18 @@ fn assemble_plain(
     features: crate::TargetFeatures,
 ) -> Result<(Assembly, Vec<InstructionLocation>), Error> {
     let mut previous = None;
+    // Populate only on a second pass: ordinary single-pass input retains no
+    // extra representation. Each entry packs a statement ordinal and a fixed
+    // instruction word into eight bytes. Symbolic instructions are excluded.
+    let mut fixed_words = Vec::new();
     for _ in 0..32 {
-        let (assembly, symbolic_leb, locations) =
-            assemble_pass(source, previous.as_ref(), metrics, features)?;
+        let (assembly, symbolic_leb, locations) = assemble_pass(
+            source,
+            previous.as_ref(),
+            metrics,
+            features,
+            &mut fixed_words,
+        )?;
         if !symbolic_leb {
             return Ok((assembly, locations));
         }
@@ -464,7 +473,10 @@ fn assemble_pass(
     previous: Option<&BTreeMap<String, data::Location>>,
     metrics: bool,
     features: crate::TargetFeatures,
+    fixed_words: &mut Vec<u64>,
 ) -> Result<(Assembly, bool, Vec<InstructionLocation>), Error> {
+    let record_words = previous.is_some() && fixed_words.is_empty();
+    let mut next_word = 0;
     let mut locations = Vec::new();
     // Declare scratch first so every collection (including nested owners) drops
     // before its backing arena, on success and on every early error return.
@@ -502,7 +514,7 @@ fn assemble_pass(
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
     let mut relocation_lines = BTreeMap::new();
-    for raw in source.lines(&arena) {
+    for (statement, raw) in source.lines(&arena).enumerate() {
         let (line, raw) = raw?;
         let err = |message| Error::new(line, message);
         let raw = match raw {
@@ -897,6 +909,30 @@ fn assemble_pass(
             {
                 return Err(err("duplicate symbol assignment".into()));
             }
+            continue;
+        }
+        if !record_words
+            && let Some(&cached) = fixed_words.get(next_word)
+            && cached >> 32 == statement as u64
+        {
+            next_word += 1;
+            // Layout may have moved since encoding. Keep the same executable
+            // section/alignment checks and final metric positions on replay.
+            if !data::is_code(&result, current)
+                || !data::position(&result, current).is_multiple_of(4)
+            {
+                return Err(err(
+                    "instructions require a four-byte-aligned executable section".into(),
+                ));
+            }
+            if metrics {
+                locations.push(InstructionLocation {
+                    section: current,
+                    line,
+                    offset: data::position(&result, current) as usize,
+                });
+            }
+            data::instruction(&mut result, current, &(cached as u32).to_le_bytes()).map_err(err)?;
             continue;
         }
         let (op, operands) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
@@ -1320,6 +1356,9 @@ fn assemble_pass(
                 None => instruction_with_features(op, &args, features).map_err(err)?,
             },
         };
+        if record_words && let Ok(statement) = u32::try_from(statement) {
+            fixed_words.push((u64::from(statement) << 32) | u64::from(word));
+        }
         data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
     }
     // Resolve assignments before instruction fixups so function aliases (including
@@ -1778,5 +1817,67 @@ fn native_expression(e: &keel_asm_ir::Expression) -> data::Expression<'_> {
         add: e.add.as_deref(),
         subtract: e.subtract.as_deref(),
         constant: e.constant,
+    }
+}
+
+#[cfg(test)]
+mod layout_replay_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_words_match_fresh_encoding_on_every_symbolic_layout_pass() {
+        let source = ".text\n.globl _f\n_f: mov x0, #7\nLstart: add x0, x0, #1\n\
+            b Lend\nadr x1, Lend\nadrp x2, _external@PAGE\n\
+            ldr x2, [x2, _external@PAGEOFF]\nLend: ret\n\
+            .section __TEXT,__cold,regular,pure_instructions\n\
+            /* across\nlines */ Lcold: fadd d0, d0, d1\nret\n\
+            .section __DWARF,__debug_info,regular,debug\n\
+            Lbase: .uleb128 Lfinish-Lbase\n.space 127\n\
+            .uleb128 Lfinish-Lbase\nLfinish: .sleb128 Lbase-Lfinish\n\
+            .quad Lend-Lstart\n.text\n.p2align 2\nnop\n";
+        let input = program::Input::Text(source);
+        let mut previous = None;
+        let mut words = Vec::new();
+        let mut passes = 0;
+        for _ in 0..32 {
+            let cached = assemble_pass(
+                input,
+                previous.as_ref(),
+                true,
+                crate::TargetFeatures::default(),
+                &mut words,
+            )
+            .unwrap();
+            let fresh = assemble_pass(
+                input,
+                previous.as_ref(),
+                true,
+                crate::TargetFeatures::default(),
+                &mut Vec::new(),
+            )
+            .unwrap();
+            assert_eq!(cached, fresh);
+            passes += 1;
+            let symbols: BTreeMap<_, _> = cached
+                .0
+                .symbols
+                .iter()
+                .filter_map(|s| {
+                    Some((
+                        s.name.clone(),
+                        data::Location {
+                            section: s.section?,
+                            offset: s.offset?,
+                        },
+                    ))
+                })
+                .collect();
+            if previous.as_ref() == Some(&symbols) {
+                break;
+            }
+            previous = Some(symbols);
+        }
+        assert!(passes >= 3);
+        assert_eq!(words.len(), 6); // branches, ADR and symbol relocations excluded
     }
 }
