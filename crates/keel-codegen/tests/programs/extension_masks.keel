@@ -1,0 +1,45 @@
+; expect: exit 0
+; opt-passes: instcombine,dce,gcm
+func @mask_uext32(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i32 v0
+    v2 = uext.i64 v1
+    v3 = iconst.i64 4294967295
+    v4 = and v3, v2
+    return v4
+}
+func @mask_sext32(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i32 v0
+    v2 = iconst.i32 2147483647
+    v3 = and v2, v1
+    v4 = sext.i64 v3
+    return v4
+}
+func @mask_sign32(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i32 v0
+    v2 = iconst.i32 -2147483648
+    v3 = and v1, v2
+    v4 = sext.i64 v3
+    return v4
+}
+func @mask_wide8(i64) -> i64 {
+block0(v0: i64):
+    v1 = trunc.i8 v0
+    v2 = uext.i128 v1
+    v3 = iconst.i128 255
+    v4 = and v2, v3
+    v5 = trunc.i64 v4
+    return v5
+}
+func @mask_wide_sign(i64) -> i64 {
+block0(v0: i64):
+    v1 = iconst.i64 9223372036854775807
+    v2 = and v0, v1
+    v3 = sext.i128 v2
+    v4 = iconst.i64 64
+    v5 = ushr v3, v4
+    v6 = trunc.i64 v5
+    return v6
+}

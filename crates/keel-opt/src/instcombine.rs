@@ -11,7 +11,7 @@
 //! constants, and turn tests adjacent to a range bound into equality. Shift
 //! amounts are reduced modulo the width, as the IR defines. These rules and
 //! single-use constant grouping (`iadd`/`isub`/`ptradd`, ...) run only in the
-//! worklist; the bounded Fast visit keeps the original local rules.
+//! worklist; the bounded Fast visit also handles literal extension masks.
 
 mod constant_division;
 
@@ -55,8 +55,9 @@ fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
 /// Use information for profitability gates only. User lists can overcount
 /// (stale or removed users) but never undercount, so a shared value is never
 /// mistaken for an unshared one. Only the worklist (`Users`) enables the
-/// width-aware rules: in Fast they cost about 3% more optimizer instructions
-/// on the 44-file C corpus for a 0.2% object-size reduction (2026-10-19).
+/// recursive known-bit rules: in Fast they cost about 3% more optimizer
+/// instructions on the 44-file C corpus for a 0.2% object-size reduction
+/// (2026-10-19).
 #[derive(Clone, Copy)]
 enum Uses<'a> {
     /// The worklist's user lists. Also enables reciprocal division expansion.
@@ -619,6 +620,14 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
 }
 
 fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
+    let result = *func.inst_results(inst).first()?;
+    // A stale layout instruction can remain after its result was aliased.
+    // Never let a later fold overwrite that existing replacement.
+    if func.inst_results(inst).len() == 1
+        && !matches!(func.value_def(result), ValueDef::Result(owner, 0) if owner == inst)
+    {
+        return None;
+    }
     let mut data = func.inst_data(inst).clone();
     crate::canonicalize::normalize(func, &mut data);
     let canonicalized = data != *func.inst_data(inst);
@@ -626,10 +635,9 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
         return Some(Fold::Multi(constants));
     }
-    let result = *func.inst_results(inst).first()?;
     let ty = func.value_type(result);
-    // Width-aware rules, reassociation and division expansion are measured
-    // costs (see `Uses`); Fast keeps only the original local rules.
+    // Recursive known-bit rules, reassociation and division expansion are
+    // measured costs (see `Uses`); Fast keeps only the local rules.
     let full = matches!(uses, Uses::Users(_));
     if let InstData::Select { args: [cond, a, b] } = data
         && let Some(fold) = select(func, cond, a, b, ty, full)
@@ -687,6 +695,30 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
                 }
                 BinaryOp::Ptradd if y == Some(0) => return Some(Fold::Value(a)),
                 _ => {}
+            }
+            // A widening zero extension has no possible bits above its source
+            // width. The literal's upper bits do not matter to this identity.
+            if op == BinaryOp::And && ty.is_int() {
+                for (extended, literal) in [(a, b), (b, a)] {
+                    if let Some(source) = widening_source(func, extended)
+                        && let ValueDef::Result(def, 0) = func.value_def(func.resolve(extended))
+                        && matches!(
+                            func.inst_data(def),
+                            InstData::Convert {
+                                op: ConvertOp::Uext,
+                                ..
+                            }
+                        )
+                        && func.value_type(extended) == ty
+                        && func.value_type(literal) == ty
+                        && bits(func, literal).is_some_and(|m| {
+                            let source_mask = mask(func.value_type(source));
+                            m & source_mask == source_mask
+                        })
+                    {
+                        return Some(Fold::Value(extended));
+                    }
+                }
             }
             if let Some(fold) = boolean(func, op, a, b, ty) {
                 return Some(fold);
@@ -762,6 +794,27 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
             }
         }
         InstData::Convert { op, ty, arg } => {
+            let from = func.value_type(arg);
+            if op == ConvertOp::Sext
+                && from.is_int()
+                && ty.is_int()
+                && from.bytes() < ty.bytes()
+                && let Some((BinaryOp::And, args)) = binary(func, arg)
+            {
+                // Test the sign bit at the AND's width, before widening. No
+                // literal is constructed (including for an i128 destination).
+                let sign = 1u128 << (8 * from.bytes().unwrap() - 1);
+                if args.into_iter().any(|literal| {
+                    func.value_type(literal) == from
+                        && bits(func, literal).is_some_and(|m| m & sign == 0)
+                }) {
+                    return Some(Fold::Data(InstData::Convert {
+                        op: ConvertOp::Uext,
+                        ty,
+                        arg,
+                    }));
+                }
+            }
             if matches!(op, ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc)
                 && ty == func.value_type(arg)
             {
@@ -1027,7 +1080,8 @@ pub fn run(func: &mut Function) -> bool {
 }
 
 /// One visit, with no user graph, reassociation, reciprocal division expansion,
-/// width-aware rules, or consumer requeue. Used by the bounded Fast pipeline.
+/// recursive known-bit rules, or consumer requeue. Used by the bounded Fast
+/// pipeline.
 pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
     if func.inst_results(inst).is_empty() {
         return false;

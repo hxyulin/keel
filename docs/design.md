@@ -873,6 +873,19 @@ ratio 1.011 versus the historical Full pipeline; 38/44 translation units
 change assembly. Raw samples and intervals are in
 `instcombine-aarch64-2026-10-15.json`.
 
+Literal extension-mask rules also run in the bounded Fast visit: an AND
+whose literal covers every source bit of a widening zero extension is
+redundant, and sign extension of an AND with its source sign bit cleared
+becomes zero extension. These rules resolve aliases, inspect the mask at
+its own width, and need no new integer literal, including for i128 results.
+Full already removes redundant zero-extension masks through known bits.
+Combining skips single-result producers whose result has already been
+aliased, preserving the replacement while dead code removal cleans up the
+stale instruction. Exhaustive i8 mask/input checks and widening-pair,
+overflow-flag, alias, and native regressions cover these rules. The pipeline
+and tier defaults are unchanged; Full retains three rounds. No performance
+measurement is claimed for these local simplifications.
+
 The final default-pipeline confirmation reproduces the runtime improvement
 (2.7% geometric mean), with 1.5% extra compiler cost and 25,052 bytes less
 aggregate text (0.85%). The `-O` and explicit combining-preset assembly match
