@@ -89,6 +89,145 @@ fn target_cost_gate_avoids_scalarized_integer_multiply() {
     let source = kernel(Type::I64, Type::I64, "imul", false);
     assert_eq!(packed(&optimize(&source, VectorTarget::Aarch64Neon)), 0);
 }
+
+fn sum_loop(ty: &str) -> String {
+    let (bytes, mask) = if ty == "i32" {
+        (4, 0xff00ff)
+    } else {
+        (8, 0xff00ff00ff00ffi64)
+    };
+    format!(
+        "func @sum(ptr,i64,{ty}) -> {ty} {{
+block0(v0: ptr,v1: i64,v2: {ty}):
+ v3 = iconst.i64 0
+ jump block1(v3,v2)
+block1(v4: i64,v5: {ty}):
+ v6 = icmp.ult v4,v1
+ brif v6,block2,block3
+block2:
+ v7 = iconst.i64 {bytes}
+ v8 = imul v4,v7
+ v9 = ptradd v0,v8
+ v10 = load.{ty} v9
+ v11 = iconst.{ty} {mask}
+ v12 = and v10,v11
+ v13 = iadd v5,v12
+ v14 = iconst.i64 1
+ v15 = iadd v4,v14
+ jump block1(v15,v13)
+block3:
+ return v5
+}}"
+    )
+}
+
+fn reduce_sum(source: &str, target: VectorTarget) -> keel_ir::Module {
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], target).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    m
+}
+
+#[test]
+fn read_only_wrapping_integer_sums_vectorize_and_keep_seed_once() {
+    for ty in ["i32", "i64"] {
+        for target in [
+            VectorTarget::Portable,
+            VectorTarget::Aarch64Neon,
+            VectorTarget::X86Sse2,
+        ] {
+            for commute in [false, true] {
+                let mut src = sum_loop(ty);
+                if commute {
+                    src = src.replace("iadd v5,v12", "iadd v12,v5");
+                }
+                assert_eq!(packed(&optimize(&src, target)), 0);
+                let m = reduce_sum(&src, target);
+                assert!(packed(&m) >= 2, "{m}");
+                assert!(m.to_string().contains("vextract"), "{m}");
+                let mut twice = m.clone();
+                keel_opt::run_passes_for_target(&mut twice, &["loop-reduce"], target).unwrap();
+                assert_eq!(m.to_string(), twice.to_string());
+            }
+        }
+    }
+}
+
+#[test]
+fn sum_rejects_extra_effects_recurrences_nonunit_steps_and_float_reassociation() {
+    let original = sum_loop("i64");
+    for source in [
+        original.replace("load.i64", "load.i64 volatile"),
+        original.replace("v13 = iadd v5,v12", "v13 = isub v5,v12"),
+        original.replace("v14 = iconst.i64 1", "v14 = iconst.i64 2"),
+        original.replace("v12 = and v10,v11", "v12 = and v10,v5"),
+        original.replace("v13 = iadd v5,v12", "store v12,v0\n v13 = iadd v5,v12"),
+        format!(
+            "decl @effect()\n{}",
+            original.replace("v13 = iadd", "call @effect()\n v13 = iadd")
+        ),
+        original
+            .replace("v3 = iconst.i64 0", "v3 = iconst.i64 -1")
+            .replace("icmp.ult", "icmp.slt"),
+        original
+            .replace("v13 = iadd v5,v12", "v13 = fadd v5,v12")
+            .replace(
+                "v11 = iconst.i64 71777214294589695\n v12 = and v10,v11",
+                "v12 = fconst.f64 1.0",
+            )
+            .replace("v2: i64", "v2: f64")
+            .replace("v5: i64", "v5: f64")
+            .replace("ptr,i64,i64) -> i64", "ptr,i64,f64) -> f64")
+            .replace("load.i64", "load.f64"),
+    ] {
+        assert_eq!(
+            packed(&reduce_sum(&source, VectorTarget::Aarch64Neon)),
+            0,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn sum_preserves_fault_order_unless_other_reads_explicitly_cannot_fault() {
+    let src = include_str!("../../keel-codegen/tests/fixtures/reduction_fault_order.ir");
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::Aarch64Neon,
+        VectorTarget::X86Sse2,
+    ] {
+        assert_eq!(packed(&reduce_sum(src, target)), 0);
+        // A promise on B lets A remain the only possible faulting stream;
+        // a promise on A likewise leaves only B. Do not infer either promise.
+        for marked in [
+            src.replace("load.i32 v13", "load.i32 notrap v13"),
+            src.replace("load.i32 v20", "load.i32 notrap v20"),
+        ] {
+            assert!(packed(&reduce_sum(&marked, target)) > 0);
+        }
+    }
+}
+
+#[test]
+fn dead_nontrapping_read_cleanup_unlocks_vectorization_without_relaxing_faults() {
+    let original = kernel(Type::I32, Type::I64, "iadd", false);
+    for (flags, vectorizes) in [("notrap", true), ("", false), ("volatile notrap", false)] {
+        let source = original.replace(
+            "store v17,v12",
+            &format!("store v17,v12\n v50 = load.i32 {flags} v13\n v51 = iadd v50,v50"),
+        );
+        let mut m = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes_for_target(
+            &mut m,
+            &["dce", "loop-vectorize"],
+            VectorTarget::Aarch64Neon,
+        )
+        .unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert_eq!(packed(&m) != 0, vectorizes, "{source}");
+    }
+}
 #[test]
 fn rejects_volatile_calls_nonunit_strides_offsets_reductions_and_escaping_values() {
     let source = kernel(Type::I32, Type::I64, "iadd", false);

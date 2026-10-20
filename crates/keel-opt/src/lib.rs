@@ -206,6 +206,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_memory::LoopMemory,
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
+    &loop_vectorize::LoopReduce,
     &inline::Inline,
     &inline::InlineAggregateReserve,
 ];

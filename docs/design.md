@@ -209,7 +209,10 @@ they do not wrap at 65,536 entries.
   memory. It can defer copying across expressions proven free of writes and
   volatile accesses. A regression previously returned 9 instead of 3 after a
   later argument mutated the assignment destination.
-- Loads/stores remain pinned to the memory-unaware GVN/DCE/GCM passes.
+- Loads/stores remain pinned to the memory-unaware GVN/GCM passes. DCE can
+  discard an unused ordinary load only when it explicitly promises `notrap`;
+  volatile and potentially faulting accesses are retained. Live `notrap`
+  loads still retain their memory order.
   The opt-in `memory-forward` pass uses explicit effects to eliminate
   redundant ordinary loads without moving accesses or removing the first
   potentially faulting access. Alias classes and call
@@ -767,9 +770,10 @@ analyses they need; there is no analysis cache yet.
 | `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
-| `dce` | mark from pinned instructions, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
+| `dce` | mark from pinned instructions except unused ordinary `notrap` reads, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
-| `loop-vectorize` | guarded contiguous counted loops with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
+| `loop-vectorize` | guarded contiguous counted maps with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
+| `loop-reduce` (opt-in) | experimental read-only wrapping i32/i64 sum reductions with a vector accumulator and scalar tail; no floating reassociation |
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.

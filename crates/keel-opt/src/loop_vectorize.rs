@@ -2,6 +2,7 @@
 //!
 //! Recognizes unit-stride, two-block counted loops with invariant starts, one store,
 //! a uniform element type and no carried values except the induction variable.
+//! The separate opt-in loop-reduce pass handles read-only wrapping integer sums.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
@@ -59,6 +60,22 @@ impl crate::Pass for LoopVectorize {
     }
 }
 
+pub(crate) struct LoopReduce;
+impl crate::Pass for LoopReduce {
+    fn name(&self) -> &'static str {
+        "loop-reduce"
+    }
+    fn description(&self) -> &'static str {
+        "experimental vectorization of read-only wrapping i32/i64 sum loops"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        run_candidates(f, VectorTarget::Portable, true)
+    }
+    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+        run_candidates(f, target, true)
+    }
+}
+
 struct Candidate {
     header: Block,
     body: Block,
@@ -67,11 +84,20 @@ struct Candidate {
     start: Value,
     bound: Value,
     signed: bool,
-    store: Inst,
+    output: Output,
     shape: VectorType,
     // Original scalar stream address -> invariant base pointer.
     addresses: HashMap<Value, Value>,
     vectors: HashSet<Value>,
+}
+#[derive(Clone, Copy)]
+enum Output {
+    Store(Inst),
+    Sum {
+        accumulator: Value,
+        initial: Value,
+        update: Value,
+    },
 }
 fn def(f: &Function, v: Value) -> Option<Inst> {
     match f.value_def(f.resolve(v)) {
@@ -209,10 +235,11 @@ fn analyze(
     target: VectorTarget,
     analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
 ) -> Option<Candidate> {
-    let [iv] = *f.block_params(header) else {
+    let params = f.block_params(header);
+    if !(1..=2).contains(&params.len()) || params.iter().any(|&v| f.resolve(v) != v) {
         return None;
-    };
-    let iv = f.resolve(iv);
+    }
+    let iv = params[0];
     if !matches!(f.value_type(iv), Type::I32 | Type::I64) {
         return None;
     }
@@ -274,15 +301,19 @@ fn analyze(
     let D::Jump { dest } = f.inst_data(pre_jump) else {
         return None;
     };
-    if dest.block != header || dest.args.len() != 1 || !invariant(f, dom, pre, dest.args[0]) {
+    if dest.block != header
+        || dest.args.len() != params.len()
+        || !dest.args.iter().all(|&v| invariant(f, dom, pre, v))
+    {
         return None;
     }
     let start = f.resolve(dest.args[0]);
+    let initial = dest.args.get(1).copied().map(|v| f.resolve(v));
     let back = *f.block_insts(body).last()?;
     let D::Jump { dest } = f.inst_data(back) else {
         return None;
     };
-    if dest.block != header || dest.args.len() != 1 {
+    if dest.block != header || dest.args.len() != params.len() {
         return None;
     }
     let step = def(f, dest.args[0])?;
@@ -300,15 +331,44 @@ fn analyze(
         .copied()
         .filter(|&i| matches!(f.inst_data(i), D::Store { .. }))
         .collect();
-    let [store] = *stores.as_slice() else {
-        return None;
+    let (output, value, root) = match (stores.as_slice(), params) {
+        ([store], [_]) => {
+            let D::Store { flags, value, .. } = *f.inst_data(*store) else {
+                unreachable!()
+            };
+            if flags.volatile {
+                return None;
+            }
+            (Output::Store(*store), value, *store)
+        }
+        ([], [_, accumulator]) if matches!(f.value_type(*accumulator), Type::I32 | Type::I64) => {
+            let update = f.resolve(dest.args[1]);
+            let root = def(f, update)?;
+            if f.inst_block(root) != body {
+                return None;
+            }
+            let D::Binary { op: B::Iadd, args } = *f.inst_data(root) else {
+                return None;
+            };
+            let value = if f.resolve(args[0]) == *accumulator {
+                args[1]
+            } else if f.resolve(args[1]) == *accumulator {
+                args[0]
+            } else {
+                return None;
+            };
+            (
+                Output::Sum {
+                    accumulator: *accumulator,
+                    initial: initial?,
+                    update,
+                },
+                value,
+                root,
+            )
+        }
+        _ => return None,
     };
-    let D::Store { flags, value, addr } = *f.inst_data(store) else {
-        return None;
-    };
-    if flags.volatile {
-        return None;
-    }
     let shape = VectorType::ALL
         .into_iter()
         .find(|s| s.lane_type() == f.value_type(value))?;
@@ -344,7 +404,7 @@ fn analyze(
         start,
         bound: f.resolve(bound),
         signed,
-        store,
+        output,
         shape,
         addresses: HashMap::new(),
         vectors: HashSet::new(),
@@ -354,10 +414,35 @@ fn analyze(
         dom,
         c,
         target,
-        allowed: HashSet::from([back, step, store]),
+        allowed: HashSet::from([back, step, root]),
     };
-    a.address(addr)?;
+    if let Output::Store(store) = output {
+        let D::Store { addr, .. } = *f.inst_data(store) else {
+            unreachable!()
+        };
+        a.address(addr)?;
+    }
     a.expression(value, 0)?;
+    if let Output::Sum { update, .. } = output {
+        a.c.vectors.insert(update);
+        // Widening A then B across several iterations could fault at A[1]
+        // before the scalar loop's B[0]. With at most one potentially faulting
+        // read, and no writes/other traps, lane grouping preserves first-fault
+        // order. Distinct streams require explicit nontrapping promises.
+        let trapping_reads = a
+            .allowed
+            .iter()
+            .filter(|&&i| matches!(f.inst_data(i), D::Load { flags, .. } if !flags.notrap))
+            .count();
+        if trapping_reads > 1 {
+            return None;
+        }
+        // No point vectorizing an entirely invariant expression here. Keep
+        // this initial reduction support tied to actual contiguous reads.
+        if a.c.addresses.is_empty() {
+            return None;
+        }
+    }
     if a.c
         .addresses
         .values()
@@ -369,7 +454,7 @@ fn analyze(
     {
         return None;
     }
-    // No hidden side effects, loads, reductions, induction uses as data, or
+    // No hidden side effects, loads, extra recurrences, induction uses as data, or
     // values escaping to the scalar tail. Literals used for address/step are OK.
     for &i in f.block_insts(body) {
         if !a.allowed.contains(&i) && !matches!(f.inst_data(i), D::Iconst { .. } | D::Fconst { .. })
@@ -509,10 +594,15 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         safe = bin(f, guard, B::And, safe, fits);
         len
     };
-    let D::Store { addr, .. } = *f.inst_data(c.store) else {
-        unreachable!()
+    let dst = match c.output {
+        Output::Store(store) => {
+            let D::Store { addr, .. } = *f.inst_data(store) else {
+                unreachable!()
+            };
+            Some(c.addresses[&f.resolve(addr)])
+        }
+        Output::Sum { .. } => None,
     };
-    let dst = c.addresses[&f.resolve(addr)];
     let mut bases: Vec<_> = c.addresses.values().copied().collect();
     bases.sort();
     bases.dedup();
@@ -533,6 +623,9 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         ints.insert(base, p);
     }
     for (&base, &p) in &ints {
+        let Some(dst) = dst else {
+            break;
+        };
         if base == dst {
             continue;
         }
@@ -546,7 +639,11 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         let ok = bin(f, guard, B::Or, same, disjoint);
         safe = bin(f, guard, B::And, safe, ok);
     }
-    branch(f, guard, safe, setup, vec![], c.header, vec![c.start]);
+    let mut scalar_args = vec![c.start];
+    if let Output::Sum { initial, .. } = c.output {
+        scalar_args.push(initial);
+    }
+    branch(f, guard, safe, setup, vec![], c.header, scalar_args);
     let round = iconst(f, setup, ty, i64::from(lanes.trailing_zeros()));
     let groups = bin(f, setup, B::Ushr, count, round);
     let length = bin(f, setup, B::Shl, groups, round);
@@ -556,6 +653,13 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         bin(f, setup, B::Iadd, c.start, length)
     };
     let mut mapping = HashMap::from([(c.iv, vi)]);
+    let vector_sum = if let Output::Sum { accumulator, .. } = c.output {
+        let sum = f.append_block_param(vector, Type::Vector(c.shape));
+        mapping.insert(accumulator, sum);
+        Some(sum)
+    } else {
+        None
+    };
     // Broadcast invariants once, outside the vector loop. Local literals are
     // cloned here too; the scalar body retains its original definitions.
     let mut values: Vec<_> = c.vectors.iter().copied().collect();
@@ -578,7 +682,20 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         );
         mapping.insert(v, splat);
     }
-    jump(f, setup, vector, vec![c.start]);
+    let mut vector_args = vec![c.start];
+    if vector_sum.is_some() {
+        let zero = iconst(f, setup, c.shape.lane_type(), 0);
+        let zero = emit(
+            f,
+            setup,
+            D::VectorSplat {
+                ty: Type::Vector(c.shape),
+                arg: zero,
+            },
+        );
+        vector_args.push(zero);
+    }
+    jump(f, setup, vector, vector_args);
     // Rebuild addresses from the vector induction, avoiding scalar address
     // conversion/sign-extension subtleties after grouping iterations.
     let index = if ty == Type::I64 {
@@ -649,7 +766,24 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
     let step = iconst(f, vector, ty, lanes);
     let next = bin(f, vector, B::Iadd, vi, step);
     let more = cmp(f, vector, IntCC::Ult, next, end);
-    branch(f, vector, more, vector, vec![next], c.header, vec![next]);
+    if let Output::Sum {
+        initial, update, ..
+    } = c.output
+    {
+        // Integer addition wraps, so lane grouping and the final scalar sum
+        // are exact. Do not apply this reassociation to floating point.
+        let finish = f.create_block();
+        let sum = mapping[&update];
+        branch(f, vector, more, vector, vec![next, sum], finish, vec![]);
+        let mut reduced = initial;
+        for lane in 0..c.shape.lanes() {
+            let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
+            reduced = bin(f, finish, B::Iadd, reduced, part);
+        }
+        jump(f, finish, c.header, vec![next, reduced]);
+    } else {
+        branch(f, vector, more, vector, vec![next], c.header, vec![next]);
+    }
     let pre = *f.block_insts(c.pre).last().unwrap();
     *f.inst_data_mut(pre) = D::Jump {
         dest: BlockCall {
@@ -658,18 +792,25 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         },
     };
 }
-pub fn run(f: &mut Function, target: VectorTarget) -> bool {
+fn run_candidates(f: &mut Function, target: VectorTarget, reductions: bool) -> bool {
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
     // Rejected candidates do not change the function. Share these whole-function
     // analyses until a successful transformation adds blocks and redirects edges.
     let mut analysis = None;
     for header in headers {
+        if f.block_params(header).len() != if reductions { 2 } else { 1 } {
+            continue;
+        }
         if let Some(c) = analyze(f, header, target, &mut analysis) {
             transform(f, c, target);
             analysis = None;
             changed = true;
         }
     }
+    changed
+}
+pub fn run(f: &mut Function, target: VectorTarget) -> bool {
+    let changed = run_candidates(f, target, false);
     scan::run(f) || changed
 }

@@ -198,6 +198,20 @@ outside the vector loop. NEON broadcasts use typed `DUP` instructions for all si
 shapes. Signed positive bounds and scalar cleanup are supported, without floating
 reassociation or a fast-math requirement.
 
+The opt-in `loop-reduce` pass lets read-only i32/i64 sum reductions use a vector accumulator, provided
+the only extra loop-carried value is the wrapping sum. The initial scalar
+accumulator is added once after reducing the vector lanes; the original scalar
+loop handles the tail. The same bounded lane-wise integer expression and
+contiguous-stream analysis applies. Hidden reads, writes, calls, extra
+recurrences and volatile accesses reject the candidate. Floating-point sums
+are not reassociated. At most one read may potentially fault; additional reads
+need explicit `notrap` promises so widening cannot change first-fault order.
+Negative signed starts, short/empty ranges and unsafe
+address arithmetic keep the scalar path. No new IR opcode or frontend memory
+promise is needed. It is deliberately absent from the default full pipeline:
+the initial local measurements show a small large-loop gain and substantial
+short-loop setup overhead, so broader profitability work remains necessary.
+
 Starts may be constant or runtime values, for example `for (i = lo; i < n; i++)`.
 Either branch orientation is recognized, including `if (i >= n) break`, as are
 comparisons with swapped operands and commuted element-size multiplication.
