@@ -1,3 +1,4 @@
+; expect: exit 0
 func @k_isort(ptr, i64) cc(c) {
 block0(v0: ptr, v1: i64):
     v2 = iconst.i64 1
