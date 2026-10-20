@@ -41,6 +41,60 @@ selectors override the preset, with the last explicit selector winning.
 `keel-O-folds`, and `keel-O-hints` enable one selection pass at a time for
 ablation measurements. The default test configurations include both modes.
 
+`keel-fast` selects the Fast IR profile with Full selection and allocation;
+`keel-full` selects Full for all three. The historical Basic-IR/Fast-allocation
+recipe is retained as `keel-basic-fast-alloc`, so allocation experiments do not
+silently stand in for the Fast IR profile.
+
+## Native platform comparisons
+
+`benchmark_platforms.py` records serial preprocessed-C-to-assembly and
+preprocessed-C-to-object compilation separately, then native CLI runtime over
+the eight Lua/QuickJS/SQLite workloads. Keel's object boundary uses its native
+emitter; Clang/GCC use `-c`. The common Clang linker and all preprocessing,
+compiler builds, and dependency setup are outside these timing boundaries.
+There is no LTO or native CPU tuning; Linux reference compilers explicitly
+target baseline x86-64. Every configuration must pass the application tests
+and match Clang O2 benchmark outputs before it is timed. Failures are retained
+and excluded, rather than timed as successful builds.
+
+```sh
+python3 suite/benchmark_platforms.py --root /path/to/frozen/source \
+  --work /path/to/new/results --keel /path/to/frozen/keel \
+  --gcc /usr/bin/gcc --clang /usr/bin/clang --cpu 2
+```
+
+Use `--prepare-only` to prepare native inputs and `--reuse-prepared` to reuse
+their verified hashes. Two Linux hosts can share that prepared corpus, including
+generated QuickJS sources. `--normalize-prepared` preserves raw `.i` files and
+renames explicit glibc `_Float32`-family compatibility typedef identifiers for
+GCC/Clang interoperability; it does not change their underlying types or rewrite
+application operations. Verify unchanged Clang assembly before using normalized
+inputs. Do not share preprocessed inputs across Linux and macOS.
+
+The initial 2026-10-20 MacHost measurement omitted `LUA_USE_MACOSX` because
+the runner compared Darwin against the manifest name `macos`. All measured
+MacHost arms used that same configuration. The runner now maps Darwin to `macos`;
+preserved reports describe the original measured configuration, not this fix.
+
+Clang's preprocessed C11 atomics are compiler-specific. When a GCC build cannot
+consume QuickJS's `__c11_atomic_*` builtins, run a separately labelled supplement:
+`--apps quickjs --configs clang-O2 gcc-O0 gcc-O2 --gcc-native-preprocess`.
+This uses the same upstream/generated C sources and defines but GCC's native
+preprocessor and headers. Its preprocessing remains outside the timing boundary;
+do not describe those GCC inputs as byte-identical to the shared Clang/Keel `.i`
+files. The supplement needs its own new work directory and the same host lock.
+
+Defaults are five paired compile rounds after one warmup and seven paired
+runtime rounds after two warmups. Order is seeded and shuffled. An identical
+Clang O2 executable control, load/CPU-pressure/steal counters, compiler/input
+hashes, correctness results, full command logs and raw samples are retained.
+Ratios and paired bootstrap intervals are against Clang O2 on each host;
+cross-host absolute times are not interchangeable. Runtime includes process
+startup and uses ordinary ASLR/page backing, not a physical-page selection
+protocol. Run under a per-host exclusive performance lock and avoid concurrent
+builds or profiling on that host.
+
 
 ## A suite
 

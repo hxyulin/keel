@@ -79,6 +79,12 @@ flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "full"]
 [[config]]
 name = "keel-fast"
 compiler = "keel"
+flags = ["--opt-tier", "fast", "--isel-tier", "full", "--regalloc", "full"]
+
+# Historical allocation-effort experiment, distinct from the Fast IR profile.
+[[config]]
+name = "keel-basic-fast-alloc"
+compiler = "keel"
 flags = ["--opt-tier", "basic", "--isel-tier", "baseline", "--regalloc", "fast"]
 
 [[config]]
