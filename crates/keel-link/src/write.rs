@@ -1,6 +1,63 @@
 use crate::*;
 use read::{Reader, Reloc};
 
+// Most object relocation lists run monotonically through the section (often
+// backwards). Keep those disjoint ranges in a compact vector. Arbitrary input
+// order falls back once to an interval tree, without changing validation order.
+#[derive(Default)]
+struct RelocationRanges {
+    ordered: Vec<(usize, usize)>,
+    descending: bool,
+    unordered: Option<BTreeMap<usize, usize>>,
+}
+impl RelocationRanges {
+    fn insert(&mut self, start: usize, end: usize) -> bool {
+        if start == end {
+            return true;
+        }
+        if self.unordered.is_none() {
+            let append = match self.ordered.as_slice() {
+                [] => true,
+                &[(first, last)] => {
+                    if end <= first {
+                        self.descending = true;
+                        true
+                    } else if start >= last {
+                        true
+                    } else {
+                        return false;
+                    }
+                }
+                ranges => {
+                    let &(last_start, last_end) = ranges.last().unwrap();
+                    if self.descending {
+                        end <= last_start
+                    } else {
+                        start >= last_end
+                    }
+                }
+            };
+            if append {
+                self.ordered.push((start, end));
+                return true;
+            }
+            self.unordered = Some(std::mem::take(&mut self.ordered).into_iter().collect());
+        }
+        let ranges = self.unordered.as_mut().unwrap();
+        // Existing ranges are disjoint. The last one starting before this end
+        // is the only predecessor that can intersect the new half-open range.
+        if ranges
+            .range(..end)
+            .next_back()
+            .is_some_and(|(_, &last)| last > start)
+        {
+            return false;
+        }
+        ranges.insert(start, end);
+        true
+    }
+}
+
 pub(crate) fn u32le(v: &mut Vec<u8>, n: u32) {
     v.extend_from_slice(&n.to_le_bytes());
 }
@@ -740,7 +797,7 @@ impl Linker {
         let s = &self.objects[oi].sections[si];
         let metadata = s.name == "__compact_unwind" && s.segment == "__LD";
         let mut i = 0;
-        let mut patched = BTreeSet::new();
+        let mut patched = RelocationRanges::default();
         while i < s.relocs.len() {
             let mut r = s.relocs[i].clone();
             i += 1;
@@ -789,10 +846,8 @@ impl Linker {
                 i += 1;
                 difference = true;
             }
-            for byte in r.offset..r.offset + r.width {
-                if !patched.insert(byte) {
-                    return fail("overlapping relocation locations");
-                }
+            if !patched.insert(r.offset, r.offset + r.width) {
+                return fail("overlapping relocation locations");
             }
             match r.kind {
                 0 => {
@@ -1124,4 +1179,125 @@ fn nlist(
     u64le(out, value);
     strings.extend_from_slice(symbol.as_bytes());
     strings.push(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relocation_intervals_match_byte_oracle_in_arbitrary_order() {
+        let choices: Vec<_> = (0..5)
+            .flat_map(|at| [0, 1, 2, 4, 8].map(|width| (at, at + width)))
+            .collect();
+        for a in &choices {
+            for b in &choices {
+                for c in &choices {
+                    let mut ranges = RelocationRanges::default();
+                    let mut bytes = BTreeSet::new();
+                    for &(start, end) in [a, b, c] {
+                        let expected = (start..end).all(|byte| bytes.insert(byte));
+                        assert_eq!(ranges.insert(start, end), expected, "{a:?}, {b:?}, {c:?}");
+                        if !expected {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        for offsets in [
+            vec![0, 8, 16, 24, 32],
+            vec![32, 24, 16, 8, 0],
+            vec![0, 32, 8, 24, 16],
+            vec![32, 0, 16, 8, 24],
+        ] {
+            let mut ranges = RelocationRanges::default();
+            for start in offsets {
+                assert!(ranges.insert(start, start + 8));
+            }
+            for (start, end) in [(0, 1), (7, 9), (16, 24), (39, 41)] {
+                assert!(!ranges.insert(start, end));
+            }
+            assert!(ranges.insert(40, 48));
+        }
+    }
+
+    #[test]
+    fn overlap_checks_follow_pair_validation_and_precede_width_checks() {
+        let source = ".text\n.globl _main\n_main:\nret\n.data\n.quad _main\n.quad _main\n";
+        let bytes = keel_asm::assemble_object(source).unwrap();
+        let make = || {
+            prepare_linker(
+                &[Input {
+                    name: "pairs.o",
+                    bytes: &bytes,
+                }],
+                Options {
+                    dylibs: vec![Dylib {
+                        install_name: "/usr/lib/libSystem.B.dylib".into(),
+                        exports: BTreeSet::new(),
+                        weak_exports: BTreeSet::new(),
+                    }],
+                    ..Options::default()
+                },
+            )
+            .unwrap()
+        };
+        let l = make();
+        let si = l.objects[0]
+            .sections
+            .iter()
+            .position(|s| s.name == "__data")
+            .unwrap();
+        let mut pointer = l.objects[0].sections[si].relocs[0].clone();
+        pointer.offset = 0;
+        let check = |relocs, expected| {
+            let mut l = make();
+            l.objects[0].sections[si].relocs = relocs;
+            assert_eq!(l.relocate_section(0, si).err().unwrap(), expected);
+        };
+        let mut narrow = pointer.clone();
+        narrow.width = 4;
+        check(
+            vec![pointer.clone(), narrow.clone()],
+            "overlapping relocation locations",
+        );
+        narrow.offset = 8;
+        check(
+            vec![pointer.clone(), narrow],
+            "unsupported UNSIGNED relocation width/flags",
+        );
+        let mut subtractor = pointer.clone();
+        subtractor.kind = 1;
+        check(
+            vec![pointer.clone(), subtractor.clone()],
+            "unpaired SUBTRACTOR",
+        );
+        check(
+            vec![pointer.clone(), subtractor.clone(), pointer.clone()],
+            "overlapping relocation locations",
+        );
+        let mut bad_unsigned = pointer.clone();
+        bad_unsigned.pc = true;
+        check(
+            vec![pointer.clone(), subtractor, bad_unsigned],
+            "invalid SUBTRACTOR/UNSIGNED pair",
+        );
+        let mut addend = pointer.clone();
+        addend.kind = 10;
+        addend.symbol = 0;
+        addend.external = false;
+        addend.width = 4;
+        check(vec![pointer.clone(), addend.clone()], "unpaired ADDEND");
+        let mut branch = pointer.clone();
+        branch.kind = 2;
+        branch.pc = true;
+        branch.width = 4;
+        check(
+            vec![pointer.clone(), addend.clone(), branch.clone()],
+            "overlapping relocation locations",
+        );
+        addend.width = 8;
+        check(vec![pointer, addend, branch], "invalid ARM64_RELOC_ADDEND");
+    }
 }
