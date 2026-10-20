@@ -145,3 +145,23 @@ fn unknown_initializers_are_read_and_out_of_bounds_writes_disable_caching() {
     let before = keel_ir::parse(&text).unwrap();
     assert_eq!(before.to_string(), apply(&text).to_string());
 }
+#[test]
+fn already_aliased_load_results_are_not_redirected_again() {
+    let mut m = keel_ir::parse(FIXTURE).unwrap();
+    let f = &mut m.functions[3];
+    let load = f
+        .layout_insts()
+        .find_map(|(b, i)| {
+            (b != f.entry_block().unwrap() && matches!(f.inst_data(i), D::Load { .. })).then_some(i)
+        })
+        .unwrap();
+    let result = f.first_result(load);
+    let replacement = f.block_params(f.entry_block().unwrap())[0];
+    f.replace_all_uses(result, replacement);
+    let before = f.to_string();
+    keel_ir::verify_module(&m).unwrap();
+    keel_opt::run_passes(&mut m, &["stack-cache"]).unwrap();
+    assert_eq!(m.functions[3].resolve(result), replacement);
+    assert_eq!(before, m.functions[3].to_string());
+    keel_ir::verify_module(&m).unwrap();
+}

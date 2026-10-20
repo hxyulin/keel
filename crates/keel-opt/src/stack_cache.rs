@@ -29,8 +29,11 @@ impl crate::Pass for StackCache {
 type Field = (StackSlot, usize, Type);
 
 pub fn run(f: &mut Function) -> bool {
-    let blocks: Vec<_> = f.blocks().collect();
-    let instructions: Vec<_> = f.layout_insts().collect();
+    if f.stack_slots().next().is_none() {
+        return false;
+    }
+    let blocks: Vec<_> = f.blocks().take(65).collect();
+    let instructions: Vec<_> = f.layout_insts().take(2049).collect();
     if blocks.is_empty()
         || blocks.len() > 64
         || instructions.len() > 2048
@@ -63,8 +66,10 @@ pub fn run(f: &mut Function) -> bool {
     let sizes: HashMap<_, _> = f.stack_slots().map(|(s, d)| (s, d.size as usize)).collect();
     let mut addresses = HashMap::new();
     for &(_, i) in &instructions {
-        if let D::StackAddr { slot } = *f.inst_data(i) {
-            addresses.insert(f.resolve(f.first_result(i)), (slot, 0usize));
+        if let D::StackAddr { slot } = *f.inst_data(i)
+            && f.resolve(f.first_result(i)) == f.first_result(i)
+        {
+            addresses.insert(f.first_result(i), (slot, 0usize));
         }
     }
     // Bound address discovery rather than chasing arbitrary pointer chains.
@@ -78,6 +83,7 @@ pub fn run(f: &mut Function) -> bool {
                 && let Some(&(slot, offset)) = addresses.get(&f.resolve(args[0]))
                 && let Some(n) = constant(f, args[1]).and_then(|n| usize::try_from(n).ok())
                 && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
+                && f.resolve(f.first_result(i)) == f.first_result(i)
             {
                 addresses.insert(f.resolve(f.first_result(i)), (slot, end));
             }
@@ -148,6 +154,10 @@ pub fn run(f: &mut Function) -> bool {
                     && (offset, ty) != (o, t)
                     && o < offset + width(ty)
                     && offset < o + width(t)
+            }) && !suffix.iter().any(|&(_, i)| {
+                accesses.get(&i) == Some(&(s, o, t))
+                    && matches!(f.inst_data(i), D::Load { .. })
+                    && f.resolve(f.first_result(i)) != f.first_result(i)
             }) && suffix.iter().any(|&(b, i)| {
                 loops.depth(b) > 0
                     && accesses.get(&i) == Some(&(s, o, t))
