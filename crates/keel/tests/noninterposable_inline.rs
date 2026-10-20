@@ -131,7 +131,15 @@ fn explicit_pass_removes_narrow_calls_on_both_targets_and_retains_exports() {
                     ],
                 );
                 assert!(fs::metadata(dir.join(&obj)).unwrap().len() > 0);
-                let symbols = command(Command::new("nm").current_dir(&dir).args(["-g", &obj]));
+                let symbols = command(
+                    Command::new(if cfg!(target_os = "linux") {
+                        "llvm-nm"
+                    } else {
+                        "nm"
+                    })
+                    .current_dir(&dir)
+                    .args(["-g", &obj]),
+                );
                 for helper in ["clamp_i8", "mix_u16"] {
                     assert!(
                         symbols
@@ -184,7 +192,15 @@ fn native_independent_abi_alias_wrapping_volatile_atomic_capture_and_fault_oracl
                     &obj,
                 ],
             );
-            let symbols = command(Command::new("nm").current_dir(&dir).args(["-g", &obj]));
+            let symbols = command(
+                Command::new(if cfg!(target_os = "linux") {
+                    "llvm-nm"
+                } else {
+                    "nm"
+                })
+                .current_dir(&dir)
+                .args(["-g", &obj]),
+            );
             for name in [
                 "clamp_i8",
                 "mix_u16",
