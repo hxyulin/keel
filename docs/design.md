@@ -775,6 +775,7 @@ analyses they need; there is no analysis cache yet.
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 | `loop-vectorize` | guarded contiguous counted maps with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
 | `loop-reduce` | read-only wrapping i32/i64 sums with independent vector accumulators, fixed-offset stream loads, countdown and scalar tail; no floating reassociation |
+| `loop-strength-reduce` | opt-in wrapping i32/i64 induction products replaced by same-width recurrences in two-block loops; at most 16 products per function, eight original header parameters and 128 body instructions; no memory operations or traps are moved |
 | `fast-loop-reduce` | the same sum transform, restricted to functions with at most 256 instructions / 16 blocks, one stream address and at most eight vector-expression values |
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite

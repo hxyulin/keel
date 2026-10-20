@@ -30,6 +30,7 @@ mod instcombine;
 mod known_bits;
 mod load_narrow;
 mod loop_memory;
+mod loop_strength_reduce;
 mod loop_unroll;
 mod loop_vectorize;
 pub use loop_vectorize::VectorTarget;
@@ -210,6 +211,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[14],
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
+    &loop_strength_reduce::LoopStrengthReduce,
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &loop_vectorize::LoopReduce,
