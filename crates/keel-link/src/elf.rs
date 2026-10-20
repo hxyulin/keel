@@ -539,7 +539,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
             let export = libraries
                 .iter()
                 .enumerate()
-                .find_map(|(i, l)| l.exports.get(&s.name).map(|e| (i, e)));
+                .find_map(|(i, l)| l.exports.get(s.name.as_str()).map(|e| (i, e)));
             if export.is_none() && !s.weak() {
                 return Err(format!("{}: undefined symbol `{}`", u.name, s.name));
             }
@@ -553,7 +553,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
                 ));
             }
             let (library, kind, version) = match export {
-                Some((i, e)) => (Some(i), e.kind, e.version.clone()),
+                Some((i, e)) => (Some(i), e.kind, e.version.map(str::to_owned)),
                 None => (None, s.info & 15, None),
             };
             if !matches!(kind, 0 | 1 | 2 | 10) {
@@ -617,7 +617,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     // weak property definition or a same-named local is not the provider.
     for library in &libraries {
         for name in &library.references {
-            if let Some(&(ui, si)) = globals.get(name) {
+            if let Some(&(ui, si)) = globals.get(*name) {
                 let target = &units[ui].symbols[&si];
                 // Hidden/internal definitions are not executable exports and
                 // cannot satisfy a DSO lookup, even with the same name.

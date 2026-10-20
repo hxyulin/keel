@@ -6,21 +6,23 @@ use object::{Object, ObjectSection, ObjectSymbol, SymbolFlags};
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, PartialEq, Eq)]
-pub(super) struct Export {
+pub(super) struct Export<'data> {
     pub kind: u8,
-    pub version: Option<String>,
+    pub version: Option<&'data str>,
 }
-pub(super) struct Library {
+// Interfaces live only for this link. Borrow validated names/versions from the
+// caller-owned DSO bytes; demand and reference sets can share the same strings.
+pub(super) struct Library<'data> {
     pub needed: String,
-    pub exports: BTreeMap<String, Export>,
-    pub required: BTreeSet<String>,
+    pub exports: BTreeMap<&'data str, Export<'data>>,
+    pub required: BTreeSet<&'data str>,
     // Runtime lookups are separate from undefined strong archive demand.
     // Includes weak and preemptible defined symbols, but not locally bound
     // definitions. None may lose a selected executable property provider.
-    pub references: BTreeSet<String>,
+    pub references: BTreeSet<&'data str>,
 }
-impl Library {
-    pub fn parse(name: &str, bytes: &[u8]) -> Result<Self> {
+impl<'data> Library<'data> {
+    pub fn parse(name: &str, bytes: &'data [u8]) -> Result<Self> {
         let file = ElfFile64::<object::Endianness>::parse(bytes).map_err(|e| e.to_string())?;
         if file.architecture() != object::Architecture::X86_64
             || !file.is_little_endian()
@@ -107,14 +109,14 @@ impl Library {
                     object::elf::STB_GLOBAL
                     | object::elf::STB_WEAK
                     | object::elf::STB_GNU_UNIQUE => {
-                        references.insert(s.name().map_err(|e| e.to_string())?.to_owned());
+                        references.insert(s.name().map_err(|e| e.to_string())?);
                     }
                     binding => return Err(format!("unsupported dynamic lookup binding {binding}")),
                 }
             }
             if s.is_undefined() && (s.is_global() || s.is_weak()) {
-                let name = s.name().map_err(|e| e.to_string())?.to_owned();
-                references.insert(name.clone());
+                let name = s.name().map_err(|e| e.to_string())?;
+                references.insert(name);
                 if !s.is_weak() {
                     required.insert(name);
                 }
@@ -133,17 +135,13 @@ impl Library {
                 table
                     .version(index)
                     .map_err(|e| e.to_string())?
-                    .map(|v| {
-                        std::str::from_utf8(v.name())
-                            .map(str::to_owned)
-                            .map_err(|e| e.to_string())
-                    })
+                    .map(|v| std::str::from_utf8(v.name()).map_err(|e| e.to_string()))
                     .transpose()?
             } else {
                 None
             };
             exports.insert(
-                s.name().map_err(|e| e.to_string())?.into(),
+                s.name().map_err(|e| e.to_string())?,
                 Export {
                     kind: st_info & 15,
                     version,
@@ -418,7 +416,7 @@ impl Dynamic {
         sections: &mut Vec<Section>,
         imports: BTreeMap<String, Import>,
         definitions: Vec<Definition>,
-        libraries: &[Library],
+        libraries: &[Library<'_>],
         options: &super::Options,
         absolute_relocations: usize,
         lifecycle: lifecycle::Plan,
