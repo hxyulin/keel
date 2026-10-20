@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run under fast_opt_locked.py; requires a freshly built worktree-local keel.
 
-No timings. Native ARM oracle + Fast/Full kernel driver equality to Clang;
+No timings. Native ARM/x86 oracle + Fast/Full kernel driver equality to Clang;
 ARM and x86 static assembly. Every child command shares the outer lock.
 """
 import argparse
@@ -38,14 +38,30 @@ def body(text, name):
     return text.split(f"func @{name}(", 1)[1].split("\n}", 1)[0]
 
 
-if platform.system() != "Darwin" or platform.machine() != "arm64":
-    raise SystemExit("native oracle requires macOS ARM; no remote execution")
+host = (platform.system(), platform.machine())
+if host == ("Darwin", "arm64"):
+    native_target = "aarch64-apple-darwin"
+elif host == ("Linux", "x86_64"):
+    native_target = "x86_64-unknown-linux-gnu"
+else:
+    raise SystemExit(f"unsupported native oracle host: {host}")
 fixture = root / "crates/keel-codegen/tests/fixtures/load_reuse.keel"
 driver = root / "crates/keel-codegen/tests/fixtures/load_reuse.c"
 kernels = root / "crates/keel-cranelift/kernels"
-run("clang", "-O2", "-ffp-contract=off", kernels / "driver.c", kernels / "kernels.c", "-o", out / "clang-check")
+kernel_driver = kernels / "driver.c"
+if host[0] == "Linux":
+    # Evidence-only timing-helper adaptation; no kernel C algorithm changes.
+    source = kernel_driver.read_text()
+    original = "static u64 now(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }"
+    replacement = "static u64 now(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec; }"
+    assert source.count(original) == 1
+    kernel_driver = out / "driver-linux.c"
+    kernel_driver.write_text(source.replace(original, replacement))
+run("clang", "-O2", "-ffp-contract=off", kernel_driver, kernels / "kernels.c", "-o", out / "clang-check")
 reference = run(out / "clang-check", "check", stdout=out / "clang-check.txt")
 assert len(reference.splitlines()) == 795
+run("clang", "-O0", "-ffp-contract=off", kernel_driver, kernels / "kernels.c", "-o", out / "clang-O0-check")
+assert run(out / "clang-O0-check", "check", stdout=out / "clang-O0-check.txt") == reference
 for tier in ["fast", "full"]:
     base = out / f"{tier}.keel"
     optimized = out / f"{tier}-reuse.keel"
@@ -66,7 +82,7 @@ for tier in ["fast", "full"]:
             assert len(re.findall(r"^\s*ldr\s+w[0-9]+,", asm_body, re.MULTILINE)) == 2
         run(keel, "compile", "--isel", "all", "--regalloc", tier, "--target", target,
             "--opt-tier", "none", "--emit-object", optimized, "-o", out / f"{tier}-{target}.o")
-    run("clang", "-O2", kernels / "driver.c", out / f"{tier}-aarch64-apple-darwin.o", "-o", out / f"{tier}-check")
+    run("clang", "-O2", kernel_driver, out / f"{tier}-{native_target}.o", "-o", out / f"{tier}-check")
     actual = run(out / f"{tier}-check", "check", stdout=out / f"{tier}-check.txt")
     assert actual == reference, tier
     fixture_base, fixture_opt = out / f"oracle-{tier}.keel", out / f"oracle-{tier}-reuse.keel"
@@ -78,6 +94,6 @@ for tier in ["fast", "full"]:
             "--opt-tier", "none", "--emit-object", fixture_opt, "-o", out / f"oracle-{tier}-{target}.o")
     for level in ["-O0", "-O2"]:
         executable = out / f"oracle-{tier}-{level}"
-        run("clang", level, driver, out / f"oracle-{tier}-aarch64-apple-darwin.o", "-o", executable)
+        run("clang", level, driver, out / f"oracle-{tier}-{native_target}.o", "-o", executable)
         print(run(executable, stdout=out / f"oracle-{tier}-{level}.txt").strip())
     print(f"{tier}: isort 3 -> 2 loads; 795 kernel output lines equal Clang O2; both targets emitted")
