@@ -186,3 +186,39 @@ Deferred: assume, distinct unreachable, hot/cold and branch weights, memory/alia
 contracts, and public interposable inlining. Suggested umbrella documentation
 follow-up: link this contract from `docs/design.md`; integration/suite-wide evidence
 belongs to coordinator review rather than this focused worker session.
+
+## Explicit non-interposable binding
+
+`noninterposable` is an opt-in producer promise on a named function. Direct
+references to that name must resolve to the promised definition; a different
+implementation cannot replace it at static or dynamic link time. The producer
+must arrange a compatible final link/load environment. Keel does not infer this
+promise from a definition, public linkage, target triple, or `alwaysinline`.
+Declarations may carry the promise before a definition is available. The
+verifier checks callee/module agreement, not the eventual link/load environment.
+
+The C spelling is `__attribute__((keel_noninterposable))`, advertised by
+`__has_attribute(keel_noninterposable)`. Its ownership and boolean-union
+redeclaration rules match the named inline policies. It survives IR printing,
+parsing, cloning and `Module::sync_function_attrs`. The printer places it before
+inline policies. It is independent of `Signature`, narrow argument/result
+extension purposes, `byval`, `sret`, pointer capture/alias metadata, `noinline`,
+and `alwaysinline`. It supplies no memory, trap, unwind or arithmetic promises.
+
+This attribute does **not** set `Function::local`, hide a symbol, change its ABI,
+add linker options, enforce local relocations, or make a declaration a definition.
+Public definitions remain exported and are not deleted by inlining. Unexpanded
+calls retain normal target call emission. A producer relying on ELF shared-library
+preemption, Darwin flat namespaces/interposable exports, symbol wrapping, or
+runtime replacement must leave the attribute absent unless it can ensure this
+specific binding. This is a source/IR semantic assertion, not a linker binding
+implementation or an alias for LLVM's relocation-oriented `dso_local`.
+
+Target investigation: ELF supports runtime symbol preemption; LLVM represents
+that separately from linkage in its [runtime preemption specifiers](https://llvm.org/docs/LangRef.html#runtime-preemption-specifiers).
+Darwin's linker normally uses a two-level namespace, but supports
+`-flat_namespace`, `-interposable`, and `-interposable_list` (see Apple's
+[ld64 manual source](https://github.com/apple-oss-distributions/ld64/blob/main/doc/man/man1/ld-classic.1)).
+Those different defaults do not establish a universal Keel frontend promise.
+Existing public definitions remain conservatively interposable on both targets;
+no new target configuration or CLI/library option is necessary.

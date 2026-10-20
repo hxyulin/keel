@@ -1186,6 +1186,7 @@ impl<'a> Parser<'a> {
                             "packed" => attrs.packed = true,
                             "returns_twice" => attrs.returns_twice = true,
                             "noreturn" => attrs.noreturn = true,
+                            "keel_noninterposable" => attrs.function_attrs.noninterposable = true,
                             "always_inline" => attrs.function_attrs.alwaysinline = true,
                             "noinline" => attrs.function_attrs.noinline = true,
                             "nothrow" => attrs.function_attrs.nounwind = true,
@@ -1196,6 +1197,7 @@ impl<'a> Parser<'a> {
                                 name,
                                 "returns_twice"
                                     | "noreturn"
+                                    | "keel_noninterposable"
                                     | "always_inline"
                                     | "noinline"
                                     | "nothrow"

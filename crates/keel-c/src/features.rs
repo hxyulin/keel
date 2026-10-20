@@ -25,6 +25,7 @@ pub fn query(name: &str, argument: &str, target: Target) -> u64 {
                 | "packed"
                 | "returns_twice"
                 | "noreturn"
+                | "keel_noninterposable"
                 | "always_inline"
                 | "noinline"
                 | "nothrow"

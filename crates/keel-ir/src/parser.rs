@@ -775,6 +775,7 @@ impl Parser {
         loop {
             let mut found = false;
             for name in [
+                "noninterposable",
                 "inlinehint",
                 "alwaysinline",
                 "noinline",
@@ -783,6 +784,7 @@ impl Parser {
             ] {
                 if self.eat(&Tok::Ident(name.into())) {
                     let flag = match name {
+                        "noninterposable" => &mut attrs.noninterposable,
                         "inlinehint" => &mut attrs.inlinehint,
                         "alwaysinline" => &mut attrs.alwaysinline,
                         "noinline" => &mut attrs.noinline,

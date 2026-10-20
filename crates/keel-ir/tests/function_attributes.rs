@@ -63,3 +63,39 @@ fn independent_promises_and_structural_verification() {
     m.functions[0].attrs.noinline = true;
     assert!(verify(&m.functions[0]).is_err());
 }
+
+#[test]
+fn noninterposable_is_independent_of_linkage_abi_and_inline_policy() {
+    for policy in ["", "alwaysinline", "noinline", "inlinehint", "local"] {
+        let text = format!(
+            "decl @external(i8 sext) -> i16 uext noninterposable\nfunc @helper(i8 sext) -> i16 uext noninterposable {policy} {{\nblock0(v0: i8):\n v1 = uext.i16 v0\n return v1\n}}\nfunc @caller(i8 sext) -> i16 uext {{\nblock0(v0: i8):\n v1 = call @helper(v0)\n return v1\n}}\n"
+        );
+        let mut m = parse(&text).unwrap();
+        verify_module(&m).unwrap();
+        assert_eq!(m.functions[0].local, policy == "local");
+        assert!(m.decls[0].attrs.noninterposable);
+        let printed = m.to_string();
+        assert_eq!(parse(&printed).unwrap().to_string(), printed);
+        let r = m.functions[1].callees().next().unwrap().0;
+        assert!(m.functions[1].callee(r).attrs.noninterposable);
+        m.functions[1].callee_mut(r).attrs.noninterposable = false;
+        assert!(
+            verify_module(&m)
+                .unwrap_err()
+                .iter()
+                .any(|e| e.message.contains("attributes disagree"))
+        );
+        m.sync_function_attrs();
+        verify_module(&m).unwrap();
+    }
+    for suffix in ["noninterposable noninterposable", "noninterposable(1)"] {
+        assert!(parse(&format!("decl @f() {suffix}\n")).is_err());
+    }
+    let mut attrs = FunctionAttrs::default();
+    attrs.merge(FunctionAttrs {
+        noninterposable: true,
+        ..Default::default()
+    });
+    attrs.merge(FunctionAttrs::default());
+    assert!(attrs.noninterposable);
+}

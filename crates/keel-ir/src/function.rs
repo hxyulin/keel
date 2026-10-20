@@ -165,6 +165,10 @@ impl Signature {
 /// Function promises and optimization policy, deliberately separate from ABI types.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct FunctionAttrs {
+    /// Producer promises that direct references cannot resolve to a different
+    /// definition, even though the symbol may remain externally visible.
+    /// This does not change linkage, visibility, ABI, or linker options.
+    pub noninterposable: bool,
     pub inlinehint: bool,
     pub alwaysinline: bool,
     pub noinline: bool,
@@ -174,6 +178,7 @@ pub struct FunctionAttrs {
 
 impl FunctionAttrs {
     pub fn merge(&mut self, other: Self) {
+        self.noninterposable |= other.noninterposable;
         self.inlinehint |= other.inlinehint;
         self.alwaysinline |= other.alwaysinline;
         self.noinline |= other.noinline;
@@ -195,6 +200,7 @@ impl FunctionAttrs {
 impl fmt::Display for FunctionAttrs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (set, name) in [
+            (self.noninterposable, "noninterposable"),
             (self.inlinehint, "inlinehint"),
             (self.alwaysinline, "alwaysinline"),
             (self.noinline, "noinline"),
