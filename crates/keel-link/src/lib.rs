@@ -167,13 +167,12 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
     }
     let mut objects = Vec::new();
     let mut archives = Vec::new();
+    let mut archive_bodies = Vec::new();
     for input in inputs {
         if input.bytes.starts_with(b"!<arch>\n") {
-            archives.extend(read::archive(
-                input.name,
-                input.bytes,
-                options.debug_directory.is_some(),
-            )?);
+            let (members, bodies) = read::archive(input.name, input.bytes)?;
+            archives.extend(members);
+            archive_bodies.extend(bodies);
         } else {
             objects.push(Object::parse(
                 input.name,
@@ -182,7 +181,12 @@ fn prepare_linker(inputs: &[Input<'_>], options: Options) -> Result<Linker> {
             )?);
         }
     }
-    extract::archives(&mut objects, archives);
+    extract::archives(
+        &mut objects,
+        archives,
+        archive_bodies,
+        options.debug_directory.is_some(),
+    )?;
     if objects.is_empty() {
         return fail("no input objects");
     }

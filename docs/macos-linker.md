@@ -93,7 +93,13 @@ the producer contract and the implementation decisions.
   This is a bounded interface reader: TAPI availability directives, Objective-C
   synthesis, and deployment-conditioned symbol substitutions are not implemented.
 * BSD/Darwin archives use demand extraction to a fixed point, ignoring the
-  archive symbol index. All parsed members must meet the basic object contract;
+  archive symbol index. Every member is validated in input order, including
+  unused members. Extraction retains symbol and section summaries while borrowing
+  member bytes; only selected members receive owned section payloads, relocation
+  arrays and requested debug snapshots. Symbols are not reparsed on selection.
+  This bounds unused payload amplification but still retains all member symbol
+  summaries and input mappings; it is not an out-of-core linker.
+  All parsed members must meet the basic object contract;
   thin/GNU long-name archives, LTO/bitcode and universal archives require the
   system linker. Extraction is whole-member, without atom splitting/dead strip.
 

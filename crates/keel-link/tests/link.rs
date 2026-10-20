@@ -383,6 +383,32 @@ fn extracted_archive_duplicates_keep_member_diagnostic_and_unused_inputs_are_val
 }
 
 #[test]
+fn selected_archive_payload_and_debug_snapshot_match_direct_input() {
+    let selected = object(
+        ".globl _main\n_main: adrp x0, _value@PAGE\nadd x0, x0, _value@PAGEOFF\nret\n.data\n_value: .quad 42\n.section __DWARF,__debug_info,regular,debug\n.byte 1,2,3,4\n",
+    );
+    let unused = object(
+        ".globl _unused\n_unused: ret\n.section __DWARF,__debug_info,regular,debug\n.byte 5,6,7,8\n",
+    );
+    let ar = archive(&[("unused.o", unused), ("selected.o", selected.clone())]);
+    let link = |name, bytes| {
+        let mut options = options();
+        options.debug_directory = Some(std::env::temp_dir().join("keel-archive-snapshot"));
+        keel_link::link(&[Input { name, bytes }], options).unwrap()
+    };
+    let direct = link("lib.a(selected.o)", &selected);
+    let extracted = link("lib.a", &ar);
+    assert_eq!(extracted.bytes, direct.bytes);
+    assert_eq!(extracted.warnings, direct.warnings);
+    assert_eq!(extracted.debug_objects.len(), 1);
+    assert_eq!(extracted.debug_objects[0].bytes, selected);
+    assert_eq!(
+        extracted.debug_objects[0].path,
+        direct.debug_objects[0].path
+    );
+}
+
+#[test]
 fn single_member_archive_paths_preserve_images_and_downstream_diagnostics() {
     let main = object(".globl _main\n_main: ret\n");
     let entry = archive(&[("entry.o", main.clone())]);

@@ -30,6 +30,20 @@ pub(crate) struct Reloc {
     pub width: usize,
     pub kind: u32,
 }
+impl Reloc {
+    fn read(r: &Reader<'_>, at: usize) -> Result<Self> {
+        let offset = r.u32(at)? as usize;
+        let bits = r.u32(at + 4)?;
+        Ok(Self {
+            offset,
+            symbol: (bits & 0xffffff) as usize,
+            external: bits & (1 << 27) != 0,
+            pc: bits & (1 << 24) != 0,
+            width: 1 << ((bits >> 25) & 3),
+            kind: bits >> 28,
+        })
+    }
+}
 #[derive(Clone, Debug)]
 pub(crate) struct Section {
     pub segment: String,
@@ -60,10 +74,42 @@ pub(crate) struct Object {
     pub debug_bytes: Option<Vec<u8>>,
 }
 impl Object {
-    pub fn parse(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
-        Self::read(name, bytes, retain_debug).map_err(|e| format!("{name}: {e}"))
+    /// Attach owned payloads to an already validated archive summary. Reuse its
+    /// symbols and section metadata rather than parsing/allocating them again.
+    /// `bytes` must be the unchanged member used to construct this summary.
+    pub(crate) fn materialize(&mut self, bytes: &[u8], retain_debug: bool) -> Result<()> {
+        let r = Reader(bytes);
+        let mut at = 32;
+        let mut section_index = 0;
+        for _ in 0..r.u32(16)? {
+            if r.u32(at)? == 0x19 {
+                for i in 0..r.u32(at + 64)? as usize {
+                    let s = at + 72 + i * 80;
+                    let section = &mut self.sections[section_index];
+                    section_index += 1;
+                    if !matches!(section.flags & 255, 1 | 0x12) && section.segment != "__DWARF" {
+                        section.data = r.bytes(r.u32(s + 48)? as usize, section.size)?.to_vec();
+                    }
+                    let nr = r.u32(s + 60)? as usize;
+                    let ro = r.u32(s + 56)? as usize;
+                    section.relocs.reserve(nr);
+                    for j in 0..nr {
+                        section.relocs.push(Reloc::read(&r, ro + j * 8)?);
+                    }
+                }
+            }
+            at += r.u32(at + 4)? as usize;
+        }
+        if retain_debug && self.sections.iter().any(|s| s.segment == "__DWARF") {
+            self.debug_bytes = Some(bytes.to_vec());
+        }
+        Ok(())
     }
-    fn read(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
+
+    pub fn parse(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Self> {
+        Self::read(name, bytes, retain_debug, true).map_err(|e| format!("{name}: {e}"))
+    }
+    fn read(name: &str, bytes: &[u8], retain_debug: bool, materialize: bool) -> Result<Self> {
         let r = Reader(bytes);
         if r.u32(0)? != 0xfeedfacf || r.u32(4)? != 0x100000c || r.u32(12)? != 1 {
             return fail("expected a thin little-endian arm64 MH_OBJECT");
@@ -127,7 +173,7 @@ impl Object {
                             // DWARF is omitted from the image. Its exact bytes, when
                             // requested, live in the object snapshot instead.
                             let data = r.bytes(r.u32(s + 48)? as usize, len)?;
-                            if segment == "__DWARF" {
+                            if segment == "__DWARF" || !materialize {
                                 Vec::new()
                             } else {
                                 data.to_vec()
@@ -138,23 +184,16 @@ impl Object {
                         r.bytes(ro, nr.checked_mul(8).ok_or("relocation overflow")?)?;
                         let mut relocs = Vec::new();
                         for j in 0..nr {
-                            let off = r.u32(ro + j * 8)?;
-                            if off & 0x80000000 != 0 {
+                            let relocation = Reloc::read(&r, ro + j * 8)?;
+                            if relocation.offset & 0x80000000 != 0 {
                                 return fail("scattered/negative relocations are unsupported");
                             }
-                            let bits = r.u32(ro + j * 8 + 4)?;
-                            let width = 1 << ((bits >> 25) & 3);
-                            if off as usize + width > len || zero {
+                            if relocation.offset + relocation.width > len || zero {
                                 return fail("relocation outside file-backed section");
                             }
-                            relocs.push(Reloc {
-                                offset: off as usize,
-                                symbol: (bits & 0xffffff) as usize,
-                                external: bits & (1 << 27) != 0,
-                                pc: bits & (1 << 24) != 0,
-                                width,
-                                kind: bits >> 28,
-                            });
+                            if materialize {
+                                relocs.push(relocation);
+                            }
                         }
                         sections.push(Section {
                             name: r.string(s, 16)?,
@@ -263,14 +302,16 @@ impl Object {
     }
 }
 
-/// BSD/Darwin ar members; archive indexes are hints, never trusted for resolution.
-pub(crate) fn archive(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Vec<Object>> {
+/// Validate every member in input order, retaining symbol/section summaries but
+/// borrowing payloads until extraction. Archive indexes are never trusted.
+pub(crate) fn archive<'a>(name: &str, bytes: &'a [u8]) -> Result<(Vec<Object>, Vec<&'a [u8]>)> {
     let r = Reader(bytes);
     if r.bytes(0, 8)? != b"!<arch>\n" {
         return fail("expected BSD ar archive");
     }
     let mut at = 8;
     let mut members = Vec::new();
+    let mut bodies = Vec::new();
     while at < bytes.len() {
         let header = r.bytes(at, 60)?;
         if &header[58..] != b"`\n" {
@@ -295,13 +336,12 @@ pub(crate) fn archive(name: &str, bytes: &[u8], retain_debug: bool) -> Result<Ve
             (raw.trim_end_matches('/').into(), data)
         };
         if !member.starts_with("__.SYMDEF") && !matches!(member.as_str(), "" | "/" | "/SYM64") {
-            members.push(Object::parse(
-                &format!("{name}({member})"),
-                body,
-                retain_debug,
-            )?);
+            let name = format!("{name}({member})");
+            members
+                .push(Object::read(&name, body, false, false).map_err(|e| format!("{name}: {e}"))?);
+            bodies.push(body);
         }
         at = (at + 60 + size + 1) & !1;
     }
-    Ok(members)
+    Ok((members, bodies))
 }

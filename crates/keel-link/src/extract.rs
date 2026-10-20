@@ -100,19 +100,28 @@ fn selection(objects: &[Object], members: &[Object]) -> Vec<usize> {
     selected
 }
 
-pub(crate) fn archives(objects: &mut Vec<Object>, members: Vec<Object>) {
+pub(crate) fn archives(
+    objects: &mut Vec<Object>,
+    members: Vec<Object>,
+    bodies: Vec<&[u8]>,
+    retain_debug: bool,
+) -> crate::Result<()> {
     if members.is_empty() {
-        return;
+        return Ok(());
     }
     let selected = selection(objects, &members);
-    // Stable slots let us move each member once without shifting the remaining
-    // archive objects after every extraction. Selection borrows only names.
+    // Selection uses validated summaries only. Materialize selected members in
+    // the same fixed-point order; unused section bytes, relocation arrays and
+    // debug snapshots never need owned copies. Caller keeps input bytes stable.
     let mut members: Vec<_> = members.into_iter().map(Some).collect();
-    objects.extend(
-        selected
-            .into_iter()
-            .map(|index| members[index].take().unwrap()),
-    );
+    for index in selected {
+        let mut member = members[index].take().unwrap();
+        member
+            .materialize(bodies[index], retain_debug)
+            .map_err(|e| format!("{}: {e}", member.name))?;
+        objects.push(member);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
