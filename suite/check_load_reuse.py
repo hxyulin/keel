@@ -69,7 +69,10 @@ for tier in ["fast", "full"]:
     run(keel, "opt", "-p", ("gvn,load-reuse" if tier == "fast" else "load-reuse"), base, "-o", optimized)
     before, after = body(base.read_text(), "k_isort"), body(optimized.read_text(), "k_isort")
     # Fast has independent ptradd expressions; explicit GVN exposes exact SSA.
-    assert before.count("load.i32") == 3
+    # Full already includes load-reuse; the explicit repeat must retain its
+    # two-load result. Fast still needs GVN followed by the opt-in pass.
+    before_loads = 2 if tier == "full" else 3
+    assert before.count("load.i32") == before_loads
     assert after.count("load.i32") == 2
     for target in ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]:
         assembly = out / f"{tier}-{target}.s"
@@ -96,4 +99,4 @@ for tier in ["fast", "full"]:
         executable = out / f"oracle-{tier}-{level}"
         run("clang", level, driver, out / f"oracle-{tier}-{native_target}.o", "-o", executable)
         print(run(executable, stdout=out / f"oracle-{tier}-{level}.txt").strip())
-    print(f"{tier}: isort 3 -> 2 loads; 795 kernel output lines equal Clang O2; both targets emitted")
+    print(f"{tier}: isort {before_loads} -> 2 loads; 795 kernel output lines equal Clang O2; both targets emitted")
