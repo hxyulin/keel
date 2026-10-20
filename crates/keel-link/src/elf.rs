@@ -913,6 +913,35 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
     }
     let mut strings = vec![0];
     let mut symbols = vec![0; 24];
+    // Keep local names for debugger function bounds and prologue unwinding.
+    // ELF requires all local records to precede the first nonlocal record.
+    for (ui, unit) in units.iter().enumerate() {
+        for (&si, s) in &unit.symbols {
+            if s.global() || s.name.is_empty() {
+                continue;
+            }
+            let index = match s.section {
+                SymbolSection::Absolute => 0xfff1,
+                SymbolSection::Section(i) => unit.sections.get(&i.0).map(|i| i + 1).unwrap_or(0),
+                _ => 0,
+            };
+            if index == 0 {
+                continue;
+            }
+            if index >= 0xff00 && index != 0xfff1 {
+                return Err("too many output sections".into());
+            }
+            let mut record = [0u8; 24];
+            put32(&mut record, 0, string(&mut strings, &s.name));
+            record[4] = s.info;
+            record[5] = s.other;
+            put16(&mut record, 6, index as u16);
+            put64(&mut record, 8, address(ui, si)?);
+            put64(&mut record, 16, s.size);
+            symbols.extend_from_slice(&record);
+        }
+    }
+    let first_global = u32::try_from(symbols.len() / 24).map_err(|_| "too many local symbols")?;
     for (name, &(ui, si)) in &globals {
         let s = &units[ui].symbols[&si];
         // Nonallocated metadata symbols are not part of the executable image.
@@ -972,7 +1001,7 @@ pub fn link(inputs: &[Input<'_>], options: Options) -> Result<Executable> {
         sym_offset,
         symbols.len() as u64,
         str_index as u32,
-        1,
+        first_global,
         8,
         24,
     ));

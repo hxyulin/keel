@@ -52,7 +52,9 @@ linker. `--system` continues to select the explicit Clang fallback.
 - Fixed base `0x400000`, 4 KiB segment alignment, separate R/RX/RW LOAD mappings,
   zero-filled BSS and a non-executable GNU_STACK program header. There is no
   interpreter or dynamic relocation processing for static output. This output is not PIE.
-- ELF section headers and a global symbol table for `readelf`/`nm`. Input debug
+- ELF section headers and local/global symbol tables for `readelf`/`nm` and
+  debugger function bounds. Named local symbols in retained sections and
+  absolute locals preserve their input identity; omitted metadata stays omitted. Input debug
   sections are omitted with warnings. Read-only allocated `.eh_frame` inputs
   accept both PROGBITS and x86-64 `SHT_X86_64_UNWIND`, preserving their types,
   alignment, CFI bytes and supported pointer relocations. A generated read-only

@@ -435,7 +435,17 @@ fn abi_bytes_and_local_symbol_addresses_retain_original_unit_identity() {
         u64at(&exe.bytes, (symbol("other_pointer") - 0x400000) as usize),
         f.section_by_name(".rodata").unwrap().address()
     );
-    assert!(!f.symbols().any(|s| s.name().unwrap() == "__abi_tag"));
+    let locals: Vec<_> = f
+        .symbols()
+        .filter(|s| s.name().unwrap() == "__abi_tag")
+        .collect();
+    assert_eq!(locals.len(), 2);
+    assert!(locals.iter().all(|s| s.is_local()));
+    assert_eq!(locals[0].address(), abi.address());
+    assert_eq!(
+        locals[1].address(),
+        f.section_by_name(".rodata").unwrap().address()
+    );
 }
 
 #[test]
