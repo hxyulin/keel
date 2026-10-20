@@ -320,6 +320,32 @@ fn allocator_only_edge_transfers_are_not_lost_or_moved_to_the_other_edge() {
             assert_eq!(text.contains("\tjmp\t"), successor == 0 && !noop, "{text}");
             assert_eq!(text.contains("\tjne\t"), successor == 1 || noop, "{text}");
             assert!(!text.contains("_else:"), "{text}");
+            #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+            {
+                use std::{fs, process::Command};
+                let dir =
+                    std::env::temp_dir().join(format!("keel-edge-transfer-{}", std::process::id()));
+                fs::create_dir_all(&dir).unwrap();
+                fs::write(
+                    dir.join("test.o"),
+                    keel_asm::x86::assemble_program_object(&program).unwrap(),
+                )
+                .unwrap();
+                fs::write(dir.join("oracle.c"), "#include <stdint.h>\n#include <assert.h>\nextern uint64_t f(uint64_t,uint64_t,uint64_t*);\nint main(void){uint64_t v[]={0,1,~(uint64_t)0,1ULL<<63};for(int i=0;i<4;i++)for(int j=0;j<4;j++){uint64_t out=17,want=v[i]?v[j]:v[i];assert(f(v[i],v[j],&out)==want);assert(out==want);}}\n").unwrap();
+                assert!(
+                    Command::new("clang")
+                        .args(["-O2"])
+                        .arg(dir.join("oracle.c"))
+                        .arg(dir.join("test.o"))
+                        .arg("-o")
+                        .arg(dir.join("run"))
+                        .status()
+                        .unwrap()
+                        .success()
+                );
+                assert!(Command::new(dir.join("run")).status().unwrap().success());
+                fs::remove_dir_all(dir).unwrap();
+            }
         }
     }
 }
@@ -362,6 +388,53 @@ fn native_both_outcomes_and_edge_stores_match_independent_c_oracle() {
             }
         }
     }
+    // Execute each integer condition both fused and materialized, including
+    // negative/signed boundaries from the shared bit-pattern corpus.
+    for (cc, expression) in [
+        ("eq", "x==y"),
+        ("ne", "x!=y"),
+        ("slt", "(int64_t)x<(int64_t)y"),
+        ("sle", "(int64_t)x<=(int64_t)y"),
+        ("sgt", "(int64_t)x>(int64_t)y"),
+        ("sge", "(int64_t)x>=(int64_t)y"),
+        ("ult", "x<y"),
+        ("ule", "x<=y"),
+        ("ugt", "x>y"),
+        ("uge", "x>=y"),
+    ] {
+        for materialized in [false, true] {
+            let name = format!("cmp_{cc}_{}", materialized as u8);
+            src += &format!(
+                "func @{name}(i64, i64, ptr) -> i8 uext {{
+block0(v0: i64, v1: i64, v5: ptr):
+ v2 = icmp.{cc} v0, v1
+ brif v2, block1, block2
+block1:
+ {} v3 = iconst.i8 37
+ return v3
+block2:
+ v4 = iconst.i8 91
+ return v4
+}}",
+                if materialized { "store v2, v5\n" } else { "" }
+            );
+            c += &format!("extern uint8_t {name}(uint64_t,uint64_t,uint8_t*);\n");
+            checks += &format!(
+                "{{uint64_t x=values[i],y=values[j];uint8_t stored=77;int yes=({expression});assert({name}(x,y,&stored)==(yes?37:91));assert(stored==({}? (yes?1:77):77));}}\n",
+                materialized as u8
+            );
+        }
+    }
+    src += "func @alias_noop(i64) -> i64 {
+block0(v0: i64):
+ brif v0, block1(v0), block2
+block1(v1: i64):
+ return v1
+block2:
+ return v0
+}";
+    c += "extern uint64_t alias_noop(uint64_t);\n";
+    checks += "assert(alias_noop((uint64_t)values[i])==(uint64_t)values[i]);\n";
     src += "func @same_noop(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):
  brif v0, block1(v0), block1(v1)
