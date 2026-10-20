@@ -873,6 +873,14 @@ only when no load from the object remains anywhere in the function; debug-visibl
 homes retain both reads and writes so debugger edits remain observable. This is limited aggregate cleanup rather than full scalar
 replacement of aggregates.
 
+`load-reuse` carries at most 128 exact memory facts along eight
+unique-predecessor edges. An ordinary store updates the cached value but does
+not by itself establish that the address can be read. Store-to-load forwarding
+therefore requires a prior successful read of that exact address/type, or a
+`notrap` promise on the later load. The first potentially faulting read and all
+stores remain observable. Aliasing writes, memory barriers, merges, backedges,
+and debugger-visible homes retain their conservative handling.
+
 For compiler-only ablation, keep the same cleanup pipeline and omit `inline`;
 omit `stack-forward` too when measuring the combined inlining/aggregate-cleanup
 change. None and Basic tiers retain their prior pipelines. The `inline` and

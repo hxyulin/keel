@@ -31,7 +31,7 @@ fn successful_loads_reused_without_hoisting_and_with_exact_types() {
     for ty in ["i8", "i16", "i32", "i64", "i128", "f32", "f64", "ptr"] {
         let mut m = optimize(&edge("", ty, "v0"));
         assert_eq!(loads(&m), 1, "{ty}");
-        assert!(m.to_string().contains("return v4"));
+        assert!(!m.to_string().contains("return v1"));
         keel_opt::run_passes(&mut m, &["dce", "gcm"]).unwrap();
         assert_eq!(loads(&m), 1);
     }
@@ -112,8 +112,12 @@ block1:
         );
         assert_eq!(loads(&optimize(&src)), expected, "{offset}/{width}");
     }
-    for store in ["store v2, v1", "store v3, v0", "store v2, v0"] {
-        assert_eq!(loads(&optimize(&edge(store, "i64", "v0"))), 2);
+    for (store, expected) in [
+        ("store v2, v1", 2),
+        ("store v3, v0", 2),
+        ("store v2, v0", 1),
+    ] {
+        assert_eq!(loads(&optimize(&edge(store, "i64", "v0"))), expected);
     }
 }
 
@@ -177,8 +181,9 @@ block2:
  return v4
 }",
     );
-    assert_eq!(loads(&m), 2);
+    assert_eq!(loads(&m), 1);
     assert!(m.to_string().contains("return v2"));
+    assert!(m.to_string().contains("return v1"));
 }
 
 #[test]
@@ -317,5 +322,88 @@ fn equal_width_different_types_and_vector_shapes_do_not_match() {
     }
     for shape in keel_ir::VectorType::ALL {
         assert_eq!(loads(&optimize(&edge("", &shape.to_string(), "v0"))), 1);
+    }
+}
+
+fn written(prior: &str, middle: &str, flags: &str) -> String {
+    format!(
+        "decl @effect(ptr)\nfunc @f(ptr, i64, ptr) -> i64 {{
+block0(v0: ptr, v1: i64, v2: ptr):
+ {prior}
+ store v1, v0
+ jump block1
+block1:
+ {middle}
+ v4 = load.i64 {flags} v0
+ return v4
+}}"
+    )
+}
+#[test]
+fn exact_stores_forward_across_edges_after_successful_reads() {
+    let m = optimize(&written("v3 = load.i64 v0", "", ""));
+    assert_eq!(loads(&m), 1);
+    assert!(m.to_string().contains("return v1"));
+    assert_eq!(
+        m.functions[0]
+            .layout_insts()
+            .filter(|&(_, i)| matches!(m.functions[0].inst_data(i), InstData::Store { .. }))
+            .count(),
+        1
+    );
+}
+#[test]
+fn a_store_does_not_erase_the_first_potential_read_fault() {
+    for prior in ["", "v3 = iconst.i64 0"] {
+        let m = optimize(&written(prior, "", ""));
+        assert_eq!(loads(&m), 1);
+        assert!(!m.to_string().contains("return v1"));
+    }
+    let source = written("", "", "").replace("store v1, v0", "store notrap v1, v0");
+    assert_eq!(loads(&optimize(&source)), 1);
+    let m = optimize(&written("", "", "notrap"));
+    assert_eq!(loads(&m), 0);
+    assert!(m.to_string().contains("return v1"));
+}
+#[test]
+fn writes_barriers_and_type_changes_discard_store_readability() {
+    for middle in [
+        "call @effect(v0)",
+        "store v1, v2",
+        "fence acquire",
+        "v5 = iconst.i8 0\n store v5, v0",
+    ] {
+        assert_eq!(
+            loads(&optimize(&written("v3 = load.i64 v0", middle, ""))),
+            2,
+            "{middle}"
+        );
+    }
+    let text = written("v3 = load.i64 v0", "", "").replace("store v1, v0", "store volatile v1, v0");
+    assert_eq!(loads(&optimize(&text)), 2);
+    let text = written("v3 = load.i64 v0", "", "")
+        .replace("store v1, v0", "v5 = iconst.i32 9\n store v5, v0")
+        .replace("v4 = load.i64", "v4 = load.i32")
+        .replace("-> i64", "-> i32");
+    assert_eq!(loads(&optimize(&text)), 2);
+}
+#[test]
+fn exact_store_values_keep_all_scalar_bit_patterns_and_types() {
+    for ty in ["i8", "i16", "i32", "i64", "i128", "f32", "f64", "ptr"] {
+        let src = format!(
+            "func @f(ptr, {ty}) -> {ty} {{
+block0(v0: ptr, v1: {ty}):
+ v2 = load.{ty} v0
+ store v1, v0
+ jump block1
+block1:
+ v3 = load.{ty} v0
+ return v3
+}}"
+        );
+        let m = optimize(&src);
+        assert_eq!(loads(&m), 1, "{ty}");
+        assert!(m.to_string().contains("return v1"), "{m}");
+        keel_ir::verify_module(&m).unwrap();
     }
 }

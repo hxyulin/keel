@@ -9,6 +9,9 @@
 //! At most eight edges and 128 facts are carried, with no fixed point or path
 //! exploration. Writes use the shared circular-footprint alias analysis; all
 //! observable/lifetime barriers discard the state, including debugger edits.
+//! Exact stores also publish their value, but do not establish readability.
+//! Store-to-load forwarding requires a prior successful read of that exact
+//! field, or an explicit notrap promise on the later load. Stores stay pinned.
 use crate::memory_alias::{Address, AliasInfo};
 use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::{EntityRef, Function, InstData, Type, Value, ValueDef};
@@ -20,7 +23,7 @@ impl crate::Pass for LoadReuse {
         "load-reuse"
     }
     fn description(&self) -> &'static str {
-        "reuse successful ordinary loads across bounded unique-predecessor chains"
+        "reuse successful reads and exact stored values across bounded CFG chains"
     }
     fn run(&self, func: &mut Function) -> bool {
         run(func)
@@ -29,7 +32,13 @@ impl crate::Pass for LoadReuse {
 
 const MAX_EDGES: usize = 8;
 const MAX_FACTS: usize = 128;
-type Facts = HashMap<(Address, Type), (Value, Value)>;
+#[derive(Clone, Copy)]
+struct Fact {
+    value: Value,
+    addr: Value,
+    readable: bool,
+}
+type Facts = HashMap<(Address, Type), Fact>;
 
 fn run(func: &mut Function) -> bool {
     // A debugger may edit source variable homes between source locations.
@@ -62,8 +71,10 @@ fn run(func: &mut Function) -> bool {
                     {
                         continue;
                     }
-                    if let Some(&(value, _)) = facts.get(&key) {
-                        func.replace_all_uses(result, func.resolve(value));
+                    if let Some(fact) = facts.get(&key)
+                        && (fact.readable || flags.notrap)
+                    {
+                        func.replace_all_uses(result, func.resolve(fact.value));
                         func.remove_inst(inst);
                         changed = true;
                     } else {
@@ -72,23 +83,44 @@ fn run(func: &mut Function) -> bool {
                         if facts.len() == MAX_FACTS {
                             facts.clear();
                         }
-                        facts.insert(key, (result, addr));
+                        facts.insert(
+                            key,
+                            Fact {
+                                value: result,
+                                addr,
+                                readable: true,
+                            },
+                        );
                     }
                 }
                 InstData::Store { value, addr, flags } if !flags.volatile => {
-                    let ty = func.value_type(func.resolve(value));
-                    facts.retain(|&(_, other_ty), &mut (_, other)| {
-                        match (ty.bytes(), other_ty.bytes()) {
+                    let value = func.resolve(value);
+                    let ty = func.value_type(value);
+                    let key = (aliases.address(func, addr), ty);
+                    let readable = facts.get(&key).is_some_and(|fact| fact.readable);
+                    facts.retain(
+                        |&(_, other_ty), fact| match (ty.bytes(), other_ty.bytes()) {
                             (Some(bytes), Some(other_bytes)) => !aliases.may_alias(
                                 func,
                                 addr,
                                 u64::from(bytes),
-                                other,
+                                fact.addr,
                                 u64::from(other_bytes),
                             ),
                             _ => false,
-                        }
-                    });
+                        },
+                    );
+                    if facts.len() == MAX_FACTS {
+                        facts.clear();
+                    }
+                    facts.insert(
+                        key,
+                        Fact {
+                            value,
+                            addr,
+                            readable,
+                        },
+                    );
                 }
                 ref data if data.memory_effects().may_write() => facts.clear(),
                 _ => {}
