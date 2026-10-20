@@ -707,6 +707,17 @@ and add/ptradd with a scaled shift (`lea`) on x86. Narrow integer and float
 patterns retain their original semantics; floating multiply/add is never
 implicitly fused because that changes rounding.
 
+Aarch64 scalar loads and stores can also consume a single-use, same-block
+`ptradd` with an i64 register offset. A single-use i64 shift can be absorbed
+when its masked count is zero or log2(access bytes), producing a register-offset
+address in the memory instruction itself. Accesses remain at their original
+position and width, including volatile accesses; atomics and 128-bit/vector
+accesses keep their existing lowering. Both address leaves are published before
+allocation, with separate scratch registers for spilled bases, indices and store
+values. Shared shifts stay materialized; shared or cross-block addresses and
+distinct debug source lines prevent consuming those definitions. Narrow index
+extension is not folded by this pattern.
+
 Allocation sees the selected instruction's leaf operands at the root,
 rather than the intermediate result. This both removes the consumed
 result's interval and keeps its inputs live until the fused instruction,

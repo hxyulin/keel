@@ -755,20 +755,33 @@ fn memory(op: &str, a: &[Arg]) -> Instruction {
         _ => r.bits() / 8,
     };
     if let Offset::Index { reg, extend, shift } = address.offset {
+        // Byte LSL is a distinct encoding identity with option=3 fixed in
+        // its opcode, rather than a writable `option` field.
+        let byte = matches!(op, "ldrb" | "strb");
+        let option = extension(extend);
+        let byte_lsl = byte && option == 3;
         return ins(
             op,
-            tag(r),
+            if byte_lsl {
+                "32BL"
+            } else if byte {
+                "32B"
+            } else {
+                tag(r)
+            },
             "ldst_regoff",
             [
                 (F::Rt, r.number),
                 (F::Rn, address.base.number),
                 (F::Rm, reg.number),
-                (F::option, extension(extend)),
+                (F::option, option),
                 (
                     F::S,
                     u32::from(shift.is_some() && shift.unwrap() == bytes.trailing_zeros()),
                 ),
-            ],
+            ]
+            .into_iter()
+            .filter(|&(field, _)| !byte_lsl || field != F::option),
         );
     }
     if mode == "off"

@@ -4352,6 +4352,22 @@ impl<'a> FunctionCompiler<'a> {
             let base = self.use_reg(base, scratch);
             return Address::offset(Reg::x(base), offset);
         }
+        if let Some(&address) = self
+            .selection
+            .indexed_addresses
+            .get(&self.func.resolve(addr))
+        {
+            let base = self.use_reg(address.base, scratch);
+            // Stores may already hold a spilled value in S0 and use S1 for
+            // their base. S2 is distinct from both and from allocated GPRs.
+            let index = self.use_reg(address.index, S2);
+            return Address::index(
+                Reg::x(base),
+                Reg::x(index),
+                "lsl",
+                Some(address.shift.into()),
+            );
+        }
         Address::base(Reg::x(self.use_reg(addr, scratch)))
     }
 

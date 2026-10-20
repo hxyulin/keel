@@ -48,6 +48,14 @@ pub struct Match {
     pub args: Vec<Value>,
     pub shift: u8,
 }
+
+/// Exact 64-bit modular address arithmetic, evaluated at the memory access.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct IndexedAddress {
+    pub base: Value,
+    pub index: Value,
+    pub shift: u8,
+}
 /// Dense instruction indices, sparse operand lists. Fusion makes overrides
 /// common enough that hashing every instruction in each liveness pass is costly.
 #[derive(Default)]
@@ -93,6 +101,7 @@ pub struct Selection {
     covered: Vec<bool>,
     /// Single-use ptradd results encoded at their original memory consumer.
     pub(crate) addresses: HashMap<Value, (Value, i64)>,
+    pub(crate) indexed_addresses: HashMap<Value, IndexedAddress>,
     /// An outer zero test uses the original integer compare, optionally inverted.
     pub(crate) conditions: HashMap<Inst, (Inst, bool)>,
     /// X86 exact-width adjacent ordinary load encoded as an integer CMP RHS.
@@ -105,6 +114,80 @@ pub struct Selection {
     pub hints: HashMap<Value, Vec<Value>>,
 }
 impl Selection {
+    fn select_indexed_address(
+        &mut self,
+        func: &Function,
+        inst: Inst,
+        addr: Value,
+        ty: Type,
+        uses: &[u8],
+    ) -> bool {
+        let addr = func.resolve(addr);
+        let Some(size @ (1 | 2 | 4 | 8)) = (if ty == Type::Ptr { Some(8) } else { ty.bytes() })
+        else {
+            return false;
+        };
+        let same_source = |child| match (func.inst_loc(child), func.inst_loc(inst)) {
+            (Some(_), None) => false,
+            (Some(a), Some(b)) => a.file == b.file && a.line == b.line,
+            _ => true,
+        };
+        let ValueDef::Result(address, _) = func.value_def(addr) else {
+            return false;
+        };
+        if uses[addr.index()] != 1
+            || func.inst_block(address) != func.inst_block(inst)
+            || self.covered(address)
+            || func.is_removed(address)
+            || !same_source(address)
+        {
+            return false;
+        }
+        let InstData::Binary {
+            op: BinaryOp::Ptradd,
+            args,
+        } = *func.inst_data(address)
+        else {
+            return false;
+        };
+        let base = func.resolve(args[0]);
+        let offset = func.resolve(args[1]);
+        // Constants continue through the existing displacement selection path.
+        if func.value_type(offset) != Type::I64 || crate::fold::iconst(func, offset).is_some() {
+            return false;
+        }
+        let mut index = offset;
+        let mut shift = 0;
+        if uses[offset.index()] == 1
+            && let ValueDef::Result(producer, _) = func.value_def(offset)
+            && func.inst_block(producer) == func.inst_block(inst)
+            && !self.covered(producer)
+            && !func.is_removed(producer)
+            && same_source(producer)
+            && let InstData::Binary {
+                op: BinaryOp::Shl,
+                args: inputs,
+            } = *func.inst_data(producer)
+            && let Some(raw_shift) = crate::fold::iconst(func, inputs[1])
+            // IR shifts mask the count to the value width. A register-offset
+            // access allows no shift or precisely log2(access bytes).
+            && let amount = (raw_shift as u64 & 63) as u8
+            && (amount == 0 || u32::from(amount) == size.ilog2())
+        {
+            index = func.resolve(inputs[0]);
+            shift = amount;
+            self.cover(producer);
+        }
+        let mut operands = self.operands(func, inst);
+        let position = operands.iter().position(|&v| v == addr).unwrap();
+        operands.splice(position..=position, [base, index]);
+        self.set_operands(inst, operands);
+        self.indexed_addresses
+            .insert(addr, IndexedAddress { base, index, shift });
+        self.cover(address);
+        true
+    }
+
     /// Require a location at a selected sequence boundary. Parts must be
     /// resolved and present in the selected operands/results. Allocators must
     /// satisfy these requirements; emission rejects unsatisfied constraints.
@@ -427,6 +510,11 @@ impl Selection {
                     _ => None,
                 };
                 if let Some((addr, ty)) = memory {
+                    if target == Target::Aarch64
+                        && plan.select_indexed_address(func, inst, addr, ty, &uses)
+                    {
+                        continue;
+                    }
                     let addr = func.resolve(addr);
                     if uses[addr.index()] == 1
                         && let ValueDef::Result(child, _) = func.value_def(addr)
