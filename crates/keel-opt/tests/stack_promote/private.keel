@@ -1,0 +1,69 @@
+; Reduced private initialization fixture, NOT the actual escaping-memset corpus.
+func @private_acc(ptr, i64) -> i64 cc(c) {
+    ss0 = stack_slot 24, align 8
+block0(v0: ptr, v1: i64):
+    v2 = stack_addr ss0
+    v3 = iconst.i32 0
+    v4 = iconst.i64 24
+    v64 = iconst.i64 0
+    store v64, v2
+    v65 = iconst.i64 8
+    v66 = ptradd v2, v65
+    store v64, v66
+    v67 = iconst.i64 16
+    v68 = ptradd v2, v67
+    store v3, v68
+    v6 = iconst.i64 0
+    jump block1(v6)
+block1(v7: i64):
+    v9 = icmp.ugt v1, v7
+    brif v9, block2, block4
+block2:
+    v48 = iconst.i64 3
+    v13 = shl v7, v48
+    v14 = ptradd v0, v13
+    v15 = load.i64 v14
+    v59 = iconst.i64 0
+    v36 = icmp.slt v15, v59
+    brif v36, block8, block7
+block4:
+    v60 = stack_addr ss0
+    v19 = load.i64 align 8 v60
+    v20 = iconst.i64 3
+    v21 = imul v19, v20
+    v23 = iconst.i64 8
+    v24 = ptradd v60, v23
+    v25 = load.i64 align 8 v24
+    v26 = iadd v21, v25
+    v28 = iconst.i64 16
+    v29 = ptradd v60, v28
+    v30 = load.i32 align 8 v29
+    v31 = uext.i64 v30
+    v32 = iadd v26, v31
+    return v32
+block7:
+    v12 = iconst.i64 8
+    v61 = stack_addr ss0
+    v38 = ptradd v61, v12
+    v39 = load.i64 v38
+    v40 = iadd v15, v39
+    store v40, v38
+    jump block9
+block8:
+    v62 = stack_addr ss0
+    v41 = load.i64 v62
+    v42 = iadd v15, v41
+    store v42, v62
+    jump block9
+block9:
+    v43 = iconst.i64 16
+    v63 = stack_addr ss0
+    v44 = ptradd v63, v43
+    v45 = load.i32 v44
+    v46 = iconst.i32 1
+    v47 = iadd v45, v46
+    store v47, v44
+    v16 = iconst.i64 1
+    v17 = iadd v7, v16
+    jump block1(v17)
+}

@@ -43,6 +43,7 @@ mod sign_extend_idiom;
 mod simplify_cfg;
 mod small_memory;
 mod stack_forward;
+mod stack_promote;
 
 /// A replaceable optimization pass over one function.
 /// `run` must report true whenever it mutates the function, including aliases.
@@ -170,6 +171,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "trim direct noreturn call continuations and lower direct nounwind invokes",
         run: call_contracts::run,
     },
+    BuiltinPass {
+        name: "stack-promote",
+        description: "promote initialized disjoint private stack fields to loop SSA (opt-in)",
+        run: stack_promote::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -210,6 +216,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[12],
     &BUILTINS[13],
     &BUILTINS[14],
+    &BUILTINS[15],
     &load_reuse::LoadReuse,
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
