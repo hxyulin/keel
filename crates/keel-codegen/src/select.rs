@@ -106,6 +106,8 @@ pub struct Selection {
     pub(crate) conditions: HashMap<Inst, (Inst, bool)>,
     /// X86 exact-width adjacent ordinary load encoded as an integer CMP RHS.
     pub(crate) compare_memory: HashMap<Inst, Value>,
+    /// X86 adjacent load encoded as an integer binary RHS.
+    pub(crate) binary_memory: HashMap<Inst, Value>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
@@ -787,7 +789,7 @@ impl Selection {
             }
         }
         if target == Target::X86 && options.trees {
-            plan.fold_compare_loads(func, &uses);
+            plan.fold_memory_rhs(func, &uses);
         }
         // Generate affinities only for instructions that survive selection.
         // Three-address fused instructions need no destructive-input copy.
@@ -808,10 +810,10 @@ impl Selection {
     }
 
     /// Do this after address selection, so the load's selected address leaves
-    /// (including a covered ptradd) move to the compare before allocation.
+    /// (including a covered ptradd) move to the consumer before allocation.
     /// There is no intervening IR instruction, including a second memory read.
     /// Keep debug functions on their existing materialization/location path.
-    fn fold_compare_loads(&mut self, func: &Function, uses: &[u8]) {
+    fn fold_memory_rhs(&mut self, func: &Function, uses: &[u8]) {
         if func.debug_loc.is_some()
             || !func.debug_vars.is_empty()
             || func.layout_insts().any(|(_, i)| func.inst_loc(i).is_some())
@@ -820,34 +822,50 @@ impl Selection {
         }
         for block in func.blocks() {
             for pair in func.block_insts(block).windows(2) {
-                let [load, compare] = [pair[0], pair[1]];
-                let InstData::Load {
-                    ty: Type::I64,
-                    addr,
-                    flags,
-                } = *func.inst_data(load)
-                else {
+                let [load, consumer] = [pair[0], pair[1]];
+                let InstData::Load { ty, addr, flags } = *func.inst_data(load) else {
                     continue;
                 };
-                let InstData::Icmp { args, .. } = *func.inst_data(compare) else {
+                if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
                     continue;
+                }
+                let (args, binary) = match *func.inst_data(consumer) {
+                    InstData::Icmp { args, .. } => (args, false),
+                    InstData::Binary { op, args }
+                        if matches!(
+                            op,
+                            BinaryOp::Iadd
+                                | BinaryOp::Isub
+                                | BinaryOp::And
+                                | BinaryOp::Or
+                                | BinaryOp::Xor
+                        ) || (op == BinaryOp::Imul && ty != Type::I8) =>
+                    {
+                        (args, true)
+                    }
+                    _ => continue,
                 };
                 let value = func.inst_results(load)[0];
-                let result = func.inst_results(compare)[0];
+                let result = func.inst_results(consumer)[0];
                 if flags.volatile
                     || func.resolve(value) != value
                     || func.resolve(result) != result
                     || func.resolve(args[1]) != value
                     || uses[value.index()] != 1
                     || self.covered(load)
-                    || self.covered(compare)
+                    || self.covered(consumer)
+                    || self.matches.contains_key(&consumer)
                 {
                     continue;
                 }
                 let mut operands = vec![func.resolve(args[0])];
                 operands.extend(self.operands(func, load));
-                self.set_operands(compare, operands);
-                self.compare_memory.insert(compare, addr);
+                self.set_operands(consumer, operands);
+                if binary {
+                    self.binary_memory.insert(consumer, addr);
+                } else {
+                    self.compare_memory.insert(consumer, addr);
+                }
                 self.cover(load);
             }
         }

@@ -2473,6 +2473,34 @@ impl<'a> FunctionCompiler<'a> {
     fn binary(&mut self, inst: Inst, op: BinaryOp, args: [Value; 2], d: u8) {
         let ty = self.ty(args[0]);
         let a = self.use_reg(args[0], S0);
+        if let Some(&addr) = self.selection.binary_memory.get(&inst) {
+            // Prepare the accumulator before mem reloads its distinct S1/S2
+            // leaves. Never write d until the access: d may alias either leaf,
+            // including when lhs and an address leaf are the same SSA value.
+            if a != S0 {
+                self.emit(Opcode::Mov, [asm_arg(&r64(S0)), asm_arg(&r64(a))]);
+            }
+            let at = self.mem(addr, S1, ty);
+            let mnemonic = match op {
+                BinaryOp::Iadd => Opcode::Add,
+                BinaryOp::Isub => Opcode::Sub,
+                BinaryOp::And => Opcode::And,
+                BinaryOp::Or => Opcode::Or,
+                BinaryOp::Xor => Opcode::Xor,
+                BinaryOp::Imul => Opcode::Imul,
+                _ => unreachable!("selected integer memory RHS"),
+            };
+            self.emit(mnemonic, [asm_arg(&reg(S0, ty)), asm_arg(&at)]);
+            // IR narrow arithmetic is modular. Normalize the partial-register
+            // result explicitly before any subsequent extension or spill.
+            if matches!(ty, Type::I8 | Type::I16) {
+                self.emit(Opcode::Movzx, [asm_arg(&r32(S0)), asm_arg(&reg(S0, ty))]);
+            }
+            if d != S0 {
+                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S0))]);
+            }
+            return;
+        }
         let imm = folded_imm(self.func, self.func.inst_data(inst)).map(|(_, k)| k);
         let simple = match op {
             BinaryOp::Iadd | BinaryOp::Ptradd => Some(Opcode::Add),
@@ -3742,7 +3770,7 @@ impl<'a> FunctionCompiler<'a> {
             .indexed_addresses
             .get(&self.func.resolve(addr))
         {
-            // All mem callers preserve at most S0 (integer store data or CMP
+            // All mem callers preserve at most S0 (integer data, ALU or CMP
             // lhs). S1/S2 are reserved, never allocation destinations, and
             // use_reg/rematerialize write only their requested scratch. Keep
             // the reloads distinct even when both leaves spill. The memory

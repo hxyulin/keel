@@ -161,7 +161,7 @@ fn shared_volatile_atomic_nonadjacent_left_and_debug_loads_stay_materialized() {
         let text = compile(&m, SelectionTier::Full, AllocationTier::Full, &SPILLED);
         assert_eq!(memory_compares(&text), 0, "{negative}\n{text}");
     }
-    for ty in ["i8", "i16", "i32", "i128"] {
+    for ty in ["i128"] {
         let src = format!(
             "func @f(ptr, {ty}) -> i64 {{\nblock0(v0: ptr, v1: {ty}):\n v2 = load.{ty} v0\n v3 = icmp.ult v1, v2\n v4 = uext.i64 v3\n return v4\n}}"
         );
@@ -297,7 +297,7 @@ fn native_unsigned_signed_and_boundaries_match_independent_clang_oracle() {
     let mut ir = String::new();
     let mut oracle = String::from("#include <stdint.h>\n");
     let mut driver = String::from(
-        "#include <stdint.h>\n#include <assert.h>\n#include <unistd.h>\n#include <sys/mman.h>\n#include <sys/wait.h>\n#include <signal.h>\n",
+        "#include <stdint.h>\n#include <assert.h>\n#include <unistd.h>\n#include <sys/mman.h>\n#include <sys/wait.h>\n#include <signal.h>\n#include <sys/prctl.h>\n",
     );
     let mut checks = String::new();
     for (index, (cc, op, signed)) in [
@@ -320,7 +320,7 @@ fn native_unsigned_signed_and_boundaries_match_independent_clang_oracle() {
         driver.push_str(&format!("extern uint64_t f{index}(const void*,uint64_t);extern uint64_t o{index}(const uint64_t*,uint64_t);\n"));
         checks.push_str(&format!("assert(f{index}(p,x)==o{index}(p,x));"));
     }
-    driver.push_str(&format!("int main(void){{uint64_t a[]={{0,1,2,0x7fffffffffffffffULL,0x8000000000000000ULL,UINT64_MAX}};for(unsigned i=0;i<6;i++)for(unsigned j=0;j<6;j++){{uint64_t*p=&a[i],x=a[j];{checks}}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);uint64_t*p=(uint64_t*)(m+n-8);*p=UINT64_MAX;assert(mprotect(m+n,n,PROT_NONE)==0);for(unsigned j=0;j<6;j++){{uint64_t x=a[j];{checks}}}pid_t c=fork();assert(c>=0);if(!c){{(void)f0(m+n-7,0);_exit(0);}}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);assert(munmap(m,2*n)==0);return 0;}}\n"));
+    driver.push_str(&format!("int main(void){{assert(prctl(PR_SET_DUMPABLE,0)==0);uint64_t a[]={{0,1,2,0x7fffffffffffffffULL,0x8000000000000000ULL,UINT64_MAX}};for(unsigned i=0;i<6;i++)for(unsigned j=0;j<6;j++){{uint64_t*p=&a[i],x=a[j];{checks}}}long n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);uint64_t*p=(uint64_t*)(m+n-8);*p=UINT64_MAX;assert(mprotect(m+n,n,PROT_NONE)==0);for(unsigned j=0;j<6;j++){{uint64_t x=a[j];{checks}}}pid_t c=fork();assert(c>=0);if(!c){{(void)f0(m+n-7,0);_exit(0);}}int s;assert(waitpid(c,&s,0)==c);assert(WIFSIGNALED(s));assert(WTERMSIG(s)==SIGSEGV||WTERMSIG(s)==SIGBUS);assert(munmap(m,2*n)==0);return 0;}}\n"));
     fs::write(dir.join("oracle.c"), oracle).unwrap();
     fs::write(dir.join("driver.c"), driver).unwrap();
     assert!(
