@@ -447,7 +447,7 @@ fn native_independent_c_oracles_exact_width_wrap_spills_and_fault_order() {
         "#include <stdint.h>\n#include <string.h>\nvolatile unsigned calls; void clobber(void){calls++;}\n",
     );
     let mut driver = String::from(
-        "#include <stdint.h>\n#include <string.h>\n#include <assert.h>\n#include <unistd.h>\n#include <sys/mman.h>\n#include <sys/wait.h>\n#include <signal.h>\n#include <sys/resource.h>\n",
+        "#include <stdint.h>\n#include <string.h>\n#include <assert.h>\n#include <unistd.h>\n#include <sys/mman.h>\n#include <sys/wait.h>\n#include <signal.h>\n#include <sys/resource.h>\n#ifdef __linux__\n#include <sys/prctl.h>\n#endif\n",
     );
     let mut checks = String::new();
     let mut faults = String::new();
@@ -540,7 +540,9 @@ fn native_independent_c_oracles_exact_width_wrap_spills_and_fault_order() {
     // A fault must occur after the earlier volatile marker store and before
     // the later marker store; shared mapping makes ordering parent-visible.
     ir.push_str("func @ordered(ptr,i64,ptr) -> i64 {\nblock0(v0: ptr,v1: i64,v2: ptr):\n v3 = iconst.i64 3\n v4 = shl v1,v3\n v5 = ptradd v0,v4\n v6 = iconst.i64 17\n store volatile v6,v2\n v7 = load.i64 volatile v5\n v8 = iconst.i64 91\n store volatile v8,v2\n return v7\n}\n");
-    driver.push_str("extern uint64_t wrap(void*,uint64_t);extern uint64_t same_index(void*,uint64_t,uint64_t);extern void* same_base(void*,uint64_t,void*);extern uint64_t stack(uint64_t,uint64_t);extern uint64_t ordered(void*,uint64_t,void*);\nint main(void){struct rlimit lim={0,0};assert(!setrlimit(RLIMIT_CORE,&lim));\n");
+    // Linux core_pattern pipes can invoke crash reporters despite RLIMIT_CORE=0.
+    // Disable dumps for this oracle and its deliberate-fault children only.
+    driver.push_str("extern uint64_t wrap(void*,uint64_t);extern uint64_t same_index(void*,uint64_t,uint64_t);extern void* same_base(void*,uint64_t,void*);extern uint64_t stack(uint64_t,uint64_t);extern uint64_t ordered(void*,uint64_t,void*);\nint main(void){struct rlimit lim={0,0};assert(!setrlimit(RLIMIT_CORE,&lim));\n#ifdef __linux__\nassert(!prctl(PR_SET_DUMPABLE,0));\n#endif\n");
     driver.push_str(&checks);
     driver.push_str("{uint64_t a[65]={0}; a[1]=UINT64_C(0xfedcba9876543210);assert(wrap(a,(UINT64_C(1)<<61)+1)==a[1]);assert(wrap((void*)(UINTPTR_MAX-7),((uintptr_t)&a[1]+8)>>3)==a[1]);for(int i=-32;i<=32;i++){assert(same_index(a+32,(uint64_t)(int64_t)i,0)==(uint64_t)(int64_t)i);assert(a[i+32]==(uint64_t)(int64_t)i);}void* b[65];for(int i=-32;i<=32;i++){assert(same_base(b+32,(uint64_t)(int64_t)i,0)==b+32);assert(b[i+32]==b+32);}for(unsigned i=0;i<8;i++)assert(stack(i,UINT64_C(0xfedcba9876543210)^i)==(UINT64_C(0xfedcba9876543210)^i));}\nlong n=sysconf(_SC_PAGESIZE);assert(n>0);unsigned char*m=mmap(0,2*n,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANONYMOUS,-1,0);assert(m!=MAP_FAILED);assert(!mprotect(m+n,n,PROT_NONE));\n");
     driver.push_str(&faults);
