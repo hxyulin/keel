@@ -183,11 +183,13 @@ The stages can be tuned independently:
   promotion and bounded loop transformations. Full includes GVN,
   [small-memory expansion](docs/small-memory.md), and GCM within each round.
   Fast keeps its five-pass schedule to bound compilation work.
-  `-O` remains an alias for `full`; the default is `none`.
+  `-O` selects Full IR and full instruction selection; the default IR tier
+  is `none`.
 - `--isel-tier baseline|trees|full`: existing per-instruction lowering;
   generated tree selection; or trees plus folded operand liveness and
-  register affinities. The default is `baseline`. `--isel` still allows
-  individual features. When flags overlap, the last one wins.
+  register affinities. Without `-O`, the default is `baseline`; `-O` selects
+  `full`. `--isel` still allows individual features. Among explicit selectors,
+  the last one wins.
 - `--regalloc fast|full`: contiguous live intervals without affinities;
   or lifetime holes and register affinities. The default is `full`.
   Both use linear scan with the same ABI and spill handling. These are
