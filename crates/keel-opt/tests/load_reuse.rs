@@ -42,6 +42,24 @@ fn successful_loads_reused_without_hoisting_and_with_exact_types() {
 }
 
 #[test]
+fn stale_load_result_alias_cannot_supply_a_memory_fact() {
+    let mut m = keel_ir::parse(&edge("", "i64", "v0")).unwrap();
+    let f = &mut m.functions[0];
+    let load = f
+        .layout_insts()
+        .find_map(|(_, i)| matches!(f.inst_data(i), InstData::Load { .. }).then_some(i))
+        .unwrap();
+    let entry = f.entry_block().unwrap();
+    let unrelated = f.block_params(entry)[2];
+    // The observable read remains in layout but its old result is redirected.
+    // That unrelated value is not evidence of what memory contains.
+    f.replace_all_uses(f.first_result(load), unrelated);
+    keel_opt::run_passes(&mut m, &["load-reuse"]).unwrap();
+    assert_eq!(loads(&m), 2);
+    assert!(m.to_string().contains("return v5"));
+}
+
+#[test]
 fn barriers_include_debugger_edits_and_lifetimes() {
     for middle in [
         "v8 = load.i64 volatile v0",

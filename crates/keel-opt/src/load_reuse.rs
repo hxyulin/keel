@@ -11,7 +11,7 @@
 //! observable/lifetime barriers discard the state, including debugger edits.
 use crate::memory_alias::{Address, AliasInfo};
 use keel_ir::dominators::ControlFlowGraph;
-use keel_ir::{EntityRef, Function, InstData, Type, Value};
+use keel_ir::{EntityRef, Function, InstData, Type, Value, ValueDef};
 use std::collections::HashMap;
 
 pub struct LoadReuse;
@@ -55,6 +55,13 @@ fn run(func: &mut Function) -> bool {
                 InstData::Load { ty, addr, flags } if !flags.volatile => {
                     let key = (aliases.address(func, addr), ty);
                     let result = func.first_result(inst);
+                    // Replacements leave the observable read in layout. Its
+                    // redirected old result is neither a memory fact nor a
+                    // result that this pass may redirect again.
+                    if !matches!(func.value_def(result), ValueDef::Result(owner, 0) if owner == inst)
+                    {
+                        continue;
+                    }
                     if let Some(&(value, _)) = facts.get(&key) {
                         func.replace_all_uses(result, func.resolve(value));
                         func.remove_inst(inst);
