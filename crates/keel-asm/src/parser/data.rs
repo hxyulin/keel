@@ -281,12 +281,25 @@ pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
     }
     Ok(result)
 }
-pub(super) fn value(constant: i128, width: u8) -> Result<Vec<u8>, String> {
+pub(super) struct Value {
+    bytes: [u8; 8],
+    width: u8,
+}
+impl std::ops::Deref for Value {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &self.bytes[..usize::from(self.width)]
+    }
+}
+pub(super) fn value(constant: i128, width: u8) -> Result<Value, String> {
     let bits = u32::from(width) * 8;
     if constant < -(1i128 << (bits - 1)) || constant >= 1i128 << bits {
         return Err(format!("data value does not fit {bits} bits"));
     }
-    Ok((constant as u64).to_le_bytes()[..usize::from(width)].to_vec())
+    Ok(Value {
+        bytes: (constant as u64).to_le_bytes(),
+        width,
+    })
 }
 pub(super) fn width(op: &str) -> Option<u8> {
     match op {

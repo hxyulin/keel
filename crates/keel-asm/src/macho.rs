@@ -132,11 +132,12 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     }
     let data_end = file;
     let first_file = first_file.unwrap_or(data_end);
-    let mut all_names = BTreeSet::new();
-    for symbol in &assembly.symbols {
+    // Validate once and keep source indices for both definitions and nlist IDs.
+    let mut by_name = BTreeMap::new();
+    for (source_index, symbol) in assembly.symbols.iter().enumerate() {
         if symbol.name.is_empty()
             || symbol.name.contains('\0')
-            || !all_names.insert(symbol.name.as_str())
+            || by_name.insert(symbol.name.as_str(), source_index).is_some()
             || (symbol.offset.is_none() && !symbol.global)
             || (symbol.private_extern && !symbol.global)
             || (symbol.weak_can_be_hidden && !symbol.weak_definition)
@@ -155,30 +156,20 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             return Err(Error::new(0, "invalid symbol section or offset"));
         }
     }
-    let definitions: BTreeMap<_, _> = assembly
-        .symbols
-        .iter()
-        .filter_map(|s| Some((s.name.as_str(), (s.section?, s.offset?))))
-        .collect();
-    let temporary: BTreeSet<_> = assembly
-        .symbols
-        .iter()
-        .filter(|s| !s.global && s.name.starts_with('L'))
-        .map(|s| s.name.as_str())
-        .collect();
     // Absolute local pointers can use a section ordinal and original address,
     // so no interior temporary label has to become a linker function entry.
     let section_target = |r: &super::Relocation| {
+        let symbol = &assembly.symbols[*by_name.get(r.symbol.as_str())?];
         if r.kind != RelocationKind::Unsigned
             || r.subtract_symbol.is_some()
-            || !(temporary.contains(r.symbol.as_str())
+            || !((!symbol.global && symbol.name.starts_with('L'))
                 || views
                     .get(r.section)
                     .is_some_and(|v| v.flags & 0x0200_0000 != 0))
         {
             return None;
         }
-        definitions.get(r.symbol.as_str()).copied()
+        Some((symbol.section?, symbol.offset?))
     };
     // Darwin temporary labels are not independent function entries. Keeping
     // interior L labels in nlist makes ld generate spurious no-unwind ranges.
@@ -221,27 +212,11 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     let nundefined = nsyms - nlocals - ndefined;
     let mut strings = vec![0];
     let mut entries = Vec::new();
-    let mut indices = BTreeMap::new();
+    let mut indices = vec![None; assembly.symbols.len()];
     for (index, symbol) in symbols.into_iter().enumerate() {
-        if symbol.name.is_empty()
-            || symbol.name.contains('\0')
-            || (symbol.offset.is_none() && !symbol.global)
-            || symbol.offset.is_some() != symbol.section.is_some()
-            || symbol.common.is_some_and(|(size, alignment)| {
-                size == 0 || alignment > 15 || symbol.section.is_some() || !symbol.global
-            })
-            || indices.insert(symbol.name.as_str(), index as u32).is_some()
-        {
-            return Err(Error::new(0, "invalid or duplicate symbol"));
-        }
+        indices[by_name[symbol.name.as_str()]] = Some(index as u32);
         let (ordinal, value) = if let Some(section) = symbol.section {
-            let view = views
-                .get(section)
-                .ok_or_else(|| Error::new(0, "invalid symbol section"))?;
             let offset = symbol.offset.unwrap();
-            if offset > view.size {
-                return Err(Error::new(0, "symbol offset exceeds its section"));
-            }
             (
                 ordinals[section],
                 addresses[section]
@@ -319,16 +294,20 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             let index = if local.is_some() {
                 0
             } else {
-                *indices.get(r.symbol.as_str()).ok_or_else(|| {
-                    Error::new(
-                        0,
-                        format!("relocation references missing symbol `{}`", r.symbol),
-                    )
-                })?
+                by_name
+                    .get(r.symbol.as_str())
+                    .and_then(|&i| indices[i])
+                    .ok_or_else(|| {
+                        Error::new(
+                            0,
+                            format!("relocation references missing symbol `{}`", r.symbol),
+                        )
+                    })?
             };
             if let Some(subtract) = &r.subtract_symbol {
-                let index = *indices
+                let index = by_name
                     .get(subtract.as_str())
+                    .and_then(|&i| indices[i])
                     .ok_or_else(|| Error::new(0, "difference references missing symbol"))?;
                 u32le(&mut layout.records, r.offset);
                 u32le(

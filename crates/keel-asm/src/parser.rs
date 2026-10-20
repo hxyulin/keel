@@ -1031,8 +1031,9 @@ fn assemble_pass(
         if let Some(width) = data::width(&op) {
             count(&args, 1, usize::MAX).map_err(err)?;
             for argument in args.iter().copied() {
-                let got = argument.contains("@GOT");
-                if let Some((_, suffix)) = argument.split_once("@GOT")
+                let modifier = argument.split_once("@GOT");
+                let got = modifier.is_some();
+                if let Some((_, suffix)) = modifier
                     && suffix
                         .chars()
                         .next()
@@ -1040,8 +1041,7 @@ fn assemble_pass(
                 {
                     return Err(err("data GOT pointers require the @GOT modifier".into()));
                 }
-                let expression: &str = if got {
-                    let (head, tail) = argument.split_once("@GOT").unwrap();
+                let expression: &str = if let Some((head, tail)) = modifier {
                     let mut text = bumpalo::collections::String::with_capacity_in(
                         head.len() + tail.len(),
                         &arena,
