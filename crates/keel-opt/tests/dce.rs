@@ -77,6 +77,57 @@ block0(v0: ptr, v1: i64):
 }
 
 #[test]
+fn only_unused_ordinary_nontrapping_reads_can_die() {
+    for ty in [
+        "i8", "i16", "i32", "i64", "i128", "f32", "f64", "ptr", "i32x4",
+    ] {
+        for (flags, retained) in [
+            ("", true),
+            ("align 8", true),
+            ("volatile notrap", true),
+            ("notrap", false),
+        ] {
+            let source = format!(
+                "func @f(ptr, {ty}) -> {ty} {{
+block0(v0: ptr, v1: {ty}):
+ v2 = load.{ty} {flags} v0
+ return v1
+}}"
+            );
+            let original = keel_ir::parse(&source).unwrap();
+            for tier in [
+                keel_opt::OptimizationTier::Fast,
+                keel_opt::OptimizationTier::Basic,
+                keel_opt::OptimizationTier::Full,
+            ] {
+                let mut m = original.clone();
+                keel_opt::optimize_with_tier(&mut m, tier).unwrap();
+                keel_ir::verify_module(&m).unwrap();
+                assert_eq!(
+                    m.to_string().contains("load."),
+                    retained,
+                    "{tier:?}: {source}"
+                );
+            }
+            // The access stays pinned for memory ordering, irrespective of
+            // whether DCE is allowed to discard an unused result.
+            let mut live = keel_ir::parse(&source.replace("return v1", "return v2")).unwrap();
+            keel_opt::run_passes(&mut live, &["dce", "gcm"]).unwrap();
+            assert!(
+                live.functions[0]
+                    .layout_insts()
+                    .any(|(_, i)| matches!(live.functions[0].inst_data(i), InstData::Load { .. }))
+            );
+            assert!(
+                !keel_opt::find_pass("dce")
+                    .unwrap()
+                    .run(&mut live.functions[0])
+            );
+        }
+    }
+}
+
+#[test]
 fn dead_loop_cycle_dies_in_every_pass_combination() {
     let source = "func @f(i64, i64) -> i64 {
 block0(v0: i64, v1: i64):

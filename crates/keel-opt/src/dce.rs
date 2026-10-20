@@ -1,8 +1,10 @@
 //! Dead code elimination: mark what is needed, remove the rest.
 //!
 //! Pinned instructions (side effects, traps, terminators) are always
-//! needed. A value is needed if a needed instruction uses it, which makes
-//! its defining instruction needed in turn. Branch arguments are the
+//! needed, except ordinary loads explicitly promised not to trap: their
+//! reads have no observable effect when the result is dead. They remain
+//! pinned for scheduling when live. A value is needed if a needed instruction
+//! uses it, which makes its defining instruction needed in turn. Branch arguments are the
 //! exception: passing a value to a block parameter only needs the value if
 //! the parameter itself is needed. That way a loop variable that is only
 //! ever passed around the loop (`jump block1(v7)` where `v7 = iadd v3, ..`
@@ -27,7 +29,9 @@ pub fn run(func: &mut Function) -> bool {
     // Roots: the operands of pinned instructions, minus branch arguments.
     for (_, inst) in func.layout_insts() {
         let data = func.inst_data(inst);
-        if data.is_pinned() {
+        let dead_read_eligible = matches!(data, InstData::Load { flags, .. }
+            if flags.notrap && !flags.volatile);
+        if data.is_pinned() && !dead_read_eligible {
             live_inst[inst.index()] = true;
             uses_except_branch_args(func, inst, |value| {
                 enqueue(func, value, &mut live_value, &mut worklist);
