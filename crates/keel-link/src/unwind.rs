@@ -173,6 +173,14 @@ impl Linker {
                     continue;
                 }
                 let output = &self.outputs[s.output.ok_or("eh_frame discarded")?];
+                // Membership is by offset after filtering: an earlier foreign
+                // relocation at the same offset must not hide a native one.
+                let fde_starts: BTreeSet<_> = s
+                    .relocs
+                    .iter()
+                    .filter(|rel| rel.kind == 1 && rel.width == 8)
+                    .map(|rel| rel.offset)
+                    .collect();
                 let mut at = 0;
                 while at < s.data.len() {
                     let r = Reader(&s.data);
@@ -189,11 +197,7 @@ impl Linker {
                         // Keel emits explicit pointer differences with native
                         // width PC-relative FDE starts (DW_EH_PE_pcrel).
                         // Never silently copy implicit assembler FDE fixups.
-                        if !s
-                            .relocs
-                            .iter()
-                            .any(|rel| rel.offset == at + 8 && rel.kind == 1 && rel.width == 8)
-                        {
+                        if !fde_starts.contains(&(at + 8)) {
                             return fail(format!(
                                 "{}: implicit/foreign eh_frame FDE fixups require the system linker",
                                 o.name
@@ -296,6 +300,14 @@ impl Linker {
                     return fail("compact unwind size is not a multiple of 32");
                 }
                 let r = Reader(&s.data);
+                // Preserve find's first-match semantics, including malformed
+                // duplicates. Validation still happens in record order below.
+                let mut personality_relocs = BTreeMap::new();
+                for rel in &s.relocs {
+                    if rel.offset % 32 == 16 {
+                        personality_relocs.entry(rel.offset).or_insert(rel);
+                    }
+                }
                 for at in (0..s.data.len()).step_by(32) {
                     let address = r.u64(at)?;
                     let (start, end) = function_range(address, r.u32(at + 8)?)?;
@@ -311,7 +323,7 @@ impl Linker {
                     } else if !matches!(encoding & 0x0f000000, 0 | 0x02000000 | 0x04000000) {
                         return fail("unknown arm64 compact unwind mode");
                     }
-                    let personality = s.relocs.iter().find(|rel| rel.offset == at + 16);
+                    let personality = personality_relocs.get(&(at + 16));
                     if let Some(rel) = personality {
                         if !rel.external || rel.kind != 0 || rel.width != 8 {
                             return fail("unsupported compact personality relocation");
@@ -449,6 +461,101 @@ fn validate_cie(bytes: &[u8], at: usize) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn personality_index_preserves_first_match_and_record_error_order() {
+        let bytes = keel_asm::assemble_object(".text\n.globl _main\n_main:\nret\n.section __LD,__compact_unwind\n.quad _main\n.long 4\n.long 0x02001000\n.quad _p0\n.quad 0\n").unwrap();
+        let mut l = prepare_linker(
+            &[Input {
+                name: "index.o",
+                bytes: &bytes,
+            }],
+            Options {
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::from(["_p0".into()]),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        l.outputs[l.got_section].address = BASE + 0x1000;
+        let si = l.objects[0]
+            .sections
+            .iter()
+            .position(|s| s.name == "__compact_unwind")
+            .unwrap();
+        let s = &mut l.objects[0].sections[si];
+        s.data[..8].copy_from_slice(&(BASE + 4).to_le_bytes());
+        let valid = s.relocs.iter().find(|r| r.offset == 16).unwrap().clone();
+        let mut invalid = valid.clone();
+        invalid.width = 4;
+        s.relocs = vec![valid.clone(), invalid.clone()];
+        let expected = l.unwind_entries(&BTreeMap::new()).unwrap();
+        assert_eq!(expected.1, vec![0x1000]);
+        l.objects[0].sections[si].relocs.reverse();
+        assert_eq!(
+            l.unwind_entries(&BTreeMap::new()).err().unwrap(),
+            "unsupported compact personality relocation"
+        );
+        l.objects[0].sections[si].data[12..16].copy_from_slice(&0x05000000u32.to_le_bytes());
+        assert_eq!(
+            l.unwind_entries(&BTreeMap::new()).err().unwrap(),
+            "unknown arm64 compact unwind mode"
+        );
+        l.objects[0].sections[si].data[12..16].copy_from_slice(&0x02001000u32.to_le_bytes());
+        l.objects[0].sections[si].relocs = vec![valid];
+        assert_eq!(l.unwind_entries(&BTreeMap::new()).unwrap().1, expected.1);
+    }
+
+    #[test]
+    fn fde_index_filters_before_matching_duplicate_offsets() {
+        let bytes = keel_asm::assemble_object(
+            ".text\n.globl _main\n_main:\n.cfi_startproc\n.cfi_def_cfa x28,16\nret\n.cfi_endproc\n",
+        )
+        .unwrap();
+        let mut l = prepare_linker(
+            &[Input {
+                name: "fde.o",
+                bytes: &bytes,
+            }],
+            Options {
+                dylibs: vec![Dylib {
+                    install_name: "/usr/lib/libSystem.B.dylib".into(),
+                    exports: BTreeSet::new(),
+                    weak_exports: BTreeSet::new(),
+                }],
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        let si = l.objects[0]
+            .sections
+            .iter()
+            .position(|s| s.name == "__eh_frame")
+            .unwrap();
+        let s = &mut l.objects[0].sections[si];
+        let valid = s
+            .relocs
+            .iter()
+            .find(|r| r.kind == 1 && r.width == 8)
+            .unwrap()
+            .clone();
+        let mut foreign = valid.clone();
+        foreign.kind = 0;
+        s.relocs.insert(0, foreign.clone());
+        // This fixture's compact record needs a relocated address, but the FDE
+        // membership check runs first. Compare its later error with the oracle.
+        let with_duplicate = l.unwind().err().unwrap();
+        assert!(!with_duplicate.contains("implicit/foreign"));
+        l.objects[0].sections[si].relocs.retain(|r| r.kind != 1);
+        assert!(l.unwind().err().unwrap().contains("implicit/foreign"));
+        foreign.kind = 1;
+        foreign.width = 4;
+        l.objects[0].sections[si].relocs.push(foreign);
+        assert!(l.unwind().err().unwrap().contains("implicit/foreign"));
+    }
 
     #[test]
     fn plan_key_tracks_function_targets_but_not_lsda_addresses() {
