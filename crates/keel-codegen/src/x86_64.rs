@@ -70,8 +70,11 @@
 //! which the loader fills in, and calls to it go through the procedure
 //! linkage table (`call puts@PLT`).
 
+mod constant_division;
+
 use crate::dwarf::{self, FrameDebug};
 use crate::fold::{self, iconst};
+use crate::integer_division::{reducible_divisor, signed_reciprocal, unsigned_reciprocal};
 use crate::metadata::{Cfi, Directive, Expression, Sink};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools};
@@ -377,6 +380,12 @@ fn folds(func: &Function, data: &InstData) -> Vec<Value> {
     .filter(|&addr| stack_slot(func, addr).is_some());
     addr.into_iter()
         .chain(folded_imm(func, data).map(|(v, _)| v))
+        .chain(match *data {
+            InstData::Binary { args, .. } if reducible_divisor(func, data).is_some() => {
+                Some(func.resolve(args[1]))
+            }
+            _ => None,
+        })
         .collect()
 }
 
@@ -591,6 +600,7 @@ impl<'a> FunctionCompiler<'a> {
             backend_scope!(CompareFusion);
             selection.fuse_compares(func, |data| folds(func, data))
         };
+        selection.fuse_x86_selects(func, |data| folds(func, data));
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
@@ -1215,6 +1225,11 @@ impl<'a> FunctionCompiler<'a> {
                 self.float_binary(inst, op, args, d);
                 self.def_done(result, d);
             }
+            InstData::Binary { .. } if self.selection.division_remainders.contains_key(&inst) => {
+                let d = self.def_reg(result);
+                self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S2))]);
+                self.def_done(result, d);
+            }
             InstData::Binary { op, args } => {
                 let d = self.def_reg(result);
                 self.binary(inst, op, args, d);
@@ -1239,6 +1254,21 @@ impl<'a> FunctionCompiler<'a> {
             // condition is non-zero; the moves leave the flags alone.
             InstData::Select { args } => {
                 let d = self.def_reg(result);
+                if let Some(&compare) = self.selection.select_compares.get(&inst) {
+                    // Stage arms outside the compare's rax/rcx scratch. It
+                    // preserves these
+                    // two reserved registers even when every operand spills.
+                    self.emit_move(Loc::Reg(S2), self.loc(args[2]));
+                    self.emit_move(Loc::Reg(S3), self.loc(args[1]));
+                    let cc = self.compare(compare);
+                    self.emit(
+                        Opcode::Cmovcc(condition(cc)),
+                        [asm_arg(&r64(S2)), asm_arg(&r64(S3))],
+                    );
+                    self.emit(Opcode::Mov, [asm_arg(&r64(d)), asm_arg(&r64(S2))]);
+                    self.def_done(result, d);
+                    return;
+                }
                 self.test_value(args[0]);
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
@@ -1293,7 +1323,15 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Icmp { .. } | InstData::Fcmp { .. } => {
                 let d = self.def_reg(result);
                 let cc = self.compare(inst);
-                self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(d)))]);
+                if matches!(*func.inst_data(inst), InstData::Fcmp { cond: FloatCC::Eq | FloatCC::Ne, args } if func.resolve(args[0]) != func.resolve(args[1]))
+                {
+                    // Eq/Ne already combined the two flags into canonical al.
+                    if d != S0 {
+                        self.emit(Opcode::Mov, [asm_arg(&r8(d)), asm_arg(&r8(S0))]);
+                    }
+                } else {
+                    self.emit(Opcode::Setcc(condition(cc)), [asm_arg(&(r8(d)))]);
+                }
                 self.def_done(result, d);
             }
             InstData::Load { ty, addr, .. } if ty.is_float() || ty.is_vector() => {
@@ -2669,6 +2707,10 @@ impl<'a> FunctionCompiler<'a> {
         let ty = self.ty(args[0]);
         let signed = matches!(op, BinaryOp::Sdiv | BinaryOp::Srem);
         let width = wide_ty(ty);
+        if let Some(divisor) = reducible_divisor(self.func, self.func.inst_data(inst)) {
+            self.constant_division(op, ty, a, divisor, d);
+            return;
+        }
         let b = self.use_reg(args[1], S1);
         let b = self.extend(S1, b, ty, signed);
         let x = self.extend(S0, a, ty, signed);
@@ -3505,6 +3547,9 @@ impl<'a> FunctionCompiler<'a> {
                     FloatCC::Uno => (xa, xb, "p"),
                     FloatCC::Eq | FloatCC::Ne => {
                         self.emit(ucomi, [asm_arg(&(xa)), asm_arg(&(xb))]);
+                        if self.func.resolve(args[0]) == self.func.resolve(args[1]) {
+                            return if cond == FloatCC::Eq { "np" } else { "p" };
+                        }
                         if cond == FloatCC::Eq {
                             self.emit(Opcode::Setcc(4), [asm_arg(&(r8(0)))]);
                             self.emit(Opcode::Setcc(11), [asm_arg(&(r8(1)))]);
@@ -3514,7 +3559,7 @@ impl<'a> FunctionCompiler<'a> {
                             self.emit(Opcode::Setcc(10), [asm_arg(&(r8(1)))]);
                             self.emit(Opcode::Or, [asm_arg(&(r8(0))), asm_arg(&(r8(1)))]);
                         }
-                        self.emit(Opcode::Test, [asm_arg(&(r8(0))), asm_arg(&(r8(0)))]);
+                        // AND/OR already set ZF from canonical al.
                         return "ne";
                     }
                 };

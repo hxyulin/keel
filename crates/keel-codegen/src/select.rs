@@ -108,6 +108,10 @@ pub struct Selection {
     pub(crate) compare_memory: HashMap<Inst, Value>,
     /// X86 adjacent load encoded as an integer binary RHS.
     pub(crate) binary_memory: HashMap<Inst, Value>,
+    /// X86 adjacent quotient/multiply/subtract using the native remainder.
+    pub(crate) division_remainders: HashMap<Inst, Inst>,
+    /// Adjacent scalar compare consumed directly by a select.
+    pub(crate) select_compares: HashMap<Inst, Inst>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
     // (including addresses known only after allocation) does not remove them twice.
@@ -225,6 +229,73 @@ impl Selection {
         folds: impl Fn(&InstData) -> Vec<Value>,
     ) -> HashSet<Value> {
         self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func))
+    }
+
+    /// Only adjacent single-use scalar compares: move their inputs to the
+    /// select's allocation boundary before suppressing the Boolean definition.
+    pub(crate) fn fuse_x86_selects(
+        &mut self,
+        func: &Function,
+        folds: impl Fn(&InstData) -> Vec<Value>,
+    ) {
+        let mut uses = vec![0u8; func.num_values()];
+        for (_, i) in func.layout_insts() {
+            func.inst_data(i).for_each_operand(|v| {
+                let n = &mut uses[func.resolve(v).index()];
+                *n = (*n + 1).min(2);
+            });
+        }
+        let mut pairs = Vec::new();
+        for block in func.blocks() {
+            for pair in func.block_insts(block).windows(2) {
+                let [compare, select] = [pair[0], pair[1]];
+                let InstData::Select { args } = *func.inst_data(select) else {
+                    continue;
+                };
+                if !matches!(
+                    func.value_type(func.resolve(args[1])),
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+                ) {
+                    continue;
+                }
+                let scalar = match *func.inst_data(compare) {
+                    InstData::Icmp { args, .. } => {
+                        func.value_type(func.resolve(args[0])) != Type::I128
+                    }
+                    InstData::Fcmp { .. } => true,
+                    _ => false,
+                };
+                // Memory-CMP address lowering can use rdx for an index.
+                // Keep it outside this staging contract, including outer tests.
+                if !scalar
+                    || self.compare_memory.contains_key(&compare)
+                    || self.conditions.contains_key(&compare)
+                {
+                    continue;
+                }
+                let cond = func.resolve(args[0]);
+                if func.inst_results(compare).first() != Some(&cond) || uses[cond.index()] != 1 {
+                    continue;
+                }
+                if let Some(a) = func.inst_loc(compare) {
+                    if func
+                        .inst_loc(select)
+                        .is_none_or(|b| a.file != b.file || a.line != b.line)
+                    {
+                        continue;
+                    }
+                }
+                pairs.push((cond, compare, select));
+            }
+        }
+        for pair in pairs {
+            if self
+                .fuse_compare_pairs(func, &folds, vec![pair])
+                .contains(&pair.0)
+            {
+                self.select_compares.insert(pair.2, pair.1);
+            }
+        }
     }
 
     pub(crate) fn fuse_aarch64_compares(
@@ -458,6 +529,59 @@ impl Selection {
             for (end, &inst) in func.block_insts(block).iter().enumerate().rev() {
                 if plan.covered(inst) {
                     continue;
+                }
+                // Preserve the quotient and its trap guard at the original
+                // instruction. With exactly this adjacent sequence, emission
+                // between IDIV/DIV and the remainder read only moves registers
+                // or spill homes; no operation can clobber reserved RDX.
+                if target == Target::X86 && end >= 2 {
+                    let insts = func.block_insts(block);
+                    let (division, product) = (insts[end - 2], insts[end - 1]);
+                    if let InstData::Binary {
+                        op: BinaryOp::Isub,
+                        args: sub,
+                    } = *func.inst_data(inst)
+                        && let InstData::Binary {
+                            op: BinaryOp::Imul,
+                            args: mul,
+                        } = *func.inst_data(product)
+                        && let InstData::Binary {
+                            op: BinaryOp::Sdiv | BinaryOp::Udiv,
+                            args: div,
+                        } = *func.inst_data(division)
+                        && matches!(
+                            func.value_type(func.resolve(div[0])),
+                            Type::I8 | Type::I16 | Type::I32 | Type::I64
+                        )
+                        && crate::integer_division::reducible_divisor(
+                            func,
+                            func.inst_data(division),
+                        )
+                        .is_none()
+                        && let quotient = func.resolve(func.first_result(division))
+                        && quotient == func.first_result(division)
+                        && func.resolve(sub[0]) == func.resolve(div[0])
+                        && func.resolve(sub[1]) == func.first_result(product)
+                        && uses[func.first_result(product).index()] == 1
+                        && ((func.resolve(mul[0]) == quotient
+                            && func.resolve(mul[1]) == func.resolve(div[1]))
+                            || (func.resolve(mul[1]) == quotient
+                                && func.resolve(mul[0]) == func.resolve(div[1])))
+                        && !plan.covered(product)
+                        && !plan.covered(division)
+                        && [division, product].into_iter().all(|i| {
+                            match (func.inst_loc(i), func.inst_loc(inst)) {
+                                (Some(a), Some(b)) => a.file == b.file && a.line == b.line,
+                                (Some(_), None) => false,
+                                _ => true,
+                            }
+                        })
+                    {
+                        plan.cover(product);
+                        plan.set_operands(inst, vec![quotient]);
+                        plan.division_remainders.insert(inst, division);
+                        continue;
+                    }
                 }
                 // A compare produces exactly 0 or 1. Its unsigned extension
                 // and an equality test against zero can use the original

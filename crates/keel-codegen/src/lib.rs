@@ -16,6 +16,7 @@ mod abi;
 mod data;
 mod dwarf;
 mod fold;
+mod integer_division;
 mod metadata;
 mod parallel_copy;
 mod stack_frame;
