@@ -112,3 +112,42 @@ block2:
 block3(v15: i64):
  return v15
 }
+
+func @offset32(i32, i32, i32, i32) -> i64 cc(c) {
+block0(v0: i32, v1: i32, v2: i32, v3: i32):
+ v4 = iconst.i32 0
+ v5 = iconst.i64 17
+ jump block1(v2, v4, v5)
+block1(v6: i32, v7: i32, v8: i64):
+ v9 = icmp.ult v7, v0
+ brif v9, block2, block3(v8)
+block2:
+ v10 = iadd v6, v3
+ v11 = sext.i64 v10
+ v12 = iadd v8, v11
+ v13 = iadd v6, v1
+ v14 = iconst.i32 1
+ v15 = iadd v7, v14
+ jump block1(v13, v15, v12)
+block3(v16: i64):
+ return v16
+}
+
+func @offset64(i64, i64, i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64, v2: i64, v3: i64):
+ v4 = iconst.i64 0
+ v5 = iconst.i64 17
+ jump block1(v2, v4, v5)
+block1(v6: i64, v7: i64, v8: i64):
+ v9 = icmp.ult v7, v0
+ brif v9, block2, block3(v8)
+block2:
+ v10 = iadd v6, v3
+ v12 = iadd v8, v10
+ v13 = iadd v6, v1
+ v14 = iconst.i64 1
+ v15 = iadd v7, v14
+ jump block1(v13, v15, v12)
+block3(v16: i64):
+ return v16
+}

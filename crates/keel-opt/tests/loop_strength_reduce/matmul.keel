@@ -1,0 +1,58 @@
+; Actual kernels/kernels.c matmul after Full prefix and product strength reduction.
+; Retained before offset folding, unrolling, and rotation at adc70770.
+func @k_matmul(ptr, ptr, ptr, i32) cc(c) {
+block0(v0: ptr, v1: ptr, v2: ptr, v3: i32):
+    v4 = iconst.i32 0
+    jump block1(v4)
+block1(v5: i32):
+    v6 = icmp.sgt v3, v5
+    brif v6, block2, block4
+block2:
+    v7 = imul v3, v5
+    v8 = iconst.i32 0
+    jump block5(v8)
+block3:
+    v9 = iconst.i32 1
+    v10 = iadd v5, v9
+    jump block1(v10)
+block4:
+    return
+block5(v11: i32):
+    v12 = icmp.sgt v3, v11
+    brif v12, block6, block3
+block6:
+    v13 = iconst.i32 0
+    v40 = iconst.i32 0
+    jump block7(v13, v13, v40)
+block7(v14: i32, v15: i32, v43: i32):
+    v16 = icmp.sgt v3, v14
+    brif v16, block8, block9
+block8:
+    v17 = iadd v7, v14
+    v18 = sext.i64 v17
+    v19 = iconst.i64 2
+    v20 = shl v18, v19
+    v21 = ptradd v0, v20
+    v22 = load.i32 v21
+    v24 = iadd v11, v43
+    v25 = sext.i64 v24
+    v26 = shl v25, v19
+    v27 = ptradd v1, v26
+    v28 = load.i32 v27
+    v29 = imul v22, v28
+    v30 = iadd v15, v29
+    v31 = iconst.i32 1
+    v32 = iadd v14, v31
+    v44 = iadd v3, v43
+    jump block7(v32, v30, v44)
+block9:
+    v33 = iadd v7, v11
+    v34 = sext.i64 v33
+    v35 = iconst.i64 2
+    v36 = shl v34, v35
+    v37 = ptradd v2, v36
+    store v15, v37
+    v38 = iconst.i32 1
+    v39 = iadd v11, v38
+    jump block5(v39)
+}
