@@ -372,6 +372,10 @@ pub struct Profile {
     pub discard_ms: Vec<f64>,
     pub widened: Vec<usize>,
     pub object_ms: f64,
+    /// Parsed instructions, labels and retained directives before layout.
+    /// Each inline directive counts separately, just like newline-separated
+    /// directives. Syntax-mode directives consumed by the source parser do not
+    /// contribute. Older versions coalesced adjacent inline directive texts.
     pub items: usize,
 }
 /// Assemble once and collect stage timings, excluding file I/O.

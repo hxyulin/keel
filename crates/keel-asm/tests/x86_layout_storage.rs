@@ -326,6 +326,12 @@ fn profile_counts_parsed_items_not_runs() {
     // nop, nop, foo, nop, ".byte 1\n", jmp.
     assert_eq!(profile.items, 6);
     assert_eq!(profile.widened, [0]);
+
+    for source in [".byte 1; .byte 2; ret", ".byte 1\n.byte 2\nret"] {
+        let (object, profile) = profile_object(source).unwrap();
+        assert_eq!(object, assemble_object(source).unwrap());
+        assert_eq!(profile.items, 3);
+    }
 }
 
 #[test]
