@@ -36,7 +36,7 @@ def run(argv):
     return r.stdout
 
 def opt(src, dst, passes):
-    run([keel, 'opt', '--verify-each', '-p', passes, src, '-o', dst])
+    run([keel, 'opt', '--verify-each', *(['-p', passes] if passes else ['--opt-tier', 'none']), src, '-o', dst])
 
 promotion = 'stack-promote,phi-simplify,dce'
 combined = promotion + (',if-convert,simplify-cfg,dce' if a.if_convert else '')
@@ -90,6 +90,22 @@ for tier in ['fast', 'full']:
     actual = run([exe, 'check'])
     assert actual == expected, tier
     (out/('whole-'+tier+'-check.txt')).write_text(actual)
+if a.if_convert:
+    diamond = fixture.parent/'if_convert'
+    run(['clang', '-O2', '-fno-lto', '-c', diamond/'oracle.c', '-o', out/'diamond-oracle.o'])
+    for name, passes in [('before', ''), ('converted', 'if-convert,simplify-cfg,dce')]:
+        opt(diamond/'diamonds.keel', out/('diamonds-'+name+'.keel'), passes)
+    for tier in ['fast', 'full']:
+        run([keel, 'opt', '--opt-tier', tier, out/'diamonds-converted.keel', '-o', out/('diamonds-'+tier+'.keel')])
+    for name in ['before', 'converted', 'fast', 'full']:
+        for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
+            src = out/('diamonds-'+name+'.keel')
+            for ext, flag in [('s', []), ('o', ['--emit-object'])]:
+                run([keel, 'compile', '-O', '--opt-tier', 'none', '--target', target, *flag,
+                     src, '-o', out/('diamonds-'+name+'-'+target+'.'+ext)])
+        exe = out/('diamonds-'+name+'.exe')
+        run(['clang', out/'diamond-oracle.o', out/('diamonds-'+name+'-aarch64-apple-darwin.o'), '-o', exe])
+        run([exe])
 summary = dict(status='correctness/static only; no timing', native='ARM64 macOS only',
     private_before=counts(source.read_text()), private_promoted=counts(private),
     private_combined=counts((out/'combined.keel').read_text()), corpus_before=counts(before), corpus_after=counts(after),

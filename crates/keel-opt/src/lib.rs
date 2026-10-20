@@ -22,6 +22,7 @@ mod dce;
 mod fast;
 mod gcm;
 mod gvn;
+mod if_convert;
 mod inline;
 mod report;
 pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
@@ -176,6 +177,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "promote initialized disjoint private stack fields to loop SSA (opt-in)",
         run: stack_promote::run,
     },
+    BuiltinPass {
+        name: "if-convert",
+        description: "convert bounded nontrapping scalar diamonds to selects (opt-in)",
+        run: if_convert::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -217,6 +223,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[13],
     &BUILTINS[14],
     &BUILTINS[15],
+    &BUILTINS[16],
     &load_reuse::LoadReuse,
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
