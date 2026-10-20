@@ -18,27 +18,26 @@ fn scalar(v: &Value, key: &str) -> Result<String> {
         .map(str::to_owned)
         .ok_or_else(|| format!("TBD missing string `{key}`"))
 }
-fn list(v: &Value, key: &str) -> Result<Vec<String>> {
-    if v[key].is_null() {
-        return Ok(Vec::new());
+fn list<'a>(v: &'a Value, key: &str) -> Result<impl Iterator<Item = &'a str>> {
+    let values = if v[key].is_null() {
+        &[][..]
+    } else {
+        v[key]
+            .as_sequence()
+            .ok_or_else(|| format!("TBD `{key}` must be a list"))?
+            .as_slice()
+    };
+    // Validate the entire list before iteration: a matching target must not
+    // hide a malformed later entry through short-circuiting.
+    if values.iter().any(|value| value.as_str().is_none()) {
+        return fail(format!("TBD `{key}` contains a non-string"));
     }
-    v[key]
-        .as_sequence()
-        .ok_or_else(|| format!("TBD `{key}` must be a list"))?
-        .iter()
-        .map(|s| {
-            s.as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| format!("TBD `{key}` contains a non-string"))
-        })
-        .collect()
+    Ok(values.iter().map(|value| value.as_str().unwrap()))
 }
 fn compatible(v: &Value) -> Result<bool> {
     // Apple's current libSystem SDK umbrella lists arm64e but is also the
     // arm64 link interface. Do not accept Catalyst, iOS, or arm64e.x1 alone.
-    Ok(list(v, "targets")?
-        .iter()
-        .any(|s| matches!(s.as_str(), "arm64-macos" | "arm64e-macos")))
+    Ok(list(v, "targets")?.any(|s| matches!(s, "arm64-macos" | "arm64e-macos")))
 }
 impl Dylib {
     pub fn from_tbd(path: &Path, sysroot: &Path) -> Result<Self> {
@@ -94,11 +93,13 @@ impl Dylib {
                 if let Some(groups) = v[key].as_sequence() {
                     for group in groups {
                         if compatible(group)? {
-                            exports.extend(list(group, "symbols")?);
+                            exports.extend(list(group, "symbols")?.map(str::to_owned));
                             let weak = list(group, "weak-symbols")?;
-                            exports.extend(weak.iter().cloned());
-                            weak_exports.extend(weak);
-                            exports.extend(list(group, "thread-local-symbols")?);
+                            for name in weak {
+                                exports.insert(name.to_owned());
+                                weak_exports.insert(name.to_owned());
+                            }
+                            exports.extend(list(group, "thread-local-symbols")?.map(str::to_owned));
                             // TLV imports bind descriptor addresses; Objective-C synthesis remains unsupported.
                         }
                     }
@@ -107,7 +108,7 @@ impl Dylib {
             if let Some(groups) = v["reexported-libraries"].as_sequence() {
                 for group in groups {
                     if compatible(group)? {
-                        todo.extend(list(group, "libraries")?);
+                        todo.extend(list(group, "libraries")?.map(str::to_owned));
                     }
                 }
             }
@@ -124,6 +125,15 @@ impl Dylib {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn matching_target_does_not_hide_invalid_later_entries() {
+        let value: Value = serde_yaml::from_str("targets: [arm64-macos, 42]").unwrap();
+        assert_eq!(
+            compatible(&value).unwrap_err(),
+            "TBD `targets` contains a non-string"
+        );
+    }
+
     #[test]
     fn filters_architecture_and_follows_only_reachable_reexports() {
         let root = std::env::temp_dir().join(format!("keel-tbd-{}", std::process::id()));
