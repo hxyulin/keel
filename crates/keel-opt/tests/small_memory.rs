@@ -313,18 +313,15 @@ int main(void) {{
 fn full_expands_small_memory_before_stack_forward_only() {
     use keel_opt::{DEFAULT_PIPELINE, OptimizationTier};
     assert_eq!(OptimizationTier::Full.pipeline(), DEFAULT_PIPELINE);
-    let at = DEFAULT_PIPELINE
+    let positions: Vec<_> = DEFAULT_PIPELINE
         .iter()
-        .position(|p| *p == "small-memory")
-        .unwrap();
-    assert_eq!(DEFAULT_PIPELINE[at + 1], "stack-forward");
-    assert_eq!(
-        DEFAULT_PIPELINE
-            .iter()
-            .filter(|p| **p == "small-memory")
-            .count(),
-        1
-    );
+        .enumerate()
+        .filter_map(|(i, p)| (*p == "small-memory").then_some(i))
+        .collect();
+    assert_eq!(positions.len(), 3);
+    for at in positions {
+        assert_eq!(DEFAULT_PIPELINE[at + 1], "stack-forward");
+    }
     for pass in ["memory-forward", "loop-memory", "loop-unroll"] {
         assert!(!DEFAULT_PIPELINE.contains(&pass));
     }

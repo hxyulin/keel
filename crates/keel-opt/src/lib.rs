@@ -262,9 +262,8 @@ fn observe_verification(
     (result, start.elapsed().as_nanos())
 }
 
-/// Independent optimizer effort; Full adds value numbering, code motion, and
-/// bounded direct-call inlining, small memory expansion, private stack forwarding,
-/// and guarded map/sum loop vectorization.
+/// Independent optimizer effort; Full runs three bounded rounds of direct-call
+/// inlining, scalar/memory cleanup, code motion, and guarded loop optimization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
@@ -302,8 +301,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
     run_passes(module, tier.pipeline())
 }
 
-/// The passes `keel compile -O` runs, in order.
-pub const DEFAULT_PIPELINE: &[&str] = &[
+const FULL_ROUND: [&str; 15] = [
     "inline",
     "simplify-cfg",
     "canonicalize",
@@ -320,6 +318,25 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "loop-vectorize",
     "loop-reduce",
 ];
+
+const FULL_ROUNDS: usize = 3;
+
+// Inlining freezes its templates at each invocation. Cleanup exposes smaller
+// helpers for subsequent rounds, while each inliner retains its growth limits.
+// Keep the measured order, including code motion and loop passes between rounds;
+// cheaper schedules did not preserve the same workload/code-size tradeoffs.
+const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS] {
+    let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS];
+    let mut i = 0;
+    while i < passes.len() {
+        passes[i] = FULL_ROUND[i % FULL_ROUND.len()];
+        i += 1;
+    }
+    passes
+}
+
+/// The passes `keel compile -O` runs, in order: three bounded Full rounds.
+pub const DEFAULT_PIPELINE: &[&str] = &full_pipeline();
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {
     PASSES.iter().copied().find(|p| p.name() == name)

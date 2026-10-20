@@ -42,7 +42,24 @@ selectors override the preset, with the last explicit selector winning.
 ablation measurements. The default test configurations include both modes.
 
 `keel-fast` selects the Fast IR profile with Full selection and allocation;
-`keel-full` selects Full for all three. The historical Basic-IR/Fast-allocation
+`keel-full` selects Full for all three. Full IR now runs three bounded rounds
+of inlining, scalar/memory cleanup, code motion and loop optimization; Fast
+retains its existing bounded pipeline. The inliner freezes templates per round,
+so later rounds revisit helpers exposed by earlier cleanup. This is a fixed
+three-round schedule, not an unbounded fixed-point loop.
+
+The corrected-compiler suite comparison on MacHost, LinuxHost and the VPS measured
+about 8.5–15.6% less runtime than one Full round for about 50–53% more native
+object compilation time. Gains concentrate in QuickJS; code size increases and
+some individual workloads gain little or regress slightly. Shorter schedules
+did not offer a consistent runtime/code-size improvement. The measured compiler
+included the sparse-switch default-edge fix (`ad85339a`); pre-fix failed Lua
+arms are not valid performance evidence. Full remains about 1.67–2.08× Clang O2
+runtime on this corpus, while compiling about 6.5–7.8× faster at the measured
+preprocessed-C-to-object boundary. These are within-host paired comparisons,
+not end-to-end build times or a Cranelift comparison.
+
+The historical Basic-IR/Fast-allocation
 recipe is retained as `keel-basic-fast-alloc`, so allocation experiments do not
 silently stand in for the Fast IR profile.
 

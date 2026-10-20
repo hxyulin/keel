@@ -779,9 +779,17 @@ analyses they need; there is no analysis cache yet.
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
-The default pipeline (`-O`) is `inline, simplify-cfg, canonicalize, instcombine,
+The default pipeline (`-O`) runs three bounded rounds of `inline, simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
-loop-vectorize, loop-reduce`. Fast uses `fast-cfg, fast-local, fast-cfg, dce,
+loop-vectorize, loop-reduce`. Cleanup between inliner invocations exposes smaller
+helpers for the next round. This fixed 45-entry schedule retains code motion and
+loop optimization between rounds; it is not an unbounded fixed-point loop.
+The paired suite comparison on ARM and two x86 hosts measured 8.5–15.6% less
+runtime than one round at 50–53% greater preprocessed-C-to-object compilation
+time, with increased code size and uneven workload benefits. The
+[suite comparison protocol](../suite/README.md#native-platform-comparisons)
+describes the measurement boundary and limits.
+Fast uses `fast-cfg, fast-local, fast-cfg, dce,
 fast-loop-reduce`; the reduction eligibility scan and CFG analysis are size-capped.
 Basic uses `simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
@@ -813,6 +821,8 @@ fixed stack storage. `inlinehint` doubles these limits; `alwaysinline` bypasses
 only these soft limits and `noinline` prohibits expansion. Each caller accepts
 at most 128 sites and 2,048 added IR instructions, with a module limit of 16,384
 added instructions and hard stack budgets (including by-value snapshots).
+These admission budgets reset on each invocation; Full uses three invocations.
+They bound each round's pre-cleanup growth, not total final module or frame size.
 See [function attributes](function-attributes.md#inliner-policy-and-hard-boundaries)
 for exact limits and skip reports through `inline_with_report`. Normal CLI
 passes discard those reports. `alwaysinline` acts only when the pass runs.
