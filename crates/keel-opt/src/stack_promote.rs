@@ -1,9 +1,12 @@
 //! Promote definitely initialized, exact, disjoint fields of nonescaping fixed
-//! slots. No uninitialized SSA values are invented: a forward must analysis
+//! slots, including integer fields covered by wider byte-splat initialization.
+//! No uninitialized SSA values are invented: a forward must analysis
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
 use keel_ir::dominators::ControlFlowGraph;
-use keel_ir::{BinaryOp, EntityRef, Function, InstData, StackSlot, Type, Value, ValueDef};
+use keel_ir::{
+    BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value, ValueDef,
+};
 use std::collections::{HashMap, HashSet};
 
 type Field = (StackSlot, usize, Type);
@@ -14,6 +17,9 @@ pub fn run(f: &mut Function) -> bool {
         return false;
     }
     let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+    if insts.len() > 8192 {
+        return false;
+    }
     if insts.iter().any(|&i| match f.inst_data(i) {
         InstData::Invoke { .. } | InstData::LandingPad { .. } | InstData::InlineAsm { .. } => true,
         InstData::Call { func, .. } => f.callee(*func).sig.returns_twice,
@@ -117,26 +123,54 @@ pub fn run(f: &mut Function) -> bool {
     if fields.len() > 64 {
         return false;
     }
+    // A repeated byte has the same representation at every offset on either
+    // endianness. Do not reinterpret arbitrary integer bits or pointer values.
+    // Keep these stores in memory when they initialize a narrower field: their
+    // other bytes may still be read by an unpromoted field (including padding).
+    let splats: HashMap<_, _> = accesses
+        .keys()
+        .filter_map(|&i| {
+            let InstData::Store { value, .. } = *f.inst_data(i) else {
+                return None;
+            };
+            splat_byte(f, value).map(|byte| (i, byte))
+        })
+        .collect();
     let eligible: Vec<_> = fields
         .iter()
         .copied()
         .filter(|&(slot, offset, ty)| {
             !escaped.contains(&slot)
-                && !fields.iter().any(|&(s, o, t)| {
+                && !accesses.iter().any(|(i, &(s, o, t))| {
                     s == slot
                         && (o, t) != (offset, ty)
                         && offset < o + width(t)
                         && o < offset + width(ty)
+                        && !(ty.is_int()
+                            && splats.contains_key(i)
+                            && o <= offset
+                            && offset + width(ty) <= o + width(t))
                 })
         })
         .collect();
     let mut changed = false;
+    let mut retained_initializers = HashSet::new();
     for field in eligible {
+        let covers = |i: &_| {
+            let &(s, o, t) = accesses.get(i)?;
+            (field.2.is_int()
+                && s == field.0
+                && o <= field.1
+                && field.1 + width(field.2) <= o + width(t))
+            .then(|| splats.get(i).copied())
+            .flatten()
+        };
+        let relevant = |i: &_| accesses.get(i) == Some(&field) || covers(i).is_some();
         let mut stores = vec![false; f.num_blocks()];
         let mut has_load = false;
         for &b in &blocks {
             for &i in f.block_insts(b) {
-                if accesses.get(&i) == Some(&field) {
+                if relevant(&i) {
                     stores[b.index()] |= matches!(f.inst_data(i), InstData::Store { .. });
                     has_load |= matches!(f.inst_data(i), InstData::Load { .. });
                 }
@@ -168,7 +202,7 @@ pub fn run(f: &mut Function) -> bool {
         let valid = blocks.iter().all(|&b| {
             let mut defined = initialized[b.index()];
             for &i in f.block_insts(b) {
-                if accesses.get(&i) != Some(&field) {
+                if !relevant(&i) {
                     continue;
                 }
                 match f.inst_data(i) {
@@ -192,7 +226,21 @@ pub fn run(f: &mut Function) -> bool {
         for &b in &blocks {
             let mut value = incoming[b.index()];
             for i in f.block_insts(b).to_vec() {
+                if !relevant(&i) {
+                    continue;
+                }
                 if accesses.get(&i) != Some(&field) {
+                    let byte = covers(&i).unwrap();
+                    retained_initializers.insert(i);
+                    let loc = f.inst_loc(i);
+                    let init = f
+                        .ins(InsertPoint::Before(i))
+                        .loc(loc)
+                        .build(InstData::Iconst {
+                            ty: field.2,
+                            imm: repeated_byte(byte, field.2),
+                        });
+                    value = Some(f.first_result(init));
                     continue;
                 }
                 match *f.inst_data(i) {
@@ -215,6 +263,21 @@ pub fn run(f: &mut Function) -> bool {
         }
         changed = true;
     }
+    // Once all overlapping reads have moved to SSA, the covering initializer
+    // is dead too. Otherwise keep its complete original byte footprint.
+    for i in retained_initializers {
+        let &(slot, offset, ty) = &accesses[&i];
+        let still_read = accesses.iter().any(|(&other, &(s, o, t))| {
+            s == slot
+                && o < offset + width(ty)
+                && offset < o + width(t)
+                && !f.is_removed(other)
+                && matches!(f.inst_data(other), InstData::Load { .. })
+        });
+        if !still_read {
+            f.remove_inst(i);
+        }
+    }
     changed
 }
 fn constant(f: &Function, v: Value) -> Option<i64> {
@@ -229,4 +292,19 @@ fn constant(f: &Function, v: Value) -> Option<i64> {
 
 fn width(ty: Type) -> usize {
     ty.bytes().unwrap_or(8) as usize
+}
+
+fn repeated_byte(byte: u8, ty: Type) -> i64 {
+    ((u64::MAX / 255 * u64::from(byte)) >> (64 - width(ty) * 8)) as i64
+}
+
+fn splat_byte(f: &Function, value: Value) -> Option<u8> {
+    let ty = f.value_type(value);
+    if !matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64) {
+        return None;
+    }
+    let imm = constant(f, value)?;
+    let byte = imm as u8;
+    let mask = u64::MAX >> (64 - width(ty) * 8);
+    ((imm as u64 & mask) == repeated_byte(byte, ty) as u64).then_some(byte)
 }

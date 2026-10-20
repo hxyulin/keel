@@ -263,3 +263,237 @@ block1:
     let before = keel_ir::parse(src).unwrap();
     assert_eq!(before.to_string(), optimize(src).to_string());
 }
+
+fn covered_fixture(wide: Type, field: Type, offset: usize, byte: u8) -> String {
+    let bits = wide.bytes().unwrap() * 8;
+    let imm = ((u64::MAX / 255 * u64::from(byte)) >> (64 - bits)) as i64;
+    fixture(field)
+        .replace(
+            "v2 = stack_addr ss0",
+            &format!("v20 = stack_addr ss0\n v21 = iconst.i64 {offset}\n v2 = ptradd v20, v21"),
+        )
+        .replace(
+            "store v1, v2",
+            &format!("v22 = iconst.{wide} {imm}\n store v22, v20"),
+        )
+}
+
+#[test]
+fn byte_splat_initialization_promotes_every_subfield_width_and_offset() {
+    for wide in [Type::I16, Type::I32, Type::I64] {
+        for field in [Type::I8, Type::I16, Type::I32] {
+            if field.bytes().unwrap() >= wide.bytes().unwrap() {
+                continue;
+            }
+            for offset in 0..=(wide.bytes().unwrap() - field.bytes().unwrap()) as usize {
+                for byte in [0, 1, 127, 128, 255] {
+                    let src = covered_fixture(wide, field, offset, byte);
+                    let mut m = optimize(&src);
+                    assert_eq!(memory(&m.functions[0]), 0, "{src}\n{m}");
+                    let once = m.to_string();
+                    keel_opt::run_passes(&mut m, &["stack-promote"]).unwrap();
+                    assert_eq!(once, m.to_string());
+                    keel_opt::run_passes(&mut m, &["dce"]).unwrap();
+                    let bits = field.bytes().unwrap() * 8;
+                    let mask = u64::MAX >> (64 - bits);
+                    let init = (u64::MAX / 255 * u64::from(byte)) & mask;
+                    for n in [0u64, 1, 2, 17, 63] {
+                        let expected = init.wrapping_add(n * n.saturating_sub(1) / 2) & mask;
+                        assert_eq!(support::execute(&m.functions[0], &[n, 99]), expected);
+                    }
+                    // Exercise the production Full epilogue, not just the named pass.
+                    let mut full = keel_ir::parse(&src).unwrap();
+                    keel_opt::optimize_with_tier(&mut full, keel_opt::OptimizationTier::Full)
+                        .unwrap();
+                    assert_eq!(memory(&full.functions[0]), 0, "{full}");
+                    assert_eq!(support::execute(&full.functions[0], &[0, 99]), init);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn one_wide_initializer_feeds_two_independent_loop_fields() {
+    let src = covered_fixture(Type::I64, Type::I32, 0, 255)
+        .replace(
+            "store v22, v20",
+            "store v22, v20\n v23 = iconst.i64 4\n v24 = ptradd v20, v23",
+        )
+        .replace(
+            "v6 = load.i32 v2",
+            "v25 = load.i32 v24\n v26 = iadd v25, v4\n store v26, v24\n v6 = load.i32 v2",
+        )
+        .replace(
+            "return v10",
+            "v27 = load.i32 v24\n v28 = iadd v10, v27\n return v28",
+        );
+    let mut m = optimize(&src);
+    assert_eq!(memory(&m.functions[0]), 0, "{m}");
+    keel_opt::run_passes(&mut m, &["dce"]).unwrap();
+    for n in [0u64, 1, 2, 31] {
+        let expected = 2u64.wrapping_mul(u64::from(u32::MAX) + n * n.saturating_sub(1) / 2)
+            & u64::from(u32::MAX);
+        assert_eq!(support::execute(&m.functions[0], &[n, 0]), expected);
+    }
+}
+
+#[test]
+fn partial_overlaps_unknown_and_nonuniform_initializers_are_not_reinterpreted() {
+    let src = covered_fixture(Type::I64, Type::I32, 0, 0);
+    for candidate in [
+        // Both ends of a partially covering store must be rejected.
+        covered_fixture(Type::I16, Type::I32, 0, 0),
+        covered_fixture(Type::I64, Type::I32, 6, 0),
+        src.replace("v22 = iconst.i64 0", "v22 = iconst.i64 4294967296"),
+        src.replace("v22 = iconst.i64 0", "v22 = uext.i64 v1"),
+        // An overlapping read would observe the promoted stores.
+        src.replace("return v10", "v23 = load.i64 v20\n return v10"),
+        // An overlapping partial write must invalidate the entire field.
+        src.replace(
+            "v6 = load.i32 v2",
+            "v23 = iconst.i8 9\n store v23, v2\n v6 = load.i32 v2",
+        ),
+        // Covering writes with unknown bits later in the loop also disqualify.
+        src.replace(
+            "v6 = load.i32 v2",
+            "v23 = uext.i64 v1\n store v23, v20\n v6 = load.i32 v2",
+        ),
+        // A loop write cannot define the value on a zero-trip exit.
+        src.replace("store v22, v20", "")
+            .replace("v6 = load.i32 v2", "store v22, v20\n v6 = load.i32 v2"),
+    ] {
+        let before = keel_ir::parse(&candidate).unwrap();
+        assert_eq!(
+            before.to_string(),
+            optimize(&candidate).to_string(),
+            "{candidate}"
+        );
+    }
+}
+
+#[test]
+fn covering_store_is_retained_for_unpromoted_neighbor_bytes() {
+    let src = covered_fixture(Type::I64, Type::I32, 0, 127)
+        .replace("return v10", "v23 = iconst.i64 6\n v24 = ptradd v20, v23\n v25 = load.i16 v24\n v26 = iconst.i8 9\n store v26, v24\n v27 = uext.i32 v25\n v28 = iadd v10, v27\n return v28");
+    let m = optimize(&src);
+    // The i32 recurrence is in SSA, while the overlapping i16/i8 neighbor
+    // accesses and the complete original i64 initializer remain in memory.
+    assert_eq!(memory(&m.functions[0]), 3, "{m}");
+    assert!(m.functions[0].layout_insts().any(|(_, i)| matches!(
+        m.functions[0].inst_data(i), D::Store { value, .. }
+        if m.functions[0].value_type(*value) == Type::I64)));
+    assert!(
+        !m.functions[0]
+            .layout_insts()
+            .any(|(_, i)| matches!(m.functions[0].inst_data(i), D::Load { ty: Type::I32, .. }))
+    );
+}
+
+#[test]
+fn mixed_width_fields_keep_escape_observer_and_exception_barriers() {
+    let exact = fixture(Type::I32);
+    let covered = covered_fixture(Type::I64, Type::I32, 0, 0);
+    // Reuse every existing barrier regression with the wider initializer.
+    // Calls named memset remain ordinary calls, even after initialization.
+    for effect in [
+        "call @observe(v20)",
+        "v23 = load.i8 volatile v20",
+        "v23 = atomic_load.i8 relaxed v20",
+        "v23 = intrinsic frame_address()",
+        "v23 = intrinsic stack_save()",
+        "call @twice()",
+        "v23 = iconst.i64 8\n v24 = iconst.i32 0\n v25 = call @memset(v20, v24, v23)",
+    ] {
+        let candidate = format!(
+            "decl @observe(ptr)\ndecl @twice() returns_twice\ndecl @memset(ptr, i32, i64) -> ptr\n{}",
+            covered.replace("store v22, v20", &format!("store v22, v20\n {effect}"))
+        );
+        let before = keel_ir::parse(&candidate).unwrap();
+        assert_eq!(
+            before.to_string(),
+            optimize(&candidate).to_string(),
+            "{candidate}"
+        );
+    }
+    // Wider initialization does not bypass the existing debug-home guard.
+    let mut m = keel_ir::parse(&covered).unwrap();
+    let mut exact_m = keel_ir::parse(&exact).unwrap();
+    use keel_ir::{DebugType, DebugTypeData, DebugVar, Encoding, EntityRef, StackSlot};
+    for module in [&mut m, &mut exact_m] {
+        module.debug_types.push(DebugTypeData::Base {
+            name: "field".into(),
+            encoding: Encoding::Unsigned,
+            size: 4,
+        });
+        module.functions[0].debug_vars.push(DebugVar {
+            name: "home".into(),
+            ty: DebugType::new(0),
+            slot: StackSlot::new(0),
+            indirect: false,
+            param: false,
+            scope: None,
+        });
+        let before = module.to_string();
+        keel_opt::run_passes(module, &["stack-promote"]).unwrap();
+        assert_eq!(before, module.to_string());
+    }
+}
+
+#[test]
+fn covering_writes_inside_loop_reset_the_promoted_value_in_order() {
+    for after in [false, true] {
+        let src = covered_fixture(Type::I64, Type::I32, 0, 255);
+        let src = if after {
+            src.replace("store v7, v2", "store v7, v2\n store v22, v20")
+        } else {
+            src.replace("v6 = load.i32 v2", "store v22, v20\n v6 = load.i32 v2")
+        };
+        let mut m = optimize(&src);
+        assert_eq!(memory(&m.functions[0]), 0, "{m}");
+        keel_opt::run_passes(&mut m, &["dce"]).unwrap();
+        for n in [0u64, 1, 2, 31] {
+            let expected = if after || n == 0 {
+                u32::MAX
+            } else {
+                u32::MAX.wrapping_add(n as u32 - 1)
+            };
+            assert_eq!(
+                support::execute(&m.functions[0], &[n, 0]),
+                u64::from(expected)
+            );
+        }
+    }
+}
+
+#[test]
+fn split_initializer_constants_keep_source_location_and_scope() {
+    use keel_ir::EntityRef;
+    let mut m = keel_ir::parse(&covered_fixture(Type::I64, Type::I32, 0, 128)).unwrap();
+    let f = &mut m.functions[0];
+    let store = f
+        .layout_insts()
+        .find(|(_, i)| matches!(f.inst_data(*i), D::Store { .. }))
+        .unwrap()
+        .1;
+    let loc = keel_ir::SourceLoc {
+        file: keel_ir::SourceFile::new(0),
+        line: 27,
+        col: 5,
+        scope: None,
+    };
+    f.set_inst_loc(store, Some(loc));
+    let old: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+    keel_opt::run_passes(&mut m, &["stack-promote"]).unwrap();
+    let f = &m.functions[0];
+    let new: Vec<_> = f.layout_insts().filter(|(_, i)| !old.contains(i)).collect();
+    assert_eq!(new.len(), 1);
+    assert_eq!(f.inst_loc(new[0].1), Some(loc));
+    assert!(matches!(
+        f.inst_data(new[0].1),
+        D::Iconst {
+            ty: Type::I32,
+            imm: 2155905152
+        }
+    ));
+}

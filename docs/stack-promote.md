@@ -7,8 +7,12 @@ Run it after inlining, CFG cleanup and, for small intrinsic initialization,
 
 The pass admits scalar i8/i16/i32/i64 and pointer fields reached solely through
 fixed stack addresses and constant, nonnegative, in-bounds pointer offsets.
-All accesses to an overlapping range must agree exactly in offset and type.
-Disjoint fields are independent. Unsupported uses escape the entire slot,
+Accesses to an overlapping range must agree exactly in offset and type, except
+that a fully covering ordinary integer store of a constant repeated byte may
+initialize a smaller integer field. The byte-splat representation is independent
+of endianness and field offset. Arbitrary nonuniform bits, pointer representations,
+partial writes and overlapping reads are not reinterpreted. Disjoint fields are
+independent. Unsupported uses escape the entire slot,
 including ordinary calls, intrinsics, volatile/atomic accesses, address comparisons,
 returning an address, storing it, and nonconstant pointer offsets. Debugger homes
 are excluded. Inline assembly, frame observers, stack save/restore, returns-twice
@@ -16,14 +20,19 @@ calls (direct or indirect), invokes and landing pads exclude the function.
 Unrelated ordinary calls remain in place and cannot observe an unescaped slot.
 
 A greatest-fixed-point must-initialization analysis starts false at entry and
-true elsewhere. Every load must be preceded by an exact store on every path.
+true elsewhere. Every load must be preceded by an exact store or a fully covering
+byte-splat store on every path. Each covering store supplies a typed constant at
+its original instruction position and source location, including loop-local
+resets. The complete original store remains in memory if any overlapping read
+is unpromoted; otherwise it is removed after promotion. This preserves all bytes
+of padding and neighboring fields that remain observable.
 This includes zero-trip and loop-entry paths; the pass never invents an undef,
 zero, speculative read, libc contract or writeback. Initialized non-entry blocks
 receive fresh parameters, every syntactic incoming edge receives its outgoing
 field value, and loads/stores become SSA uses/definitions. Duplicate edges retain
 independent argument lists. Existing aliased load definitions are excluded.
 The initial implementation requires all blocks reachable and no entry backedge,
-and caps functions at 256 blocks and 64 distinct fields. Parameters are initially
+and caps functions at 256 blocks, 8192 instructions and 64 distinct fields. Parameters are initially
 unpruned; `phi-simplify,dce` removes the redundant ones.
 
 ## Actual corpus blocker
@@ -73,3 +82,38 @@ outputs against a fresh Clang O2 reference: 795 lines each. Clang uses
 `-ffp-contract=off` to match Keel's separate FP operations. No native x86 execution.
 Ignored evidence is in `target/stack-field-evidence/stage1`, with exact argv,
 outputs, activation counts and SHA-256 hashes in `commands.json`/`result.json`.
+
+## Mixed-width initialization (2026-10-21)
+
+The existing Full-only admission now handles small-memory's i64 zero store at
+`acc + 16` together with i32 counter updates. It promotes the counter recurrence
+alongside the two i64 accumulators. No pass registration, Fast pipeline, allocator
+or libc-name rules change. Dynamic/nonuniform wider initializers remain outside
+this subset. Promotion after an ordinary escaping `memset` still requires the
+region alias/observer proof described above; no loads or writebacks are moved
+across such a call by this change.
+
+`tests/stack_promote.rs` exercises all narrower integer widths and byte offsets
+inside i16/i32/i64 splat stores, five fill bytes, loop and zero-trip paths,
+independent subfields, loop-local resets, retained neighboring byte observations,
+source locations, partial overlaps, unknown/nonuniform initialization, escaping
+calls and frame/debug/atomic barriers. The native validator now also constructs
+an i64-initialized/i32-counter variant of `private.keel`, verifies both named-pass
+and Full activation, emits ARM64 and x86-64 assembly/objects, and applies the same
+10,401-case unsigned oracle to each native variant.
+
+Validation in the isolated priority3 worktree used `target/priority3/build` and
+`suite/fast_opt_locked.py` with the shared `/tmp/keel-perf-20261019.lock`:
+
+- The complete `keel-opt` suite passed, followed by all 16 final focused tests.
+- All eight reduced native variants passed 10,401 oracle cases each. Mixed-width
+  promotion reduced seven loads/six stores to one input load/no stores.
+- Fresh Full C compilation of the retained explicit-builtin `intrinsic.c`
+  produced one input load/no stores in `k_stackobj`; its whole-driver output
+  matched fresh Clang O2 across 795 lines. Both target object routes passed.
+- Ordinary escaping-memset corpus field accesses remained intact. Native x86
+  execution and performance measurements were not performed.
+
+Exact commands, statuses, outputs and artifact hashes are retained locally in
+`target/priority3/native/result.json`, `commands.json`, `intrinsic-result.json`,
+`intrinsic-commands.json`, and `target/priority3/lock-events.jsonl`.

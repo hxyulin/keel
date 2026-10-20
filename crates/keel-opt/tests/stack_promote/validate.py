@@ -61,6 +61,21 @@ assert counts(before) == counts(after), (before, after)
 assert 'call @memset' in after
 variants = dict(before=source, promoted=out/'promoted.keel', combined=out/'combined.keel',
                 fast=out/'fast.keel', full=out/'full.keel')
+# Match small-memory's 64-bit zeroing of the final 32-bit counter plus
+# padding. Run the identical unsigned oracle before/after and through Full.
+mixed = source.read_text()
+assert mixed.count('store v3, v68') == 1
+mixed = mixed.replace('store v3, v68', 'store v64, v68')
+(out/'mixed-before.keel').write_text(mixed)
+opt(out/'mixed-before.keel', out/'mixed-promoted.keel', promotion)
+run([keel, 'opt', '--opt-tier', 'full', '--verify-each', out/'mixed-before.keel',
+     '-o', out/'mixed-full.keel'])
+for name in ['mixed-before', 'mixed-promoted', 'mixed-full']:
+    variants[name] = out/(name+'.keel')
+    if name != 'mixed-before':
+        text = variants[name].read_text()
+        assert counts(text)['loads'] == 1, text
+        assert counts(text)['stores'] == 0, text
 for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
     for name, src in variants.items():
         for ext, flag in [('s', []), ('o', ['--emit-object'])]:
@@ -119,6 +134,8 @@ if a.if_convert:
         run([exe])
 summary = dict(status='correctness/static only; no timing', native=native_target,
     private_before=counts(source.read_text()), private_promoted=counts(private),
+    mixed_before=counts(mixed), mixed_promoted=counts((out/'mixed-promoted.keel').read_text()),
+    mixed_full=counts((out/'mixed-full.keel').read_text()),
     private_combined=counts((out/'combined.keel').read_text()), corpus_before=counts(before), corpus_after=counts(after),
     whole_driver_lines=len(expected.splitlines()), commands=len(commands),
     artifacts={x.name:hashlib.sha256(x.read_bytes()).hexdigest() for x in out.iterdir() if x.is_file()})
