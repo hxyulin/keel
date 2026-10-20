@@ -773,14 +773,17 @@ analyses they need; there is no analysis cache yet.
 | `dce` | mark from pinned instructions except unused ordinary `notrap` reads, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 | `loop-vectorize` | guarded contiguous counted maps with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
-| `loop-reduce` (opt-in) | experimental read-only wrapping i32/i64 sum reductions with a vector accumulator and scalar tail; no floating reassociation |
+| `loop-reduce` | read-only wrapping i32/i64 sums with independent vector accumulators, fixed-offset stream loads, countdown and scalar tail; no floating reassociation |
+| `fast-loop-reduce` | the same sum transform, restricted to functions with at most 256 instructions / 16 blocks, one stream address and at most eight vector-expression values |
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
 The default pipeline (`-O`) is `inline, simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
-loop-vectorize`. Basic uses `simplify-cfg, canonicalize, instcombine,
+loop-vectorize, loop-reduce`. Fast uses `fast-cfg, fast-local, fast-cfg, dce,
+fast-loop-reduce`; the reduction eligibility scan and CFG analysis are size-capped.
+Basic uses `simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, dce`. Initial CFG canonicalization precedes operand normalization
 to avoid invalidating it immediately. The scalar cleanup order was chosen for
 lower compile cost while preserving assembly on the earlier measured corpus.

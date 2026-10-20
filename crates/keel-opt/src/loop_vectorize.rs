@@ -2,7 +2,7 @@
 //!
 //! Recognizes unit-stride, two-block counted loops with invariant starts, one store,
 //! a uniform element type and no carried values except the induction variable.
-//! The separate opt-in loop-reduce pass handles read-only wrapping integer sums.
+//! The separate loop-reduce passes handle read-only wrapping integer sums.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
@@ -66,13 +66,35 @@ impl crate::Pass for LoopReduce {
         "loop-reduce"
     }
     fn description(&self) -> &'static str {
-        "experimental vectorization of read-only wrapping i32/i64 sum loops"
+        "unrolled read-only wrapping i32/i64 sum loops with independent vector accumulators"
     }
     fn run(&self, f: &mut Function) -> bool {
         run_candidates(f, VectorTarget::Portable, true)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
         run_candidates(f, target, true)
+    }
+}
+
+pub(crate) struct FastLoopReduce;
+impl crate::Pass for FastLoopReduce {
+    fn name(&self) -> &'static str {
+        "fast-loop-reduce"
+    }
+    fn description(&self) -> &'static str {
+        "bounded small-function single-stream integer sum vectorization"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        self.run_for_target(f, VectorTarget::Portable)
+    }
+    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+        // Bound eligibility work before constructing CFG/dominators. Large
+        // functions stay on Fast's local-only path. These limits apply before
+        // any transformation, not to the scalar loop retained after unrolling.
+        if f.layout_insts().take(257).count() > 256 || f.blocks().take(17).count() > 16 {
+            return false;
+        }
+        run_candidates_with_budget(f, target, true, true)
     }
 }
 
@@ -526,8 +548,194 @@ fn branch(
         },
     );
 }
+
+/// Unroll a read-only reduction into independent wrapping recurrences. Stream
+/// pointers advance once per group; fixed 16-byte offsets expose load addressing
+/// modes without a chain of post-increment loads. A countdown avoids carrying an
+/// otherwise unused element induction through the vector body.
+fn reduce_body(
+    f: &mut Function,
+    c: &Candidate,
+    target: VectorTarget,
+    setup: Block,
+    vector: Block,
+    remaining: Value,
+    count: Value,
+) {
+    let Output::Sum {
+        accumulator,
+        initial,
+        update,
+    } = c.output
+    else {
+        unreachable!()
+    };
+    // Bound code growth/register pressure for larger expression DAGs/stream sets.
+    let unroll = if c.vectors.len() <= 8 && c.addresses.len() <= 2 {
+        4
+    } else {
+        2
+    };
+    let ty = f.value_type(c.iv);
+    let group = i64::from(c.shape.lanes()) * unroll;
+    let shift = iconst(f, setup, ty, i64::from(group.trailing_zeros()));
+    let groups = bin(f, setup, B::Ushr, count, shift);
+    let length = bin(f, setup, B::Shl, groups, shift);
+    let end = if constant(f, c.start) == Some(0) {
+        length
+    } else {
+        bin(f, setup, B::Iadd, c.start, length)
+    };
+    let zero = iconst(f, setup, c.shape.lane_type(), 0);
+    let zero = emit(
+        f,
+        setup,
+        D::VectorSplat {
+            ty: Type::Vector(c.shape),
+            arg: zero,
+        },
+    );
+    let sums: Vec<_> = (0..unroll)
+        .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
+        .collect();
+    let mut invariants = HashMap::new();
+    let mut values: Vec<_> = c.vectors.iter().copied().collect();
+    values.sort();
+    for v in values {
+        let scalar = match def(f, v) {
+            Some(i) if f.inst_block(i) == c.body => match f.inst_data(i) {
+                D::Iconst { .. } | D::Fconst { .. } => emit(f, setup, f.inst_data(i).clone()),
+                _ => continue,
+            },
+            _ => v,
+        };
+        let splat = emit(
+            f,
+            setup,
+            D::VectorSplat {
+                ty: Type::Vector(c.shape),
+                arg: scalar,
+            },
+        );
+        invariants.insert(v, splat);
+    }
+    let mut bases: Vec<_> = c.addresses.values().copied().collect();
+    bases.sort();
+    bases.dedup();
+    let mut pointers = HashMap::new();
+    let mut args = vec![length];
+    args.extend((0..unroll).map(|_| zero));
+    for base in bases {
+        let pointer = f.append_block_param(vector, Type::Ptr);
+        pointers.insert(base, pointer);
+        let start = if constant(f, c.start) == Some(0) {
+            base
+        } else {
+            let index = if ty == Type::I64 {
+                c.start
+            } else {
+                emit(
+                    f,
+                    setup,
+                    D::Convert {
+                        op: ConvertOp::Uext,
+                        ty: Type::I64,
+                        arg: c.start,
+                    },
+                )
+            };
+            let shift = iconst(
+                f,
+                setup,
+                Type::I64,
+                i64::from(c.shape.lane_type().bytes().unwrap().trailing_zeros()),
+            );
+            let offset = bin(f, setup, B::Shl, index, shift);
+            bin(f, setup, B::Ptradd, base, offset)
+        };
+        args.push(start);
+    }
+    jump(f, setup, vector, args);
+    let mut next_sums = Vec::new();
+    let mut addresses: Vec<_> = c.addresses.iter().map(|(&a, &b)| (a, b)).collect();
+    addresses.sort();
+    for (chunk, &sum) in sums.iter().enumerate() {
+        let mut mapping = invariants.clone();
+        mapping.insert(accumulator, sum);
+        for &(addr, base) in &addresses {
+            let p = pointers[&base];
+            let p = if chunk == 0 {
+                p
+            } else {
+                let offset = iconst(f, vector, Type::I64, (chunk * 16) as i64);
+                bin(f, vector, B::Ptradd, p, offset)
+            };
+            mapping.insert(addr, p);
+        }
+        for i in f.block_insts(c.body).to_vec() {
+            let result = f.inst_results(i).first().copied().map(|v| f.resolve(v));
+            if !result.is_some_and(|v| c.vectors.contains(&v)) {
+                continue;
+            }
+            let data = match *f.inst_data(i) {
+                D::Load {
+                    mut flags, addr, ..
+                } => {
+                    flags.align = flags.align.min(c.shape.lane_type().bytes().unwrap());
+                    D::Load {
+                        flags,
+                        ty: Type::Vector(c.shape),
+                        addr: mapping[&f.resolve(addr)],
+                    }
+                }
+                D::Binary { op, args } => D::VectorBinary {
+                    op: target.binary(op, c.shape.lane_type()).unwrap(),
+                    args: args.map(|v| mapping[&f.resolve(v)]),
+                },
+                _ => continue,
+            };
+            let new = f.append_inst(vector, data);
+            f.set_inst_loc(new, f.inst_loc(i));
+            mapping.insert(result.unwrap(), f.first_result(new));
+        }
+        next_sums.push(mapping[&update]);
+    }
+    let step = iconst(f, vector, ty, group);
+    let next = bin(f, vector, B::Isub, remaining, step);
+    let mut args = vec![next];
+    args.extend_from_slice(&next_sums);
+    let mut bases: Vec<_> = pointers.keys().copied().collect();
+    bases.sort();
+    for base in bases {
+        let step = iconst(f, vector, Type::I64, unroll * 16);
+        args.push(bin(f, vector, B::Ptradd, pointers[&base], step));
+    }
+    let zero = iconst(f, vector, ty, 0);
+    let more = cmp(f, vector, IntCC::Ne, next, zero);
+    let finish = f.create_block();
+    branch(f, vector, more, vector, args, finish, vec![]);
+    let mut sum = next_sums[0];
+    for &part in &next_sums[1..] {
+        sum = emit(
+            f,
+            finish,
+            D::VectorBinary {
+                op: V::Iadd,
+                args: [sum, part],
+            },
+        );
+    }
+    let mut scalar = initial;
+    for lane in 0..c.shape.lanes() {
+        let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
+        scalar = bin(f, finish, B::Iadd, scalar, part);
+    }
+    jump(f, finish, c.header, vec![end, scalar]);
+}
+
 fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
     let guard = f.create_block();
+    let entry = guard;
     let setup = f.create_block();
     let vector = f.create_block();
     let ty = f.value_type(c.iv);
@@ -553,19 +761,6 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         count,
         min,
     );
-    let n64 = if ty == Type::I64 {
-        c.bound
-    } else {
-        emit(
-            f,
-            guard,
-            D::Convert {
-                op: ConvertOp::Uext,
-                ty: Type::I64,
-                arg: c.bound,
-            },
-        )
-    };
     let mut safe = enough;
     if !from_zero {
         // Subtraction alone can turn an empty range into a huge unsigned count.
@@ -584,6 +779,33 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
             safe = bin(f, guard, B::And, safe, nonnegative);
         }
     }
+    let mut scalar_args = vec![c.start];
+    if let Output::Sum { initial, .. } = c.output {
+        scalar_args.push(initial);
+    }
+    // Avoid address-overflow checks and vector setup on short/reversed/negative
+    // reductions. Keep the established map guard unchanged.
+    let reduction = matches!(c.output, Output::Sum { .. });
+    let guard = if reduction {
+        let range = f.create_block();
+        branch(f, guard, safe, range, vec![], c.header, scalar_args.clone());
+        range
+    } else {
+        guard
+    };
+    let n64 = if ty == Type::I64 {
+        c.bound
+    } else {
+        emit(
+            f,
+            guard,
+            D::Convert {
+                op: ConvertOp::Uext,
+                ty: Type::I64,
+                arg: c.bound,
+            },
+        )
+    };
     let len = if bytes == 1 {
         n64
     } else {
@@ -591,7 +813,11 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         let len = bin(f, guard, B::Shl, n64, shift);
         let recovered = bin(f, guard, B::Ushr, len, shift);
         let fits = cmp(f, guard, IntCC::Eq, n64, recovered);
-        safe = bin(f, guard, B::And, safe, fits);
+        safe = if reduction {
+            fits
+        } else {
+            bin(f, guard, B::And, safe, fits)
+        };
         len
     };
     let dst = match c.output {
@@ -639,11 +865,20 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         let ok = bin(f, guard, B::Or, same, disjoint);
         safe = bin(f, guard, B::And, safe, ok);
     }
-    let mut scalar_args = vec![c.start];
-    if let Output::Sum { initial, .. } = c.output {
-        scalar_args.push(initial);
-    }
     branch(f, guard, safe, setup, vec![], c.header, scalar_args);
+    if reduction {
+        reduce_body(f, &c, target, setup, vector, vi, count);
+        let pre = *f.block_insts(c.pre).last().unwrap();
+        // The preheader must enter the cheap trip-count guard, not the later
+        // pointer-range guard created above.
+        *f.inst_data_mut(pre) = D::Jump {
+            dest: BlockCall {
+                block: entry,
+                args: vec![],
+            },
+        };
+        return;
+    }
     let round = iconst(f, setup, ty, i64::from(lanes.trailing_zeros()));
     let groups = bin(f, setup, B::Ushr, count, round);
     let length = bin(f, setup, B::Shl, groups, round);
@@ -653,13 +888,6 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         bin(f, setup, B::Iadd, c.start, length)
     };
     let mut mapping = HashMap::from([(c.iv, vi)]);
-    let vector_sum = if let Output::Sum { accumulator, .. } = c.output {
-        let sum = f.append_block_param(vector, Type::Vector(c.shape));
-        mapping.insert(accumulator, sum);
-        Some(sum)
-    } else {
-        None
-    };
     // Broadcast invariants once, outside the vector loop. Local literals are
     // cloned here too; the scalar body retains its original definitions.
     let mut values: Vec<_> = c.vectors.iter().copied().collect();
@@ -682,20 +910,7 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         );
         mapping.insert(v, splat);
     }
-    let mut vector_args = vec![c.start];
-    if vector_sum.is_some() {
-        let zero = iconst(f, setup, c.shape.lane_type(), 0);
-        let zero = emit(
-            f,
-            setup,
-            D::VectorSplat {
-                ty: Type::Vector(c.shape),
-                arg: zero,
-            },
-        );
-        vector_args.push(zero);
-    }
-    jump(f, setup, vector, vector_args);
+    jump(f, setup, vector, vec![c.start]);
     // Rebuild addresses from the vector induction, avoiding scalar address
     // conversion/sign-extension subtleties after grouping iterations.
     let index = if ty == Type::I64 {
@@ -766,24 +981,7 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
     let step = iconst(f, vector, ty, lanes);
     let next = bin(f, vector, B::Iadd, vi, step);
     let more = cmp(f, vector, IntCC::Ult, next, end);
-    if let Output::Sum {
-        initial, update, ..
-    } = c.output
-    {
-        // Integer addition wraps, so lane grouping and the final scalar sum
-        // are exact. Do not apply this reassociation to floating point.
-        let finish = f.create_block();
-        let sum = mapping[&update];
-        branch(f, vector, more, vector, vec![next, sum], finish, vec![]);
-        let mut reduced = initial;
-        for lane in 0..c.shape.lanes() {
-            let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
-            reduced = bin(f, finish, B::Iadd, reduced, part);
-        }
-        jump(f, finish, c.header, vec![next, reduced]);
-    } else {
-        branch(f, vector, more, vector, vec![next], c.header, vec![next]);
-    }
+    branch(f, vector, more, vector, vec![next], c.header, vec![next]);
     let pre = *f.block_insts(c.pre).last().unwrap();
     *f.inst_data_mut(pre) = D::Jump {
         dest: BlockCall {
@@ -793,6 +991,14 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
     };
 }
 fn run_candidates(f: &mut Function, target: VectorTarget, reductions: bool) -> bool {
+    run_candidates_with_budget(f, target, reductions, false)
+}
+fn run_candidates_with_budget(
+    f: &mut Function,
+    target: VectorTarget,
+    reductions: bool,
+    fast: bool,
+) -> bool {
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
     // Rejected candidates do not change the function. Share these whole-function
@@ -803,6 +1009,9 @@ fn run_candidates(f: &mut Function, target: VectorTarget, reductions: bool) -> b
             continue;
         }
         if let Some(c) = analyze(f, header, target, &mut analysis) {
+            if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
+                continue;
+            }
             transform(f, c, target);
             analysis = None;
             changed = true;

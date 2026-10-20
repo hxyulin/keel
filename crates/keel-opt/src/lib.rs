@@ -207,6 +207,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &loop_unroll::LoopUnroll,
     &loop_vectorize::LoopVectorize,
     &loop_vectorize::LoopReduce,
+    &loop_vectorize::FastLoopReduce,
     &inline::Inline,
     &inline::InlineAggregateReserve,
 ];
@@ -263,12 +264,12 @@ fn observe_verification(
 
 /// Independent optimizer effort; Full adds value numbering, code motion, and
 /// bounded direct-call inlining, small memory expansion, private stack forwarding,
-/// and guarded loop vectorization.
+/// and guarded map/sum loop vectorization.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OptimizationTier {
     #[default]
     None,
-    /// Fixed CFG sweeps and local simplification, without global analyses.
+    /// Fixed CFG/local cleanup plus size-capped single-stream sum reductions.
     Fast,
     Basic,
     Full,
@@ -277,7 +278,13 @@ impl OptimizationTier {
     pub fn pipeline(self) -> &'static [&'static str] {
         match self {
             Self::None => &[],
-            Self::Fast => &["fast-cfg", "fast-local", "fast-cfg", "dce"],
+            Self::Fast => &[
+                "fast-cfg",
+                "fast-local",
+                "fast-cfg",
+                "dce",
+                "fast-loop-reduce",
+            ],
             Self::Basic => &[
                 "simplify-cfg",
                 "canonicalize",
@@ -311,6 +318,7 @@ pub const DEFAULT_PIPELINE: &[&str] = &[
     "dce",
     "gcm",
     "loop-vectorize",
+    "loop-reduce",
 ];
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {

@@ -155,6 +155,99 @@ fn read_only_wrapping_integer_sums_vectorize_and_keep_seed_once() {
 }
 
 #[test]
+fn sums_use_independent_accumulators_fixed_stream_offsets_and_a_countdown() {
+    for ty in ["i32", "i64"] {
+        let m = reduce_sum(&sum_loop(ty), VectorTarget::Aarch64Neon);
+        let f = &m.functions[0];
+        let vector = f
+            .blocks()
+            .find(|&b| {
+                f.block_insts(b).iter().any(|&i| {
+                    matches!(
+                        f.inst_data(i),
+                        InstData::Load {
+                            ty: Type::Vector(_),
+                            ..
+                        }
+                    )
+                })
+            })
+            .unwrap();
+        // Remaining element count, four independent sums, one stream pointer.
+        assert_eq!(f.block_params(vector).len(), 6, "{m}");
+        let mut reads = 0;
+        let mut additions = 0;
+        let mut countdowns = 0;
+        for &i in f.block_insts(vector) {
+            match f.inst_data(i) {
+                InstData::Load {
+                    ty: Type::Vector(_),
+                    ..
+                } => reads += 1,
+                InstData::VectorBinary {
+                    op: keel_ir::VectorBinaryOp::Iadd,
+                    ..
+                } => additions += 1,
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::Isub,
+                    ..
+                } => countdowns += 1,
+                InstData::Binary {
+                    op: keel_ir::BinaryOp::Shl,
+                    ..
+                } => panic!("per-iteration address scaling: {m}"),
+                _ => {}
+            }
+        }
+        assert_eq!((reads, additions, countdowns), (4, 4, 1), "{m}");
+        // Cheap trip-count rejection dominates every pointer-range check.
+        let pre = f.blocks().next().unwrap();
+        let InstData::Jump { dest } = f.inst_data(*f.block_insts(pre).last().unwrap()) else {
+            panic!("{m}")
+        };
+        let guard = dest.block;
+        assert!(
+            !f.block_insts(guard).iter().any(|&i| matches!(
+                f.inst_data(i),
+                InstData::Convert {
+                    op: keel_ir::ConvertOp::PtrToInt,
+                    ..
+                }
+            )),
+            "{m}"
+        );
+        assert!(matches!(
+            f.inst_data(*f.block_insts(guard).last().unwrap()),
+            InstData::Brif { .. }
+        ));
+    }
+}
+
+#[test]
+fn profile_reductions_use_bounded_fast_and_general_full_policies() {
+    for tier in [
+        keel_opt::OptimizationTier::Fast,
+        keel_opt::OptimizationTier::Full,
+    ] {
+        let mut m = keel_ir::parse(&sum_loop("i64")).unwrap();
+        keel_opt::optimize_with_tier(&mut m, tier).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert!(packed(&m) > 0, "{tier:?}: {m}");
+    }
+    let large = format!(
+        "decl @effect()\n{}",
+        sum_loop("i64").replace(
+            "jump block1(v3,v2)",
+            &format!("{}jump block1(v3,v2)", "call @effect()\n ".repeat(300))
+        )
+    );
+    let mut fast = keel_ir::parse(&large).unwrap();
+    keel_opt::run_passes(&mut fast, &["fast-loop-reduce"]).unwrap();
+    assert_eq!(packed(&fast), 0, "{fast}");
+    assert!(packed(&reduce_sum(&large, VectorTarget::Portable)) > 0);
+}
+
+#[test]
 fn sum_rejects_extra_effects_recurrences_nonunit_steps_and_float_reassociation() {
     let original = sum_loop("i64");
     for source in [

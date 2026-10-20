@@ -198,7 +198,7 @@ outside the vector loop. NEON broadcasts use typed `DUP` instructions for all si
 shapes. Signed positive bounds and scalar cleanup are supported, without floating
 reassociation or a fast-math requirement.
 
-The opt-in `loop-reduce` pass lets read-only i32/i64 sum reductions use a vector accumulator, provided
+The full `-O` pipeline includes `loop-reduce`, which lets read-only i32/i64 sum reductions use independent vector accumulators, provided
 the only extra loop-carried value is the wrapping sum. The initial scalar
 accumulator is added once after reducing the vector lanes; the original scalar
 loop handles the tail. The same bounded lane-wise integer expression and
@@ -208,9 +208,15 @@ are not reassociated. At most one read may potentially fault; additional reads
 need explicit `notrap` promises so widening cannot change first-fault order.
 Negative signed starts, short/empty ranges and unsafe
 address arithmetic keep the scalar path. No new IR opcode or frontend memory
-promise is needed. It is deliberately absent from the default full pipeline:
-the initial local measurements show a small large-loop gain and substantial
-short-loop setup overhead, so broader profitability work remains necessary.
+promise is needed. Cheap trip-count checks reject short ranges before pointer-range
+checks. Simple expressions use four independent accumulators, larger expressions
+or stream sets use two. Fixed-offset loads share a pointer advanced once per group;
+a countdown controls the vector loop. The original scalar tail handles the remainder.
+Fast includes `fast-loop-reduce`, with the same transformation but an eligibility cap
+of 256 instructions, 16 blocks, one stream address and eight expression values.
+These are compile-effort policies, independent of selection and allocation tiers.
+Runtime measurements currently cover a masked u64 sum on AArch64; they do not
+establish broad application or native x86 speedups.
 
 Starts may be constant or runtime values, for example `for (i = lo; i < n; i++)`.
 Either branch orientation is recognized, including `if (i >= n) break`, as are

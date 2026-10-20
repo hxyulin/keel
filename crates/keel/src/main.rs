@@ -49,7 +49,7 @@ const USAGE: &str = "usage:
   -O enables full IR optimization and all target selection passes.
   --isel / --isel-tier override -O selection in either order; last selector wins.
   --opt-tier none|fast|basic|full controls IR optimization; -p overrides its pipeline in either order.
-  fast runs bounded local/CFG cleanup and keeps the allocator and selection defaults.
+  fast runs bounded local/CFG cleanup and small single-stream sum reductions; allocator/selection defaults are independent.
   Repeated verification defaults on with debug assertions or feature verify-each.
   --verify-each / --no-verify-each override this; contradictory flags are rejected.
   Initial input verification and canonical restoration always run.
