@@ -29,6 +29,7 @@ pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod known_bits;
 mod load_narrow;
+mod load_reuse;
 mod loop_memory;
 mod loop_strength_reduce;
 mod loop_unroll;
@@ -209,6 +210,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[12],
     &BUILTINS[13],
     &BUILTINS[14],
+    &load_reuse::LoadReuse,
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
     &loop_strength_reduce::LoopStrengthReduce,
