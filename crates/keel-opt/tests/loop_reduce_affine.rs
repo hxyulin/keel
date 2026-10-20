@@ -86,3 +86,25 @@ fn actual_logic_remains_blocked_until_a_stream_is_explicitly_safe() {
         assert!(packed(&run(&positive, "loop-reduce-affine", target)));
     }
 }
+
+#[test]
+fn address_width_offsets_after_i32_extension_are_supported() {
+    for (extend, predicate) in [("uext", "ult"), ("sext", "slt")] {
+        let src = source()
+            .replace("ptr,i64,i64,i64,i64", "ptr,i32,i64,i32,i64")
+            .replace("v1: i64", "v1: i32")
+            .replace("v3: i64", "v3: i32")
+            .replace("v5: i64", "v5: i32")
+            .replace("icmp.ult", &format!("icmp.{predicate}"))
+            .replace(
+                "v9 = iadd v2,v5",
+                &format!("v30 = {extend}.i64 v5\n v9 = iadd v2,v30"),
+            )
+            .replace("v16 = iconst.i64", "v16 = iconst.i32");
+        assert!(packed(&run(
+            &src,
+            "loop-reduce-affine",
+            VectorTarget::Portable
+        )));
+    }
+}

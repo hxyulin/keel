@@ -89,7 +89,7 @@ impl crate::Pass for AffineLoopReduce {
         self.run_for_target(f, VectorTarget::Portable)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target, false)
+        run_extended(f, target, false, false)
     }
 }
 
@@ -106,7 +106,24 @@ impl crate::Pass for CastLoopReduce {
         self.run_for_target(f, VectorTarget::Portable)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_extended(f, target, true)
+        run_extended(f, target, true, false)
+    }
+}
+
+/// Up to four independent read-only recurrences of a common lane width.
+pub(crate) struct MultiLoopReduce;
+impl crate::Pass for MultiLoopReduce {
+    fn name(&self) -> &'static str {
+        "loop-reduce-multi"
+    }
+    fn description(&self) -> &'static str {
+        "vectorize bounded same-width independent integer sum recurrences"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        self.run_for_target(f, VectorTarget::Portable)
+    }
+    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+        run_extended(f, target, true, true)
     }
 }
 
@@ -147,6 +164,13 @@ struct Candidate {
     vectors: HashSet<Value>,
     offsets: HashMap<Value, Value>,
     casts: HashMap<Value, NarrowRoundTrip>,
+    extra_sums: Vec<Reduction>,
+}
+struct Reduction {
+    accumulator: Value,
+    initial: Value,
+    update: Value,
+    value: Value,
 }
 #[derive(Clone, Copy)]
 struct NarrowRoundTrip {
@@ -293,6 +317,15 @@ impl Analyze<'_> {
         if depth > 32 || self.f.value_type(v) != self.c.shape.lane_type() {
             return None;
         }
+        if matches!(self.c.output, Output::Sum { accumulator, update, .. } if v == accumulator || v == update)
+            || self
+                .c
+                .extra_sums
+                .iter()
+                .any(|r| v == r.accumulator || v == r.update)
+        {
+            return None;
+        }
         if self.c.vectors.contains(&v) {
             return Some(());
         }
@@ -367,9 +400,12 @@ fn analyze(
     analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
     affine: bool,
     casts: bool,
+    multi: bool,
 ) -> Option<Candidate> {
     let params = f.block_params(header);
-    if !(1..=2).contains(&params.len()) || params.iter().any(|&v| f.resolve(v) != v) {
+    if !(1..=if multi { 5 } else { 2 }).contains(&params.len())
+        || params.iter().any(|&v| f.resolve(v) != v)
+    {
         return None;
     }
     let iv = params[0];
@@ -474,7 +510,9 @@ fn analyze(
             }
             (Output::Store(*store), value, *store)
         }
-        ([], [_, accumulator]) if matches!(f.value_type(*accumulator), Type::I32 | Type::I64) => {
+        ([], [_, accumulator, ..])
+            if matches!(f.value_type(*accumulator), Type::I32 | Type::I64) =>
+        {
             let update = f.resolve(dest.args[1]);
             let root = def(f, update)?;
             if f.inst_block(root) != body {
@@ -502,6 +540,36 @@ fn analyze(
         }
         _ => return None,
     };
+    let mut extra_sums = Vec::new();
+    let D::Jump { dest: entry } = f.inst_data(pre_jump) else {
+        unreachable!()
+    };
+    for (index, &accumulator) in params.iter().enumerate().skip(2) {
+        if f.value_type(accumulator) != f.value_type(value) {
+            return None;
+        }
+        let update = f.resolve(dest.args[index]);
+        let root = def(f, update)?;
+        if f.inst_block(root) != body {
+            return None;
+        }
+        let D::Binary { op: B::Iadd, args } = *f.inst_data(root) else {
+            return None;
+        };
+        let value = if f.resolve(args[0]) == accumulator {
+            args[1]
+        } else if f.resolve(args[1]) == accumulator {
+            args[0]
+        } else {
+            return None;
+        };
+        extra_sums.push(Reduction {
+            accumulator,
+            initial: f.resolve(entry.args[index]),
+            update,
+            value,
+        });
+    }
     let shape = VectorType::ALL
         .into_iter()
         .find(|s| s.lane_type() == f.value_type(value))?;
@@ -543,6 +611,7 @@ fn analyze(
         vectors: HashSet::new(),
         offsets: HashMap::new(),
         casts: HashMap::new(),
+        extra_sums,
     };
     let mut a = Analyze {
         f,
@@ -562,6 +631,15 @@ fn analyze(
     a.expression(value, 0)?;
     if let Output::Sum { update, .. } = output {
         a.c.vectors.insert(update);
+        // Analyze every contribution independently. Any use of a carried value
+        // inside a contribution fails expression(), excluding coupled sums.
+        for index in 0..a.c.extra_sums.len() {
+            let reduction = &a.c.extra_sums[index];
+            let (value, update) = (reduction.value, reduction.update);
+            a.expression(value, 0)?;
+            a.allowed.insert(def(f, update)?);
+            a.c.vectors.insert(update);
+        }
         // Widening A then B across several iterations could fault at A[1]
         // before the scalar loop's B[0]. With at most one potentially faulting
         // read, and no writes/other traps, lane grouping preserves first-fault
@@ -686,7 +764,13 @@ fn reduce_body(
         unreachable!()
     };
     // Bound code growth/register pressure for larger expression DAGs/stream sets.
-    let unroll = if c.vectors.len() <= 8 && c.addresses.len() <= 2 {
+    let mut reductions = vec![(accumulator, initial, update)];
+    reductions.extend(
+        c.extra_sums
+            .iter()
+            .map(|r| (r.accumulator, r.initial, r.update)),
+    );
+    let unroll = if reductions.len() == 1 && c.vectors.len() <= 8 && c.addresses.len() <= 2 {
         4
     } else {
         2
@@ -710,7 +794,7 @@ fn reduce_body(
             arg: zero,
         },
     );
-    let sums: Vec<_> = (0..unroll)
+    let sums: Vec<_> = (0..unroll as usize * reductions.len())
         .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
         .collect();
     let mut invariants = HashMap::new();
@@ -758,7 +842,7 @@ fn reduce_body(
     bases.dedup();
     let mut pointers = HashMap::new();
     let mut args = vec![length];
-    args.extend((0..unroll).map(|_| zero));
+    args.extend(sums.iter().map(|_| zero));
     for base in bases {
         let pointer = f.append_block_param(vector, Type::Ptr);
         pointers.insert(base, pointer);
@@ -793,9 +877,11 @@ fn reduce_body(
     let mut next_sums = Vec::new();
     let mut addresses: Vec<_> = c.addresses.iter().map(|(&a, &b)| (a, b)).collect();
     addresses.sort();
-    for (chunk, &sum) in sums.iter().enumerate() {
+    for chunk in 0..unroll as usize {
         let mut mapping = invariants.clone();
-        mapping.insert(accumulator, sum);
+        for (index, &(accumulator, _, _)) in reductions.iter().enumerate() {
+            mapping.insert(accumulator, sums[chunk * reductions.len() + index]);
+        }
         for &(addr, base) in &addresses {
             let p = pointers[&base];
             let p = if chunk == 0 {
@@ -865,7 +951,7 @@ fn reduce_body(
             f.set_inst_loc(new, f.inst_loc(i));
             mapping.insert(result.unwrap(), f.first_result(new));
         }
-        next_sums.push(mapping[&update]);
+        next_sums.extend(reductions.iter().map(|&(_, _, update)| mapping[&update]));
     }
     let step = iconst(f, vector, ty, group);
     let next = bin(f, vector, B::Isub, remaining, step);
@@ -881,23 +967,27 @@ fn reduce_body(
     let more = cmp(f, vector, IntCC::Ne, next, zero);
     let finish = f.create_block();
     branch(f, vector, more, vector, args, finish, vec![]);
-    let mut sum = next_sums[0];
-    for &part in &next_sums[1..] {
-        sum = emit(
-            f,
-            finish,
-            D::VectorBinary {
-                op: V::Iadd,
-                args: [sum, part],
-            },
-        );
+    let mut tail = vec![end];
+    for (index, &(_, initial, _)) in reductions.iter().enumerate() {
+        let mut sum = next_sums[index];
+        for chunk in 1..unroll as usize {
+            sum = emit(
+                f,
+                finish,
+                D::VectorBinary {
+                    op: V::Iadd,
+                    args: [sum, next_sums[chunk * reductions.len() + index]],
+                },
+            );
+        }
+        let mut scalar = initial;
+        for lane in 0..c.shape.lanes() {
+            let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
+            scalar = bin(f, finish, B::Iadd, scalar, part);
+        }
+        tail.push(scalar);
     }
-    let mut scalar = initial;
-    for lane in 0..c.shape.lanes() {
-        let part = emit(f, finish, D::VectorExtract { arg: sum, lane });
-        scalar = bin(f, finish, B::Iadd, scalar, part);
-    }
-    jump(f, finish, c.header, vec![end, scalar]);
+    jump(f, finish, c.header, tail);
 }
 
 fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
@@ -949,6 +1039,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let mut scalar_args = vec![c.start];
     if let Output::Sum { initial, .. } = c.output {
         scalar_args.push(initial);
+        scalar_args.extend(c.extra_sums.iter().map(|r| r.initial));
     }
     // Avoid address-overflow checks and vector setup on short/reversed/negative
     // reductions. Keep the established map guard unchanged.
@@ -1207,7 +1298,7 @@ fn run_candidates_with_budget(
         if f.block_params(header).len() != if reductions { 2 } else { 1 } {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, false, false) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, false, false, false) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
             }
@@ -1223,15 +1314,15 @@ pub fn run(f: &mut Function, target: VectorTarget) -> bool {
     scan::run(f) || changed
 }
 
-fn run_extended(f: &mut Function, target: VectorTarget, casts: bool) -> bool {
+fn run_extended(f: &mut Function, target: VectorTarget, casts: bool, multi: bool) -> bool {
     let headers: Vec<_> = f.blocks().collect();
     let mut changed = false;
     let mut analysis = None;
     for header in headers {
-        if f.block_params(header).len() != 2 {
+        if !(2..=if multi { 5 } else { 2 }).contains(&f.block_params(header).len()) {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts, multi) {
             transform(f, c, target);
             analysis = None;
             changed = true;
