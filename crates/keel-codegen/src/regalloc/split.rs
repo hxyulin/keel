@@ -4,6 +4,12 @@
 use super::*;
 use keel_ir::Inst;
 
+#[path = "split_call.rs"]
+mod call;
+#[cfg(test)]
+#[path = "split_tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy)]
 struct Register {
     loc: Loc,
@@ -81,6 +87,19 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     if spills.is_empty() {
         return alloc;
     }
+    cache_spills(input, alloc, &intervals, true)
+}
+
+// Keep the Full scan separate from the cache walk so token tests can supply
+// forced homes and lifetime holes without depending on scan victim choices.
+// Only tests disable the preference; the public opt-in remains the Split tier.
+fn cache_spills(
+    input: &AllocationInput<'_>,
+    alloc: Allocation,
+    intervals: &[Interval],
+    prefer_call: bool,
+) -> Allocation {
+    let func = input.func;
     // These definitions may disappear in target folding after frame layout.
     // Keep their baseline locations rather than introducing transfers for
     // operands that the emitter will encode as constants or stack addresses.
@@ -91,12 +110,17 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         ),
         _ => true,
     };
-    if !spills.iter().any(|interval| eligible(interval.value)) {
+    if !intervals.iter().any(|interval| {
+        matches!(
+            alloc.locs[interval.half][interval.value.index()],
+            Some(Loc::Stack(_))
+        ) && eligible(interval.value)
+    }) {
         return alloc;
     }
     let mut ends = vec![0; 2 * func.num_values()];
     let mut events = Vec::new();
-    for interval in &intervals {
+    for interval in intervals {
         let part = ValuePart {
             value: interval.value,
             high: interval.half == 1,
@@ -140,6 +164,7 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
         ends,
         active: 0,
     };
+    let mut call_preference = call::Preference::new(&cache, &events, prefer_call);
     let mut live = [0u64; 8];
     let mut cursor = 0;
     let mut slot = 0u32;
@@ -149,6 +174,7 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     for b in 0..cache.alloc.order.len() {
         let block = cache.alloc.order[b];
         slot += 1;
+        call_preference.prepare(input, block, slot, &cache.ends);
         for &inst in func.block_insts(block) {
             let read = 2 * slot;
             let write = read + 1;
@@ -276,7 +302,9 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
                 let index = if current != u32::MAX {
                     Some(current as usize)
                 } else {
-                    cache.acquire(op.part, inst, read, &unavailable)
+                    call_preference
+                        .acquire(&mut cache, op.part, inst, read, &unavailable)
+                        .or_else(|| cache.acquire(op.part, inst, read, &unavailable))
                 };
                 if let Some(i) = index {
                     if current == u32::MAX {
@@ -345,6 +373,12 @@ pub(super) fn allocate(input: &AllocationInput<'_>) -> Allocation {
     cache.alloc
 }
 impl Cache<'_> {
+    fn occupy(&mut self, index: usize, part: ValuePart) -> usize {
+        self.registers[index].part = Some(part);
+        self.active += 1;
+        self.resident[key(part)] = index as u32;
+        index
+    }
     fn home(&self, part: ValuePart) -> Loc {
         self.alloc.locs[usize::from(part.high)][part.value.index()].unwrap()
     }
@@ -394,9 +428,6 @@ impl Cache<'_> {
             })
             .map(|(i, _)| i)?;
         self.evict(index, inst, point);
-        self.registers[index].part = Some(part);
-        self.active += 1;
-        self.resident[key(part)] = index as u32;
-        Some(index)
+        Some(self.occupy(index, part))
     }
 }

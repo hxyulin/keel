@@ -27,7 +27,7 @@ fn copies(state: &mut [Option<u64>], moves: &[(Loc, Loc)], current: &[Vec<Option
         state[location(dst)] = Some(value);
     }
 }
-fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
+pub(super) fn check(input: &AllocationInput<'_>, allocation: &Allocation, mut seed: u64) {
     let func = input.func;
     let mut state = vec![None; 512 + allocation.spill_slots as usize];
     let mut values = [vec![None; func.num_values()], vec![None; func.num_values()]];
