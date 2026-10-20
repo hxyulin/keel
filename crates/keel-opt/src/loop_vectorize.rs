@@ -76,6 +76,23 @@ impl crate::Pass for LoopReduce {
     }
 }
 
+/// Opt-in affine stream recognition; deliberately absent from tier pipelines.
+pub(crate) struct AffineLoopReduce;
+impl crate::Pass for AffineLoopReduce {
+    fn name(&self) -> &'static str {
+        "loop-reduce-affine"
+    }
+    fn description(&self) -> &'static str {
+        "vectorize integer reductions with guarded invariant stream offsets"
+    }
+    fn run(&self, f: &mut Function) -> bool {
+        self.run_for_target(f, VectorTarget::Portable)
+    }
+    fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
+        run_extended(f, target)
+    }
+}
+
 pub(crate) struct FastLoopReduce;
 impl crate::Pass for FastLoopReduce {
     fn name(&self) -> &'static str {
@@ -111,6 +128,7 @@ struct Candidate {
     // Original scalar stream address -> invariant base pointer.
     addresses: HashMap<Value, Value>,
     vectors: HashSet<Value>,
+    offsets: HashMap<Value, Value>,
 }
 #[derive(Clone, Copy)]
 enum Output {
@@ -147,12 +165,13 @@ struct Analyze<'a> {
     c: Candidate,
     target: VectorTarget,
     allowed: HashSet<Inst>,
+    affine: bool,
 }
 impl Analyze<'_> {
-    fn index(&mut self, v: Value) -> Option<()> {
+    fn index(&mut self, v: Value) -> Option<Option<Value>> {
         let v = self.f.resolve(v);
         if v == self.c.iv {
-            return Some(());
+            return Some(None);
         }
         let i = def(self.f, v)?;
         match self.f.inst_data(i) {
@@ -167,7 +186,28 @@ impl Analyze<'_> {
                     return None;
                 }
                 self.allowed.insert(i);
-                Some(())
+                Some(None)
+            }
+            D::Binary { op: B::Iadd, args } if self.affine && self.f.value_type(v) == Type::I64 => {
+                // Only addition at address width: never reassociate a narrow
+                // wrapping add through an extension. The guard checks this sum.
+                for (index, offset) in [(args[0], args[1]), (args[1], args[0])] {
+                    if invariant(self.f, self.dom, self.c.pre, offset)
+                        && (self.f.resolve(index) == self.c.iv
+                            || matches!(
+                                def(self.f, index).map(|i| self.f.inst_data(i)),
+                                Some(D::Convert {
+                                    op: ConvertOp::Uext | ConvertOp::Sext,
+                                    ..
+                                })
+                            ))
+                        && self.index(index)? == None
+                    {
+                        self.allowed.insert(i);
+                        return Some(Some(self.f.resolve(offset)));
+                    }
+                }
+                None
             }
             _ => None,
         }
@@ -190,8 +230,8 @@ impl Analyze<'_> {
         }
         let bytes = self.c.shape.lane_type().bytes()?;
         let offset = self.f.resolve(offset);
-        if bytes == 1 {
-            self.index(offset)?;
+        let invariant_offset = if bytes == 1 {
+            self.index(offset)?
         } else {
             let scale = def(self.f, offset)?;
             let D::Binary { op, args } = *self.f.inst_data(scale) else {
@@ -209,11 +249,15 @@ impl Analyze<'_> {
                 }
                 _ => return None,
             };
-            self.index(index)?;
+            let invariant_offset = self.index(index)?;
             self.allowed.insert(scale);
             if let Some(i) = def(self.f, amount) {
                 self.allowed.insert(i);
             }
+            invariant_offset
+        };
+        if let Some(offset) = invariant_offset {
+            self.c.offsets.insert(v, offset);
         }
         self.allowed.insert(i);
         self.c.addresses.insert(v, self.f.resolve(base));
@@ -256,6 +300,7 @@ fn analyze(
     header: Block,
     target: VectorTarget,
     analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
+    affine: bool,
 ) -> Option<Candidate> {
     let params = f.block_params(header);
     if !(1..=2).contains(&params.len()) || params.iter().any(|&v| f.resolve(v) != v) {
@@ -430,6 +475,7 @@ fn analyze(
         shape,
         addresses: HashMap::new(),
         vectors: HashSet::new(),
+        offsets: HashMap::new(),
     };
     let mut a = Analyze {
         f,
@@ -437,6 +483,7 @@ fn analyze(
         c,
         target,
         allowed: HashSet::from([back, step, root]),
+        affine,
     };
     if let Output::Store(store) = output {
         let D::Store { addr, .. } = *f.inst_data(store) else {
@@ -733,7 +780,7 @@ fn reduce_body(
     jump(f, finish, c.header, vec![end, scalar]);
 }
 
-fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
+fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let guard = f.create_block();
     let entry = guard;
     let setup = f.create_block();
@@ -820,6 +867,38 @@ fn transform(f: &mut Function, c: Candidate, target: VectorTarget) {
         };
         len
     };
+    // Hoist base + offset*element_size only after checking that the
+    // original address-width addition and scaling do not wrap anywhere in
+    // the vector range. Rejecting valid wrapping inputs is fine: scalar
+    // fallback retains their exact address arithmetic and first fault.
+    let mut offsets: Vec<_> = c.offsets.iter().map(|(&a, &o)| (a, o)).collect();
+    offsets.sort();
+    for (address, offset) in offsets {
+        let last = bin(f, guard, B::Iadd, offset, n64);
+        let nowrap = cmp(f, guard, IntCC::Uge, last, offset);
+        safe = bin(f, guard, B::And, safe, nowrap);
+        let shift = iconst(f, guard, Type::I64, i64::from(bytes.trailing_zeros()));
+        let scaled_end = bin(f, guard, B::Shl, last, shift);
+        let recovered = bin(f, guard, B::Ushr, scaled_end, shift);
+        let fits = cmp(f, guard, IntCC::Eq, last, recovered);
+        safe = bin(f, guard, B::And, safe, fits);
+        let scaled = bin(f, guard, B::Shl, offset, shift);
+        let base = c.addresses[&address];
+        let p = emit(
+            f,
+            guard,
+            D::Convert {
+                op: ConvertOp::PtrToInt,
+                ty: Type::I64,
+                arg: base,
+            },
+        );
+        let adjusted = bin(f, guard, B::Iadd, p, scaled);
+        let nowrap = cmp(f, guard, IntCC::Uge, adjusted, p);
+        safe = bin(f, guard, B::And, safe, nowrap);
+        let base = bin(f, guard, B::Ptradd, base, scaled);
+        c.addresses.insert(address, base);
+    }
     let dst = match c.output {
         Output::Store(store) => {
             let D::Store { addr, .. } = *f.inst_data(store) else {
@@ -1008,7 +1087,7 @@ fn run_candidates_with_budget(
         if f.block_params(header).len() != if reductions { 2 } else { 1 } {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, false) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
             }
@@ -1022,4 +1101,21 @@ fn run_candidates_with_budget(
 pub fn run(f: &mut Function, target: VectorTarget) -> bool {
     let changed = run_candidates(f, target, false);
     scan::run(f) || changed
+}
+
+fn run_extended(f: &mut Function, target: VectorTarget) -> bool {
+    let headers: Vec<_> = f.blocks().collect();
+    let mut changed = false;
+    let mut analysis = None;
+    for header in headers {
+        if f.block_params(header).len() != 2 {
+            continue;
+        }
+        if let Some(c) = analyze(f, header, target, &mut analysis, true) {
+            transform(f, c, target);
+            analysis = None;
+            changed = true;
+        }
+    }
+    changed
 }

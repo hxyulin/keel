@@ -1,0 +1,36 @@
+data @kernel_calls = align 8 { zero 8 }
+func @k_logic(ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: i64):
+    v2 = iconst.i64 0
+    jump block1(v2, v2)
+block1(v5: i64, v18: i64):
+    v7 = icmp.ugt v1, v5
+    brif v7, block2, block4
+block2:
+    v32 = iconst.i64 3
+    v10 = shl v5, v32
+    v11 = ptradd v0, v10
+    v12 = load.i64 v11
+    v13 = iadd v1, v5
+    v15 = shl v13, v32
+    v16 = ptradd v0, v15
+    v17 = load.i64 v16
+    v3 = iconst.i64 71777214294589695
+    v20 = and v12, v3
+    v21 = xor v17, v3
+    v22 = iadd v20, v21
+    v23 = or v12, v3
+    v24 = iadd v22, v23
+    v25 = iadd v18, v24
+    v26 = iconst.i64 1
+    v27 = iadd v5, v26
+    jump block1(v27, v25)
+block4:
+    v28 = symbol_addr @kernel_calls
+    v29 = load.i64 align 8 v28
+    v30 = iconst.i64 1
+    v31 = iadd v29, v30
+    store align 8 v31, v28
+    return v18
+}
+
