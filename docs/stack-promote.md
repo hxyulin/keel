@@ -117,3 +117,24 @@ Validation in the isolated priority3 worktree used `target/priority3/build` and
 Exact commands, statuses, outputs and artifact hashes are retained locally in
 `target/priority3/native/result.json`, `commands.json`, `intrinsic-result.json`,
 `intrinsic-commands.json`, and `target/priority3/lock-events.jsonl`.
+
+## Post-capture read caching (opt-in)
+
+`stack-cache` complements private-slot promotion for an object passed to an
+ordinary initializer. It seeds exact integer/pointer fields from memory after
+the last entry-block effect and carries those values through bounded loop SSA.
+It does not assume `memset` semantics, initialization to zero, or `nocapture`.
+Keel's stable uninitialized-memory rule permits the seed read; its fixed-slot
+bounds prove that this additional read cannot fault.
+
+Every original store stays at its original location. An arbitrary read through
+a pointer returned by the initializer can therefore still observe those writes.
+The suffix rejects unknown writes, calls, volatile/atomic operations, and other
+memory barriers. Overlapping field types stay in memory. Debug homes, frame
+observers, exception continuations, dynamic stack operations and returns-twice
+calls disable the transformation. No edge may return to the entry block.
+
+Eligibility is bounded at 64 blocks, 2,048 instructions and eight cached fields;
+address discovery makes at most eight scans. Only fields read inside a natural
+loop are selected. The pass is available explicitly and is not yet part of the
+Full or Fast schedules.

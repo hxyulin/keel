@@ -1,0 +1,113 @@
+decl @init8(ptr, i64) -> ptr
+func @cache8(i64, i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ v3 = call @init8(v2, v1)
+ v4 = iconst.i64 0
+ jump block1(v4, v4)
+block1(v5: i64, v6: i64):
+ v7 = icmp.ult v5, v0
+ brif v7, block2, block3
+block2:
+ v8 = load.i8 v2
+ v9 = iconst.i8 1
+ v10 = iadd v8, v9
+ store v10, v2
+ v15 = load.i8 v3
+ v18 = uext.i64 v15
+ v11 = iadd v6, v18
+ v12 = iconst.i64 1
+ v13 = iadd v5, v12
+ jump block1(v13, v11)
+block3:
+ v16 = load.i8 v2
+ v19 = uext.i64 v16
+ v17 = iadd v6, v19
+ return v17
+}
+
+decl @init16(ptr, i64) -> ptr
+func @cache16(i64, i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ v3 = call @init16(v2, v1)
+ v4 = iconst.i64 0
+ jump block1(v4, v4)
+block1(v5: i64, v6: i64):
+ v7 = icmp.ult v5, v0
+ brif v7, block2, block3
+block2:
+ v8 = load.i16 v2
+ v9 = iconst.i16 1
+ v10 = iadd v8, v9
+ store v10, v2
+ v15 = load.i16 v3
+ v18 = uext.i64 v15
+ v11 = iadd v6, v18
+ v12 = iconst.i64 1
+ v13 = iadd v5, v12
+ jump block1(v13, v11)
+block3:
+ v16 = load.i16 v2
+ v19 = uext.i64 v16
+ v17 = iadd v6, v19
+ return v17
+}
+
+decl @init32(ptr, i64) -> ptr
+func @cache32(i64, i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ v3 = call @init32(v2, v1)
+ v4 = iconst.i64 0
+ jump block1(v4, v4)
+block1(v5: i64, v6: i64):
+ v7 = icmp.ult v5, v0
+ brif v7, block2, block3
+block2:
+ v8 = load.i32 v2
+ v9 = iconst.i32 1
+ v10 = iadd v8, v9
+ store v10, v2
+ v15 = load.i32 v3
+ v18 = uext.i64 v15
+ v11 = iadd v6, v18
+ v12 = iconst.i64 1
+ v13 = iadd v5, v12
+ jump block1(v13, v11)
+block3:
+ v16 = load.i32 v2
+ v19 = uext.i64 v16
+ v17 = iadd v6, v19
+ return v17
+}
+
+decl @init64(ptr, i64) -> ptr
+func @cache64(i64, i64) -> i64 {
+ ss0 = stack_slot 8, align 8
+block0(v0: i64, v1: i64):
+ v2 = stack_addr ss0
+ v3 = call @init64(v2, v1)
+ v4 = iconst.i64 0
+ jump block1(v4, v4)
+block1(v5: i64, v6: i64):
+ v7 = icmp.ult v5, v0
+ brif v7, block2, block3
+block2:
+ v8 = load.i64 v2
+ v9 = iconst.i64 1
+ v10 = iadd v8, v9
+ store v10, v2
+ v15 = load.i64 v3
+ v11 = iadd v6, v15
+ v12 = iconst.i64 1
+ v13 = iadd v5, v12
+ jump block1(v13, v11)
+block3:
+ v16 = load.i64 v2
+ v17 = iadd v6, v16
+ return v17
+}

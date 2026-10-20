@@ -44,6 +44,7 @@ mod sccp;
 mod sign_extend_idiom;
 mod simplify_cfg;
 mod small_memory;
+mod stack_cache;
 mod stack_forward;
 mod stack_promote;
 
@@ -225,6 +226,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[14],
     &BUILTINS[15],
     &BUILTINS[16],
+    &stack_cache::StackCache,
     &load_reuse::LoadReuse,
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
