@@ -1,0 +1,12 @@
+[package]
+name = "keel-cargo-smoke"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Independent of Keel's own build; no network dependencies.
+[workspace]
+
+[[bin]]
+name = "keel-cargo-smoke"
+path = "../../compiler_asm_compat/fixtures/rust/std_generic.rs"
