@@ -31,6 +31,33 @@ tiers and fully spilled inputs use separate scratch registers for the integer
 left operand and memory address. The text and structured-object emitters share
 the same selected CMP; no opaque assembly peephole or new instruction is added.
 
+Indexed scalar memory selection also composes with this rule. A single-use,
+same-block `ptradd` with an i64 offset can become `[base + index * scale]`
+at the original load or store. A single-use i64 shift can supply scales 1, 2,
+4, or 8 after masking its count modulo 64. Scalar integer, pointer, and float
+accesses keep their exact 1/2/4/8-byte widths; atomic and 128-bit/vector accesses
+remain excluded. Shared or cross-block addresses stay materialized, and narrow
+shifts/sign extensions retain their own arithmetic. Address producers respect
+the existing file/line source boundaries. Volatile accesses retain their
+original effects and ordering, while volatile loads remain excluded from CMP
+folding.
+
+Both address leaves are allocation operands at the memory consumer, including
+when that consumer becomes a comparison or fused branch. Indexed address reloads
+use reserved RCX and RDX separately; stores and comparisons can retain their
+integer data or left operand in RAX. The backend validates that allocation pools
+exclude these scratch registers, and rematerialization writes only its requested
+scratch. A load destination can overlap either allocated address leaf because
+the memory instruction reads its address before writing the result.
+
+`x86_indexed_memory` checks all scalar widths, legal scales, masked counts,
+selection options, both allocators, forced spills, overlap, source boundaries,
+fallbacks, optimizer interaction, and independent LLVM assembly encoding. Its
+independent C oracle runs on Linux x86 or macOS ARM and checks modular address
+wrap, calls across address formation, byte-exact stores, floats, and protected
+page faults/order. ARM execution validates the oracle and ARM subset only; x86
+native correctness requires the Linux run.
+
 The motivating manual QuickJS experiment measured 14.14% less process wall time
 on one AMD session. The NUC experiment was inconclusive. Those experiments
 include function and linked-code layout changes and establish neither isolated

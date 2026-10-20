@@ -121,6 +121,7 @@ impl Selection {
         addr: Value,
         ty: Type,
         uses: &[u8],
+        target: Target,
     ) -> bool {
         let addr = func.resolve(addr);
         let Some(size @ (1 | 2 | 4 | 8)) = (if ty == Type::Ptr { Some(8) } else { ty.bytes() })
@@ -169,10 +170,13 @@ impl Selection {
                 args: inputs,
             } = *func.inst_data(producer)
             && let Some(raw_shift) = crate::fold::iconst(func, inputs[1])
-            // IR shifts mask the count to the value width. A register-offset
-            // access allows no shift or precisely log2(access bytes).
+            // IR shifts mask the count to the value width. ARM allows no
+            // shift or log2(access bytes); x86 permits scales 1, 2, 4, 8.
             && let amount = (raw_shift as u64 & 63) as u8
-            && (amount == 0 || u32::from(amount) == size.ilog2())
+            && match target {
+                Target::Aarch64 => amount == 0 || u32::from(amount) == size.ilog2(),
+                Target::X86 => amount <= 3,
+            }
         {
             index = func.resolve(inputs[0]);
             shift = amount;
@@ -510,9 +514,7 @@ impl Selection {
                     _ => None,
                 };
                 if let Some((addr, ty)) = memory {
-                    if target == Target::Aarch64
-                        && plan.select_indexed_address(func, inst, addr, ty, &uses)
-                    {
+                    if plan.select_indexed_address(func, inst, addr, ty, &uses, target) {
                         continue;
                     }
                     let addr = func.resolve(addr);

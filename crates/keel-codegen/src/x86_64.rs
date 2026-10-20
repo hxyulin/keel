@@ -3737,6 +3737,24 @@ impl<'a> FunctionCompiler<'a> {
         if let Some(slot) = stack_slot(self.func, addr) {
             return sized(self.frame(self.stack_slot_offsets[slot]), ptr(ty));
         }
+        if let Some(&address) = self
+            .selection
+            .indexed_addresses
+            .get(&self.func.resolve(addr))
+        {
+            // All mem callers preserve at most S0 (integer store data or CMP
+            // lhs). S1/S2 are reserved, never allocation destinations, and
+            // use_reg/rematerialize write only their requested scratch. Keep
+            // the reloads distinct even when both leaves spill. The memory
+            // instruction reads both leaves before writing a load result,
+            // so an allocated destination may overlap either leaf.
+            let base = self.use_reg(address.base, S1);
+            let index = self.use_reg(address.index, S2);
+            return sized(
+                indexed(r64(base), r64(index), 1u8 << address.shift),
+                ptr(ty),
+            );
+        }
         if let Some(&(base, offset)) = self.selection.addresses.get(&self.func.resolve(addr)) {
             let base = self.use_reg(base, scratch);
             return sized(memory(r64(base), i128::from(offset)), ptr(ty));
