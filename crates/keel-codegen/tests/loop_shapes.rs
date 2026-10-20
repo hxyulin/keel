@@ -15,11 +15,19 @@ const TINY: Pools = Pools {
 };
 
 #[test]
-fn rotated_objects_match_text_on_both_targets() {
+fn loop_shape_objects_match_text_on_both_targets() {
     let mut module = keel_ir::parse(include_str!("programs/loop_shapes.keel")).unwrap();
     keel_opt::run_passes(
         &mut module,
-        &["loop-rotate", "canonicalize", "instcombine", "dce"],
+        &[
+            "load-reuse",
+            "loop-strength-reduce",
+            "canonicalize",
+            "instcombine",
+            "dce",
+            "loop-unroll",
+            "loop-rotate",
+        ],
     )
     .unwrap();
     for target in keel_codegen::Target::ALL {
@@ -30,6 +38,15 @@ fn rotated_objects_match_text_on_both_targets() {
                     allocator: &allocator,
                 };
                 let text = keel_codegen::compile_with_pipeline(&module, target, &pipeline).unwrap();
+                let evidence =
+                    std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-shapes-static");
+                std::fs::create_dir_all(&evidence).unwrap();
+                std::fs::write(
+                    evidence.join(format!("{target:?}-{selector:?}-{allocator:?}.s")),
+                    &text,
+                )
+                .unwrap();
+                std::fs::write(evidence.join("transformed.keel"), module.to_string()).unwrap();
                 let program =
                     keel_codegen::compile_program_with_pipeline(&module, target, &pipeline)
                         .unwrap();
@@ -60,7 +77,7 @@ const TINY: Pools = Pools {
 fn native_loop_shapes_match_independent_oracle() {
     use std::{fs, path::Path, process::Command};
     let source = include_str!("programs/loop_shapes.keel");
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-rotate");
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("loop-shapes");
     fs::create_dir_all(&dir).unwrap();
     let driver = dir.join("driver.c");
     let asm = dir.join("test.s");
@@ -69,25 +86,72 @@ fn native_loop_shapes_match_independent_oracle() {
     let mut runs = 0;
     for (name, passes) in [
         ("none", keel_opt::OptimizationTier::None.pipeline()),
-        ("strength", &["loop-rotate"][..]),
+        ("shapes", &[][..]),
         ("fast", keel_opt::OptimizationTier::Fast.pipeline()),
         ("full", keel_opt::OptimizationTier::Full.pipeline()),
-        (
-            "strength-cleanup",
-            &["loop-rotate", "canonicalize", "instcombine", "dce", "gcm"][..],
-        ),
+        ("cleanup", &["canonicalize", "instcombine", "dce"][..]),
     ] {
         let mut module = keel_ir::parse(source).unwrap();
         keel_ir::verify_module(&module).unwrap();
         keel_opt::run_passes(&mut module, passes).unwrap();
-        keel_opt::run_passes(&mut module, &["load-reuse", "dce", "loop-rotate"]).unwrap();
+        if name != "none" {
+            keel_opt::run_passes(
+                &mut module,
+                &[
+                    "load-reuse",
+                    "loop-strength-reduce",
+                    "canonicalize",
+                    "instcombine",
+                    "dce",
+                    "loop-unroll",
+                    "loop-rotate",
+                ],
+            )
+            .unwrap();
+        }
         keel_ir::verify_module(&module).unwrap();
+        fs::write(dir.join(format!("{name}.keel")), module.to_string()).unwrap();
         if name == "full" {
             assert!(
                 module.functions[0]
                     .blocks()
                     .any(|b| module.functions[0].block_params(b).len() >= 2)
             );
+        }
+        if name == "full" || name == "shapes" || name == "fast" {
+            assert_eq!(
+                module.functions[1]
+                    .layout_insts()
+                    .filter(|(_, i)| matches!(
+                        module.functions[1].inst_data(*i),
+                        keel_ir::InstData::Load { .. }
+                    ))
+                    .count(),
+                6,
+                "matmul unroll activation {name}"
+            );
+        }
+        assert_eq!(
+            module.functions[4]
+                .layout_insts()
+                .filter(|(_, i)| matches!(
+                    module.functions[4].inst_data(*i),
+                    keel_ir::InstData::Load { .. }
+                ))
+                .count(),
+            2,
+            "division must reject unrolling"
+        );
+        if name != "none" {
+            for f in &module.functions[2..4] {
+                assert_eq!(
+                    f.layout_insts()
+                        .filter(|(_, i)| matches!(f.inst_data(*i), keel_ir::InstData::Load { .. }))
+                        .count(),
+                    6,
+                    "signed two-stream activation {name}"
+                );
+            }
         }
         for selector in [SelectionTier::Baseline, SelectionTier::Full] {
             for allocator in [AllocationTier::Fast, AllocationTier::Full] {

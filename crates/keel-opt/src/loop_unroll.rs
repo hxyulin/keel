@@ -1,5 +1,10 @@
 //! Bounded two-way unrolling of wrapping integer additive reductions.
 //! The original loop is retained as the scalar tail. No pipeline enables this pass.
+//! Accept zero-based signed/unsigned counted innermost loops at any nesting depth.
+//! Run strength reduction (and alias cleanup) before unrolling, then rotation:
+//! up to two extra same-width additive recurrences are forwarded sequentially.
+//! Whole iterations are cloned in order, including both loads, before beginning
+//! the next iteration; only the non-observable wrapping sum is reassociated.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::loops::LoopDepth;
 use keel_ir::{
@@ -32,6 +37,8 @@ struct Candidate {
     bound: Value,
     next_iv: Value,
     next_sum: Value,
+    signed: bool,
+    extras: Vec<(Value, Value, Value)>,
 }
 fn def(f: &Function, v: Value) -> Option<Inst> {
     match f.value_def(f.resolve(v)) {
@@ -54,9 +61,11 @@ fn invariant(f: &Function, dom: &DominatorTree, pre: Block, v: Value) -> bool {
     dom.dominates(b, pre)
 }
 fn analyze(f: &Function, header: Block) -> Option<Candidate> {
-    let [iv, sum] = *f.block_params(header) else {
+    let params = f.block_params(header);
+    if !(2..=4).contains(&params.len()) {
         return None;
-    };
+    }
+    let (iv, sum) = (params[0], params[1]);
     if f.resolve(iv) != iv
         || f.resolve(sum) != sum
         || !matches!(f.value_type(iv), Type::I32 | Type::I64)
@@ -70,9 +79,10 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let D::Icmp { cond, args } = *f.inst_data(compare) else {
         return None;
     };
+    let signed = matches!(cond, IntCC::Slt | IntCC::Sgt);
     let bound = match (cond, f.resolve(args[0]) == iv, f.resolve(args[1]) == iv) {
-        (IntCC::Ult, true, false) => f.resolve(args[1]),
-        (IntCC::Ugt, false, true) => f.resolve(args[0]),
+        (IntCC::Ult | IntCC::Slt, true, false) => f.resolve(args[1]),
+        (IntCC::Ugt | IntCC::Sgt, false, true) => f.resolve(args[0]),
         _ => return None,
     };
     let D::Brif { cond, dests } = f.inst_data(branch) else {
@@ -91,8 +101,8 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         || cfg.preds(body) != [header]
         || !f.block_params(body).is_empty()
         || !dests[0].args.is_empty()
-        || depth.depth(header) != 1
-        || depth.depth(body) != 1
+        || depth.depth(header) == 0
+        || depth.depth(body) != depth.depth(header)
         || !dom.dominates(header, body)
     {
         return None;
@@ -102,7 +112,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     }
     let pre = *preds.iter().find(|&&b| b != body)?;
-    if pre == header || depth.depth(pre) != 0 || !invariant(f, &dom, pre, bound) {
+    if pre == header || depth.depth(pre) >= depth.depth(header) || !invariant(f, &dom, pre, bound) {
         return None;
     }
     let pre_jump = *f.block_insts(pre).last()?;
@@ -110,13 +120,14 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     };
     if dest.block != header
-        || dest.args.len() != 2
+        || dest.args.len() != params.len()
         || constant(f, dest.args[0]) != Some(0)
         || !invariant(f, &dom, pre, dest.args[1])
     {
         return None;
     }
     let (start, seed) = (f.resolve(dest.args[0]), f.resolve(dest.args[1]));
+    let initial = dest.args.clone();
     let insts = f.block_insts(body);
     // At most 20 instructions including the backedge; paired cloning adds <=54
     // instructions. At most 2 loads, 16 simultaneously live scalar values.
@@ -127,10 +138,35 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     let D::Jump { dest } = f.inst_data(back) else {
         return None;
     };
-    if dest.block != header || dest.args.len() != 2 {
+    if dest.block != header || dest.args.len() != params.len() {
         return None;
     }
     let (next_iv, next_sum) = (f.resolve(dest.args[0]), f.resolve(dest.args[1]));
+    let mut extras = Vec::new();
+    for (index, &param) in params.iter().enumerate().skip(2) {
+        let seed = f.resolve(initial[index]);
+        let next = f.resolve(dest.args[index]);
+        let update = def(f, next)?;
+        let D::Binary { op: B::Iadd, args } = *f.inst_data(update) else {
+            return None;
+        };
+        let stride = if f.resolve(args[0]) == param {
+            args[1]
+        } else if f.resolve(args[1]) == param {
+            args[0]
+        } else {
+            return None;
+        };
+        if f.resolve(param) != param
+            || !matches!(f.value_type(param), Type::I32 | Type::I64)
+            || f.inst_block(update) != body
+            || !invariant(f, &dom, pre, stride)
+            || !invariant(f, &dom, pre, seed)
+        {
+            return None;
+        }
+        extras.push((param, seed, next));
+    }
     let step = def(f, next_iv)?;
     let D::Binary { op: B::Iadd, args } = *f.inst_data(step) else {
         return None;
@@ -197,7 +233,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             // its updated result cannot feed another operation in this body.
             if v == next_sum
                 || v == sum && i != reduction
-                || !(v == iv || v == sum || local.contains(&v) || invariant(f, &dom, pre, v))
+                || !(params.contains(&v) || local.contains(&v) || invariant(f, &dom, pre, v))
             {
                 ok = false;
             }
@@ -222,6 +258,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         }
     }
     let mut live = HashSet::from([next_iv, next_sum]);
+    live.extend(extras.iter().map(|e| e.2));
     for &i in insts[..insts.len() - 1].iter().rev() {
         for v in f.inst_results(i) {
             live.remove(&f.resolve(*v));
@@ -244,6 +281,8 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         bound,
         next_iv,
         next_sum,
+        signed,
+        extras,
     })
 }
 fn emit(f: &mut Function, b: Block, d: D) -> Value {
@@ -270,6 +309,13 @@ fn transform(f: &mut Function, c: Candidate) {
     let iv = f.append_block_param(pair_header, iv_ty);
     let lane0 = f.append_block_param(pair_header, sum_ty);
     let lane1 = f.append_block_param(pair_header, sum_ty);
+    let extra_params: Vec<_> = c
+        .extras
+        .iter()
+        .map(|e| f.append_block_param(pair_header, f.value_type(e.0)))
+        .collect();
+    // For signed bounds, negative/zero bounds take the untouched scalar tail.
+    // On every paired step 0<=iv<=bound<=SIGNED_MAX, so subtraction is exact.
     // iv<=bound is inductive: entry iv=0; a paired step occurs only when
     // bound-iv>=2. Hence subtraction and the two unit increments cannot wrap.
     let remaining = bin(f, pair_header, B::Isub, c.bound, iv);
@@ -278,7 +324,7 @@ fn transform(f: &mut Function, c: Candidate) {
         f,
         pair_header,
         D::Icmp {
-            cond: IntCC::Uge,
+            cond: if c.signed { IntCC::Sge } else { IntCC::Uge },
             args: [remaining, two],
         },
     );
@@ -301,8 +347,10 @@ fn transform(f: &mut Function, c: Candidate) {
     let originals = f.block_insts(c.body).to_vec();
     let mut next_iv = iv;
     let mut sums = [lane0, lane1];
+    let mut extra_values = extra_params.clone();
     for lane in &mut sums {
         let mut map = HashMap::from([(c.iv, next_iv), (c.sum, *lane)]);
+        map.extend(c.extras.iter().zip(&extra_values).map(|(e, &v)| (e.0, v)));
         for &i in &originals[..originals.len() - 1] {
             let mut data = f.inst_data(i).clone();
             data.for_each_operand_mut(|v| {
@@ -314,20 +362,27 @@ fn transform(f: &mut Function, c: Candidate) {
         }
         next_iv = map[&c.next_iv];
         *lane = map[&c.next_sum];
+        extra_values = c.extras.iter().map(|e| map[&e.2]).collect();
     }
-    jump(f, pair_body, pair_header, vec![next_iv, sums[0], sums[1]]);
+    let mut back = vec![next_iv, sums[0], sums[1]];
+    back.extend(extra_values);
+    jump(f, pair_body, pair_header, back);
     let sum = bin(f, combine, B::Iadd, lane0, lane1);
-    jump(f, combine, c.header, vec![iv, sum]);
+    let mut tail = vec![iv, sum];
+    tail.extend(extra_params);
+    jump(f, combine, c.header, tail);
     // Insert zero before the preheader terminator, preserving all existing work.
     let zero_inst = f.insert_inst(
         InsertPoint::Before(c.pre_jump),
         D::Iconst { ty: sum_ty, imm: 0 },
     );
     let zero = f.first_result(zero_inst);
+    let mut entry = vec![c.start, c.seed, zero];
+    entry.extend(c.extras.iter().map(|e| e.1));
     *f.inst_data_mut(c.pre_jump) = D::Jump {
         dest: BlockCall {
             block: pair_header,
-            args: vec![c.start, c.seed, zero],
+            args: entry,
         },
     };
 }
@@ -338,7 +393,10 @@ fn run(f: &mut Function) -> bool {
         || f.debug_loc.is_some()
         || !f.debug_vars.is_empty()
         || !f.debug_scopes.is_empty()
-        || f.layout_insts().any(|(_, i)| f.inst_loc(i).is_some())
+        || f.layout_insts().any(|(_, i)| {
+            f.inst_loc(i).is_some()
+                || matches!(f.inst_data(i), D::Call { .. } | D::CallIndirect { .. })
+        })
     {
         return false;
     }

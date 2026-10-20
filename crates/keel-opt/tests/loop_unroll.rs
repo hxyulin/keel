@@ -102,6 +102,14 @@ fn execute(
                     }
                     _ => panic!("unmodeled {op:?}"),
                 }),
+                D::Convert {
+                    op: keel_ir::ConvertOp::Sext,
+                    arg,
+                    ..
+                } => {
+                    let width = f.value_type(*arg).bytes().unwrap() * 8;
+                    Some((((read(*arg) << (64 - width)) as i64) >> (64 - width)) as u64)
+                }
                 D::Convert { arg, .. } => Some(read(*arg)),
                 D::Load { addr, .. } => {
                     let address = read(*addr);
@@ -112,6 +120,15 @@ fn execute(
                     IntCC::Ult => read(args[0]) < read(args[1]),
                     IntCC::Ugt => read(args[0]) > read(args[1]),
                     IntCC::Uge => read(args[0]) >= read(args[1]),
+                    IntCC::Slt | IntCC::Sgt | IntCC::Sge => {
+                        let width = f.value_type(args[0]).bytes().unwrap() * 8;
+                        let signed = |v| ((read(v) << (64 - width)) as i64) >> (64 - width);
+                        match cond {
+                            IntCC::Slt => signed(args[0]) < signed(args[1]),
+                            IntCC::Sgt => signed(args[0]) > signed(args[1]),
+                            _ => signed(args[0]) >= signed(args[1]),
+                        }
+                    }
                     _ => panic!("unmodeled {cond:?}"),
                 })),
                 D::Return { args } => return (read(args[0]), trace),
@@ -257,12 +274,13 @@ fn near_unsigned_maximum_pair_guard_and_tail_are_bounded() {
 fn unsupported_shapes_remain_byte_identical() {
     let src = kernel(Type::I64);
     let mut cases = vec![
-        src.replace("icmp.ult", "icmp.slt"),
         src.replace("iconst.i64 0\n jump", "iconst.i64 -2\n jump"),
         src.replace("iconst.i64 1\n v15", "iconst.i64 2\n v15"),
         src.replace("load.i64 v11", "load.i64 volatile v11"),
         src.replace("v17 = imul v13,v15", "v17 = imul v13,v6"),
         src.replace("v17 = imul v13,v15", "v17 = udiv v13,v15"),
+        src.replace("v17 = imul v13,v15", "v17 = sdiv v13,v15"),
+        src.replace("v17 = imul v13,v15", "v17 = srem v13,v15"),
         src.replace("v18 = iadd v6,v17", "v18 = imul v6,v17"),
         src.replace("v18 = iadd v6,v17", "v18 = iadd v6,v6"),
         src.replace(" v18 =", " store v13,v11\n v18 ="),
@@ -384,7 +402,7 @@ fn skips_debug_functions_and_does_not_grow_after_default_cleanup() {
 }
 
 #[test]
-fn rejects_nested_loop_and_excess_live_values() {
+fn accepts_nested_loop_and_rejects_excess_live_values() {
     let nested = kernel(Type::I64)
         .replace(
             "block0(v0: ptr,v1: i64,v2: i64,v3: i64):",
@@ -424,7 +442,8 @@ block3:
  return v6
 }}"
     );
-    for src in [nested, pressure] {
+    assert_eq!(loads(&optimize(&nested, &["loop-unroll"]).functions[0]), 3);
+    for src in [pressure] {
         let before = keel_ir::parse(&src).unwrap();
         keel_ir::verify_module(&before).unwrap();
         assert_eq!(
@@ -528,5 +547,124 @@ fn in_memory_header_aliases_and_multiresult_body_are_rejected() {
         keel_ir::verify(f).unwrap();
         assert_eq!(f.resolve(original), target);
         assert_eq!(f.layout_insts().count(), count);
+    }
+}
+
+#[test]
+fn signed_empty_bounds_tails_and_strength_reduction_order() {
+    for ty in [Type::I32, Type::I64] {
+        for commuted in [false, true] {
+            let cmp = if commuted {
+                "icmp.sgt v1,v5"
+            } else {
+                "icmp.slt v5,v1"
+            };
+            let src = kernel(ty).replace("icmp.ult v5,v1", cmp);
+            let before = keel_ir::parse(&src).unwrap();
+            for passes in [
+                vec!["loop-unroll"],
+                vec!["loop-strength-reduce", "canonicalize", "dce", "loop-unroll"],
+            ] {
+                let after = optimize(&src, &passes);
+                assert_eq!(loads(&after.functions[0]), 3);
+                for bound in [i64::MIN, -3, -1, 0, 1, 2, 3, 4, 7, 16, 31] {
+                    let n = bound as u64 & mask(ty);
+                    let signed = ((n << (64 - ty.bytes().unwrap() * 8)) as i64)
+                        >> (64 - ty.bytes().unwrap() * 8);
+                    let count = signed.max(0) as u64;
+                    let memory = (0..count)
+                        .map(|i| (0x1000 + i * u64::from(ty.bytes().unwrap()), u64::MAX - i))
+                        .collect();
+                    let input = [0x1000, n, 0x12345678, u64::MAX - 3];
+                    assert_eq!(
+                        execute(&after.functions[0], &input, &memory, None),
+                        execute(&before.functions[0], &input, &memory, None)
+                    );
+                }
+            }
+        }
+    }
+}
+#[test]
+fn signed_maximum_pair_tail_does_not_wrap_iv() {
+    for ty in [Type::I32, Type::I64] {
+        let m = optimize(
+            &kernel(ty).replace("icmp.ult", "icmp.slt"),
+            &["loop-unroll"],
+        );
+        let f = &m.functions[0];
+        let h = f.blocks().find(|&b| f.block_params(b).len() == 3).unwrap();
+        let max = mask(ty) >> 1;
+        for tail in 0..4 {
+            let start = max - tail;
+            let bytes = u64::from(ty.bytes().unwrap());
+            let memory = (start..max).map(|i| (i.wrapping_mul(bytes), 7)).collect();
+            let got = execute(
+                f,
+                &[0, max, 0, 0],
+                &memory,
+                Some((h, vec![start, mask(ty), 5])),
+            );
+            let want = (start..max).fold(4, |s: u64, i| {
+                s.wrapping_add(7u64.wrapping_mul(i + 1)) & mask(ty)
+            });
+            assert_eq!(got.0, want);
+            assert_eq!(
+                got.1,
+                (start..max)
+                    .map(|i| i.wrapping_mul(bytes))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn extra_same_width_recurrence_wraps_and_rejects_dependent_stride() {
+    for ty in [Type::I32, Type::I64] {
+        let src = kernel(ty)
+            .replace(
+                " jump block1(v4,v3)",
+                &format!(" v41 = iconst.{ty} 7\n jump block1(v4,v3,v2)"),
+            )
+            .replace(
+                &format!("block1(v5: {ty},v6: {ty})"),
+                &format!("block1(v5: {ty},v6: {ty},v40: {ty})"),
+            )
+            .replace("xor v12,v2", "xor v12,v40")
+            .replace(
+                " jump block1(v15,v18)",
+                " v42 = iadd v40,v41\n jump block1(v15,v18,v42)",
+            );
+        for liveout in [false, true] {
+            let src = if liveout {
+                src.replace("return v6", "return v40")
+            } else {
+                src.clone()
+            };
+            let before = keel_ir::parse(&src).unwrap();
+            let after = optimize(&src, &["loop-unroll"]);
+            assert_eq!(loads(&after.functions[0]), 3);
+            for n in 0..18 {
+                let memory = (0..n)
+                    .map(|i| (0x1000 + i * u64::from(ty.bytes().unwrap()), i * 13))
+                    .collect();
+                let inputs = [0x1000, n, mask(ty) - 3, mask(ty) - 1];
+                assert_eq!(
+                    execute(&after.functions[0], &inputs, &memory, None),
+                    execute(&before.functions[0], &inputs, &memory, None)
+                );
+            }
+        }
+        for unsupported in [
+            src.replace("iadd v40,v41", "iadd v40,v5"),
+            src.replace("iadd v40,v41", "iadd v40,v6"),
+        ] {
+            let before = keel_ir::parse(&unsupported).unwrap();
+            assert_eq!(
+                optimize(&unsupported, &["loop-unroll"]).to_string(),
+                before.to_string()
+            );
+        }
     }
 }
