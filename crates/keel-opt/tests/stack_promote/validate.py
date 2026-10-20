@@ -24,7 +24,7 @@ a.lock_log.parent.mkdir(parents=True, exist_ok=True)
 fixture = Path(__file__).resolve().parent
 keel, out = a.keel.resolve(), a.out.resolve()
 commands = []
-env = dict(os.environ, CARGO_TARGET_DIR='target/kernel-gap-build')
+env = dict(os.environ)
 def run(argv):
     argv = [str(x) for x in argv]
     r = subprocess.run(['python3', str(a.lock_wrapper), str(a.lock_log), *argv],
@@ -69,14 +69,25 @@ for target in ['aarch64-apple-darwin', 'x86_64-unknown-linux-gnu']:
     for name in ['corpus-before', 'corpus-after']:
         run([keel, 'compile', '-O', '--opt-tier', 'none', '--target', target,
              out/(name+'.keel'), '-o', out/(name+'-'+target+'.s')])
-assert (platform.system(), platform.machine()) == ('Darwin', 'arm64'), 'ARM native oracle requires local ARM macOS'
+host = (platform.system(), platform.machine())
+native_target = {('Darwin', 'arm64'): 'aarch64-apple-darwin',
+                 ('Linux', 'x86_64'): 'x86_64-unknown-linux-gnu'}.get(host)
+assert native_target, f'unsupported native oracle host: {host}'
 run(['clang', '-O2', '-fno-lto', '-c', fixture/'oracle.c', '-o', out/'oracle.o'])
 for name in variants:
     exe = out/(name+'.exe')
-    run(['clang', out/'oracle.o', out/(name+'-aarch64-apple-darwin.o'), '-o', exe])
+    run(['clang', out/'oracle.o', out/(name+'-'+native_target+'.o'), '-o', exe])
     run([exe])
 # Independent whole-corpus oracle: fresh Clang output, no historical objects.
-run(['clang', '-O2', '-fwrapv', '-fno-lto', '-ffp-contract=off', '-c', 'crates/keel-cranelift/kernels/driver.c', '-o', out/'driver.o'])
+driver = Path('crates/keel-cranelift/kernels/driver.c')
+if host[0] == 'Linux':
+    text = driver.read_text()
+    original = 'static u64 now(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }'
+    replacement = 'static u64 now(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (u64)ts.tv_sec * 1000000000ULL + (u64)ts.tv_nsec; }'
+    assert text.count(original) == 1
+    driver = out/'driver-linux.c'
+    driver.write_text(text.replace(original, replacement))
+run(['clang', '-O2', '-fwrapv', '-fno-lto', '-ffp-contract=off', '-c', driver, '-o', out/'driver.o'])
 run(['clang', '-O2', '-fwrapv', '-fno-lto', '-ffp-contract=off', '-c', 'crates/keel-cranelift/kernels/kernels.c', '-o', out/'clang.o'])
 run(['clang', out/'driver.o', out/'clang.o', '-o', out/'clang-check'])
 expected = run([out/'clang-check', 'check'])
@@ -104,9 +115,9 @@ if a.if_convert:
                 run([keel, 'compile', '-O', '--opt-tier', 'none', '--target', target, *flag,
                      src, '-o', out/('diamonds-'+name+'-'+target+'.'+ext)])
         exe = out/('diamonds-'+name+'.exe')
-        run(['clang', out/'diamond-oracle.o', out/('diamonds-'+name+'-aarch64-apple-darwin.o'), '-o', exe])
+        run(['clang', out/'diamond-oracle.o', out/('diamonds-'+name+'-'+native_target+'.o'), '-o', exe])
         run([exe])
-summary = dict(status='correctness/static only; no timing', native='ARM64 macOS only',
+summary = dict(status='correctness/static only; no timing', native=native_target,
     private_before=counts(source.read_text()), private_promoted=counts(private),
     private_combined=counts((out/'combined.keel').read_text()), corpus_before=counts(before), corpus_after=counts(after),
     whole_driver_lines=len(expected.splitlines()), commands=len(commands),

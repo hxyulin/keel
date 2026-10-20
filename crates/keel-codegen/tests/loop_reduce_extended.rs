@@ -78,7 +78,10 @@ fn extended_reductions_compile_to_both_target_objects() {
         }
     }
 }
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
 #[test]
 fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
     use std::{fs, process::Command};
@@ -107,15 +110,15 @@ fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
                     selector: &selection,
                     allocator: &allocation,
                 };
-                let p = keel_codegen::compile_program_with_pipeline(
-                    &m,
-                    Target::Aarch64AppleDarwin,
-                    &pipeline,
-                )
-                .unwrap();
+                let p = keel_codegen::compile_program_with_pipeline(&m, native_target(), &pipeline)
+                    .unwrap();
                 fs::write(
                     dir.join("test.o"),
-                    keel_asm::assemble_program_object(&p, Default::default()).unwrap(),
+                    if cfg!(target_arch = "x86_64") {
+                        keel_asm::x86::assemble_program_object(&p).unwrap()
+                    } else {
+                        keel_asm::assemble_program_object(&p, Default::default()).unwrap()
+                    },
                 )
                 .unwrap();
                 let output = Command::new("clang")
@@ -141,7 +144,10 @@ fn native_affine_offsets_and_wrap_fallback_match_independent_oracle() {
     }
 }
 
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
 #[test]
 fn extended_passes_preserve_first_fault_between_two_read_streams() {
     use std::{fs, process::Command};
@@ -178,15 +184,16 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
                 selector: &SelectionTier::Full,
                 allocator: &allocation,
             };
-            let program = keel_codegen::compile_program_with_pipeline(
-                &m,
-                Target::Aarch64AppleDarwin,
-                &pipeline,
-            )
-            .unwrap();
+            let program =
+                keel_codegen::compile_program_with_pipeline(&m, native_target(), &pipeline)
+                    .unwrap();
             fs::write(
                 dir.join("test.o"),
-                keel_asm::assemble_program_object(&program, Default::default()).unwrap(),
+                if cfg!(target_arch = "x86_64") {
+                    keel_asm::x86::assemble_program_object(&program).unwrap()
+                } else {
+                    keel_asm::assemble_program_object(&program, Default::default()).unwrap()
+                },
             )
             .unwrap();
             let output = Command::new("clang")
@@ -208,5 +215,17 @@ fn extended_passes_preserve_first_fault_between_two_read_streams() {
                 Some(20)
             );
         }
+    }
+}
+
+#[cfg(any(
+    all(target_os = "macos", target_arch = "aarch64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+fn native_target() -> Target {
+    if cfg!(target_arch = "x86_64") {
+        Target::X86_64LinuxGnu
+    } else {
+        Target::Aarch64AppleDarwin
     }
 }
