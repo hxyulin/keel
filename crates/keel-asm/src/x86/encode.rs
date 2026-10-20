@@ -260,10 +260,11 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
             | Pcmpgtw | Pcmpgtd | Pshufd | Pshuflw | Pshufhw | Punpcklbw | Punpcklwd | Punpckldq
             | Punpcklqdq | Punpckhbw | Punpckhwd | Punpckhdq | Punpckhqdq | Unpcklps | Unpckhps
             | Unpcklpd | Unpckhpd | Shufps | Shufpd | Andnps | Andnpd | Minps | Minpd | Maxps
-            | Maxpd | Cmpps | Cmppd | Cmpss | Cmpsd | Cmpltss | Cmpltsd | Cmpnltps | Pmovmskb
-            | Movmskps | Movmskpd | Pmaddwd | Pmulhuw | Pmulhw | Pmuludq | Psllw | Pslld | Psllq
-            | Psrlw | Psrld | Psrlq | Psraw | Psrad | Pslldq | Psrldq | Cvtdq2ps | Cvtps2dq
-            | Cvttps2dq | Cvtps2pd | Cvtpd2ps | Cvtdq2pd | Cvtpd2dq | Cvttpd2dq,
+            | Maxpd | Cmpps | Cmppd | Cmpss | Cmpsd | Cmpltss | Cmpltsd | Cmpeqsd | Cmplesd
+            | Cmpneqsd | Cmpordsd | Cmpnltps | Pmovmskb | Movmskps | Movmskpd | Pmaddwd | Pmulhuw
+            | Pmulhw | Pmuludq | Psllw | Pslld | Psllq | Psrlw | Psrld | Psrlq | Psraw | Psrad
+            | Pslldq | Psrldq | Cvtdq2ps | Cvtps2dq | Cvttps2dq | Cvtps2pd | Cvtpd2ps | Cvtdq2pd
+            | Cvtpd2dq | Cvttpd2dq,
             _,
         ) => sse2::encode(&mut e, i)?,
         (Fld, [m @ M(memory)]) if matches!(memory.width, 32 | 64 | 80) => {
