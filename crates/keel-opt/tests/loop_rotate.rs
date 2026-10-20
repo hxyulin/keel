@@ -30,7 +30,7 @@ fn guarded_single_exit_rotation_verifies_and_is_idempotent() {
     keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
     assert!(!pass.run(&mut m.functions[0]));
     assert_eq!(text, m.to_string());
-    assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"loop-rotate"));
+    assert!(keel_opt::DEFAULT_PIPELINE.contains(&"loop-rotate"));
 }
 #[test]
 fn rejects_debug_calls_header_loads_and_multiple_exits() {

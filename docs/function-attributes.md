@@ -227,6 +227,7 @@ no new target configuration or CLI/library option is necessary.
 
 ### Named binding-aware inliner integration
 
+Full uses `inline-noninterposable` in its three bounded inlining rounds.
 `inline-noninterposable` admits private definitions and explicitly
 `noninterposable` public definitions. It uses the same cloning implementation,
 recursion rejection, ABI signature equality, `noinline` precedence, supported
@@ -238,9 +239,9 @@ still reach the exported ABI entry. No alias/capture metadata is inferred or
 transferred onto the caller's parameters.
 
 This pass is registered by name and supports the normal optimization report's
-inline-site outcomes. It is absent from every tier preset, including Fast and
-Full. Neither `inline` nor `inline-aggregate-reserve` changes its private-only
-admission. A caller can explicitly schedule it before an existing tier pipeline;
+inline-site outcomes. It is part of Full; in other tiers it requires explicit
+scheduling. Neither `inline` nor `inline-aggregate-reserve` changes its
+private-only admission. A caller can explicitly schedule it before an existing tier pipeline;
 for a small CLI example:
 
 ```sh

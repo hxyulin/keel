@@ -198,14 +198,17 @@ fn debugger_homes_and_aliased_load_definitions_are_preserved() {
     assert_eq!(memory(f), 4);
 }
 #[test]
-fn remains_opt_in() {
+fn full_only_default_admission() {
     for tier in [
         keel_opt::OptimizationTier::None,
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Basic,
         keel_opt::OptimizationTier::Full,
     ] {
-        assert!(!tier.pipeline().contains(&"stack-promote"));
+        assert_eq!(
+            tier.pipeline().contains(&"stack-promote"),
+            tier == keel_opt::OptimizationTier::Full
+        );
     }
 }
 

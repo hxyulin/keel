@@ -322,7 +322,7 @@ fn full_expands_small_memory_before_stack_forward_only() {
     for at in positions {
         assert_eq!(DEFAULT_PIPELINE[at + 1], "stack-forward");
     }
-    for pass in ["memory-forward", "loop-memory", "loop-unroll"] {
+    for pass in ["memory-forward", "loop-memory"] {
         assert!(!DEFAULT_PIPELINE.contains(&pass));
     }
     assert!(OptimizationTier::None.pipeline().is_empty());

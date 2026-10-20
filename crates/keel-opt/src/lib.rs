@@ -332,7 +332,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
 }
 
 const FULL_ROUND: [&str; 15] = [
-    "inline",
+    "inline-noninterposable",
     "simplify-cfg",
     "canonicalize",
     "instcombine",
@@ -351,21 +351,46 @@ const FULL_ROUND: [&str; 15] = [
 
 const FULL_ROUNDS: usize = 3;
 
+const FULL_EPILOGUE: [&str; 14] = [
+    "load-reuse",
+    "stack-promote",
+    "phi-simplify",
+    "dce",
+    "simplify-cfg",
+    "loop-strength-reduce",
+    "canonicalize",
+    "instcombine",
+    "dce",
+    "loop-unroll",
+    "loop-reduce-multi",
+    "loop-rotate",
+    "phi-simplify",
+    "dce",
+];
+
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller
 // helpers for subsequent rounds, while each inliner retains its growth limits.
 // Keep the measured order, including code motion and loop passes between rounds;
 // cheaper schedules did not preserve the same workload/code-size tradeoffs.
-const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS] {
-    let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS];
+// The epilogue reuses memory facts before introducing loop recurrences, then
+// unrolls before extended reductions and rotation. Keep phi cleanup late and
+// omit an extra GCM: broader schedules regressed Lua fib in app screening.
+const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()] {
+    let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
     let mut i = 0;
-    while i < passes.len() {
+    while i < FULL_ROUND.len() * FULL_ROUNDS {
         passes[i] = FULL_ROUND[i % FULL_ROUND.len()];
         i += 1;
+    }
+    let mut j = 0;
+    while j < FULL_EPILOGUE.len() {
+        passes[i + j] = FULL_EPILOGUE[j];
+        j += 1;
     }
     passes
 }
 
-/// The passes `keel compile -O` runs, in order: three bounded Full rounds.
+/// The passes `keel compile -O` runs: three bounded rounds, then memory/loop cleanup.
 pub const DEFAULT_PIPELINE: &[&str] = &full_pipeline();
 
 pub fn find_pass(name: &str) -> Option<&'static dyn Pass> {

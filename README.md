@@ -177,9 +177,12 @@ limitation. Packaging a static archive does not create a shared library (DSO).
 
 The stages can be tuned independently:
 
-- `--opt-tier none|basic|full`: no IR passes; CFG simplification, constant
-  folding, instruction combining and DCE; or the full pipeline including
-  GVN, bounded [small-memory expansion](docs/small-memory.md), and GCM.
+- `--opt-tier none|fast|basic|full`: no IR passes; bounded local/CFG cleanup
+  and simple sum reductions; CFG simplification, combining and DCE; or Full's
+  three inlining/cleanup rounds followed by memory reuse, private stack
+  promotion and bounded loop transformations. Full includes GVN,
+  [small-memory expansion](docs/small-memory.md), and GCM within each round.
+  Fast keeps its five-pass schedule to bound compilation work.
   `-O` remains an alias for `full`; the default is `none`.
 - `--isel-tier baseline|trees|full`: existing per-instruction lowering;
   generated tree selection; or trees plus folded operand liveness and
@@ -201,9 +204,10 @@ explicit IR pipeline, overriding `-O` and `--opt-tier` regardless of flag
 order. The opt-in `sccp` pass propagates constants through executable edges
 and block parameters. Basic and Full use `instcombine` for numeric folding,
 integer identities and power-of-two strength reduction. SCCP suite presets
-add propagation before combining. `phi-simplify` also remains opt-in: use
-`keel-O-phi-late` to try cleanup after code motion. Early phi cleanup caused
-large application regressions. Pipeline choices and raw measurements are in
+add propagation before combining. Full uses `phi-simplify` only in its final
+memory/loop stage. Early phi cleanup caused large application regressions.
+If-conversion remains opt-in, and Full adds no extra GCM after that final
+stage. Pipeline choices and raw measurements are in
 [suite/README.md](suite/README.md#paired-pass-measurements).
 
 The experimental [`inline-aggregate-reserve`](docs/controlled-helper-generalization-20261018.md)

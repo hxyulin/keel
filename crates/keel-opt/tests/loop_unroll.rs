@@ -187,7 +187,7 @@ fn actual_two_lane_shape_is_deterministic_idempotent_and_bounded() {
             optimize(&src, &["loop-unroll", "loop-unroll"]).to_string()
         );
         assert_eq!(text, optimize(&src, &["loop-unroll"]).to_string());
-        assert!(!keel_opt::DEFAULT_PIPELINE.contains(&"loop-unroll"));
+        assert!(keel_opt::DEFAULT_PIPELINE.contains(&"loop-unroll"));
     }
 }
 

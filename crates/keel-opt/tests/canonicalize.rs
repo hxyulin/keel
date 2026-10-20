@@ -180,7 +180,7 @@ block0(v0: i64, v1: i64):
         keel_opt::OptimizationTier::Basic.pipeline()[0],
         "simplify-cfg"
     );
-    assert_eq!(keel_opt::DEFAULT_PIPELINE[0], "inline");
+    assert_eq!(keel_opt::DEFAULT_PIPELINE[0], "inline-noninterposable");
     assert!(keel_opt::OptimizationTier::None.pipeline().is_empty());
 }
 

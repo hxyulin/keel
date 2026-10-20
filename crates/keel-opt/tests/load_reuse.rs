@@ -260,12 +260,15 @@ fn chain_and_fact_budgets_are_conservative() {
 }
 
 #[test]
-fn default_pipelines_remain_opt_in() {
+fn full_only_default_admission() {
     for tier in [
         keel_opt::OptimizationTier::Fast,
         keel_opt::OptimizationTier::Full,
     ] {
-        assert!(!tier.pipeline().contains(&"load-reuse"));
+        assert_eq!(
+            tier.pipeline().contains(&"load-reuse"),
+            tier == keel_opt::OptimizationTier::Full
+        );
     }
 }
 

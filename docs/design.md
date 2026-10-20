@@ -768,25 +768,38 @@ analyses they need; there is no analysis cache yet.
 | `memory-forward` (opt-in) | block-local exact-address, same-type load reuse and store-to-load forwarding; every write invalidates all prior facts, and volatile accesses, calls, atomics and lifetime barriers clear them |
 | `branch-ranges` (opt-in) | derive signed/unsigned intervals from dominating conditional edges and fold later comparisons against literals |
 | `known-bits` (opt-in) | propagate integer known-zero/known-one facts through SSA, including carry-aware add/subtract/negate, remove proven redundant masks and fold comparisons from derived bounds |
-| `phi-simplify` (opt-in) | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
+| `phi-simplify` | replace uniform incoming block arguments with a dominating value, including anchored self-referential loop parameters; remove the corresponding edge arguments |
 | `sccp` (opt-in) | propagate constants through executable edges and block parameters using sparse conditional constant propagation |
 | `gvn` | scoped hash table over the dominator tree: an equivalent pure instruction that dominates wins. Commutative operands are sorted; reversed integer comparison operands reverse the predicate while retaining signedness. Loads are never merged. |
 | `dce` | mark from pinned instructions except unused ordinary `notrap` reads, deduplicating resolved values when queued; a branch argument is only needed if its parameter is, so dead loop variables die with their parameters |
 | `gcm` | Click's global code motion, the scheduler for floating instructions |
 | `loop-vectorize` | guarded contiguous counted maps with packed arithmetic and scalar tails; see [SIMD IR](simd-ir.md) |
 | `loop-reduce` | read-only wrapping i32/i64 sums with independent vector accumulators, fixed-offset stream loads, countdown and scalar tail; no floating reassociation |
-| `loop-strength-reduce` | opt-in wrapping i32/i64 induction products replaced by same-width recurrences in two-block loops; at most 16 products per function, eight original header parameters and 128 body instructions; no memory operations or traps are moved |
+| `loop-strength-reduce` | wrapping i32/i64 induction products replaced by same-width recurrences in two-block loops; at most 16 products per function, eight original header parameters and 128 body instructions; no memory operations or traps are moved |
 | `fast-loop-reduce` | the same sum transform, restricted to functions with at most 256 instructions / 16 blocks, one stream address and at most eight vector-expression values |
 
 See the [simplification audit](simplification.md) for missing analysis/rewrite
 families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
-The default pipeline (`-O`) runs three bounded rounds of `inline, simplify-cfg, canonicalize, instcombine,
+The default pipeline (`-O`) runs three bounded rounds of `inline-noninterposable, simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
 loop-vectorize, loop-reduce`. Cleanup between inliner invocations exposes smaller
-helpers for the next round. This fixed 45-entry schedule retains code motion and
-loop optimization between rounds; it is not an unbounded fixed-point loop.
-The paired suite comparison on ARM and two x86 hosts measured 8.5–15.6% less
+helpers for the next round. The inliner keeps its existing growth budgets;
+public definitions require an explicit `noninterposable` producer promise.
+The 45 round entries retain code motion and loop optimization between rounds,
+followed by this 14-entry epilogue:
+`load-reuse, stack-promote, phi-simplify, dce, simplify-cfg,
+loop-strength-reduce, canonicalize, instcombine, dce, loop-unroll,
+loop-reduce-multi, loop-rotate, phi-simplify, dce`.
+Memory cleanup precedes wrapping recurrences; unrolling precedes extended sum
+reductions and rotation. `loop-reduce-multi` includes the affine-offset and
+same-lane cast support, so those passes are not scheduled separately.
+If-conversion and an additional final GCM remain opt-in after Lua screening
+found a large fib regression in broader candidates. The selected schedule
+passed the kernel and Lua correctness checks; noisy identical-binary timing
+controls prevent a placement-independent speedup claim. This fixed 59-entry
+schedule is not an unbounded fixed-point loop.
+The earlier paired suite comparison on ARM and two x86 hosts measured 8.5–15.6% less
 runtime than one round at 50–53% greater preprocessed-C-to-object compilation
 time, with increased code size and uneven workload benefits. The
 [suite comparison protocol](../suite/README.md#native-platform-comparisons)
@@ -810,8 +823,9 @@ pass ablation matrix
 supports retaining CFG cleanup, GVN, DCE and GCM. Removing GCM regresses runtime
 by 4.2% overall; removing GVN grows aggregate text by 5.1%, with mixed runtime
 effects. Late phi cleanup avoids the early regression but adds compiler cost
-without an established runtime gain. SCCP also adds compiler cost for neutral
-runtime in these applications, so both remain opt-in.
+without an established runtime gain in the earlier schedule. The current
+memory/loop epilogue uses late phi cleanup to remove newly exposed parameters.
+SCCP remains opt-in after neutral runtime in those applications.
 
 ### Bounded function inlining
 
@@ -905,7 +919,7 @@ revisits consumers after substitution. Entry ABI parameters remain; removing
 other parameters preserves existing aliases while renumbering the remainder.
 Tests cover distinct edges, loop induction, SCCP aliases, reverse layout,
 128 pass subsets, and native execution with restricted register pools.
-The pass remains opt-in: placing it before GVN/GCM regressed Lua fib by
+Early placement remains excluded from defaults: placing it before GVN/GCM regressed Lua fib by
 2.21× and QuickJS fib/sort by 1.20×/1.16× in paired application measurements.
 See `phi-simplify-aarch64-2026-10-15.json`.
 

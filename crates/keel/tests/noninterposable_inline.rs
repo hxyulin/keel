@@ -21,11 +21,23 @@ fn keel(dir: &Path, args: &[&str]) -> String {
     )
 }
 fn pipeline(tier: keel_opt::OptimizationTier, binding: bool) -> String {
-    let mut names = Vec::new();
-    if binding {
-        names.push("inline-noninterposable");
+    // The negative control disables the binding promise while retaining all
+    // other default passes and the same number of inliner invocations.
+    let mut names: Vec<_> = tier
+        .pipeline()
+        .iter()
+        .copied()
+        .map(|name| {
+            if !binding && name == "inline-noninterposable" {
+                "inline"
+            } else {
+                name
+            }
+        })
+        .collect();
+    if binding && !names.contains(&"inline-noninterposable") {
+        names.insert(0, "inline-noninterposable");
     }
-    names.extend_from_slice(tier.pipeline());
     names.join(",")
 }
 fn function<'a>(text: &'a str, name: &str) -> &'a str {
