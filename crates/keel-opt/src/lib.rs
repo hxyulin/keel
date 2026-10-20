@@ -154,6 +154,11 @@ const BUILTINS: &[BuiltinPass] = &[
         run: stack_forward::run,
     },
     BuiltinPass {
+        name: "stack-forward-cfg",
+        description: "forward private stack bytes and clean CFG when a conditional becomes constant (opt-in)",
+        run: stack_forward::run_with_cfg,
+    },
+    BuiltinPass {
         name: "branch-ranges",
         description: "fold integer comparisons using ranges from dominating conditional edges",
         run: branch_ranges::run,
@@ -202,6 +207,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[11],
     &BUILTINS[12],
     &BUILTINS[13],
+    &BUILTINS[14],
     &load_narrow::LoadNarrow,
     &loop_memory::LoopMemory,
     &loop_unroll::LoopUnroll,

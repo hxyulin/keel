@@ -235,3 +235,83 @@ fn schema_order_is_repeatable_when_timings_are_removed() {
         normalize(observed(&source, pipeline).1)
     );
 }
+
+#[test]
+fn selective_stack_cfg_is_one_composite_observation_for_every_target() {
+    let source = "decl @yes() -> i64
+func @f() -> i64 {
+ ss0 = stack_slot 1, align 1
+block0:
+ v0 = stack_addr ss0
+ v1 = iconst.i8 1
+ store v1, v0
+ v2 = load.i8 v0
+ brif v2, block1, block2
+block1:
+ v3 = call @yes()
+ return v3
+block2:
+ trap
+}";
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::X86Sse2,
+        VectorTarget::Aarch64Neon,
+    ] {
+        for names in [
+            &["stack-forward-cfg", "stack-forward-cfg"][..],
+            keel_opt::OptimizationTier::Full.pipeline(),
+        ] {
+            let mut plain = keel_ir::parse(source).unwrap();
+            keel_ir::verify_module(&plain).unwrap();
+            let mut instrumented = plain.clone();
+            keel_opt::run_passes_for_target(&mut plain, names, target).unwrap();
+            let mut report = OptimizationReport::default();
+            keel_opt::run_passes_for_target_with_report(
+                &mut instrumented,
+                names,
+                target,
+                &mut report,
+            )
+            .unwrap();
+            keel_ir::verify_module(&instrumented).unwrap();
+            assert_eq!(plain.to_string(), instrumented.to_string());
+            assert_eq!(report.invocations.len(), names.len());
+            for (index, p) in report.invocations.iter().enumerate() {
+                assert_eq!(p.pipeline_index, index);
+                assert_eq!(p.pass, names[index]);
+                assert_eq!(p.target, target);
+            }
+            let mut sf = report
+                .invocations
+                .iter()
+                .filter(|p| p.pass == "stack-forward-cfg" || p.pass == "stack-forward");
+            let first = sf.next().unwrap();
+            assert_eq!(first.function.as_deref(), Some("f"));
+            assert!(first.changed);
+            assert_eq!(first.before.blocks, 3);
+            assert_eq!(
+                first.after.blocks,
+                if names[0] == "stack-forward-cfg" {
+                    1
+                } else {
+                    3
+                }
+            );
+            assert!(first.after.instructions < first.before.instructions);
+            assert_eq!(first.restoration_changed, None);
+            for later in sf {
+                assert!(!later.changed);
+                assert_eq!(later.before, later.after);
+            }
+            assert_eq!(
+                report
+                    .invocations
+                    .iter()
+                    .filter(|p| p.pass == "simplify-cfg")
+                    .count(),
+                names.iter().filter(|&&name| name == "simplify-cfg").count()
+            );
+        }
+    }
+}

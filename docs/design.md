@@ -759,6 +759,7 @@ analyses they need; there is no analysis cache yet.
 |---|---|
 | `inline` | module-level bounded private direct-call expansion, including fresh by-value snapshots and remapped CFG/SSA/stack slots |
 | `small-memory` | expand ordinary constant memory intrinsics of 0–32 bytes with exact accesses; preload memmove sources before stores; see [bounded memory expansion](small-memory.md) |
+| `stack-forward-cfg` | opt-in stack forwarding followed by CFG fixed-point cleanup only when forwarding directly makes a previously nonconstant `brif`/`switch` operand constant; absent from every default pipeline |
 | `stack-forward` | block-local byte forwarding for nonescaping fixed stack objects, including partial integer writes; remove private stores only after every load from the object disappears |
 | `canonicalize` | resolve operand aliases, place integer literals on the right, order other interchangeable integer operand pairs by value ID, reverse integer comparison predicates when swapping |
 | `simplify-cfg` | constant `brif` → `jump`, compose arguments through jump-only forwarding blocks, merge a block into its only predecessor, drop unreachable blocks |

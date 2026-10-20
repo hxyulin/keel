@@ -4,11 +4,41 @@
 //! across blocks when their store dominates the load. This handles the union
 //! temporaries exposed by inlining aggregate helpers without assuming that
 //! arbitrary pointers cannot alias.
+use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
 };
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use std::collections::{HashMap, HashSet};
+
+/// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
+/// only when it directly exposes a previously nonconstant branch operand.
+/// Existing constants and expressions needing another folding pass do not
+/// request cleanup. The ordinary `run` path does not collect this snapshot.
+pub fn run_with_cfg(func: &mut Function) -> bool {
+    let conditional_inputs: Vec<_> = func
+        .blocks()
+        .filter_map(|block| {
+            let &term = func.block_insts(block).last()?;
+            let value = match *func.inst_data(term) {
+                InstData::Brif { cond, .. } => cond,
+                InstData::Switch { arg, .. } => arg,
+                _ => return None,
+            };
+            crate::const_fold::constant(func, value)
+                .is_none()
+                .then_some(value)
+        })
+        .collect();
+    let changed = run(func);
+    if changed
+        && conditional_inputs
+            .iter()
+            .any(|&value| crate::const_fold::constant(func, value).is_some())
+    {
+        crate::simplify_cfg::run(func);
+    }
+    changed
+}
 
 pub fn run(func: &mut Function) -> bool {
     // Propagate addresses only along constant in-bounds ptradd chains. Any
@@ -196,13 +226,18 @@ pub fn run(func: &mut Function) -> bool {
                             dominates.then_some(value)
                         },
                     );
-                    let forwarded = exact.get(&(slot, offset, ty)).copied().or(global).or_else(|| {
-                        let width = integer_width(ty)?;
-                        let parts = (0..width)
-                            .map(|n| bytes.get(&(slot, offset + n)).copied())
-                            .collect::<Option<Vec<_>>>()?;
-                        Some(reconstruct(func, inst, ty, &parts))
-                    });
+                    let forwarded =
+                        exact
+                            .get(&(slot, offset, ty))
+                            .copied()
+                            .or(global)
+                            .or_else(|| {
+                                let width = integer_width(ty)?;
+                                let parts = (0..width)
+                                    .map(|n| bytes.get(&(slot, offset + n)).copied())
+                                    .collect::<Option<Vec<_>>>()?;
+                                Some(reconstruct(func, inst, ty, &parts))
+                            });
                     if let Some(value) = forwarded {
                         func.replace_all_uses(func.first_result(inst), value);
                         func.remove_inst(inst);
@@ -311,7 +346,8 @@ mod tests {
 
     #[test]
     fn aliased_live_load_result_is_not_overwritten() {
-        let mut m = keel_ir::parse("func @f(i64, i64) -> i64 {
+        let mut m = keel_ir::parse(
+            "func @f(i64, i64) -> i64 {
      ss0 = stack_slot 8, align 8
     block0(v0: i64, v1: i64):
      v2 = stack_addr ss0
@@ -320,11 +356,14 @@ mod tests {
     block1:
      v3 = load.i64 v2
      return v3
-    }").unwrap();
+    }",
+        )
+        .unwrap();
         let f = &mut m.functions[0];
-        let load = f.layout_insts().find_map(|(_, i)| {
-            matches!(f.inst_data(i), InstData::Load { .. }).then_some(i)
-        }).unwrap();
+        let load = f
+            .layout_insts()
+            .find_map(|(_, i)| matches!(f.inst_data(i), InstData::Load { .. }).then_some(i))
+            .unwrap();
         let result = f.first_result(load);
         let replacement = f.block_params(f.entry_block().unwrap())[1];
         f.replace_all_uses(result, replacement);
