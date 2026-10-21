@@ -52,20 +52,42 @@ pub fn run(func: &mut Function) -> bool {
     }
     let analysis = crate::analysis::get(func);
     let dom = &analysis.dom;
-    let mut incoming = vec![Vec::new(); func.num_blocks()];
-    let mut users: Vec<Vec<Block>> = vec![Vec::new(); func.num_values()];
+    // Every edge into each block, in layout and branch order, packed by
+    // destination; and the blocks each value is passed to, as lists.
+    let mut incoming_start = vec![0u32; func.num_blocks() + 1];
+    let mut users = UserLists::new(func.num_values());
     // Only terminators branch.
     for block in func.blocks() {
         let Some(&inst) = func.block_insts(block).last() else {
             continue;
         };
-        for (edge, dest) in func.inst_data(inst).branch_dests().iter().enumerate() {
-            incoming[dest.block.index()].push((inst, edge));
+        for dest in func.inst_data(inst).branch_dests() {
+            incoming_start[dest.block.index() + 1] += 1;
             for &arg in &dest.args {
-                users[func.resolve(arg).index()].push(dest.block);
+                users.push(func.resolve(arg), dest.block);
             }
         }
     }
+    for i in 1..incoming_start.len() {
+        incoming_start[i] += incoming_start[i - 1];
+    }
+    let mut fill = incoming_start.clone();
+    let mut incoming_edges = vec![(Inst::new(0), 0); *incoming_start.last().unwrap() as usize];
+    for block in func.blocks() {
+        let Some(&inst) = func.block_insts(block).last() else {
+            continue;
+        };
+        for (edge, dest) in func.inst_data(inst).branch_dests().iter().enumerate() {
+            let slot = &mut fill[dest.block.index()];
+            incoming_edges[*slot as usize] = (inst, edge);
+            *slot += 1;
+        }
+    }
+    drop(fill);
+    let incoming = |block: Block| {
+        let b = block.index();
+        &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
+    };
     // The entry's parameters are ABI arguments and must remain in place.
     let mut work: Vec<_> = dom.rpo().iter().copied().skip(1).rev().collect();
     let mut queued = vec![false; func.num_blocks()];
@@ -77,22 +99,22 @@ pub fn run(func: &mut Function) -> bool {
         queued[block.index()] = false;
         for index in (0..func.block_params(block).len()).rev() {
             let param = func.block_params(block)[index];
-            let Some(value) =
-                replacement(func, &dom, block, param, index, &incoming[block.index()])
-            else {
+            let Some(value) = replacement(func, dom, block, param, index, incoming(block)) else {
                 continue;
             };
             if func.resolve(param) == param {
                 func.replace_all_uses(param, value);
             }
             func.remove_block_param(block, index);
-            for &(branch, edge) in &incoming[block.index()] {
+            for &(branch, edge) in incoming(block) {
                 func.inst_data_mut(branch).branch_dests_mut()[edge]
                     .args
                     .remove(index);
             }
-            let waiting = std::mem::take(&mut users[param.index()]);
-            for &user in &waiting {
+            // The parameter's users now pass `value`.
+            let mut node = users.head[param.index()];
+            while node != NIL {
+                let (user, next) = users.nodes[node as usize];
                 if Some(user) != func.entry_block()
                     && dom.is_reachable(user)
                     && !queued[user.index()]
@@ -100,10 +122,58 @@ pub fn run(func: &mut Function) -> bool {
                     queued[user.index()] = true;
                     work.push(user);
                 }
+                node = next;
             }
-            users[value.index()].extend(waiting);
+            users.move_list(param, value);
             changed = true;
         }
     }
     changed
+}
+
+const NIL: u32 = u32::MAX;
+
+/// For each value, the blocks it is passed to, in insertion order: linked
+/// lists threaded through one node array instead of a vector per value.
+struct UserLists {
+    head: Vec<u32>,
+    tail: Vec<u32>,
+    /// (user, next node)
+    nodes: Vec<(Block, u32)>,
+}
+
+impl UserLists {
+    fn new(values: usize) -> Self {
+        Self {
+            head: vec![NIL; values],
+            tail: vec![NIL; values],
+            nodes: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, value: Value, user: Block) {
+        let node = u32::try_from(self.nodes.len()).expect("user list overflow");
+        self.nodes.push((user, NIL));
+        self.link(value, node, node);
+    }
+
+    /// Appends the chained nodes `first..=last` to `value`'s list.
+    fn link(&mut self, value: Value, first: u32, last: u32) {
+        let v = value.index();
+        match self.tail[v] {
+            NIL => self.head[v] = first,
+            tail => self.nodes[tail as usize].1 = first,
+        }
+        self.tail[v] = last;
+    }
+
+    /// Empties `from`'s list onto the end of `to`'s.
+    fn move_list(&mut self, from: Value, to: Value) {
+        let (first, last) = (self.head[from.index()], self.tail[from.index()]);
+        self.head[from.index()] = NIL;
+        self.tail[from.index()] = NIL;
+        if first != NIL {
+            self.link(to, first, last);
+        }
+    }
 }
