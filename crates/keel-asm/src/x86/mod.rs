@@ -5,7 +5,7 @@ mod encode;
 mod metadata;
 mod sections;
 use crate::Error;
-use crate::fxhash::{FxHashMap, FxHashSet};
+use crate::fxhash::{FxHashSet, FxHasher};
 pub use keel_asm_ir::x86::{Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
@@ -17,6 +17,7 @@ use object::{
     SymbolFlags, SymbolKind, SymbolScope,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::Hasher;
 
 struct Section {
     name: String,
@@ -40,8 +41,8 @@ struct Sym {
     hidden: bool,
     kind: SymbolKind,
     // Boxed: most symbols are plain labels, and one table entry exists per name.
-    size: Option<Box<Expression>>,
-    alias: Option<Box<Expression>>,
+    size: Option<Box<Expr>>,
+    alias: Option<Box<Expr>>,
     common: Option<(u64, u64)>,
 }
 impl Default for Sym {
@@ -60,13 +61,110 @@ impl Default for Sym {
         }
     }
 }
-/// Symbols by name. The hash index holds only names and positions in a
-/// dense table, keeping its power-of-two (often half-empty) buckets small.
-/// Layout passes declare the same names, so [`Self::clear`] keeps the index
-/// and its slots: a slot is visible once declared in the current pass.
+/// An interned symbol name: an index into [`Names`] and the symbol table.
+type SymId = u32;
+/// Symbol names, interned once to dense ids. The text lives in one buffer
+/// and the open-addressed index holds only ids, so layout passes compare and
+/// look up symbols as small integers rather than hashing names.
+#[derive(Default)]
+struct Names {
+    text: String,
+    /// Start and length of each name in `text`.
+    spans: Vec<(u32, u32)>,
+    hashes: Vec<u64>,
+    /// `id + 1` at each occupied slot; the length is zero or a power of two.
+    slots: Vec<u32>,
+}
+impl Names {
+    fn hash(name: &str) -> u64 {
+        let mut h = FxHasher::default();
+        h.write(name.as_bytes());
+        h.finish()
+    }
+    fn len(&self) -> usize {
+        self.spans.len()
+    }
+    fn name(&self, id: SymId) -> &str {
+        let (start, len) = self.spans[id as usize];
+        &self.text[start as usize..(start + len) as usize]
+    }
+    /// The slot holding `name`, or the empty slot where it belongs.
+    fn find(&self, name: &str, hash: u64) -> usize {
+        let mask = self.slots.len() - 1;
+        // Fx mixes its high bits best.
+        let mut i = (hash >> 32) as usize & mask;
+        loop {
+            let id = self.slots[i];
+            if id == 0
+                || (self.hashes[(id - 1) as usize] == hash && self.name(id - 1) == name)
+            {
+                return i;
+            }
+            i = (i + 1) & mask;
+        }
+    }
+    fn get(&self, name: &str) -> Option<SymId> {
+        if self.slots.is_empty() {
+            return None;
+        }
+        self.slots[self.find(name, Self::hash(name))].checked_sub(1)
+    }
+    fn intern(&mut self, name: &str) -> SymId {
+        if self.spans.len() * 2 >= self.slots.len() {
+            let n = (self.slots.len() * 2).max(64);
+            self.slots = vec![0; n];
+            for (id, &hash) in self.hashes.iter().enumerate() {
+                let mut i = (hash >> 32) as usize & (n - 1);
+                while self.slots[i] != 0 {
+                    i = (i + 1) & (n - 1);
+                }
+                self.slots[i] = id as u32 + 1;
+            }
+        }
+        let hash = Self::hash(name);
+        let slot = self.find(name, hash);
+        if let Some(id) = self.slots[slot].checked_sub(1) {
+            return id;
+        }
+        let id = self.spans.len() as SymId;
+        let start = u32::try_from(self.text.len()).expect("symbol names exceed 4 GiB");
+        self.text.push_str(name);
+        self.spans.push((start, name.len() as u32));
+        self.hashes.push(hash);
+        self.slots[slot] = id + 1;
+        id
+    }
+}
+/// A symbol expression over interned names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Expr {
+    add: Option<SymId>,
+    subtract: Option<SymId>,
+    constant: i128,
+}
+impl Expr {
+    fn constant(constant: i128) -> Self {
+        Self {
+            constant,
+            ..Self::default()
+        }
+    }
+    fn symbol(id: SymId) -> Self {
+        Self {
+            add: Some(id),
+            ..Self::default()
+        }
+    }
+    fn symbolic(&self) -> bool {
+        self.add.is_some() || self.subtract.is_some()
+    }
+}
+/// Symbols by interned id, in a dense table. Layout passes declare the same
+/// names, so [`Self::clear`] keeps names and slots: a slot is visible once
+/// declared in the current pass.
 #[derive(Default)]
 struct Symbols {
-    index: FxHashMap<Box<str>, u32>,
+    names: Names,
     table: Vec<Sym>,
     /// The pass that last declared each slot.
     declared: Vec<u32>,
@@ -77,54 +175,57 @@ impl Symbols {
     fn len(&self) -> usize {
         self.len
     }
-    fn slot(&self, name: &str) -> Option<usize> {
-        let i = *self.index.get(name)? as usize;
-        (self.declared[i] == self.pass).then_some(i)
+    fn intern(&mut self, name: &str) -> SymId {
+        let id = self.names.intern(name);
+        if id as usize == self.table.len() {
+            self.table.push(Sym::default());
+            // Never the current (or a later) pass.
+            self.declared.push(self.pass.wrapping_sub(1));
+        }
+        id
     }
-    fn get(&self, name: &str) -> Option<&Sym> {
-        self.slot(name).map(|i| &self.table[i])
+    fn name(&self, id: SymId) -> &str {
+        self.names.name(id)
     }
-    fn get_mut(&mut self, name: &str) -> Option<&mut Sym> {
-        self.slot(name).map(|i| &mut self.table[i])
+    fn expr(&mut self, e: &Expression) -> Expr {
+        Expr {
+            add: e.add.as_deref().map(|n| self.intern(n)),
+            subtract: e.subtract.as_deref().map(|n| self.intern(n)),
+            constant: e.constant,
+        }
     }
-    /// The named symbol, declared with default attributes on first use.
-    fn entry(&mut self, name: &str) -> &mut Sym {
-        let i = match self.index.get(name) {
-            Some(&i) => {
-                let i = i as usize;
-                if self.declared[i] != self.pass {
-                    self.declared[i] = self.pass;
-                    self.table[i] = Sym::default();
-                    self.len += 1;
-                }
-                i
-            }
-            None => {
-                let i = self.table.len();
-                self.index.insert(name.into(), i as u32);
-                self.table.push(Sym::default());
-                self.declared.push(self.pass);
-                self.len += 1;
-                i
-            }
-        };
+    fn get(&self, id: SymId) -> Option<&Sym> {
+        let i = id as usize;
+        (self.declared[i] == self.pass).then(|| &self.table[i])
+    }
+    fn get_mut(&mut self, id: SymId) -> Option<&mut Sym> {
+        let i = id as usize;
+        (self.declared[i] == self.pass).then(|| &mut self.table[i])
+    }
+    /// The symbol, declared with default attributes on first use.
+    fn entry(&mut self, id: SymId) -> &mut Sym {
+        let i = id as usize;
+        if self.declared[i] != self.pass {
+            self.declared[i] = self.pass;
+            self.table[i] = Sym::default();
+            self.len += 1;
+        }
         &mut self.table[i]
     }
-    fn insert(&mut self, name: &str, sym: Sym) {
-        *self.entry(name) = sym;
+    fn insert(&mut self, id: SymId, sym: Sym) {
+        *self.entry(id) = sym;
     }
-    fn iter(&self) -> impl Iterator<Item = (&str, &Sym)> {
-        self.index
-            .iter()
-            .filter(|&(_, &i)| self.declared[i as usize] == self.pass)
-            .map(|(name, &i)| (&**name, &self.table[i as usize]))
-    }
-    fn values(&self) -> impl Iterator<Item = &Sym> {
+    /// Declared symbols in id order.
+    fn iter(&self) -> impl Iterator<Item = (SymId, &Sym)> {
         self.table
             .iter()
             .zip(&self.declared)
-            .filter(|&(_, &pass)| pass == self.pass)
-            .map(|(sym, _)| sym)
+            .enumerate()
+            .filter(|&(_, (_, &pass))| pass == self.pass)
+            .map(|(id, (sym, _))| (id as SymId, sym))
+    }
+    fn values(&self) -> impl Iterator<Item = &Sym> {
+        self.iter().map(|(_, sym)| sym)
     }
     /// Begin the next pass with no symbols declared.
     fn clear(&mut self) {
@@ -132,10 +233,10 @@ impl Symbols {
         self.len = 0;
     }
 }
-impl std::ops::Index<&str> for Symbols {
+impl std::ops::Index<SymId> for Symbols {
     type Output = Sym;
-    fn index(&self, name: &str) -> &Sym {
-        self.get(name).expect("no such symbol")
+    fn index(&self, id: SymId) -> &Sym {
+        self.get(id).expect("no such symbol")
     }
 }
 enum AlignFill {
@@ -147,7 +248,8 @@ struct Fix {
     section: usize,
     offset: u64,
     width: u8,
-    address: Address,
+    modifier: Modifier,
+    expr: Expr,
     kind: u32,
     line: usize,
 }
@@ -165,12 +267,12 @@ struct Assembler {
     source_files: Vec<Vec<u8>>,
     addrsig: Option<Vec<String>>,
     leb_widths: Vec<usize>,
-    lebs: Vec<(usize, u64, Expression, bool, usize)>,
+    lebs: Vec<(usize, u64, Expr, bool, usize)>,
     pref_powers: Vec<u32>,
     /// Section sizes from the previous layout pass, which declares the same
     /// sections in the same order: reserve them instead of regrowing.
     size_hints: Vec<u64>,
-    prefs: Vec<(usize, u64, u64, u32, String, usize)>,
+    prefs: Vec<(usize, u64, u64, u32, SymId, usize)>,
 }
 
 /// Assemble x86 source (initially Intel) as a Linux relocatable ELF64 object.
@@ -213,6 +315,13 @@ pub fn assemble_program_object_with_features(
                 if !items.encode(i, index + 1) {
                     items.instruction(Ref::Borrowed(i), index + 1)
                 }
+            }
+            Item::Label(name) => {
+                let sym = items.symbols.intern(name);
+                items.push(Entry::Label {
+                    sym,
+                    line: index + 1,
+                })
             }
             _ => items.push(Entry::Item {
                 item: Ref::Borrowed(item),
@@ -261,10 +370,10 @@ impl ProgramAssembler {
                     }
                 }
                 // Equivalent to the borrowed label item, without its box.
-                Item::Label(name) => items.push(Entry::Label {
-                    name: name.into_boxed_str(),
-                    line,
-                }),
+                Item::Label(name) => {
+                    let sym = items.symbols.intern(&name);
+                    items.push(Entry::Label { sym, line })
+                }
                 item => items.push(Entry::Item {
                     item: Ref::Owned(Box::new(item)),
                     line,
@@ -310,7 +419,7 @@ enum Entry<'a> {
         short: bool,
     },
     Label {
-        name: Box<str>,
+        sym: SymId,
         line: usize,
     },
     /// A single, in-range literal data operand, decoded once. Keep bytes rather
@@ -336,6 +445,8 @@ enum Entry<'a> {
 struct Items<'a> {
     entries: Vec<Entry<'a>>,
     encoded: Vec<u8>,
+    /// Names interned during collection; layout passes extend and reuse it.
+    symbols: Symbols,
     features: x86::Features,
     parser: x86::SourceParser,
     // Parse errors anywhere take precedence over feature errors.
@@ -347,6 +458,7 @@ impl<'a> Items<'a> {
         Self {
             entries: Vec::new(),
             encoded: Vec::new(),
+            symbols: Symbols::default(),
             features,
             parser: x86::SourceParser::default(),
             unsupported: None,
@@ -366,10 +478,10 @@ impl<'a> Items<'a> {
                             self.instruction(Ref::Owned(Box::new(i)), line)
                         }
                     }
-                    x86::SourceItem::Label(name) => self.push(Entry::Label {
-                        name: name.into_boxed_str(),
-                        line,
-                    }),
+                    x86::SourceItem::Label(name) => {
+                        let sym = self.symbols.intern(&name);
+                        self.push(Entry::Label { sym, line })
+                    }
                     x86::SourceItem::Text(text) => {
                         self.push(if let Some((bytes, width)) = literal_data(text) {
                             Entry::LiteralData { bytes, width, line }
@@ -557,7 +669,7 @@ fn assemble_items_inner<const PROFILE: bool>(
     let mut variable_work = 0usize;
     // Every pass defines the same symbols and fixups: later passes reuse the
     // previous pass's (cleared) tables, and size their sections from it.
-    let mut recycled = (Symbols::default(), Vec::new());
+    let mut recycled = (std::mem::take(&mut items.symbols), Vec::new());
     let mut size_hints = Vec::new();
     loop {
         let start = PROFILE.then(std::time::Instant::now);
@@ -586,7 +698,7 @@ fn assemble_items_inner<const PROFILE: bool>(
                     }
                     (a.instruction(instruction, *line, *short), line)
                 }
-                Entry::Label { name, line } => (a.label(name), line),
+                Entry::Label { sym, line } => (a.label(*sym), line),
                 Entry::LiteralData { bytes, width, line } => {
                     (a.data_bytes(&bytes[..usize::from(*width)]), line)
                 }
@@ -609,9 +721,8 @@ fn assemble_items_inner<const PROFILE: bool>(
         let mut changed = 0;
         for (index, fix) in branches {
             let f = &a.fixes[fix];
-            let name = f.address.expression.add.as_deref().unwrap();
-            let fits = a.local_symbol(name, 0)
-                && a.try_eval(&f.address.expression, 0)
+            let fits = a.local_symbol(f.expr.add.unwrap(), 0)
+                && a.try_eval(&f.expr, 0)
                     .is_some_and(|(section, value)| {
                         section == Some(f.section)
                             && (-128..=127).contains(&(value - i128::from(f.offset)))
@@ -659,7 +770,7 @@ fn assemble_items_inner<const PROFILE: bool>(
             }
         }
         for (i, (section, start, padding, preferred, end, line)) in a.prefs.iter().enumerate() {
-            let (sec, value) = a.eval_symbol(end, 0).map_err(|e| Error::new(*line, e))?;
+            let (sec, value) = a.eval_symbol(*end, 0).map_err(|e| Error::new(*line, e))?;
             if sec != Some(*section) || value < i128::from(start + padding) {
                 return Err(Error::new(
                     *line,
@@ -736,26 +847,26 @@ impl Assembler {
     }
     // Binding-sensitive expressions must reach the linker, including aliases
     // whose underlying definition is interposable.
-    fn local_symbol(&self, name: &str, depth: usize) -> bool {
+    fn local_symbol(&self, id: SymId, depth: usize) -> bool {
         if depth > 64 {
             return false;
         }
-        self.symbols.get(name).is_some_and(|s| {
+        self.symbols.get(id).is_some_and(|s| {
             !s.global
                 && !s.weak
                 && s.alias.as_ref().is_none_or(|e| {
-                    e.add
-                        .as_deref()
-                        .is_none_or(|n| self.local_symbol(n, depth + 1))
+                    e.add.is_none_or(|n| self.local_symbol(n, depth + 1))
                         && e.subtract
-                            .as_deref()
                             .is_none_or(|n| self.local_symbol(n, depth + 1))
                 })
         })
     }
     fn item(&mut self, item: &Item, line: usize) -> Result<(), String> {
         match item {
-            Item::Label(n) => self.label(n),
+            Item::Label(n) => {
+                let id = self.symbols.intern(n);
+                self.label(id)
+            }
             Item::Directive(d) => self.shared_directive(d, line),
             _ => Err("AArch64 instruction/branch in x86 program".into()),
         }
@@ -884,11 +995,11 @@ impl Assembler {
         }
         Ok(())
     }
-    fn label(&mut self, name: &str) -> Result<(), String> {
+    fn label(&mut self, id: SymId) -> Result<(), String> {
         let value = self.offset();
-        let sym = self.symbols.entry(name);
+        let sym = self.symbols.entry(id);
         if sym.section.is_some() || sym.alias.is_some() || sym.common.is_some() {
-            return Err(format!("duplicate symbol `{name}`"));
+            return Err(format!("duplicate symbol `{}`", self.symbols.name(id)));
         }
         sym.section = Some(self.current);
         sym.value = value;
@@ -924,7 +1035,10 @@ impl Assembler {
             if address.modifier == Modifier::None
                 && address.expression.add.is_some()
                 && (self.aliases != 0 || address.expression.subtract.is_some())
-                && let Some((None, value)) = self.try_eval(&address.expression, 0)
+                && let Some((None, value)) = {
+                    let e = self.symbols.expr(&address.expression);
+                    self.try_eval(&e, 0)
+                }
             {
                 if matches!(
                     i.opcode,
@@ -947,40 +1061,53 @@ impl Assembler {
         let e = encode::encode(folded.as_ref().unwrap_or(i), short)?;
         let at = self.offset();
         for f in e.fixups {
+            let expr = self.symbols.expr(&f.address.expression);
             self.fixes.push(Fix {
                 section: self.current,
                 offset: at + f.offset as u64,
                 width: f.width,
-                address: f.address,
+                modifier: f.address.modifier,
+                expr,
                 kind: f.kind,
                 line,
             })
         }
         self.bytes(&e.bytes)
     }
-    fn capture_dot(&mut self, mut expression: Expression) -> Result<Expression, String> {
-        if expression.add.as_deref() == Some(".") || expression.subtract.as_deref() == Some(".") {
+    /// Replace `.` with a label at the current position.
+    fn capture_dot(&mut self, mut e: Expr) -> Result<Expr, String> {
+        let Some(dot) = self.symbols.names.get(".") else {
+            return Ok(e);
+        };
+        if e.add == Some(dot) || e.subtract == Some(dot) {
             let name = format!(".Lkeel.dot.{}", self.symbols.len());
-            self.label(&name)?;
-            if expression.add.as_deref() == Some(".") {
-                expression.add = Some(name.clone())
+            let id = self.symbols.intern(&name);
+            self.label(id)?;
+            if e.add == Some(dot) {
+                e.add = Some(id)
             }
-            if expression.subtract.as_deref() == Some(".") {
-                expression.subtract = Some(name)
+            if e.subtract == Some(dot) {
+                e.subtract = Some(id)
             }
         }
-        Ok(expression)
+        Ok(e)
     }
-    fn integer(&mut self, width: u8, mut address: Address, line: usize) -> Result<(), String> {
+    fn integer(
+        &mut self,
+        width: u8,
+        e: Expr,
+        modifier: Modifier,
+        line: usize,
+    ) -> Result<(), String> {
         self.data_location(u64::from(width));
-        address.expression = self.capture_dot(address.expression)?;
-        if address.expression.add.is_none() && address.expression.subtract.is_none() {
-            return self.bytes(&address.expression.constant.to_le_bytes()[..width as usize]);
+        let e = self.capture_dot(e)?;
+        if !e.symbolic() {
+            return self.bytes(&e.constant.to_le_bytes()[..width as usize]);
         }
         if self.sections[self.current].nobits {
             return Err("symbolic initializer in NOBITS section".into());
         }
-        let kind = match (address.modifier, width) {
+        let kind = match (modifier, width) {
             (Modifier::None, 8) => 1,
             (Modifier::None, 4) => 10,
             (Modifier::None, 2) => 12,
@@ -993,7 +1120,8 @@ impl Assembler {
             section: self.current,
             offset: self.offset(),
             width,
-            address,
+            modifier,
+            expr: e,
             kind,
             line,
         });
@@ -1002,7 +1130,8 @@ impl Assembler {
     fn shared_directive(&mut self, d: &Directive, line: usize) -> Result<(), String> {
         match d {
             Directive::X86Integer { width, address } if matches!(width, 1 | 2 | 4 | 8) => {
-                self.integer(*width, address.clone(), line)
+                let e = self.symbols.expr(&address.expression);
+                self.integer(*width, e, address.modifier, line)
             }
             Directive::ElfSection {
                 name,
@@ -1017,7 +1146,8 @@ impl Assembler {
                 group,
             } => self.section_metadata(name, Some(*flags), *nobits, *entry_size, group.clone()),
             Directive::ElfType { name, function } => {
-                self.symbols.entry(name).kind = if *function {
+                let id = self.symbols.intern(name);
+                self.symbols.entry(id).kind = if *function {
                     SymbolKind::Text
                 } else {
                     SymbolKind::Data
@@ -1025,8 +1155,10 @@ impl Assembler {
                 Ok(())
             }
             Directive::Size { name, expression } => {
-                let e = self.capture_dot(expression.clone())?;
-                self.symbols.entry(name).size = Some(Box::new(e));
+                let e = self.symbols.expr(expression);
+                let e = self.capture_dot(e)?;
+                let id = self.symbols.intern(name);
+                self.symbols.entry(id).size = Some(Box::new(e));
                 Ok(())
             }
 
@@ -1082,14 +1214,18 @@ impl Assembler {
                 let old = self.current;
                 self.section(if *thread_local { ".tbss" } else { ".bss" }, None, true)?;
                 self.align(u32::from(*alignment), None)?;
-                self.label(symbol)?;
-                self.symbols.get_mut(symbol).unwrap().size =
-                    Some(Box::new(Expression::constant(i128::from(*size))));
+                let id = self.symbols.intern(symbol);
+                self.label(id)?;
+                self.symbols.get_mut(id).unwrap().size =
+                    Some(Box::new(Expr::constant(i128::from(*size))));
                 self.zero(*size, 0)?;
                 self.current = old;
                 Ok(())
             }
-            Directive::Global(s) => self.global(s),
+            Directive::Global(s) => {
+                let id = self.symbols.intern(s);
+                self.global(id)
+            }
             Directive::Bytes(b) => self.data_bytes(b),
             Directive::CString(b) => {
                 self.data_bytes(b)?;
@@ -1099,22 +1235,21 @@ impl Assembler {
                 width,
                 expression,
                 got: false,
-            } if matches!(width, 1 | 2 | 4 | 8) => self.integer(
-                *width,
-                Address {
-                    expression: expression.clone(),
-                    modifier: Modifier::None,
-                },
-                line,
-            ),
+            } if matches!(width, 1 | 2 | 4 | 8) => {
+                let e = self.symbols.expr(expression);
+                self.integer(*width, e, Modifier::None, line)
+            }
             Directive::Space(n) => self.data_zero(*n, 0),
             Directive::Align(n) => self.align(u32::from(*n), None),
             Directive::Set { name, expression } => {
-                let e = self.capture_dot(expression.clone())?;
-                self.set(name, e)
+                let e = self.symbols.expr(expression);
+                let e = self.capture_dot(e)?;
+                let id = self.symbols.intern(name);
+                self.set(id, e)
             }
             Directive::Leb { signed, expression } => {
-                self.leb_expression(expression.clone(), *signed, line)
+                let e = self.symbols.expr(expression);
+                self.leb_expression(e, *signed, line)
             }
             _ => Err(format!(
                 "unsupported shared directive for ELF: {d:?}; use ELF text spelling"
@@ -1174,8 +1309,8 @@ impl Assembler {
         }
         Ok(())
     }
-    fn global(&mut self, name: &str) -> Result<(), String> {
-        let s = self.symbols.entry(name);
+    fn global(&mut self, id: SymId) -> Result<(), String> {
+        let s = self.symbols.entry(id);
         if s.weak {
             return Err("weak symbol changed binding to global".into());
         }
@@ -1183,10 +1318,10 @@ impl Assembler {
         s.global = true;
         Ok(())
     }
-    fn set(&mut self, name: &str, e: Expression) -> Result<(), String> {
-        let sym = self.symbols.entry(name);
+    fn set(&mut self, id: SymId, e: Expr) -> Result<(), String> {
+        let sym = self.symbols.entry(id);
         if sym.section.is_some() || sym.alias.is_some() {
-            return Err(format!("duplicate symbol `{name}`"));
+            return Err(format!("duplicate symbol `{}`", self.symbols.name(id)));
         }
         sym.alias = Some(Box::new(e));
         self.aliases += 1;
@@ -1197,9 +1332,9 @@ impl Assembler {
         metadata::leb(&mut b, n, signed)?;
         self.bytes(&b)
     }
-    fn leb_expression(&mut self, e: Expression, signed: bool, line: usize) -> Result<(), String> {
+    fn leb_expression(&mut self, e: Expr, signed: bool, line: usize) -> Result<(), String> {
         self.data_location(1);
-        if e.add.is_none() && e.subtract.is_none() {
+        if !e.symbolic() {
             return self.leb(e.constant, signed);
         }
         if self.sections[self.current].nobits {
@@ -1215,8 +1350,10 @@ impl Assembler {
         let assignment = x86::split_inline(s, '=');
         if assignment.len() == 2 {
             let name = x86::symbol(assignment[0])?;
-            let expression = self.capture_dot(x86::address(assignment[1])?.expression)?;
-            return self.set(&name, expression);
+            let e = self.symbols.expr(&x86::address(assignment[1])?.expression);
+            let e = self.capture_dot(e)?;
+            let id = self.symbols.intern(&name);
+            return self.set(id, e);
         }
         let (op, args) = s
             .trim()
@@ -1245,12 +1382,12 @@ impl Assembler {
             }
             ".globl" | ".global" | ".local" | ".weak" | ".hidden" => {
                 for name in parts {
-                    let name = x86::symbol(name)?;
+                    let id = self.symbols.intern(&x86::symbol(name)?);
                     if matches!(op, ".globl" | ".global") {
-                        self.global(&name)?;
+                        self.global(id)?;
                         continue;
                     }
-                    let s = self.symbols.entry(&name);
+                    let s = self.symbols.entry(id);
                     match op {
                         ".local" => {
                             if s.weak || s.global || s.common.is_some() {
@@ -1278,19 +1415,24 @@ impl Assembler {
                     "@tls_object" => SymbolKind::Tls,
                     _ => return Err("unsupported ELF symbol type".into()),
                 };
-                self.symbols.entry(&name).kind = kind;
+                let id = self.symbols.intern(&name);
+                self.symbols.entry(id).kind = kind;
                 Ok(())
             }
             ".size" if parts.len() == 2 => {
                 let name = x86::symbol(parts[0])?;
-                let expr = self.capture_dot(x86::address(parts[1])?.expression)?;
-                self.symbols.entry(&name).size = Some(Box::new(expr));
+                let e = self.symbols.expr(&x86::address(parts[1])?.expression);
+                let e = self.capture_dot(e)?;
+                let id = self.symbols.intern(&name);
+                self.symbols.entry(id).size = Some(Box::new(e));
                 Ok(())
             }
             ".set" | ".equ" if parts.len() == 2 => {
                 let name = x86::symbol(parts[0])?;
-                let expr = self.capture_dot(x86::address(parts[1])?.expression)?;
-                self.set(&name, expr)
+                let e = self.symbols.expr(&x86::address(parts[1])?.expression);
+                let e = self.capture_dot(e)?;
+                let id = self.symbols.intern(&name);
+                self.set(id, e)
             }
             ".comm" | ".lcomm" if parts.len() == 2 || parts.len() == 3 => {
                 let name = x86::symbol(parts[0])?;
@@ -1303,7 +1445,8 @@ impl Assembler {
                 if !align.is_power_of_two() {
                     return Err("common alignment must be a power of two".into());
                 }
-                let sym = self.symbols.entry(&name);
+                let id = self.symbols.intern(&name);
+                let sym = self.symbols.entry(id);
                 if sym.section.is_some() || sym.common.is_some() {
                     return Err("duplicate common symbol".into());
                 }
@@ -1318,10 +1461,10 @@ impl Assembler {
                     let old = self.current;
                     self.section(".bss", None, true)?;
                     self.align(align.trailing_zeros(), None)?;
-                    self.symbols.get_mut(&name).unwrap().common = None;
-                    self.label(&name)?;
-                    self.symbols.get_mut(&name).unwrap().size =
-                        Some(Box::new(Expression::constant(size.into())));
+                    self.symbols.get_mut(id).unwrap().common = None;
+                    self.label(id)?;
+                    self.symbols.get_mut(id).unwrap().size =
+                        Some(Box::new(Expr::constant(size.into())));
                     self.zero(size, 0)?;
                     self.current = old
                 }
@@ -1367,7 +1510,8 @@ impl Assembler {
                     {
                         return Err(format!("out of range literal value for `{op}`"));
                     }
-                    self.integer(width, address, line)?
+                    let e = self.symbols.expr(e);
+                    self.integer(width, e, address.modifier, line)?
                 }
                 Ok(())
             }
@@ -1394,7 +1538,8 @@ impl Assembler {
                     if address.modifier != Modifier::None {
                         return Err("LEB128 relocation modifiers are unsupported".into());
                     }
-                    self.leb_expression(address.expression, op == ".sleb128", line)?
+                    let e = self.symbols.expr(&address.expression);
+                    self.leb_expression(e, op == ".sleb128", line)?
                 }
                 Ok(())
             }
@@ -1434,7 +1579,7 @@ impl Assembler {
                 if preferred > 30 {
                     return Err("alignment exceeds 2^30".into());
                 }
-                let end = x86::symbol(parts[1])?;
+                let end = self.symbols.intern(&x86::symbol(parts[1])?);
                 let fill = if parts[2] == "nop" {
                     AlignFill::Nop
                 } else {
@@ -1472,24 +1617,24 @@ impl Assembler {
     }
     /// [`Self::eval_symbol`] for callers that discard why it fails, without
     /// formatting a diagnostic: forward references fail on every early pass.
-    fn try_eval_symbol(&self, name: &str, depth: usize) -> Option<(Option<usize>, i128)> {
+    fn try_eval_symbol(&self, id: SymId, depth: usize) -> Option<(Option<usize>, i128)> {
         if depth > 64 {
             return None;
         }
-        let s = self.symbols.get(name)?;
+        let s = self.symbols.get(id)?;
         if let Some(e) = &s.alias {
             return self.try_eval(e, depth + 1);
         }
         Some((Some(s.section?), s.value.into()))
     }
-    fn try_eval(&self, e: &Expression, depth: usize) -> Option<(Option<usize>, i128)> {
+    fn try_eval(&self, e: &Expr, depth: usize) -> Option<(Option<usize>, i128)> {
         let (mut section, mut value) = (None, e.constant);
-        if let Some(n) = &e.add {
+        if let Some(n) = e.add {
             let (s, v) = self.try_eval_symbol(n, depth)?;
             section = s;
             value += v
         }
-        if let Some(n) = &e.subtract {
+        if let Some(n) = e.subtract {
             let (s, v) = self.try_eval_symbol(n, depth)?;
             if s != section {
                 return None;
@@ -1499,31 +1644,34 @@ impl Assembler {
         }
         Some((section, value))
     }
-    fn eval_symbol(&self, name: &str, depth: usize) -> Result<(Option<usize>, i128), String> {
+    fn eval_symbol(&self, id: SymId, depth: usize) -> Result<(Option<usize>, i128), String> {
         if depth > 64 {
             return Err("cyclic or excessively nested symbol alias".into());
         }
-        let s = self
-            .symbols
-            .get(name)
-            .ok_or_else(|| format!("undefined symbol `{name}` in expression"))?;
+        let undefined = || {
+            format!(
+                "undefined symbol `{}` in expression",
+                self.symbols.name(id)
+            )
+        };
+        let s = self.symbols.get(id).ok_or_else(undefined)?;
         if let Some(e) = &s.alias {
             return self.eval(e, depth + 1);
         }
         if let Some(section) = s.section {
             Ok((Some(section), s.value.into()))
         } else {
-            Err(format!("undefined symbol `{name}` in expression"))
+            Err(undefined())
         }
     }
-    fn eval(&self, e: &Expression, depth: usize) -> Result<(Option<usize>, i128), String> {
+    fn eval(&self, e: &Expr, depth: usize) -> Result<(Option<usize>, i128), String> {
         let (mut section, mut value) = (None, e.constant);
-        if let Some(n) = &e.add {
+        if let Some(n) = e.add {
             let (s, v) = self.eval_symbol(n, depth)?;
             section = s;
             value += v
         }
-        if let Some(n) = &e.subtract {
+        if let Some(n) = e.subtract {
             let (s, v) = self.eval_symbol(n, depth)?;
             if s != section {
                 return Err("symbol difference requires the same section".into());
@@ -1533,15 +1681,15 @@ impl Assembler {
         }
         Ok((section, value))
     }
-    fn symbol_attributes(&self, name: &str, depth: usize) -> (SymbolKind, Option<&Expression>) {
-        let Some(s) = self.symbols.get(name) else {
+    fn symbol_attributes(&self, id: SymId, depth: usize) -> (SymbolKind, Option<&Expr>) {
+        let Some(s) = self.symbols.get(id) else {
             return (SymbolKind::Unknown, None);
         };
         let inherited = if depth < 64 {
             s.alias
                 .as_deref()
                 .filter(|e| e.subtract.is_none())
-                .and_then(|e| e.add.as_deref())
+                .and_then(|e| e.add)
                 .map(|n| self.symbol_attributes(n, depth + 1))
                 .unwrap_or((SymbolKind::Unknown, None))
         } else {
@@ -1559,9 +1707,14 @@ impl Assembler {
     fn finish(mut self) -> Result<Vec<u8>, Error> {
         let err = |s: String| Error::new(0, s);
         // Ensure even undefined references receive symbol table entries.
+        let section_names: Vec<_> = self
+            .sections
+            .iter()
+            .map(|s| self.symbols.names.get(&s.name))
+            .collect();
         for f in &self.fixes {
-            if let Some(n) = &f.address.expression.add {
-                let section = self.sections.iter().position(|s| s.name == *n);
+            if let Some(n) = f.expr.add {
+                let section = section_names.iter().position(|&s| s == Some(n));
                 let sym = self.symbols.entry(n);
                 if sym.section.is_none()
                     && sym.alias.is_none()
@@ -1572,7 +1725,7 @@ impl Assembler {
                     sym.kind = SymbolKind::Section;
                 }
                 if matches!(
-                    f.address.modifier,
+                    f.modifier,
                     Modifier::TpOff | Modifier::GotTpOff | Modifier::DtpOff
                 ) {
                     sym.kind = SymbolKind::Tls;
@@ -1592,29 +1745,31 @@ impl Assembler {
         } else {
             self.fixes
                 .iter()
-                .map(|f| &f.address.expression)
+                .map(|f| &f.expr)
                 .chain(
                     self.symbols
                         .values()
                         .flat_map(|s| s.alias.iter().chain(s.size.iter()))
                         .map(|e| &**e),
                 )
-                .flat_map(|e| e.add.iter().chain(e.subtract.iter()))
-                .map(String::as_str)
+                .flat_map(|e| e.add.into_iter().chain(e.subtract))
                 .collect()
         };
         let synthetic_signatures: BTreeSet<_> = groups
             .keys()
             .filter(|name| {
-                !ordinary_references.contains(name.as_str())
-                    && self.symbols.get(*name).is_none_or(|s| {
-                        s.section.is_none() && s.alias.is_none() && s.common.is_none()
-                    })
+                self.symbols.names.get(name).is_none_or(|id| {
+                    !ordinary_references.contains(&id)
+                        && self.symbols.get(id).is_none_or(|s| {
+                            s.section.is_none() && s.alias.is_none() && s.common.is_none()
+                        })
+                })
             })
             .cloned()
             .collect();
         for signature in groups.keys() {
-            self.symbols.entry(signature);
+            let id = self.symbols.intern(signature);
+            self.symbols.entry(id);
         }
         let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         for file in &self.source_files {
@@ -1657,72 +1812,67 @@ impl Assembler {
                 let pc_relative = matches!(f.kind, 2 | 4)
                     || f.kind == 10
                         && f.width == 4
-                        && f.address
-                            .expression
-                            .subtract
-                            .as_deref()
-                            .is_some_and(|name| {
-                                self.try_eval_symbol(name, 0)
-                                    .is_some_and(|(section, _)| section == Some(f.section))
-                            });
-                let merge_target = f.address.expression.add.as_deref().is_some_and(|name| {
-                    self.try_eval_symbol(name, 0).is_some_and(|(section, _)| {
+                        && f.expr.subtract.is_some_and(|id| {
+                            self.try_eval_symbol(id, 0)
+                                .is_some_and(|(section, _)| section == Some(f.section))
+                        });
+                let merge_target = f.expr.add.is_some_and(|id| {
+                    self.try_eval_symbol(id, 0).is_some_and(|(section, _)| {
                         section.is_some_and(|i| self.sections[i].flags & 0x12 == 0x12)
                     })
                 });
                 merge_target
-                    || f.address.modifier != Modifier::None
+                    || f.modifier != Modifier::None
                     || pc_relative
-                        && f.address.expression.add.as_deref().is_some_and(|name| {
-                            self.try_eval_symbol(name, 0)
+                        && f.expr.add.is_some_and(|id| {
+                            self.try_eval_symbol(id, 0)
                                 .is_some_and(|(section, _)| section.is_none())
                         })
             })
-            .filter_map(|f| f.address.expression.add.as_deref())
+            .filter_map(|f| f.expr.add)
             .collect();
         let mut retained = identity.clone();
         if let Some(names) = &self.addrsig {
-            retained.extend(names.iter().map(String::as_str));
+            retained.extend(names.iter().filter_map(|n| self.symbols.names.get(n)));
         }
-        let mut symbols = FxHashMap::default();
-        symbols.reserve(self.symbols.len());
-        // Lookup order is irrelevant during layout; ELF symbol order is stable.
+        let mut symbols = vec![None; self.symbols.names.len()];
         // Temporary local labels without an ELF symbol table entry.
-        let discard = |name: &str, s: &Sym, section: Option<usize>, tls: bool| {
+        let discard = |id: SymId, name: &str, s: &Sym, section: Option<usize>, tls: bool| {
             name.starts_with(".L")
                 && !s.global
                 && !s.weak
                 && !s.hidden
                 && s.common.is_none()
                 && !tls
-                && !retained.contains(name)
+                && !retained.contains(&id)
                 && !groups.contains_key(name)
                 && (section.is_some() || s.alias.is_some())
-                && self.local_symbol(name, 0)
+                && self.local_symbol(id, 0)
         };
         // Most symbols are plain local labels that cannot fail evaluation
         // below and are discarded there; only the rest need ordering.
         let mut entries: Vec<_> = self
             .symbols
             .iter()
-            .filter(|(name, s)| {
+            .map(|(id, s)| (self.symbols.name(id), id, s))
+            .filter(|&(name, id, s)| {
                 let tls = s.kind == SymbolKind::Tls
                     || s.section
                         .is_some_and(|i| self.sections[i].flags & 0x400 != 0);
                 s.kind == SymbolKind::Section
                     || s.alias.is_some()
                     || s.size.is_some()
-                    || !discard(name, s, s.section, tls)
+                    || !discard(id, name, s, s.section, tls)
             })
             .collect();
-        entries.sort_unstable_by_key(|(name, _)| *name);
-        for (name, s) in entries {
+        entries.sort_unstable_by_key(|&(name, _, _)| name);
+        for (name, id, s) in entries {
             if s.kind == SymbolKind::Section {
-                symbols.insert(name, object.section_symbol(sections[s.section.unwrap()]));
+                symbols[id as usize] = Some(object.section_symbol(sections[s.section.unwrap()]));
                 continue;
             }
             let (section, value) = if s.alias.is_some() {
-                let (sec, value) = self.eval_symbol(name, 0).map_err(err)?;
+                let (sec, value) = self.eval_symbol(id, 0).map_err(err)?;
                 (
                     sec,
                     u64::try_from(value).map_err(|_| err("alias value out of range".into()))?,
@@ -1730,7 +1880,7 @@ impl Assembler {
             } else {
                 (s.section, s.value)
             };
-            let (kind, size_expression) = self.symbol_attributes(name, 0);
+            let (kind, size_expression) = self.symbol_attributes(id, 0);
             let size = if let Some(e) = size_expression {
                 let (sec, n) = self.eval(e, 0).map_err(err)?;
                 if sec.is_some() {
@@ -1742,7 +1892,7 @@ impl Assembler {
             };
             let tls = kind == SymbolKind::Tls
                 || section.is_some_and(|i| self.sections[i].flags & 0x400 != 0);
-            if discard(name, s, section, tls) {
+            if discard(id, name, s, section, tls) {
                 continue;
             }
             let synthetic = synthetic_signatures.contains(name);
@@ -1785,7 +1935,7 @@ impl Assembler {
                     st_other: if s.hidden { 2 } else { 0 },
                 },
             };
-            let id = if let Some((size, align)) = s.common {
+            let symbol_id = if let Some((size, align)) = s.common {
                 // ELF common symbols store alignment in st_value. The writer's
                 // add_common_symbol API only applies `align` for Mach-O BSS.
                 let mut symbol = symbol;
@@ -1794,22 +1944,22 @@ impl Assembler {
             } else {
                 object.add_symbol(symbol)
             };
-            symbols.insert(name, id);
+            symbols[id as usize] = Some(symbol_id);
         }
+        let symbols = |id: SymId| symbols[id as usize].expect("no such symbol");
         for (signature, members) in &groups {
             object.add_comdat(Comdat {
                 kind: ComdatKind::Any,
-                symbol: symbols[signature.as_str()],
+                symbol: symbols(self.symbols.names.get(signature).unwrap()),
                 sections: members.iter().map(|&i| sections[i]).collect(),
             });
         }
         for f in &self.fixes {
-            let expr = &f.address.expression;
+            let expr = &f.expr;
             let mut kind = f.kind;
             let mut addend = expr.constant;
             let name = expr
                 .add
-                .as_deref()
                 .ok_or_else(|| Error::new(f.line, "relocation requires a positive symbol"))?;
             let defined = self.try_eval_symbol(name, 0);
             let absolute = if expr.subtract.is_some() {
@@ -1822,7 +1972,7 @@ impl Assembler {
                 defined.map(|(_, n)| n + addend)
             } else if matches!(kind, 2 | 4 | 15)
                 && defined.is_some_and(|(s, _)| s == Some(f.section))
-                && self.local_symbol(&name, 0)
+                && self.local_symbol(name, 0)
             {
                 defined.map(|(_, n)| n + addend - i128::from(f.offset))
             } else {
@@ -1844,7 +1994,7 @@ impl Assembler {
                     .copy_from_slice(&value.to_le_bytes()[..usize::from(f.width)]);
                 continue;
             }
-            if let Some(sub) = &expr.subtract {
+            if let Some(sub) = expr.subtract {
                 let (sec, value) = self
                     .eval_symbol(sub, 0)
                     .map_err(|e| Error::new(f.line, e))?;
@@ -1860,8 +2010,8 @@ impl Assembler {
             // Relocations against section-relative aliases use their underlying section symbol.
             let debug_reference = self.sections[f.section].name.starts_with(".debug_");
             let symbol = if defined.is_some()
-                && (debug_reference || !identity.contains(name))
-                && f.address.modifier == Modifier::None
+                && (debug_reference || !identity.contains(&name))
+                && f.modifier == Modifier::None
                 && self.local_symbol(name, 0)
                 && self.symbols[name].kind != SymbolKind::Tls
                 && !defined.is_some_and(|(section, _)| {
@@ -1874,10 +2024,10 @@ impl Assembler {
                 } else {
                     // GOT/TLS modifiers still require a linker relocation
                     // even when the referenced symbol is absolute.
-                    symbols[name]
+                    symbols(name)
                 }
             } else {
-                symbols[name]
+                symbols(name)
             };
             object
                 .add_relocation(

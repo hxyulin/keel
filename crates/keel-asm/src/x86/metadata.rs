@@ -1,8 +1,5 @@
-use super::{Assembler, Fix, Sym};
-use keel_asm_ir::{
-    Expression,
-    x86::{self, Address, Modifier, RegisterClass},
-};
+use super::{Assembler, Expr, Fix, Sym, SymId};
+use keel_asm_ir::x86::{self, Modifier, RegisterClass};
 
 pub(super) struct Frame {
     section: usize,
@@ -171,17 +168,19 @@ fn u32_at(bytes: &mut [u8], at: usize, n: usize) -> Result<(), String> {
     );
     Ok(())
 }
-fn symbol(a: &mut Assembler, section: usize, offset: u64) -> String {
-    let name = format!(".Lkeel.metadata.{}", a.symbols.len());
+fn symbol(a: &mut Assembler, section: usize, offset: u64) -> SymId {
+    let id = a
+        .symbols
+        .intern(&format!(".Lkeel.metadata.{}", a.symbols.len()));
     a.symbols.insert(
-        &name,
+        id,
         Sym {
             section: Some(section),
             value: offset,
             ..Sym::default()
         },
     );
-    name
+    id
 }
 pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
     if !a.frames.is_empty() {
@@ -217,14 +216,13 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 );
                 if let Some(name) = &f.personality {
                     bytes.push(0x9b); // indirect pcrel sdata4
+                    let id = a.symbols.intern(name);
                     a.fixes.push(Fix {
                         section: a.current,
                         offset: cie + bytes.len() as u64,
                         width: 4,
-                        address: Address {
-                            expression: Expression::symbol(name.clone()),
-                            modifier: Modifier::None,
-                        },
+                        modifier: Modifier::None,
+                        expr: Expr::symbol(id),
                         kind: 2,
                         line: 0,
                     });
@@ -259,14 +257,13 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
             );
             b.push(if f.lsda.is_some() { 4 } else { 0 });
             if let Some(name) = f.lsda {
+                let id = a.symbols.intern(&name);
                 a.fixes.push(Fix {
                     section: a.current,
                     offset: start + b.len() as u64,
                     width: 4,
-                    address: Address {
-                        expression: Expression::symbol(name),
-                        modifier: Modifier::None,
-                    },
+                    modifier: Modifier::None,
+                    expr: Expr::symbol(id),
                     kind: 2,
                     line: 0,
                 });
@@ -283,10 +280,8 @@ pub(super) fn finish(a: &mut Assembler) -> Result<(), String> {
                 section: a.current,
                 offset: start + 8,
                 width: 4,
-                address: Address {
-                    expression: Expression::symbol(name),
-                    modifier: Modifier::None,
-                },
+                modifier: Modifier::None,
+                expr: Expr::symbol(name),
                 kind: 2,
                 line: 0,
             });

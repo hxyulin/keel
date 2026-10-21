@@ -1,11 +1,8 @@
 //! ELF line tables. File paths, checksums, source text and every supported
 //! location flag survive assembly; unsupported operands are diagnosed.
 use super::metadata::leb;
-use super::{Assembler, Fix, Sym};
-use keel_asm_ir::{
-    Expression,
-    x86::{self, Address, Modifier},
-};
+use super::{Assembler, Expr, Fix, Sym};
+use keel_asm_ir::x86::{self, Modifier};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -252,9 +249,11 @@ impl Debug {
     }
 }
 fn address(a: &mut Assembler, b: &mut Vec<u8>, section: usize, offset: u64, width: u8, kind: u32) {
-    let name = format!(".Lkeel.line.{}", a.symbols.len());
+    let id = a
+        .symbols
+        .intern(&format!(".Lkeel.line.{}", a.symbols.len()));
     a.symbols.insert(
-        &name,
+        id,
         Sym {
             section: Some(section),
             value: offset,
@@ -265,10 +264,8 @@ fn address(a: &mut Assembler, b: &mut Vec<u8>, section: usize, offset: u64, widt
         section: a.current,
         offset: b.len() as u64,
         width,
-        address: Address {
-            expression: Expression::symbol(name),
-            modifier: Modifier::None,
-        },
+        modifier: Modifier::None,
+        expr: Expr::symbol(id),
         kind,
         line: 0,
     });
