@@ -1,0 +1,36 @@
+func @rk_adjacent(ptr, ptr, ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: ptr, v2: ptr, v3: i64):
+    v4 = iconst.i64 0
+    v5 = iconst.i64 1
+    jump block1
+block1:
+    v8 = icmp.ugt v3, v5
+    brif v8, block2(v5, v4), block4(v4)
+block2(v42: i64, v43: i64):
+    v31 = iconst.i64 2
+    v11 = shl v42, v31
+    v12 = ptradd v0, v11
+    v13 = load.i32 v12
+    v14 = sext.i64 v13
+    v39 = iconst.i64 1
+    v16 = isub v42, v39
+    v18 = shl v16, v31
+    v19 = ptradd v0, v18
+    v20 = load.i32 v19
+    v21 = sext.i64 v20
+    v22 = isub v14, v21
+    v41 = iconst.i64 0
+    v25 = icmp.slt v22, v41
+    brif v25, block5, block7(v22)
+block4(v45: i64):
+    return v45
+block5:
+    v26 = ineg v22
+    jump block7(v26)
+block7(v27: i64):
+    v28 = iadd v43, v27
+    v40 = iconst.i64 1
+    v30 = iadd v42, v40
+    v46 = icmp.ugt v3, v30
+    brif v46, block2(v30, v28), block4(v28)
+}
