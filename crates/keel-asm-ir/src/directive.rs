@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Expression {
@@ -31,21 +31,60 @@ impl Expression {
         self
     }
 }
-impl fmt::Display for Expression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Expression {
+    fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
         if let Some(add) = &self.add {
             f.write_str(add)?;
             if let Some(sub) = &self.subtract {
-                write!(f, "-{sub}")?;
+                f.write_str("-")?;
+                f.write_str(sub)?;
             }
             if self.constant != 0 {
-                write!(f, "{:+}", self.constant)?;
+                write_int(f, self.constant, true)?;
             }
             Ok(())
         } else {
-            write!(f, "{}", self.constant)
+            write_int(f, self.constant, false)
         }
     }
+}
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_to(f)
+    }
+}
+/// Decimal digits of `n`, with a sign when negative or when `plus` is set
+/// (as `{}` and `{:+}` print it), without the formatting machinery.
+pub(crate) fn write_int<W: Write + ?Sized>(w: &mut W, n: i128, plus: bool) -> fmt::Result {
+    let mut buf = [0u8; 40];
+    let mut i = buf.len();
+    let mut m = n.unsigned_abs();
+    // Most values fit a word; avoid 128-bit division for them.
+    if let Ok(mut m64) = u64::try_from(m) {
+        loop {
+            i -= 1;
+            buf[i] = b'0' + (m64 % 10) as u8;
+            m64 /= 10;
+            if m64 == 0 {
+                break;
+            }
+        }
+    } else {
+        while m != 0 {
+            i -= 1;
+            buf[i] = b'0' + (m % 10) as u8;
+            m /= 10;
+        }
+    }
+    if n < 0 {
+        i -= 1;
+        buf[i] = b'-';
+    } else if plus {
+        i -= 1;
+        buf[i] = b'+';
+    }
+    // Only ASCII digits and signs were written.
+    w.write_str(std::str::from_utf8(&buf[i..]).map_err(|_| fmt::Error)?)
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cfi {
@@ -58,32 +97,58 @@ pub enum Cfi {
     Personality(String),
     Lsda(String),
 }
-struct CfiRegister(u8);
-impl fmt::Display for CfiRegister {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.0 {
-            0..=30 => write!(f, "x{}", self.0),
-            64..=95 => write!(f, "d{}", self.0 - 64),
-            _ => write!(f, "{}", self.0),
+fn cfi_register<W: Write + ?Sized>(f: &mut W, r: u8) -> fmt::Result {
+    match r {
+        0..=30 => {
+            f.write_str("x")?;
+            write_int(f, r.into(), false)
+        }
+        64..=95 => {
+            f.write_str("d")?;
+            write_int(f, (r - 64).into(), false)
+        }
+        _ => write_int(f, r.into(), false),
+    }
+}
+impl Cfi {
+    pub fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+        match self {
+            Self::DefCfaOffset(n) => {
+                f.write_str(".cfi_def_cfa_offset ")?;
+                write_int(f, (*n).into(), false)
+            }
+            Self::DefCfaRegister(r) => {
+                f.write_str(".cfi_def_cfa_register ")?;
+                write_int(f, (*r).into(), false)
+            }
+            Self::Start => f.write_str(".cfi_startproc"),
+            Self::End => f.write_str(".cfi_endproc"),
+            Self::DefCfa { register, offset } => {
+                f.write_str(".cfi_def_cfa ")?;
+                cfi_register(f, *register)?;
+                f.write_str(", ")?;
+                write_int(f, (*offset).into(), false)
+            }
+            Self::Offset { register, offset } => {
+                f.write_str(".cfi_offset ")?;
+                cfi_register(f, *register)?;
+                f.write_str(", ")?;
+                write_int(f, (*offset).into(), false)
+            }
+            Self::Personality(s) => {
+                f.write_str(".cfi_personality 155, ")?;
+                f.write_str(s)
+            }
+            Self::Lsda(s) => {
+                f.write_str(".cfi_lsda 16, ")?;
+                f.write_str(s)
+            }
         }
     }
 }
 impl fmt::Display for Cfi {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::DefCfaOffset(n) => write!(f, ".cfi_def_cfa_offset {n}"),
-            Self::DefCfaRegister(r) => write!(f, ".cfi_def_cfa_register {r}"),
-            Self::Start => f.write_str(".cfi_startproc"),
-            Self::End => f.write_str(".cfi_endproc"),
-            Self::DefCfa { register, offset } => {
-                write!(f, ".cfi_def_cfa {}, {offset}", CfiRegister(*register))
-            }
-            Self::Offset { register, offset } => {
-                write!(f, ".cfi_offset {}, {offset}", CfiRegister(*register))
-            }
-            Self::Personality(s) => write!(f, ".cfi_personality 155, {s}"),
-            Self::Lsda(s) => write!(f, ".cfi_lsda 16, {s}"),
-        }
+        self.write_to(f)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -163,9 +228,9 @@ pub enum Directive {
     },
     Cfi(Cfi),
 }
-fn quoted(f: &mut fmt::Formatter<'_>, s: &[u8]) -> fmt::Result {
+fn quoted<W: Write + ?Sized>(f: &mut W, s: &[u8]) -> fmt::Result {
     // Write runs of printable ASCII whole; they are always valid UTF-8.
-    let run = |f: &mut fmt::Formatter<'_>, run: &[u8]| match std::str::from_utf8(run) {
+    let run = |f: &mut W, run: &[u8]| match std::str::from_utf8(run) {
         Ok(s) => f.write_str(s),
         Err(_) => Err(fmt::Error),
     };
@@ -177,9 +242,12 @@ fn quoted(f: &mut fmt::Formatter<'_>, s: &[u8]) -> fmt::Result {
         }
         run(f, &s[start..i])?;
         start = i + 1;
-        match b {
-            b'"' | b'\\' => write!(f, "\\{}", b as char)?,
-            _ => write!(f, "\\{b:03o}")?,
+        if b == b'"' || b == b'\\' {
+            f.write_char('\\')?;
+            f.write_char(b as char)?;
+        } else {
+            let octal = [b'\\', b'0' + (b >> 6), b'0' + ((b >> 3) & 7), b'0' + (b & 7)];
+            f.write_str(std::str::from_utf8(&octal).map_err(|_| fmt::Error)?)?;
         }
     }
     run(f, &s[start..])?;
@@ -187,18 +255,24 @@ fn quoted(f: &mut fmt::Formatter<'_>, s: &[u8]) -> fmt::Result {
 }
 impl fmt::Display for Directive {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_to(f)
+    }
+}
+impl Directive {
+    /// The directive's spelling, written piece by piece: a `String` sink
+    /// compiles to plain appends. The same text as its `Display`.
+    pub fn write_to<W: Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
         match self {
-            Self::X86Integer { width, address } => write!(
-                f,
-                "{} {address}",
-                match width {
-                    1 => ".byte",
-                    2 => ".short",
-                    4 => ".long",
-                    8 => ".quad",
+            Self::X86Integer { width, address } => {
+                f.write_str(match width {
+                    1 => ".byte ",
+                    2 => ".short ",
+                    4 => ".long ",
+                    8 => ".quad ",
                     _ => return Err(fmt::Error),
-                }
-            ),
+                })?;
+                address.write_to(f)
+            }
             Self::ElfSection {
                 name,
                 flags,
@@ -209,10 +283,10 @@ impl fmt::Display for Directive {
                 f.write_str(",\"")?;
                 for (bit, c) in [(1, 'w'), (2, 'a'), (4, 'x'), (0x400, 'T')] {
                     if flags & bit != 0 {
-                        write!(f, "{c}")?;
+                        f.write_char(c)?;
                     }
                 }
-                write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })
+                f.write_str(if *nobits { "\",@nobits" } else { "\",@progbits" })
             }
             Self::ElfSectionMetadata {
                 name,
@@ -234,12 +308,13 @@ impl fmt::Display for Directive {
                     (0x400, 'T'),
                 ] {
                     if flags & bit != 0 {
-                        write!(f, "{c}")?;
+                        f.write_char(c)?;
                     }
                 }
-                write!(f, "\",@{}", if *nobits { "nobits" } else { "progbits" })?;
+                f.write_str(if *nobits { "\",@nobits" } else { "\",@progbits" })?;
                 if flags & 0x10 != 0 {
-                    write!(f, ",{entry_size}")?;
+                    f.write_str(",")?;
+                    write_int(f, (*entry_size).into(), false)?;
                 }
                 if let Some(signature) = group {
                     f.write_str(",")?;
@@ -251,12 +326,13 @@ impl fmt::Display for Directive {
             Self::ElfType { name, function } => {
                 f.write_str(".type\t")?;
                 quoted(f, name.as_bytes())?;
-                write!(f, ",@{}", if *function { "function" } else { "object" })
+                f.write_str(if *function { ",@function" } else { ",@object" })
             }
             Self::Size { name, expression } => {
                 f.write_str(".size\t")?;
                 quoted(f, name.as_bytes())?;
-                write!(f, ", {expression}")
+                f.write_str(", ")?;
+                expression.write_to(f)
             }
 
             Self::Section {
@@ -285,7 +361,10 @@ impl fmt::Display for Directive {
             Self::PrivateExtern(s) => write!(f, ".private_extern\t{s}"),
             Self::WeakDefinition(name) => write!(f, ".weak_definition {name}"),
             Self::SubsectionsViaSymbols => f.write_str(".subsections_via_symbols"),
-            Self::Align(n) => write!(f, ".p2align\t{n}"),
+            Self::Align(n) => {
+                f.write_str(".p2align\t")?;
+                write_int(f, (*n).into(), false)
+            }
             Self::CString(bytes) => {
                 f.write_str(".asciz\t")?;
                 quoted(f, bytes)
@@ -299,7 +378,7 @@ impl fmt::Display for Directive {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
-                    write!(f, "{b}")?;
+                    write_int(f, (*b).into(), false)?;
                 }
                 Ok(())
             }
@@ -308,17 +387,13 @@ impl fmt::Display for Directive {
                 expression,
                 got,
             } => {
-                write!(
-                    f,
-                    "{}\t",
-                    match width {
-                        1 => ".byte",
-                        2 => ".short",
-                        4 => ".long",
-                        8 => ".quad",
-                        _ => return Err(fmt::Error),
-                    }
-                )?;
+                f.write_str(match width {
+                    1 => ".byte\t",
+                    2 => ".short\t",
+                    4 => ".long\t",
+                    8 => ".quad\t",
+                    _ => return Err(fmt::Error),
+                })?;
                 if *got {
                     let add = expression.add.as_ref().ok_or(fmt::Error)?;
                     write!(f, "{add}@GOT")?;
@@ -330,7 +405,7 @@ impl fmt::Display for Directive {
                     }
                     Ok(())
                 } else {
-                    expression.fmt(f)
+                    expression.write_to(f)
                 }
             }
             Self::Leb { signed, expression } => write!(
@@ -338,7 +413,10 @@ impl fmt::Display for Directive {
                 "{}\t{expression}",
                 if *signed { ".sleb128" } else { ".uleb128" }
             ),
-            Self::Space(n) => write!(f, ".space\t{n}"),
+            Self::Space(n) => {
+                f.write_str(".space\t")?;
+                write_int(f, (*n).into(), false)
+            }
             Self::ZeroFill {
                 symbol,
                 size,
@@ -366,7 +444,7 @@ impl fmt::Display for Directive {
                 ".loc\t{file} {line} {column}{}",
                 if *prologue_end { " prologue_end" } else { "" }
             ),
-            Self::Cfi(c) => c.fmt(f),
+            Self::Cfi(c) => c.write_to(f),
         }
     }
 }

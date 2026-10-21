@@ -104,10 +104,14 @@ impl Sink for Output {
         match self {
             Self::Text(s) => match &d {
                 Directive::Cfi(keel_asm_ir::Cfi::Offset { register, offset }) => {
-                    writeln!(s, "\t.cfi_offset {register}, {offset}").unwrap()
+                    crate::text::write_decimal(s, "\t.cfi_offset ", (*register).into()).unwrap();
+                    crate::text::write_decimal(s, ", ", (*offset).into()).unwrap();
+                    s.push('\n');
                 }
                 Directive::Cfi(keel_asm_ir::Cfi::DefCfa { register, offset }) => {
-                    writeln!(s, "\t.cfi_def_cfa {register}, {offset}").unwrap()
+                    crate::text::write_decimal(s, "\t.cfi_def_cfa ", (*register).into()).unwrap();
+                    crate::text::write_decimal(s, ", ", (*offset).into()).unwrap();
+                    s.push('\n');
                 }
                 Directive::Global(name) => {
                     writeln!(s, "\t.globl {}", crate::data::asm_string(name)).unwrap()
@@ -132,7 +136,11 @@ impl Sink for Output {
                     keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
                     s.push('\n');
                 }
-                _ => writeln!(s, "\t{d}").unwrap(),
+                _ => {
+                    s.push('\t');
+                    d.write_to(s).unwrap();
+                    s.push('\n');
+                }
             },
             Self::Structured(p) => p.directive(d),
         }

@@ -3,6 +3,7 @@
 //! Every piece is written straight to the sink: a `String` sink compiles to
 //! plain appends, without the general formatting machinery per operand.
 use super::*;
+use crate::directive::write_int;
 use std::fmt::{self, Write};
 const CC: [&str; 16] = [
     "o", "no", "b", "ae", "e", "ne", "be", "a", "s", "ns", "p", "np", "l", "ge", "le", "g",
@@ -288,39 +289,6 @@ impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write_to(f)
     }
-}
-/// Decimal digits of `n`, with a sign when negative or when `plus` is set
-/// (as `{}` and `{:+}` print it).
-fn write_int<W: Write + ?Sized>(w: &mut W, n: i128, plus: bool) -> fmt::Result {
-    let mut buf = [0u8; 40];
-    let mut i = buf.len();
-    let mut m = n.unsigned_abs();
-    // Most constants fit a word; avoid 128-bit division for them.
-    if let Ok(mut m64) = u64::try_from(m) {
-        loop {
-            i -= 1;
-            buf[i] = b'0' + (m64 % 10) as u8;
-            m64 /= 10;
-            if m64 == 0 {
-                break;
-            }
-        }
-    } else {
-        while m != 0 {
-            i -= 1;
-            buf[i] = b'0' + (m % 10) as u8;
-            m /= 10;
-        }
-    }
-    if n < 0 {
-        i -= 1;
-        buf[i] = b'-';
-    } else if plus {
-        i -= 1;
-        buf[i] = b'+';
-    }
-    // Only ASCII digits and signs were written.
-    w.write_str(std::str::from_utf8(&buf[i..]).map_err(|_| fmt::Error)?)
 }
 impl Register {
     fn write_to<W: Write + ?Sized>(&self, w: &mut W) -> fmt::Result {
