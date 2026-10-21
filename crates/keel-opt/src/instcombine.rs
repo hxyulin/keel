@@ -28,7 +28,10 @@ enum Fold {
 }
 
 fn bits(func: &Function, v: Value) -> Option<u128> {
-    let InstData::Iconst { ty, imm } = constant(func, v)? else {
+    let ValueDef::Result(inst, _) = func.value_def(func.resolve(v)) else {
+        return None;
+    };
+    let InstData::Iconst { ty, imm } = *func.inst_data(inst) else {
         return None;
     };
     Some((imm as i128 as u128) & mask(ty))
@@ -693,7 +696,23 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
     {
         return None;
     }
-    let mut data = func.inst_data(inst).clone();
+    // Other opcodes have no rules here; at most canonicalization changes them.
+    let data = func.inst_data(inst);
+    if !matches!(
+        data,
+        InstData::Binary { .. }
+            | InstData::Unary { .. }
+            | InstData::Convert { .. }
+            | InstData::Icmp { .. }
+            | InstData::Fcmp { .. }
+            | InstData::Fma { .. }
+            | InstData::Select { .. }
+            | InstData::Overflow { .. }
+    ) && !crate::canonicalize::needs_normalize(func, data)
+    {
+        return None;
+    }
+    let mut data = data.clone();
     crate::canonicalize::normalize(func, &mut data);
     let canonicalized = data != *func.inst_data(inst);
 

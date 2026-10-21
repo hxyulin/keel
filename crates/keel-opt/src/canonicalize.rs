@@ -90,7 +90,7 @@ pub(crate) fn normalize(func: &Function, data: &mut InstData) {
 
 /// Whether `normalize` would change `data`. Most instructions are already
 /// normal, and checking first avoids copying them.
-fn needs_normalize(func: &Function, data: &InstData) -> bool {
+pub(crate) fn needs_normalize(func: &Function, data: &InstData) -> bool {
     let mut aliased = false;
     data.for_each_operand(|v| aliased |= func.resolve(v) != v);
     if aliased {
