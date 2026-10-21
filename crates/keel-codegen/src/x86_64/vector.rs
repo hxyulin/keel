@@ -3,6 +3,70 @@ use super::*;
 use keel_ir::{VectorBinaryOp as V, VectorType};
 use std::borrow::Cow;
 
+// Require fresh canonical definitions, while accepting resolved operand aliases.
+pub(super) fn literal_i64x2(func: &Function, value: Value) -> Option<i64> {
+    let value = func.resolve(value);
+    let ValueDef::Result(splat, _) = func.value_def(value) else {
+        return None;
+    };
+    if func.first_result(splat) != value {
+        return None;
+    }
+    let InstData::VectorSplat {
+        ty: Type::Vector(VectorType::I64x2),
+        arg,
+    } = *func.inst_data(splat)
+    else {
+        return None;
+    };
+    let arg = func.resolve(arg);
+    let ValueDef::Result(constant, _) = func.value_def(arg) else {
+        return None;
+    };
+    if func.first_result(constant) != arg {
+        return None;
+    }
+    match *func.inst_data(constant) {
+        InstData::Iconst { ty: Type::I64, imm } => Some(imm),
+        _ => None,
+    }
+}
+
+fn sign_comparison(func: &Function, cond: IntCC, args: [Value; 2]) -> Option<(Value, bool)> {
+    // Only these six predicates and their explicit operand-swapped forms.
+    for (cc, x, k) in [
+        (cond, args[0], args[1]),
+        (
+            match cond {
+                IntCC::Slt => IntCC::Sgt,
+                IntCC::Sgt => IntCC::Slt,
+                IntCC::Sge => IntCC::Sle,
+                IntCC::Sle => IntCC::Sge,
+                IntCC::Ult => IntCC::Ugt,
+                IntCC::Ugt => IntCC::Ult,
+                IntCC::Uge => IntCC::Ule,
+                IntCC::Ule => IntCC::Uge,
+                other => other,
+            },
+            args[1],
+            args[0],
+        ),
+    ] {
+        let Some(literal) = literal_i64x2(func, k) else {
+            continue;
+        };
+        let complement = match (cc, literal) {
+            (IntCC::Slt, 0) | (IntCC::Uge, i64::MIN) | (IntCC::Ugt, i64::MAX) => false,
+            (IntCC::Sge, 0) | (IntCC::Ult, i64::MIN) | (IntCC::Ule, i64::MAX) => true,
+            _ => continue,
+        };
+        if func.value_type(func.resolve(x)) == Type::Vector(VectorType::I64x2) {
+            return Some((func.resolve(x), complement));
+        }
+    }
+    None
+}
+
 // Preserve written FP source order, including add/mul, as in scalar AVX selection.
 pub(super) fn packed_avx(op: V, shape: VectorType) -> Option<Opcode> {
     use VectorType::*;
@@ -287,6 +351,22 @@ impl FunctionCompiler<'_> {
         self.def_done(result, d);
     }
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
+        if result.is_some_and(|v| self.func.resolve(v) == v) {
+            if let Some((x, complement)) = sign_comparison(self.func, cond, args) {
+                self.vector_stage(x, FS0);
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0)), asm_arg(&0xf5i64)],
+                );
+                self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
+                if complement {
+                    self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+                    self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                }
+                self.vector_publish(result);
+                return;
+            }
+        }
         let shape = self.ty(args[0]).vector().unwrap();
         let unsigned = matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge);
         let swap = matches!(cond, IntCC::Slt | IntCC::Sge | IntCC::Ult | IntCC::Uge);
