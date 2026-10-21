@@ -1594,3 +1594,8 @@ process snapshots. Identity checks bracket timing and run before every round;
 `--verify-report` detects later source or binary mutation. Compile command wall
 times include process/I/O overhead and are metadata, not internal stage costs.
 No compiler rebuilds, remote execution, downloads or whole-app reruns occur.
+
+The separate [extended runtime kernels](runtime-kernels/README.md) provide ten
+ordinary integer C workloads with independent Python oracles and locked
+None/Fast/Full/Clang measurements. Their results remain separate from the fixed
+21-kernel corpus and Lua workloads.
