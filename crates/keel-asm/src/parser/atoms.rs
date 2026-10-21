@@ -37,10 +37,12 @@ impl<'a> Atoms<'a> {
             return result;
         }
         result.owners.reserve(order.len());
+        // Temporary names are rarely global: skip their lookups when none is.
+        let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
         let mut boundaries = BTreeMap::new();
         let mut current = BTreeMap::new();
         for (name, location) in order {
-            if !name.starts_with('L') || globals.contains_key(name) {
+            if !name.starts_with('L') || temporary_globals && globals.contains_key(name) {
                 // Aliases at one address share an atom.
                 let next = result.names.len() as u32;
                 let owner = *boundaries

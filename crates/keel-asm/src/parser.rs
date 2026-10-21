@@ -1537,6 +1537,8 @@ fn assemble_pass(
             }
         }
     }
+    // Temporary names are rarely global: skip their lookups when none is.
+    let temporary_globals = globals.keys().any(|name| name.starts_with('L'));
     for mut branch in branches {
         let err = |message| Error::new(branch.line, message);
         let kind = if branch.spec.encoding.name().ends_with("_loadlit") {
@@ -1549,7 +1551,8 @@ fn assemble_pass(
         } else {
             let expr = relocate::expression(branch.spec.target).map_err(err)?;
             let target = labels.get(expr.name);
-            let local = expr.name.starts_with('L') && !globals.contains_key(expr.name);
+            let local = expr.name.starts_with('L')
+                && !(temporary_globals && globals.contains_key(expr.name));
             if branch.spec.width == 26
                 && (target.is_some_and(|t| {
                     t.section != branch.section
