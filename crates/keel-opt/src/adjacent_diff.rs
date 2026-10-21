@@ -7,11 +7,13 @@
 //! This deliberately does not relax the generic multi-stream trapping rule.
 //!
 //! Invariant at the chunk check: 2 <= k <= n; previous lane 1 is a[k-1];
-//! the scalar seed contains |a[1]-a[0]|, and the two wrapping vector sums
+//! the scalar seed contains |a[1]-a[0]|, and the wrapping vector lane sums
 //! contain exactly differences 2..k. The initial splat of a[1] establishes
 //! this without reading a[0] again. The loaded low lanes are [a[k],a[k+1]];
 //! shuffle(previous,current,[1,2]) gives [a[k-1],a[k]]. Updating k by two
-//! establishes the invariant again. With n-k<2, the optional scalar tail
+//! establishes the invariant again. The main loop groups four ordered chunks
+//! with independent sums, carries only the fourth current, and merges once
+//! into pair cleanup. With n-k<2, the optional scalar tail
 //! reads only a[k], reusing previous lane 1. n=2 never enters either body.
 //!
 //! The n>1 guard executes before all loads. The fast-path guard requires
@@ -320,7 +322,111 @@ fn term(f: &mut Function, b: Block, d: D, loc: Option<keel_ir::SourceLoc>) {
     let i = f.append_inst(b, d);
     f.set_inst_loc(i, loc);
 }
+// Keep each exact load/splat/bitcast/widen chain adjacent for packed-low selection.
+fn chunk(
+    f: &mut Function,
+    block: Block,
+    k: Value,
+    previous: Value,
+    acc: Value,
+    z: Value,
+    two: Value,
+    c: &Candidate,
+) -> (Value, Value) {
+    let e = |f: &mut Function, b, d| emit(f, b, d, c.math_loc);
+    let offset = e(f, block, bin(B::Shl, k, two));
+    let addr = e(f, block, ptr(c.base, offset));
+    // Exactly 8 bytes, even though the arithmetic registers are 128 bits.
+    let bits = emit(
+        f,
+        block,
+        D::Load {
+            flags: MemoryFlags::default(),
+            ty: Type::I64,
+            addr,
+        },
+        c.load_loc,
+    );
+    let packed = e(
+        f,
+        block,
+        D::VectorSplat {
+            ty: WIDE,
+            arg: bits,
+        },
+    );
+    let packed = e(
+        f,
+        block,
+        D::Convert {
+            op: C::Bitcast,
+            ty: Type::Vector(VectorType::I32x4),
+            arg: packed,
+        },
+    );
+    let current = e(
+        f,
+        block,
+        D::Convert {
+            op: C::SwidenLow,
+            ty: WIDE,
+            arg: packed,
+        },
+    );
+    let prior = e(
+        f,
+        block,
+        D::VectorShuffle {
+            args: [previous, current],
+            lanes: vec![1, 2],
+        },
+    );
+    let diff = e(
+        f,
+        block,
+        D::VectorBinary {
+            op: V::Isub,
+            args: [current, prior],
+        },
+    );
+    let mask = e(
+        f,
+        block,
+        D::VectorIcmp {
+            cond: IntCC::Slt,
+            args: [diff, z],
+        },
+    );
+    let neg = e(
+        f,
+        block,
+        D::VectorUnary {
+            op: UnaryOp::Ineg,
+            arg: diff,
+        },
+    );
+    let abs = e(
+        f,
+        block,
+        D::VectorSelect {
+            args: [mask, neg, diff],
+        },
+    );
+    let next_acc = e(
+        f,
+        block,
+        D::VectorBinary {
+            op: V::Iadd,
+            args: [acc, abs],
+        },
+    );
+    (current, next_acc)
+}
+
 fn transform(f: &mut Function, c: Candidate) {
+    let main_check = f.create_block();
+    let main = f.create_block();
+    let merge = f.create_block();
     let guard = f.create_block();
     let prefix = f.create_block();
     let check = f.create_block();
@@ -415,7 +521,82 @@ fn transform(f: &mut Function, c: Candidate) {
         f,
         prefix,
         D::Jump {
-            dest: call(check, &[start, previous, z, sum]),
+            dest: call(main_check, &[start, previous, z, z, z, z, sum]),
+        },
+        loc,
+    );
+    // Main invariant: four independent wrapping lane sums cover differences
+    // 2..k, previous lane 1 is a[k-1], and 2 <= k <= n. Only remaining>=8
+    // admits k+2/k+4/k+6 loads and k+8; no induction arithmetic is hoisted.
+    let k = f.append_block_param(main_check, Type::I64);
+    let previous = f.append_block_param(main_check, WIDE);
+    let accs: Vec<_> = (0..4)
+        .map(|_| f.append_block_param(main_check, WIDE))
+        .collect();
+    let sum = f.append_block_param(main_check, Type::I64);
+    let eight = e(f, main_check, icon(8));
+    let remaining = e(f, main_check, bin(B::Isub, c.bound, k));
+    let enough = e(f, main_check, cmp(IntCC::Uge, remaining, eight));
+    term(
+        f,
+        main_check,
+        D::Brif {
+            cond: enough,
+            dests: [call(main, &[]), call(merge, &[])],
+        },
+        loc,
+    );
+    let mut current = previous;
+    let mut next_accs = Vec::with_capacity(4);
+    for (j, acc) in accs.iter().copied().enumerate() {
+        let index = if j == 0 {
+            k
+        } else {
+            let delta = e(f, main, icon(2 * j as i64));
+            e(f, main, bin(B::Iadd, k, delta))
+        };
+        let (loaded, next_acc) = chunk(f, main, index, current, acc, z, two, &c);
+        current = loaded;
+        next_accs.push(next_acc);
+    }
+    let next = e(f, main, bin(B::Iadd, k, eight));
+    term(
+        f,
+        main,
+        D::Jump {
+            dest: call(
+                main_check,
+                &[
+                    next,
+                    current,
+                    next_accs[0],
+                    next_accs[1],
+                    next_accs[2],
+                    next_accs[3],
+                    sum,
+                ],
+            ),
+        },
+        loc,
+    );
+    // Merge once modulo 2^64, including a zero-trip main loop, then reuse
+    // the original pair cleanup and scalar tail with their original invariants.
+    let mut combined = accs[0];
+    for &acc in &accs[1..] {
+        combined = e(
+            f,
+            merge,
+            D::VectorBinary {
+                op: V::Iadd,
+                args: [combined, acc],
+            },
+        );
+    }
+    term(
+        f,
+        merge,
+        D::Jump {
+            dest: call(check, &[k, previous, combined, sum]),
         },
         loc,
     );
@@ -434,92 +615,7 @@ fn transform(f: &mut Function, c: Candidate) {
         },
         loc,
     );
-    let offset = e(f, vector, bin(B::Shl, k, two));
-    let addr = e(f, vector, ptr(c.base, offset));
-    // Exactly 8 bytes, even though the arithmetic registers are 128 bits.
-    let bits = emit(
-        f,
-        vector,
-        D::Load {
-            flags: MemoryFlags::default(),
-            ty: Type::I64,
-            addr,
-        },
-        c.load_loc,
-    );
-    let packed = e(
-        f,
-        vector,
-        D::VectorSplat {
-            ty: WIDE,
-            arg: bits,
-        },
-    );
-    let packed = e(
-        f,
-        vector,
-        D::Convert {
-            op: C::Bitcast,
-            ty: Type::Vector(VectorType::I32x4),
-            arg: packed,
-        },
-    );
-    let current = e(
-        f,
-        vector,
-        D::Convert {
-            op: C::SwidenLow,
-            ty: WIDE,
-            arg: packed,
-        },
-    );
-    let prior = e(
-        f,
-        vector,
-        D::VectorShuffle {
-            args: [previous, current],
-            lanes: vec![1, 2],
-        },
-    );
-    let diff = e(
-        f,
-        vector,
-        D::VectorBinary {
-            op: V::Isub,
-            args: [current, prior],
-        },
-    );
-    let mask = e(
-        f,
-        vector,
-        D::VectorIcmp {
-            cond: IntCC::Slt,
-            args: [diff, z],
-        },
-    );
-    let neg = e(
-        f,
-        vector,
-        D::VectorUnary {
-            op: UnaryOp::Ineg,
-            arg: diff,
-        },
-    );
-    let abs = e(
-        f,
-        vector,
-        D::VectorSelect {
-            args: [mask, neg, diff],
-        },
-    );
-    let next_acc = e(
-        f,
-        vector,
-        D::VectorBinary {
-            op: V::Iadd,
-            args: [acc, abs],
-        },
-    );
+    let (current, next_acc) = chunk(f, vector, k, previous, acc, z, two, &c);
     let next = e(f, vector, bin(B::Iadd, k, two));
     term(
         f,

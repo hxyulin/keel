@@ -150,7 +150,16 @@ fn original_instructions_locations_and_function_contracts_are_untouched() {
         .collect();
     assert_eq!(
         new_loads.iter().map(|(_, t, _)| *t).collect::<Vec<_>>(),
-        [Type::I32, Type::I32, Type::I64, Type::I32]
+        [
+            Type::I64,
+            Type::I64,
+            Type::I64,
+            Type::I64,
+            Type::I32,
+            Type::I32,
+            Type::I64,
+            Type::I32
+        ]
     );
     assert!(
         new_loads
