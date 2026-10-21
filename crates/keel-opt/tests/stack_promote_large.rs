@@ -364,3 +364,93 @@ fn large_mode_retains_splat_restrictions_source_locations_and_observer_barriers(
     keel_opt::run_passes(&mut m, &["stack-promote-large"]).unwrap();
     assert_eq!(before, m.to_string());
 }
+
+#[test]
+fn analysis_exhaustion_preserves_completed_fields_and_leaves_suffix_untouched() {
+    // Each successful field consumes a whole-function scan. Enough inert IR
+    // exhausts analysis before the independent 32-field/8192-parameter caps.
+    let noise: String = (0..64000)
+        .map(|i| format!(" v{} = iconst.i64 0\n", i + 1000))
+        .collect();
+    let src =
+        many_fields(40, false).replace("block0(v0: i64):", &format!("block0(v0: i64):\n{noise}"));
+    let original = keel_ir::parse(&src).unwrap();
+    let accesses: Vec<_> = original.functions[0]
+        .layout_insts()
+        .filter(|(_, i)| {
+            matches!(
+                original.functions[0].inst_data(*i),
+                D::Load { .. } | D::Store { .. }
+            )
+        })
+        .map(|(_, i)| i)
+        .collect();
+    let mut m = optimize(&src);
+    let f = &m.functions[0];
+    let completed = (80 - memory(f)) / 2;
+    assert!(
+        completed > 0 && completed < 32,
+        "must exhaust analysis after useful work, not hit field cap"
+    );
+    assert_eq!(params(f), 1, "parameter budget cannot explain the cutoff");
+    for (field, pair) in accesses.chunks_exact(2).enumerate() {
+        for &i in pair {
+            assert_eq!(f.is_removed(i), field < completed);
+            if field >= completed {
+                assert_eq!(f.inst_data(i), original.functions[0].inst_data(i));
+            }
+        }
+    }
+    // Remaining fields are legal: a fresh budget finishes them. Earlier
+    // aliases must still verify and the original return must resolve to seed.
+    keel_opt::run_passes(&mut m, &["stack-promote-large"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(memory(&m.functions[0]), 0);
+    assert_eq!(execute(&m.functions[0], &[u64::MAX]), u64::MAX);
+}
+
+#[test]
+fn shared_covering_initializer_survives_later_field_cutoff() {
+    // 31 earlier fields leave room for only the first half of one shared
+    // splat initializer. The second half must keep the full-width store.
+    let mut src = many_fields(31, false).replace(
+        "block0(v0: i64):",
+        "ss31 = stack_slot 8, align 8\nblock0(v0: i64):",
+    );
+    src = src.replace("return v62", "v100 = stack_addr ss31\n v101 = iconst.i64 -1\n store v101,v100\n v102 = iconst.i64 4\n v103 = ptradd v100,v102\n v104 = load.i32 v100\n v105 = iconst.i32 1\n v106 = iadd v104,v105\n store v106,v100\n v107 = load.i32 v103\n v108 = uext.i64 v107\n return v108");
+    let original = keel_ir::parse(&src).unwrap();
+    let f = &original.functions[0];
+    let wide = f.layout_insts().find(|(_, i)| matches!(f.inst_data(*i), D::Store { value, .. } if matches!(f.value_def(*value), keel_ir::ValueDef::Result(_, _)))).unwrap().1;
+    let loads: Vec<_> = f
+        .layout_insts()
+        .filter(|(_, i)| {
+            matches!(
+                f.inst_data(*i),
+                D::Load {
+                    ty: keel_ir::Type::I32,
+                    ..
+                }
+            )
+        })
+        .map(|(_, i)| i)
+        .collect();
+    let mut m = optimize(&src);
+    let f = &m.functions[0];
+    assert!(f.is_removed(loads[0]));
+    assert!(!f.is_removed(loads[1]));
+    assert!(!f.is_removed(wide));
+    assert_eq!(f.inst_data(wide), original.functions[0].inst_data(wide));
+    assert_eq!(
+        f.inst_data(loads[1]),
+        original.functions[0].inst_data(loads[1])
+    );
+    assert_eq!(
+        memory(f),
+        2,
+        "one complete i64 splat and one unpromoted i32 read"
+    );
+    keel_opt::run_passes(&mut m, &["stack-promote-large"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(memory(&m.functions[0]), 0);
+    assert_eq!(execute(&m.functions[0], &[0]), u64::from(u32::MAX));
+}
