@@ -117,6 +117,19 @@ impl<K: EntityRef, V> Arena<K, V> {
     }
 }
 
+impl<K: EntityRef, V> Arena<K, V> {
+    /// The entry for `key`, which the caller knows is in range.
+    ///
+    /// # Safety
+    ///
+    /// `key` must have been returned by this arena's `push`.
+    #[inline]
+    pub(crate) unsafe fn get_unchecked(&self, key: K) -> &V {
+        debug_assert!(key.index() < self.items.len());
+        unsafe { self.items.get_unchecked(key.index()) }
+    }
+}
+
 impl<K, V: Clone> Clone for Arena<K, V> {
     fn clone(&self) -> Self {
         Self {

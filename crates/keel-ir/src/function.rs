@@ -1066,7 +1066,9 @@ impl Iterator for LayoutInsts<'_> {
                 return None;
             };
             self.block = block;
-            self.insts = self.func.block_insts(block).iter();
+            // SAFETY: the layout only holds blocks `create_block` made.
+            let lists = unsafe { self.func.blocks.get_unchecked(block) };
+            self.insts = self.func.block_insts.get(lists.insts).iter();
         }
     }
 
