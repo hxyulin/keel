@@ -15,32 +15,33 @@ pub struct LoopDepth {
 impl LoopDepth {
     pub fn compute(func: &Function, cfg: &ControlFlowGraph, domtree: &DominatorTree) -> Self {
         let mut depth = vec![0; func.num_blocks()];
-        for &header in domtree.rpo() {
-            let latches: Vec<Block> = cfg
-                .preds(header)
-                .iter()
-                .copied()
-                .filter(|&pred| domtree.dominates(header, pred))
-                .collect();
-            if latches.is_empty() {
+        // Loop membership is stamped with the header's RPO position, so one
+        // array serves every loop without clearing.
+        let mut stamp = vec![0u32; func.num_blocks()];
+        let mut stack = Vec::new();
+        for (number, &header) in (1u32..).zip(domtree.rpo()) {
+            stack.extend(
+                cfg.preds(header)
+                    .iter()
+                    .copied()
+                    .filter(|&pred| domtree.dominates(header, pred)),
+            );
+            if stack.is_empty() {
                 continue;
             }
             // Walk backwards from the latches; the header stops the walk.
-            let mut in_loop = vec![false; func.num_blocks()];
-            in_loop[header.index()] = true;
-            let mut stack = latches;
+            stamp[header.index()] = number;
+            depth[header.index()] += 1;
             while let Some(block) = stack.pop() {
-                if std::mem::replace(&mut in_loop[block.index()], true) {
+                if std::mem::replace(&mut stamp[block.index()], number) == number {
                     continue;
                 }
+                depth[block.index()] += 1;
                 stack.extend(
                     cfg.preds(block)
                         .iter()
                         .filter(|&&p| domtree.is_reachable(p)),
                 );
-            }
-            for (d, inside) in depth.iter_mut().zip(in_loop) {
-                *d += u32::from(inside);
             }
         }
         Self { depth }

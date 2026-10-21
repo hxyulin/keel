@@ -54,26 +54,45 @@ pub fn run(func: &mut Function) -> bool {
         dom_depth[block.index()] = dom_depth[idom.index()] + 1;
     }
 
-    let floating: Vec<Inst> = domtree
-        .rpo()
-        .iter()
-        .flat_map(|&b| func.block_insts(b).to_vec())
-        .filter(|&inst| !func.inst_data(inst).is_pinned())
-        .collect();
-    // Who uses each value, among reachable instructions.
-    let mut users: Vec<Vec<Inst>> = vec![Vec::new(); func.num_values()];
+    let mut floating: Vec<Inst> = Vec::new();
+    // Who uses each value, among reachable instructions: (value, user) pairs
+    // in layout order, then packed by value with `user_start`.
+    let mut uses: Vec<(u32, Inst)> = Vec::new();
+    let mut last_user = vec![None; func.num_values()];
+    let mut user_start = vec![0u32; func.num_values() + 1];
     for &block in domtree.rpo() {
         for &inst in func.block_insts(block) {
-            func.inst_data(inst).for_each_operand(|v| {
-                let users = &mut users[func.resolve(v).index()];
+            let data = func.inst_data(inst);
+            if !data.is_pinned() {
+                floating.push(inst);
+            }
+            data.for_each_operand(|v| {
+                let v = func.resolve(v).index();
                 // All operands of one instruction are visited together;
                 // repeated operands therefore only repeat the last user.
-                if users.last() != Some(&inst) {
-                    users.push(inst);
+                if last_user[v] != Some(inst) {
+                    last_user[v] = Some(inst);
+                    user_start[v + 1] += 1;
+                    uses.push((v as u32, inst));
                 }
             });
         }
     }
+    for v in 1..user_start.len() {
+        user_start[v] += user_start[v - 1];
+    }
+    let mut fill = user_start.clone();
+    let mut user_list = vec![Inst::new(0); uses.len()];
+    for &(v, inst) in &uses {
+        let slot = &mut fill[v as usize];
+        user_list[*slot as usize] = inst;
+        *slot += 1;
+    }
+    drop(uses);
+    let users = |value: Value| {
+        let v = value.index();
+        &user_list[user_start[v] as usize..user_start[v + 1] as usize]
+    };
 
     // Early placement, with operands before users: blocks in RPO and
     // definitions before uses within a block.
@@ -100,11 +119,12 @@ pub fn run(func: &mut Function) -> bool {
     // Generation markers avoid allocating or clearing a membership set for
     // every instruction. Each producer is its own unique generation.
     let mut membership = vec![None; func.num_insts()];
+    let mut inst_users: Vec<Inst> = Vec::new();
     for &inst in floating.iter().rev() {
         // The users of all its results (`*_overflow` has two).
-        let mut inst_users: Vec<Inst> = Vec::new();
+        inst_users.clear();
         for &result in func.inst_results(inst) {
-            for &user in &users[result.index()] {
+            for &user in users(result) {
                 if membership[user.index()] != Some(inst) {
                     membership[user.index()] = Some(inst);
                     inst_users.push(user);
