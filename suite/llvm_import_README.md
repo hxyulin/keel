@@ -72,7 +72,8 @@ rename; unsupported input leaves an existing destination intact.
   struct offsets. i8/i16/i32 indices sign-extend to the supported 64-bit pointer
   index width; i64 indices retain their bits. Struct indices are verified LLVM
   constants. Negative offsets and wrapping unflagged address arithmetic work.
-  Aggregate *layout* is supported, not aggregate SSA values or aggregate ABIs.
+  Aggregate *layout* is supported; aggregate SSA and ABI transport are limited
+  to the exact contracts below.
 - Fixed entry-block `alloca` with a constant element count, positive total size
   at most `2^32-1` bytes, and alignment at most 16. Each allocation gets a distinct
   Keel stack slot using LLVM allocation size and at least LLVM ABI/explicit
@@ -101,6 +102,17 @@ rename; unsupported input leaves an existing destination intact.
   `sret` of unpacked `{i64,i64,i64}`, void result, size 24, alignment 8 and offsets
   0/8/16. This preserves Apple AArch64's x8 result transport; broader layouts,
   small/HFA returns and `byval` remain rejected rather than reclassified by guess.
+  A separate parameter contract accepts only exact `[2 x i64]` (size 16,
+  alignment 8) on this target, using one Keel `ptr byval {i64, i64}` parameter.
+  Keel's existing aggregate ABI planner retains two-register placement,
+  register exhaustion, aligned whole-aggregate stack transport and caller copies;
+  the importer never expands it into two independent scalar ABI parameters.
+  Incoming lanes are snapshotted at entry. Direct and indirect calls materialize
+  separate fixed slots for each aggregate argument. Exact one-level extractvalue
+  and insertvalue chains resolve each observed lane independently, including
+  fully overwritten poison/undef seeds; an observed undefined lane is rejected.
+  Aggregate returns, loads/stores, PHIs/selects, constant aggregates and all other
+  aggregate shapes remain unsupported. No source-language struct type is inferred.
   Ordinary and volatile scalar loads/stores retain access widths and volatility.
   `unreachable` becomes a trap. No memory, call or arithmetic effect is moved.
 - Bounded Itanium EH: direct invokes, typed/catch-all landingpads,
@@ -140,7 +152,7 @@ security-hardening, or source-level tooling replacement for LLVM.
 
 Global aliases/ifuncs, TLS/common/weak-any/linkonce-any/COMDAT/sections and unsupported
 global attributes, half/bfloat/x87/FP128, vectors, `frem`,
-aggregate SSA beyond dedicated EH pairs and ABIs beyond the bounded sret contract,
+aggregate SSA/ABIs beyond dedicated EH pairs, exact two-word parameters and the bounded sret contract,
 i128, i1 ABI parameters/returns without explicit zeroext, ordinary varargs, non-C calls, intrinsics other
 than EH typeid and bounded lifetime markers, operand bundles, inline assembly, atomics, unsupported EH forms,
 GC, special sections, explicit prefix/prologue data and
@@ -246,3 +258,16 @@ remain rejected. The mixed-TU validator has 32 native runs covering identity,
 shared storage, virtual dispatch, cleanup and cross-module user-defined catches.
 See the [ODR/RTTI transport contract](llvm_import_odr_contract.md). All 14 default
 C++ profiles are required; no probe rejection counts as a successful profile.
+
+`llvm_import_aggregate_validate.py` validates the two-word parameter contract
+with untouched Clang O1/O2 C and C++17 `std::string_view` input. Native C/C++
+drivers call Keel objects, which call native direct helpers and callbacks.
+The integer matrix covers 0–10 leading scalars, two aggregates, byte-sized
+stack arguments, register boundaries, whole-aggregate spilling, lane mutations
+and 1,408 independently asserted patterns per tier/input. The string-view case
+checks pointer returns and 22 views, including empty views, per tier/input.
+None/Fast/Full produce 12 native candidate builds; 18 rejection/preservation
+cases retain source hashes, existing destinations and empty stdout. The runner
+writes JSON command/evidence records and an HTML report. Run it under
+`fast_opt_locked.py` with `--libllvm`, `--keel` and a fresh `--out` directory.
+It is standalone; this change does not alter the default validation pipeline.

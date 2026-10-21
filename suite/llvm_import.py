@@ -272,15 +272,15 @@ class Importer:
         l = self.l
         if not self.integer_pair_type(l.TypeOf(value)) or index not in (0, 1):
             raise Unsupported('aggregate component outside exact two-i64 contract')
-        if value in self.aggregate_params:
-            return self.aggregate_params[value][index]
-        if l.IsAInsertValueInst(value):
+        while l.IsAInsertValueInst(value):
             if l.GetNumIndices(value) != 1 or l.GetIndices(value)[0] > 1:
                 raise Unsupported('insertvalue outside exact two-i64 contract')
             if l.GetIndices(value)[0] == index:
                 return self.value(l.GetOperand(value, 1))
-            return self.aggregate_component(l.GetOperand(value, 0), index)
-        raise Unsupported('aggregate SSA requires parameter or insertvalue with defined observed lanes')
+            value = l.GetOperand(value, 0)
+        if value in self.aggregate_params:
+            return self.aggregate_params[value][index]
+        raise Unsupported('unsupported aggregate SSA: requires parameter or insertvalue with defined observed lanes')
 
     def abi_signature(self, value, fty, call=False, definition=False):
         """Use LLVM's function type and explicit ABI contract, never infer C types."""
