@@ -1,0 +1,605 @@
+{
+  "status": "static investigation",
+  "base": "422ada18",
+  "frozen_compiler": "target/fast-leaf-20261022/final/keel-frozen",
+  "rows": [
+    {
+      "app": "quickjs",
+      "function": "JS_CallInternal",
+      "signature": "func @JS_CallInternal(ptr sret [2 x i64], ptr, ptr byval [2 x i64], ptr byval [2 x i64], ptr byval [2 x i64], i32, ptr, i32) cc(c) local {",
+      "direct_call_sites": 332,
+      "fast_direct_sites": 62,
+      "callees": [
+        [
+          "__JS_FreeValue",
+          51
+        ],
+        [
+          "JS_FreeValue",
+          43
+        ],
+        [
+          "JS_IsException",
+          15
+        ],
+        [
+          "JS_DupValue",
+          11
+        ],
+        [
+          "__js_poll_interrupts",
+          8
+        ],
+        [
+          "JS_ThrowTypeError",
+          7
+        ],
+        [
+          "JS_ThrowReferenceErrorUninitialized",
+          7
+        ],
+        [
+          "set_value",
+          7
+        ],
+        [
+          "js_unary_arith_slow",
+          6
+        ],
+        [
+          "JS_GetPropertyInternal",
+          5
+        ],
+        [
+          "JS_ToBoolFree",
+          5
+        ],
+        [
+          "JS_ValueToAtom",
+          5
+        ]
+      ],
+      "assembly": {
+        "keel-full": {
+          "instructions": 14294,
+          "bl": 332,
+          "blr": 2,
+          "stack_pair_saves": 6,
+          "prologue": "_JS_CallInternal:\nLJS_CallInternal_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #1, lsl #12\n\tsub\tsp, sp, #848\n\tmov\tx19, sp\n\tstr\tx1, [x19, #56]\n\tstr\tx2, [x19, #64]\n\tstr\tx3, [x19, #72]\n\tstr\tx4, [x19, #80]\n\tstr\tx5, [x19, #88]\n\tstr\tx6, [x19, #96]\n\tldr\tx16, [x29, #16]\n\tstr\tx16, [x19, #144]\n\tldr\tw27, [x29, #24]\n\tstr\tx0, [x19, #112]\n\tstr\tx7, [x19, #136]\n\tadd\tx16, x19, #40\n\tstr\tx16, [x19, #104]\n\tadd\tx22, x19, #56\n\tadd\tx16, x19, #72\n\tstr\tx16, [x19, #120]\n\tadd\tx16, x19, #88\n\tstr\tx16, [x19, #128]",
+          "machine_text_sha256": "1a3b83f7ceff812852dd02c67c4862a2e4110acbebe0cef905e13ab3a682a45d"
+        },
+        "old-extensions": {
+          "instructions": 14294,
+          "bl": 332,
+          "blr": 2,
+          "stack_pair_saves": 6,
+          "prologue": "_JS_CallInternal:\nLJS_CallInternal_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #1, lsl #12\n\tsub\tsp, sp, #848\n\tmov\tx19, sp\n\tstr\tx1, [x19, #56]\n\tstr\tx2, [x19, #64]\n\tstr\tx3, [x19, #72]\n\tstr\tx4, [x19, #80]\n\tstr\tx5, [x19, #88]\n\tstr\tx6, [x19, #96]\n\tldr\tx16, [x29, #16]\n\tstr\tx16, [x19, #144]\n\tldr\tw27, [x29, #24]\n\tstr\tx0, [x19, #112]\n\tstr\tx7, [x19, #136]\n\tadd\tx16, x19, #40\n\tstr\tx16, [x19, #104]\n\tadd\tx22, x19, #56\n\tadd\tx16, x19, #72\n\tstr\tx16, [x19, #120]\n\tadd\tx16, x19, #88\n\tstr\tx16, [x19, #128]",
+          "machine_text_sha256": "1a3b83f7ceff812852dd02c67c4862a2e4110acbebe0cef905e13ab3a682a45d"
+        },
+        "fast-leaf": {
+          "instructions": 14294,
+          "bl": 332,
+          "blr": 2,
+          "stack_pair_saves": 6,
+          "prologue": "_JS_CallInternal:\nLJS_CallInternal_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #1, lsl #12\n\tsub\tsp, sp, #848\n\tmov\tx19, sp\n\tstr\tx1, [x19, #56]\n\tstr\tx2, [x19, #64]\n\tstr\tx3, [x19, #72]\n\tstr\tx4, [x19, #80]\n\tstr\tx5, [x19, #88]\n\tstr\tx6, [x19, #96]\n\tldr\tx16, [x29, #16]\n\tstr\tx16, [x19, #144]\n\tldr\tw27, [x29, #24]\n\tstr\tx0, [x19, #112]\n\tstr\tx7, [x19, #136]\n\tadd\tx16, x19, #40\n\tstr\tx16, [x19, #104]\n\tadd\tx22, x19, #56\n\tadd\tx16, x19, #72\n\tstr\tx16, [x19, #120]\n\tadd\tx16, x19, #88\n\tstr\tx16, [x19, #128]",
+          "machine_text_sha256": "1a3b83f7ceff812852dd02c67c4862a2e4110acbebe0cef905e13ab3a682a45d"
+        }
+      },
+      "same_instruction_text_as_full": true
+    },
+    {
+      "app": "quickjs",
+      "function": "JS_FreeValue",
+      "signature": "func @JS_FreeValue(ptr, ptr byval [2 x i64]) cc(c) inlinehint local {",
+      "direct_call_sites": 1,
+      "fast_direct_sites": 0,
+      "callees": [
+        [
+          "__JS_FreeValue",
+          1
+        ]
+      ],
+      "assembly": {
+        "keel-full": {
+          "instructions": 25,
+          "bl": 1,
+          "blr": 0,
+          "stack_pair_saves": 1,
+          "prologue": "_JS_FreeValue:\nLJS_FreeValue_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tsub\tsp, sp, #16\n\tstr\tx1, [sp, #0]\n\tstr\tx2, [sp, #8]\n\tmov\tx9, x0\n\tadd\tx10, sp, #0",
+          "machine_text_sha256": "750ce0508abbab29a9d01ea5ba7139a9b1e112c3322ae8901171e2bc62617fb1"
+        },
+        "old-extensions": {
+          "instructions": 25,
+          "bl": 1,
+          "blr": 0,
+          "stack_pair_saves": 1,
+          "prologue": "_JS_FreeValue:\nLJS_FreeValue_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tsub\tsp, sp, #16\n\tstr\tx1, [sp, #0]\n\tstr\tx2, [sp, #8]\n\tmov\tx9, x0\n\tadd\tx10, sp, #0",
+          "machine_text_sha256": "750ce0508abbab29a9d01ea5ba7139a9b1e112c3322ae8901171e2bc62617fb1"
+        },
+        "fast-leaf": {
+          "instructions": 25,
+          "bl": 1,
+          "blr": 0,
+          "stack_pair_saves": 1,
+          "prologue": "_JS_FreeValue:\nLJS_FreeValue_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tsub\tsp, sp, #16\n\tstr\tx1, [sp, #0]\n\tstr\tx2, [sp, #8]\n\tmov\tx9, x0\n\tadd\tx10, sp, #0",
+          "machine_text_sha256": "750ce0508abbab29a9d01ea5ba7139a9b1e112c3322ae8901171e2bc62617fb1"
+        }
+      },
+      "same_instruction_text_as_full": true
+    },
+    {
+      "app": "quickjs",
+      "function": "lre_exec_backtrack",
+      "signature": "func @lre_exec_backtrack(ptr, ptr, ptr, i32, ptr, ptr, i32) -> i64 cc(fast) local {",
+      "direct_call_sites": 16,
+      "fast_direct_sites": 6,
+      "callees": [
+        [
+          "lre_canonicalize",
+          7
+        ],
+        [
+          "push_state",
+          3
+        ],
+        [
+          "__assert_rtn",
+          2
+        ],
+        [
+          "is_word_char",
+          2
+        ],
+        [
+          "abort",
+          1
+        ],
+        [
+          "lre_exec_backtrack",
+          1
+        ]
+      ],
+      "assembly": {
+        "keel-full": {
+          "instructions": 1615,
+          "bl": 20,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_lre_exec_backtrack:\nLlre_exec_backtrack_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #64\n\tstr\tx0, [sp, #0]\n\tstr\tx1, [sp, #8]\n\tstr\tx2, [sp, #16]\n\tmov\tx9, x3\n\tmov\tx10, x4\n\tmov\tx11, x5\n\tstr\tx6, [sp, #24]",
+          "machine_text_sha256": "4d9eca441c3fd8f679de52cc7bc53ef8aeb86b55c2e11438960d54b0b75830fd"
+        },
+        "old-extensions": {
+          "instructions": 1615,
+          "bl": 20,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_lre_exec_backtrack:\nLlre_exec_backtrack_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #64\n\tstr\tx0, [sp, #0]\n\tstr\tx1, [sp, #8]\n\tstr\tx2, [sp, #16]\n\tmov\tx9, x3\n\tmov\tx10, x4\n\tmov\tx11, x5\n\tstr\tx6, [sp, #24]",
+          "machine_text_sha256": "4d9eca441c3fd8f679de52cc7bc53ef8aeb86b55c2e11438960d54b0b75830fd"
+        },
+        "fast-leaf": {
+          "instructions": 1615,
+          "bl": 20,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_lre_exec_backtrack:\nLlre_exec_backtrack_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #64\n\tstr\tx0, [sp, #0]\n\tstr\tx1, [sp, #8]\n\tstr\tx2, [sp, #16]\n\tmov\tx9, x3\n\tmov\tx10, x4\n\tmov\tx11, x5\n\tstr\tx6, [sp, #24]",
+          "machine_text_sha256": "4d9eca441c3fd8f679de52cc7bc53ef8aeb86b55c2e11438960d54b0b75830fd"
+        }
+      },
+      "same_instruction_text_as_full": true
+    },
+    {
+      "app": "sqlite",
+      "function": "sqlite3VdbeExec",
+      "signature": "func @sqlite3VdbeExec(ptr) -> i32 cc(fast) local {",
+      "direct_call_sites": 384,
+      "fast_direct_sites": 340,
+      "callees": [
+        [
+          "out2Prerelease",
+          22
+        ],
+        [
+          "sqlite3VdbeError",
+          19
+        ],
+        [
+          "sqlite3VdbeMemSetNull",
+          19
+        ],
+        [
+          "sqlite3VdbeMemSetInt64",
+          9
+        ],
+        [
+          "sqlite3VdbeMemExpandBlob",
+          8
+        ],
+        [
+          "sqlite3VtabImportErrmsg",
+          8
+        ],
+        [
+          "allocateCursor",
+          7
+        ],
+        [
+          "sqlite3VdbeBooleanValue",
+          6
+        ],
+        [
+          "sqlite3VdbeChangeEncoding",
+          6
+        ],
+        [
+          "sqlite3VdbeIntValue",
+          6
+        ],
+        [
+          "sqlite3VdbeMemIntegerify",
+          5
+        ],
+        [
+          "sqlite3_value_text",
+          5
+        ]
+      ],
+      "assembly": {
+        "keel-full": {
+          "instructions": 11905,
+          "bl": 394,
+          "blr": 22,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3VdbeExec:\nLsqlite3VdbeExec_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tstr\td8, [sp, #-16]!\n\t.cfi_offset d8, -112\n\tsub\tsp, sp, #1136\n\tstr\tx0, [sp, #32]",
+          "machine_text_sha256": "1811ad7ec1b517e1a3b18a763aa785137eb2d6fa600b1c5b2a8811a1c81fff0c"
+        },
+        "old-extensions": {
+          "instructions": 11868,
+          "bl": 394,
+          "blr": 22,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3VdbeExec:\nLsqlite3VdbeExec_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tstr\td8, [sp, #-16]!\n\t.cfi_offset d8, -112\n\tsub\tsp, sp, #1136\n\tstr\tx0, [sp, #32]",
+          "machine_text_sha256": "0eeaf3aec072ff50184d260ab82b5aeeb485f20ffaaa1be2a039c6f7049b4ca2"
+        },
+        "fast-leaf": {
+          "instructions": 11868,
+          "bl": 394,
+          "blr": 22,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3VdbeExec:\nLsqlite3VdbeExec_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tstr\td8, [sp, #-16]!\n\t.cfi_offset d8, -112\n\tsub\tsp, sp, #1136\n\tstr\tx0, [sp, #32]",
+          "machine_text_sha256": "0eeaf3aec072ff50184d260ab82b5aeeb485f20ffaaa1be2a039c6f7049b4ca2"
+        }
+      },
+      "same_instruction_text_as_full": false
+    },
+    {
+      "app": "sqlite",
+      "function": "sqlite3BtreeTableMoveto",
+      "signature": "func @sqlite3BtreeTableMoveto(ptr, i64, i32, ptr) -> i32 cc(fast) local {",
+      "direct_call_sites": 8,
+      "fast_direct_sites": 8,
+      "callees": [
+        [
+          "sqlite3Get4byte",
+          2
+        ],
+        [
+          "moveToRoot",
+          1
+        ],
+        [
+          "sqlite3BtreeNext",
+          1
+        ],
+        [
+          "getCellInfo",
+          1
+        ],
+        [
+          "sqlite3GetVarint",
+          1
+        ],
+        [
+          "sqlite3CorruptError",
+          1
+        ],
+        [
+          "moveToChild",
+          1
+        ]
+      ],
+      "assembly": {
+        "keel-full": {
+          "instructions": 281,
+          "bl": 8,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3BtreeTableMoveto:\nLsqlite3BtreeTableMoveto_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #16\n\tmov\tx19, x0\n\tmov\tx20, x1\n\tmov\tx21, x2\n\tstr\tx3, [sp, #0]",
+          "machine_text_sha256": "38e9c39b14d487aff8eee940076411bfaeec38b212649981848ecc68a82787fe"
+        },
+        "old-extensions": {
+          "instructions": 281,
+          "bl": 8,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3BtreeTableMoveto:\nLsqlite3BtreeTableMoveto_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #16\n\tmov\tx19, x0\n\tmov\tx20, x1\n\tmov\tx21, x2\n\tstr\tx3, [sp, #0]",
+          "machine_text_sha256": "38e9c39b14d487aff8eee940076411bfaeec38b212649981848ecc68a82787fe"
+        },
+        "fast-leaf": {
+          "instructions": 281,
+          "bl": 8,
+          "blr": 0,
+          "stack_pair_saves": 6,
+          "prologue": "_sqlite3BtreeTableMoveto:\nLsqlite3BtreeTableMoveto_begin:\n\t.cfi_startproc\n\tstp\tx29, x30, [sp, #-16]!\n\tmov\tx29, sp\n\t.cfi_def_cfa x29, 16\n\t.cfi_offset x30, -8\n\t.cfi_offset x29, -16\n\tstp\tx19, x20, [sp, #-16]!\n\t.cfi_offset x19, -32\n\t.cfi_offset x20, -24\n\tstp\tx21, x22, [sp, #-16]!\n\t.cfi_offset x21, -48\n\t.cfi_offset x22, -40\n\tstp\tx23, x24, [sp, #-16]!\n\t.cfi_offset x23, -64\n\t.cfi_offset x24, -56\n\tstp\tx25, x26, [sp, #-16]!\n\t.cfi_offset x25, -80\n\t.cfi_offset x26, -72\n\tstp\tx27, x28, [sp, #-16]!\n\t.cfi_offset x27, -96\n\t.cfi_offset x28, -88\n\tsub\tsp, sp, #16\n\tmov\tx19, x0\n\tmov\tx20, x1\n\tmov\tx21, x2\n\tstr\tx3, [sp, #0]",
+          "machine_text_sha256": "38e9c39b14d487aff8eee940076411bfaeec38b212649981848ecc68a82787fe"
+        }
+      },
+      "same_instruction_text_as_full": true
+    }
+  ],
+  "summary": [
+    {
+      "unit": "quickjs",
+      "local_definitions": 1270,
+      "fast": 528,
+      "non_normal_purposes": 708
+    },
+    {
+      "unit": "libregexp",
+      "local_definitions": 43,
+      "fast": 42,
+      "non_normal_purposes": 0
+    },
+    {
+      "unit": "sqlite3",
+      "local_definitions": 2292,
+      "fast": 1904,
+      "non_normal_purposes": 6
+    }
+  ],
+  "limits": "Counts are static, not dynamic. Historical sample profiles are older and used only to select candidate functions. No new timing or dynamic attribution in this investigation.",
+  "probe": {
+    "full": {
+      "leaf": {
+        "instructions": 2,
+        "machine": [
+          "add\tx0, x0, #1",
+          "ret"
+        ]
+      },
+      "caller": {
+        "instructions": 61,
+        "machine": [
+          "stp\tx29, x30, [sp, #-16]!",
+          "mov\tx29, sp",
+          "stp\tx19, x20, [sp, #-16]!",
+          "stp\tx21, x22, [sp, #-16]!",
+          "stp\tx23, x24, [sp, #-16]!",
+          "stp\tx25, x26, [sp, #-16]!",
+          "stp\tx27, x28, [sp, #-16]!",
+          "sub\tsp, sp, #16",
+          "mov\tx9, x0",
+          "add\tx10, x9, #0",
+          "ldr\tx19, [x10]",
+          "add\tx10, x9, #8",
+          "ldr\tx20, [x10]",
+          "add\tx10, x9, #16",
+          "ldr\tx21, [x10]",
+          "add\tx10, x9, #24",
+          "ldr\tx22, [x10]",
+          "add\tx10, x9, #32",
+          "ldr\tx23, [x10]",
+          "add\tx10, x9, #40",
+          "ldr\tx24, [x10]",
+          "add\tx10, x9, #48",
+          "ldr\tx25, [x10]",
+          "add\tx10, x9, #56",
+          "ldr\tx26, [x10]",
+          "add\tx10, x9, #64",
+          "ldr\tx27, [x10]",
+          "add\tx10, x9, #72",
+          "ldr\tx28, [x10]",
+          "add\tx10, x9, #80",
+          "ldr\tx16, [x10]",
+          "str\tx16, [sp, #0]",
+          "add\tx9, x9, #88",
+          "ldr\tx16, [x9]",
+          "str\tx16, [sp, #8]",
+          "mov\tx0, x19",
+          "bl\t_leaf",
+          "mov\tx9, x0",
+          "add\tx9, x9, x19",
+          "add\tx9, x9, x20",
+          "add\tx9, x9, x21",
+          "add\tx9, x9, x22",
+          "add\tx9, x9, x23",
+          "add\tx9, x9, x24",
+          "add\tx9, x9, x25",
+          "add\tx9, x9, x26",
+          "add\tx9, x9, x27",
+          "add\tx9, x9, x28",
+          "ldr\tx17, [sp, #0]",
+          "add\tx9, x9, x17",
+          "ldr\tx17, [sp, #8]",
+          "add\tx9, x9, x17",
+          "mov\tx0, x9",
+          "sub\tsp, x29, #80",
+          "ldp\tx27, x28, [sp], #16",
+          "ldp\tx25, x26, [sp], #16",
+          "ldp\tx23, x24, [sp], #16",
+          "ldp\tx21, x22, [sp], #16",
+          "ldp\tx19, x20, [sp], #16",
+          "ldp\tx29, x30, [sp], #16",
+          "ret"
+        ]
+      }
+    },
+    "fast": {
+      "leaf": {
+        "instructions": 2,
+        "machine": [
+          "add\tx0, x0, #1",
+          "ret"
+        ]
+      },
+      "caller": {
+        "instructions": 61,
+        "machine": [
+          "stp\tx29, x30, [sp, #-16]!",
+          "mov\tx29, sp",
+          "stp\tx19, x20, [sp, #-16]!",
+          "stp\tx21, x22, [sp, #-16]!",
+          "stp\tx23, x24, [sp, #-16]!",
+          "stp\tx25, x26, [sp, #-16]!",
+          "stp\tx27, x28, [sp, #-16]!",
+          "sub\tsp, sp, #16",
+          "mov\tx9, x0",
+          "add\tx10, x9, #0",
+          "ldr\tx19, [x10]",
+          "add\tx10, x9, #8",
+          "ldr\tx20, [x10]",
+          "add\tx10, x9, #16",
+          "ldr\tx21, [x10]",
+          "add\tx10, x9, #24",
+          "ldr\tx22, [x10]",
+          "add\tx10, x9, #32",
+          "ldr\tx23, [x10]",
+          "add\tx10, x9, #40",
+          "ldr\tx24, [x10]",
+          "add\tx10, x9, #48",
+          "ldr\tx25, [x10]",
+          "add\tx10, x9, #56",
+          "ldr\tx26, [x10]",
+          "add\tx10, x9, #64",
+          "ldr\tx27, [x10]",
+          "add\tx10, x9, #72",
+          "ldr\tx28, [x10]",
+          "add\tx10, x9, #80",
+          "ldr\tx16, [x10]",
+          "str\tx16, [sp, #0]",
+          "add\tx9, x9, #88",
+          "ldr\tx16, [x9]",
+          "str\tx16, [sp, #8]",
+          "mov\tx0, x19",
+          "bl\t_leaf",
+          "mov\tx9, x0",
+          "add\tx9, x9, x19",
+          "add\tx9, x9, x20",
+          "add\tx9, x9, x21",
+          "add\tx9, x9, x22",
+          "add\tx9, x9, x23",
+          "add\tx9, x9, x24",
+          "add\tx9, x9, x25",
+          "add\tx9, x9, x26",
+          "add\tx9, x9, x27",
+          "add\tx9, x9, x28",
+          "ldr\tx17, [sp, #0]",
+          "add\tx9, x9, x17",
+          "ldr\tx17, [sp, #8]",
+          "add\tx9, x9, x17",
+          "mov\tx0, x9",
+          "sub\tsp, x29, #80",
+          "ldp\tx27, x28, [sp], #16",
+          "ldp\tx25, x26, [sp], #16",
+          "ldp\tx23, x24, [sp], #16",
+          "ldp\tx21, x22, [sp], #16",
+          "ldp\tx19, x20, [sp], #16",
+          "ldp\tx29, x30, [sp], #16",
+          "ret"
+        ]
+      }
+    },
+    "c": {
+      "leaf": {
+        "instructions": 8,
+        "machine": [
+          "stp\tx29, x30, [sp, #-16]!",
+          "mov\tx29, sp",
+          "mov\tx9, x0",
+          "add\tx9, x9, #1",
+          "mov\tx0, x9",
+          "mov\tsp, x29",
+          "ldp\tx29, x30, [sp], #16",
+          "ret"
+        ]
+      },
+      "caller": {
+        "instructions": 61,
+        "machine": [
+          "stp\tx29, x30, [sp, #-16]!",
+          "mov\tx29, sp",
+          "stp\tx19, x20, [sp, #-16]!",
+          "stp\tx21, x22, [sp, #-16]!",
+          "stp\tx23, x24, [sp, #-16]!",
+          "stp\tx25, x26, [sp, #-16]!",
+          "stp\tx27, x28, [sp, #-16]!",
+          "sub\tsp, sp, #16",
+          "mov\tx9, x0",
+          "add\tx10, x9, #0",
+          "ldr\tx19, [x10]",
+          "add\tx10, x9, #8",
+          "ldr\tx20, [x10]",
+          "add\tx10, x9, #16",
+          "ldr\tx21, [x10]",
+          "add\tx10, x9, #24",
+          "ldr\tx22, [x10]",
+          "add\tx10, x9, #32",
+          "ldr\tx23, [x10]",
+          "add\tx10, x9, #40",
+          "ldr\tx24, [x10]",
+          "add\tx10, x9, #48",
+          "ldr\tx25, [x10]",
+          "add\tx10, x9, #56",
+          "ldr\tx26, [x10]",
+          "add\tx10, x9, #64",
+          "ldr\tx27, [x10]",
+          "add\tx10, x9, #72",
+          "ldr\tx28, [x10]",
+          "add\tx10, x9, #80",
+          "ldr\tx16, [x10]",
+          "str\tx16, [sp, #0]",
+          "add\tx9, x9, #88",
+          "ldr\tx16, [x9]",
+          "str\tx16, [sp, #8]",
+          "mov\tx0, x19",
+          "bl\t_leaf",
+          "mov\tx9, x0",
+          "add\tx9, x9, x19",
+          "add\tx9, x9, x20",
+          "add\tx9, x9, x21",
+          "add\tx9, x9, x22",
+          "add\tx9, x9, x23",
+          "add\tx9, x9, x24",
+          "add\tx9, x9, x25",
+          "add\tx9, x9, x26",
+          "add\tx9, x9, x27",
+          "add\tx9, x9, x28",
+          "ldr\tx17, [sp, #0]",
+          "add\tx9, x9, x17",
+          "ldr\tx17, [sp, #8]",
+          "add\tx9, x9, x17",
+          "mov\tx0, x9",
+          "sub\tsp, x29, #80",
+          "ldp\tx27, x28, [sp], #16",
+          "ldp\tx25, x26, [sp], #16",
+          "ldp\tx23, x24, [sp], #16",
+          "ldp\tx21, x22, [sp], #16",
+          "ldp\tx19, x20, [sp], #16",
+          "ldp\tx29, x30, [sp], #16",
+          "ret"
+        ]
+      }
+    }
+  },
+  "production_changes": false,
+  "compiler_sha256": "b0f8928961acb207edb5d42cf1c0a2e2ba9b732a8ec00d41142796b405d4e19c",
+  "identities": {
+    "source_hashes_match_prior_campaign": true,
+    "ir": {
+      "sqlite3.keel": "837c245f408e09e755caef1b5fc1eaf099e6b6ea6590fdeb00a5a3c4d50697c4",
+      "libregexp.keel": "7aa291768b2e47178b727133dd60c6db4225c8fcd4e9943b26356455134fe1d9",
+      "call-pressure-c.keel": "b84c981409311399488e11be28b4bed45da0fe2d7202b5f53cb85595a186de6f",
+      "call-pressure.keel": "d4df8e6f66341459c218d560dc2c51bd611a2c877bc4275a177a178260533081",
+      "quickjs.keel": "37aca5afe05bdef50961ff3de26c925b565ed3ffa800b8ba94efea8a53c67abf"
+    }
+  }
+}
