@@ -16,18 +16,20 @@ static int setup(void){
 static int check(void(*fn)(const void*,void*),unsigned complement,unsigned mode){
  const uint64_t edges[]={0,1,2,0x7fffffff,0x80000000,0xffffffff,0x100000000ULL,0x100000001ULL,0x7fffffff00000000ULL,0x7ffffffffffffffeULL,0x7fffffffffffffffULL,0x8000000000000000ULL,0x8000000000000001ULL,0xffffffff00000000ULL,UINT64_MAX};
  for(unsigned n=0;n<1200;n++)for(unsigned off=0;off<16;off++)for(unsigned alias=0;alias<2;alias++){
-  uint64_t x[2],got[4];
+  uint64_t x[2],got[6];
   for(unsigned l=0;l<2;l++)x[l]=n<225?edges[(n/(l?15:1))%15]:next();
-  unsigned char *src=region+page-16-off,output[33];
+  unsigned char *src=region+page-16-off,output[49];
   memcpy(src,x,16);
   /* alias output with input; when aliasing leave room for the live-input store. */
-  if(alias)src-=32;
+  if(alias)src-=48;
   memcpy(src,x,16);
   unsigned char *out=alias?src:output+1;
-  fn(src,out);memcpy(got,out,32);
+  fn(src,out);memcpy(got,out,mode==3?48:32);
   for(unsigned l=0;l<2;l++){
    uint64_t mask=mode==1?((int64_t)x[l]>0?UINT64_MAX:0):(((x[l]>>63)^complement)?UINT64_MAX:0);
-   uint64_t want=mode==2?((int64_t)x[l]>0?x[l]:0):mask;
+   uint64_t positive=(int64_t)x[l]>0?x[l]:0;
+   uint64_t want=mode>=2?(mode==4?positive+x[l]:positive):mask;
+   if(mode==3&&got[l+4]!=((int64_t)x[l]>0?UINT64_MAX:0))return 2;
    if(got[l]!=want||got[l+2]!=x[l])return 1;
   }
  }

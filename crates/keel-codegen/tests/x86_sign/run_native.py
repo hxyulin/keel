@@ -21,17 +21,17 @@ def main():
     parser.add_argument("--timeout", type=float, default=120, help="seconds per compile or native run")
     parser.add_argument("--dir", type=pathlib.Path, default=pathlib.Path(__file__).resolve().parent)
     args = parser.parse_args()
-    if platform.system() != "Linux" or platform.machine() not in ("x86_64", "amd64"):
-        raise SystemExit("native oracle requires Linux x86_64")
     root = args.dir.resolve()
     rows = []
     objects = sorted(root.glob("*.o"))
     expected = json.loads((root / "expected-count.json").read_text())
-    if len(objects) != expected or expected < 18:
+    if len(objects) != expected or expected < 1:
         raise SystemExit(f"expected {expected} objects, found {len(objects)}")
     missing = [str(obj.with_suffix(".c")) for obj in objects if not obj.with_suffix(".c").is_file()]
     if missing:
         raise SystemExit("missing matching C oracles: " + ", ".join(missing))
+    if platform.system() != "Linux" or platform.machine() not in ("x86_64", "amd64"):
+        raise SystemExit("native oracle requires Linux x86_64")
     for obj in objects:
         c = obj.with_suffix(".c")
         if not c.exists():

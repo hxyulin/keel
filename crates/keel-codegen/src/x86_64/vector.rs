@@ -266,6 +266,17 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Punpckldq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
         self.vector_publish(result);
     }
+    pub(super) fn vector_positive64(&mut self, value: Value, result: Option<Value>) {
+        // Retain X before any destination write, including spilled result FS0.
+        self.vector_stage(value, FS1);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+        );
+        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
+        self.emit(Opcode::Andnps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.vector_publish(result);
+    }
     pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
         self.vector_stage(value, FS1);
         self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0))]);
