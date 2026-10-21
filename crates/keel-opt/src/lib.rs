@@ -392,7 +392,7 @@ const FULL_ROUND: [&str; 16] = [
 
 const FULL_ROUNDS: usize = 3;
 
-const FULL_EPILOGUE: [&str; 14] = [
+const FULL_EPILOGUE: [&str; 15] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -407,6 +407,7 @@ const FULL_EPILOGUE: [&str; 14] = [
     "loop-rotate",
     "phi-simplify",
     "dce",
+    "internal-fast-calls",
 ];
 
 // Inlining freezes its templates at each invocation. Cleanup exposes smaller
@@ -418,6 +419,8 @@ const FULL_EPILOGUE: [&str; 14] = [
 // The epilogue reuses memory facts before introducing loop recurrences, then
 // unrolls before extended reductions and rotation. Keep phi cleanup late and
 // omit an extra GCM: broader schedules regressed Lua fib in app screening.
+// Finalize private call transport only after IR rewrites. Physical preservation
+// summaries are built by codegen from the final selected/allocated leaf bodies.
 const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()] {
     let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
     let mut i = 0;

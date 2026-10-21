@@ -1,4 +1,4 @@
-//! Opt-in private transport for contained direct calls, including removal of
+//! Final private transport for contained direct calls, including removal of
 //! C-only extension contracts. Backends may specialize eligible private leaves.
 use crate::Pass;
 use keel_ir::{ArgExt, CallConv, DataItem, Function, InstData, Module, Purpose, Symbol};
