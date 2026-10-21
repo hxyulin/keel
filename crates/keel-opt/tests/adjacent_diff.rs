@@ -11,6 +11,15 @@ fn canonical() -> keel_ir::Module {
 }
 
 #[test]
+fn accepts_the_merged_rotated_loop_emitted_by_the_real_frontend() {
+    let mut m = keel_ir::parse(include_str!("adjacent_diff/rotated.keel")).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert!(adjacent_diff::run(&mut m.functions[0]));
+    keel_ir::verify_module(&m).unwrap();
+    assert!(!adjacent_diff::run(&mut m.functions[0]));
+}
+
+#[test]
 fn derives_inputs_from_dataflow_for_ordinary_and_reordered_signatures() {
     let raw = include_str!("adjacent_abs/adjacent.keel");
     for source in [

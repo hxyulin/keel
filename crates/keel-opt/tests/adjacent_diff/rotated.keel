@@ -1,0 +1,33 @@
+func @pair_distance(ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v3: i64):
+    v4 = iconst.i64 0
+    v5 = iconst.i64 1
+    jump block1
+block1:
+    v8 = icmp.ugt v3, v5
+    brif v8, block2(v5, v4), block4(v4)
+block2(v41: i64, v42: i64):
+    v31 = iconst.i64 2
+    v11 = shl v41, v31
+    v12 = ptradd v0, v11
+    v13 = load.i32 v12
+    v14 = sext.i64 v13
+    v39 = iconst.i64 1
+    v16 = isub v41, v39
+    v18 = shl v16, v31
+    v19 = ptradd v0, v18
+    v20 = load.i32 v19
+    v21 = sext.i64 v20
+    v22 = isub v14, v21
+    v40 = iconst.i64 0
+    v25 = icmp.slt v22, v40
+    v26 = ineg v22
+    v36 = select v25, v26, v22
+    v28 = iadd v42, v36
+    v30 = iadd v41, v39
+    v45 = icmp.ugt v3, v30
+    brif v45, block2(v30, v28), block4(v28)
+block4(v44: i64):
+    return v44
+}
+

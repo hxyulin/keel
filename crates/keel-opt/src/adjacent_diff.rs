@@ -129,7 +129,7 @@ fn params(f: &Function, b: Block, types: &[Type]) -> Option<Vec<Value>> {
     .then(|| p.to_vec())
 }
 fn recognize(f: &Function) -> Option<Candidate> {
-    if f.blocks().take(6).count() != 5 || f.layout_insts().take(41).count() > 40 {
+    if !(4..=5).contains(&f.blocks().take(6).count()) || f.layout_insts().take(41).count() > 40 {
         return None;
     }
     let entry = f.entry_block()?;
@@ -212,18 +212,27 @@ fn recognize(f: &Function) -> Option<Candidate> {
     let abs = r.value(D::Select {
         args: [negative, neg, diff],
     })?;
-    let (_, D::Jump { dest }) = r.next()? else {
-        return None;
+    let (update, data) = r.next()?;
+    let (latch, total) = match data {
+        D::Jump { dest } if dest.args == [abs] => {
+            let latch = dest.block;
+            r.end()?;
+            let p = params(f, latch, &[Type::I64])?;
+            r = Reader::new(f, latch);
+            (latch, r.value(bin(B::Iadd, sum, p[0]))?)
+        }
+        D::Binary { op: B::Iadd, args } if args == [sum, abs] => {
+            let total = f.first_result(update);
+            if f.resolve(total) != total { return None; }
+            (body, total)
+        }
+        _ => return None,
     };
-    if dest.args != [abs] {
-        return None;
-    }
-    let latch = dest.block;
-    r.end()?;
-    let p = params(f, latch, &[Type::I64])?;
-    let mut r = Reader::new(f, latch);
-    let total = r.value(bin(B::Iadd, sum, p[0]))?;
-    let one3 = r.value(icon(1))?;
+    let one3 = if matches!(f.inst_data(*r.insts.get(r.pos)?), D::Iconst { ty: Type::I64, imm: 1 }) {
+        r.value(icon(1))?
+    } else {
+        one2
+    };
     let next = r.value(bin(B::Iadd, iv, one3))?;
     let cond = r.value(cmp(IntCC::Ugt, bound, next))?;
     let (_, d) = r.next()?;
@@ -246,7 +255,7 @@ fn recognize(f: &Function) -> Option<Candidate> {
     if !dom.dominates(guard_block, body)
         || !dom.dominates(body, latch)
         || cfg.preds(guard_block) != [entry]
-        || cfg.preds(latch) != [body]
+        || (latch != body && cfg.preds(latch) != [body])
         || cfg.preds(body).len() != 2
         || cfg.preds(exit).len() != 2
     {
