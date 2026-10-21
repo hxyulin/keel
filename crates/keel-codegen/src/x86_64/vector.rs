@@ -177,6 +177,14 @@ impl FunctionCompiler<'_> {
                     self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
                     self.emit(Opcode::Psrlw, [asm_arg(&xmm(FS2)), asm_arg(&8i64)]);
                     self.emit(Opcode::Punpcklbw, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+                    // The first unpack duplicates bytes as 80,80,00,00.
+                    // Replicate the low word and then the low dword so every
+                    // byte lane receives the unsigned sign-bit bias.
+                    self.emit(Opcode::Punpcklwd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+                    self.emit(
+                        Opcode::Pshufd,
+                        [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2)), asm_arg(&0i64)],
+                    );
                 }
                 VectorType::I16x8 => {
                     self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
