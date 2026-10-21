@@ -36,7 +36,10 @@ class Globals:
             importer.type(l.TypeOf(g))  # no nonzero address spaces
             if l.name(g).startswith('llvm.'):
                 raise self.Unsupported('reserved LLVM global objects')
-            if (l.GetLinkage(g) not in (0, 8, 9) or l.GetVisibility(g) != 0
+            linkage = l.GetLinkage(g)
+            defined_odr = bool(l.GetInitializer(g)) and linkage in l.ODR_LINKAGES
+            if ((linkage not in (l.ExternalLinkage, *l.LOCAL_LINKAGES) and not defined_odr)
+                    or l.GetVisibility(g) not in (0, 1)
                     or l.GetDLLStorageClass(g) or l.IsThreadLocal(g)
                     or l.IsExternallyInitialized(g) or l.GetSection(g) or l.GetComdat(g)):
                 raise self.Unsupported(f'{importer.symbol(g)}: unsupported global linkage/storage/section/COMDAT')
@@ -44,10 +47,92 @@ class Globals:
             ty = l.GlobalGetValueType(g)
             self.layout(ty)
             size = l.ABISizeOfType(importer.td, ty)
-            if not 0 < size <= 0xffffffff:
-                raise self.Unsupported('global size must be nonzero and fit u32')
+            # A declaration allocates no storage. Runtime vtables commonly use
+            # external [0 x ptr]; their real extent belongs to the runtime TU.
+            if size > 0xffffffff or (not size and l.GetInitializer(g)):
+                raise self.Unsupported('global definition size must be nonzero and global size must fit u32')
             if l.GetInitializer(g):
                 self.sizes[g] = size
+        self.rtti_tags = {}
+        rtti_hidden = self.rtti_objects()
+        for g in self.objects:
+            if l.GetVisibility(g) and g not in rtti_hidden:
+                raise self.Unsupported(f'{importer.symbol(g)}: unsupported hidden global (requires validated RTTI)')
+
+    def rtti_objects(self):
+        """Recognize transported Itanium class/si RTTI, never build RTTI data.
+
+        Only validated records and their paired byte strings qualify for hidden
+        visibility. The tagged name relocation is confined to record offset 8.
+        All ordinary layout/storage/initializer checks still run afterwards.
+        """
+        l, i = self.l, self.i
+        objects = {l.name(g): g for g in self.objects}
+        eligible = set()
+        runtimes = {2: '_ZTVN10__cxxabiv117__class_type_infoE',
+                    3: '_ZTVN10__cxxabiv120__si_class_type_infoE'}
+        for g in self.objects:
+            name, ty = l.name(g), l.GlobalGetValueType(g)
+            if (not name.startswith('_ZTI') or len(name) <= 4
+                    or l.GetLinkage(g) not in l.ODR_LINKAGES or not l.IsGlobalConstant(g)
+                    or not l.GetInitializer(g) or l.GetTypeKind(ty) != 10
+                    or l.IsPackedStruct(ty)):
+                continue
+            count = l.CountStructElementTypes(ty)
+            if (count not in runtimes or self.sizes[g] != count * 8
+                    or any(l.GetTypeKind(l.StructGetTypeAtIndex(ty, n)) != 12
+                           or l.OffsetOfElement(i.td, ty, n) != n * 8 for n in range(count))):
+                continue
+            value = l.GetInitializer(g)
+            vtable = self.address(l.GetAggregateElement(value, 0))
+            if (vtable is None or l.name(vtable[0]) != runtimes[count]
+                    or vtable[1] != 16 or vtable[0] not in self.objects
+                    or l.GetInitializer(vtable[0]) or l.GetLinkage(vtable[0]) != l.ExternalLinkage
+                    or l.GetVisibility(vtable[0])):
+                continue
+            name_object = objects.get('_ZTS' + name[4:])
+            if (not name_object or l.GetLinkage(name_object) not in l.ODR_LINKAGES
+                    or not l.IsGlobalConstant(name_object) or not l.GetInitializer(name_object)):
+                continue
+            name_ty = l.GlobalGetValueType(name_object)
+            if (l.GetTypeKind(name_ty) != 11 or l.GetTypeKind(l.GetElementType(name_ty)) != 8
+                    or l.GetIntTypeWidth(l.GetElementType(name_ty)) != 8
+                    or l.GetArrayLength2(name_ty) < 2):
+                continue
+            name_init = l.GetInitializer(name_object)
+            last = l.GetAggregateElement(name_init, l.GetArrayLength2(name_ty) - 1)
+            if not l.IsAConstantInt(last) or l.ConstIntGetZExtValue(last):
+                continue
+            name_value = l.GetAggregateElement(value, 1)
+            tagged = self.rtti_name_symbol(name_value)
+            if name_value != name_object and tagged != name_object:
+                continue
+            if count == 3:
+                base = l.GetAggregateElement(value, 2)
+                if base not in self.objects or not l.name(base).startswith('_ZTI'):
+                    continue
+            eligible.update((g, name_object))
+            if tagged:
+                self.rtti_tags[g] = (name_value, name_object)
+        return eligible
+
+    def rtti_name_symbol(self, value):
+        """Exact i64 ptrtoint(symbol) + 2**63 -> ptr, no generic int relocations."""
+        l = self.l
+        if not l.IsAConstantExpr(value) or l.GetConstOpcode(value) != 40:  # inttoptr
+            return None
+        add = l.GetOperand(value, 0)
+        if (not l.IsAConstantExpr(add) or l.GetConstOpcode(add) != 8
+                or self.i.width(add) != 64 or re.search(r'\b(?:nuw|nsw)\b', l.printed(add))):
+            return None
+        pointer, tag = l.GetOperand(add, 0), l.GetOperand(add, 1)
+        if (not l.IsAConstantInt(tag) or self.i.width(tag) != 64
+                or l.ConstIntGetZExtValue(tag) != 1 << 63
+                or not l.IsAConstantExpr(pointer) or l.GetConstOpcode(pointer) != 39
+                or self.i.width(pointer) != 64):  # ptrtoint
+            return None
+        symbol = l.GetOperand(pointer, 0)
+        return symbol if symbol in self.objects else None
 
     def check_suffix(self, text):
         # LLVM prints global attributes after the top-level initializer. Only
@@ -115,8 +200,9 @@ class Globals:
             return None
         if l.GetConstOpcode(value) != 29:
             raise self.Unsupported('only constant GEP symbolic expressions are supported')
-        if re.search(r'\binrange\b', l.printed(value)):
-            raise self.Unsupported('constant GEP inrange')
+        # LLVM inrange/inbounds/no-wrap restrict the defined execution domain,
+        # not the address. Omit those promises as a semantic refinement; retain
+        # exact TargetData arithmetic and every Keel relocation/bounds guard.
         base = self.address(l.GetOperand(value, 0))
         if base is None:
             raise self.Unsupported('constant GEP requires a named symbol base')
@@ -159,7 +245,7 @@ class Globals:
             result = self.i.emit(f'ptradd {result}, {addend}')
         return result
 
-    def initializer(self, value, ty, offset, align):
+    def initializer(self, value, ty, offset, align, owner=None):
         l, i = self.l, self.i
         size = l.ABISizeOfType(i.td, ty)
         if l.IsAConstantAggregateZero(value) or l.IsAConstantPointerNull(value):
@@ -179,6 +265,10 @@ class Globals:
                 items.append((size - used, f'zero {size - used}'))
             return items
         if kind == 12:
+            if self.rtti_tags.get(owner, (None, None))[0] == value and offset == 8:
+                if align < 8:
+                    raise self.Unsupported('RTTI name relocation requires object alignment >= 8')
+                return [(8, 'rtti_name ' + i.symbol(self.rtti_tags[owner][1]))]
             address = self.address(value)
             if address is not None:
                 if offset % 8 or align < 8:
@@ -196,7 +286,7 @@ class Globals:
                 child = l.GetAggregateElement(value, n)
                 if not child:
                     raise self.Unsupported('unsupported aggregate initializer')
-                parts = self.initializer(child, child_ty, offset + position, align)
+                parts = self.initializer(child, child_ty, offset + position, align, owner)
                 items.extend(parts)
                 cursor = position + sum(length for length, _ in parts)
             if size > cursor:
@@ -216,9 +306,13 @@ class Globals:
             align = max(l.GetAlignment(g), l.ABIAlignmentOfType(i.td, ty))
             if not 0 < align <= 4096 or align & (align - 1):
                 raise self.Unsupported('global alignment must be a power of two up to 4096')
-            items = self.initializer(value, ty, 0, align)
+            items = self.initializer(value, ty, 0, align, g)
             if sum(size for size, _ in items) != self.sizes[g]:
                 raise self.Unsupported('initializer size differs from LLVM allocation size')
-            flags = ('local ' if l.GetLinkage(g) in (8, 9) else '') + ('const ' if l.IsGlobalConstant(g) else '')
+            flags = ('local ' if l.GetLinkage(g) in l.LOCAL_LINKAGES else
+                     'weak_odr ' if l.GetLinkage(g) in l.ODR_LINKAGES else '')
+            if l.GetVisibility(g):
+                flags += 'hidden '
+            flags += 'const ' if l.IsGlobalConstant(g) else ''
             output.append(f'data {name} = {flags}align {align} {{ ' + ', '.join(text for _, text in items) + ' }')
         return output

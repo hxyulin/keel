@@ -27,6 +27,16 @@ class Unsupported(ValueError):
 
 
 class LLVM:
+    # LLVMLinkage from llvm/include/llvm-c/Core.h (not C++ GlobalValue::LinkageTypes).
+    # https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h
+    ExternalLinkage = 0
+    LinkOnceODRLinkage = 3
+    WeakODRLinkage = 6
+    InternalLinkage = 8
+    PrivateLinkage = 9
+    ODR_LINKAGES = (LinkOnceODRLinkage, WeakODRLinkage)
+    LOCAL_LINKAGES = (InternalLinkage, PrivateLinkage)
+
     def __init__(self, path):
         self.lib = C.CDLL(path)
         specs = {
@@ -229,7 +239,10 @@ class Importer:
                 raise Unsupported('unsupported personality declaration')
         elif l.IsFunctionVarArg(fty):
             raise Unsupported(f'{self.symbol(fn)}: variadic signature')
-        if ((l.GetLinkage(fn) not in (0, 8, 9) and fn not in self.local_copies)
+        linkage = l.GetLinkage(fn)
+        defined_odr = bool(l.GetFirstBasicBlock(fn)) and linkage in l.ODR_LINKAGES
+        if ((linkage not in (l.ExternalLinkage, *l.LOCAL_LINKAGES)
+                and not defined_odr and fn not in self.local_copies)
                 or l.GetVisibility(fn) != 0):
             raise Unsupported(f'{self.symbol(fn)}: unsupported linkage/visibility')
         if l.GetAlignment(fn) > 4:
@@ -257,8 +270,9 @@ class Importer:
         allowed = ('signext', 'zeroext', 'sret', 'noundef', 'nonnull', 'noalias',
                    'nocapture', 'captures', 'nofree', 'readonly', 'readnone', 'writeonly',
                    'dereferenceable', 'dereferenceable_or_null', 'align', 'range',
-                   'dead_on_unwind', 'writable', 'initializes')
+                   'dead_on_unwind', 'writable', 'initializes', 'returned')
         kinds = {l.GetEnumAttributeKindForName(n.encode(), len(n)) for n in allowed}
+        returned_kind = l.GetEnumAttributeKindForName(b'returned', len(b'returned'))
         count = l.GetCallSiteAttributeCount if call else l.GetAttributeCountAtIndex
         get = l.GetCallSiteAttributes if call else l.GetAttributesAtIndex
         result = []
@@ -270,6 +284,11 @@ class Importer:
             for attr in attrs:
                 if l.IsStringAttribute(attr) or l.GetEnumAttributeKind(attr) not in kinds:
                     raise Unsupported('unsupported parameter/return ABI attribute')
+                # Omit LLVM's returned promise without creating Keel return or
+                # alias facts. Accept only parameters with exactly the result
+                # type; LLVM's verifier checks the rest of the contract.
+                if l.GetEnumAttributeKind(attr) == returned_kind and (index == 0 or ty != types[0]):
+                    raise Unsupported('returned requires a parameter with the exact result type')
             text = self.type(ty, abi=True)
             sret = l.attribute(value, index, 'sret', call=call)
             if sret:
@@ -390,8 +409,9 @@ class Importer:
             if l.IsAConstantPointerNull(clause):
                 clauses.append('catch null')
             elif clause in self.globals.objects:
-                if l.GetInitializer(clause):
-                    raise Unsupported('defined RTTI is unsupported; catch requires external typeinfo')
+                # All global definitions have already passed exact layout,
+                # initializer, relocation and linkage transport. Typeinfo is
+                # runtime data; do not synthesize or reinterpret its structure.
                 clauses.append('catch ' + self.symbol(clause))
             else:
                 raise Unsupported('catch requires a named global typeinfo or null')
@@ -469,8 +489,9 @@ class Importer:
         if op == 26:
             return self.emit('stack_addr ' + self.slots[inst])
         if op == 29:
-            if re.search(r'\binrange\b', l.printed(inst)):
-                raise Unsupported('unsupported GEP flags')
+            # inbounds/no-wrap/inrange constrain LLVM-defined executions; they
+            # do not change the computed address on that domain. Keel keeps the
+            # exact GEP arithmetic, without adding poison/escape/alias facts.
             ty = l.GetGEPSourceElementType(inst)
             self.layout_type(ty)
             addr = self.value(l.GetOperand(inst, 0))
@@ -734,7 +755,9 @@ class Importer:
             if not blocks:
                 output.append('decl ' + signature + ' cc(c)')
                 continue
-            local = ' local' if l.GetLinkage(fn) in (8, 9) or fn in self.local_copies else ''
+            local = ' local' if l.GetLinkage(fn) in l.LOCAL_LINKAGES or fn in self.local_copies else ''
+            if not local and l.GetLinkage(fn) in l.ODR_LINKAGES:
+                local = ' weak_odr'
             personality = (' personality ' + self.symbol(l.GetPersonalityFn(fn))
                            if l.HasPersonalityFn(fn) else '')
             self.lines = ['func ' + signature + ' cc(c)' + local + personality + ' {']
