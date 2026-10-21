@@ -110,7 +110,7 @@ pub struct Selection {
     pub(crate) binary_memory: HashMap<Inst, Value>,
     /// X86 adjacent quotient/multiply/subtract using the native remainder.
     pub(crate) division_remainders: HashMap<Inst, Inst>,
-    /// Adjacent scalar compare consumed directly by a select.
+    /// Scalar compare consumed directly by a select.
     pub(crate) select_compares: HashMap<Inst, Inst>,
     allocation_operands: OperandTable,
     // Operand occurrences removed by fold_operands, so later target folding
@@ -304,6 +304,114 @@ impl Selection {
         folds: impl Fn(&InstData) -> Vec<Value>,
     ) -> HashSet<Value> {
         self.fuse_compare_pairs(func, folds, crate::fold::aarch64_compare_pairs(func))
+    }
+
+    /// Delay an integer compare to its sole select consumer. Only cross a
+    /// bounded window of small, pure integer definitions: never effects, traps,
+    /// other condition producers, or an explicit allocation/debug boundary.
+    pub(crate) fn fuse_aarch64_selects(
+        &mut self,
+        func: &Function,
+        folds: impl Fn(&InstData) -> Vec<Value>,
+    ) {
+        // Inline assembly can observe NZCV without declaring a flag input,
+        // including at a later block. Keep every old flag definition intact.
+        if func
+            .layout_insts()
+            .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
+        {
+            return;
+        }
+        let mut uses = vec![0u8; func.num_values()];
+        for (_, i) in func.layout_insts() {
+            func.inst_data(i).for_each_operand(|v| {
+                let n = &mut uses[func.resolve(v).index()];
+                *n = n.saturating_add(1).min(2);
+            });
+        }
+        let mut pairs = Vec::new();
+        for block in func.blocks() {
+            let insts = func.block_insts(block);
+            for (end, &select) in insts.iter().enumerate() {
+                let InstData::Select { args } = *func.inst_data(select) else {
+                    continue;
+                };
+                let ty = func.value_type(func.resolve(args[1]));
+                if !matches!(ty, Type::I32 | Type::I64 | Type::Ptr)
+                    || func.value_type(func.resolve(args[2])) != ty
+                {
+                    continue;
+                }
+                let cond = func.resolve(args[0]);
+                let ValueDef::Result(compare, _) = func.value_def(cond) else {
+                    continue;
+                };
+                let InstData::Icmp { args: inputs, .. } = *func.inst_data(compare) else {
+                    continue;
+                };
+                let input_ty = func.value_type(func.resolve(inputs[0]));
+                if !matches!(input_ty, Type::I32 | Type::I64)
+                    || func.value_type(func.resolve(inputs[1])) != input_ty
+                    || uses[cond.index()] != 1
+                    || func.inst_results(compare).first() != Some(&cond)
+                {
+                    continue;
+                }
+                let Some(start) = insts[..end]
+                    .iter()
+                    .rposition(|&i| i == compare)
+                    .filter(|&start| end - start <= 5)
+                else {
+                    continue;
+                };
+                let location = func.inst_loc(select).map(|l| (l.file, l.line));
+                if insts[start..=end].iter().any(|&i| {
+                    func.is_removed(i)
+                        || self.covered(i)
+                        || self.matches.contains_key(&i)
+                        || self.conditions.contains_key(&i)
+                        || self.constraints.keys().any(|&(at, _, _)| at == i)
+                        || func.inst_loc(i).map(|l| (l.file, l.line)) != location
+                }) {
+                    continue;
+                }
+                if !insts[start + 1..end].iter().all(|&i| {
+                    let small = func.inst_results(i).len() == 1
+                        && matches!(
+                            func.value_type(func.first_result(i)),
+                            Type::I32 | Type::I64
+                        );
+                    small
+                        && matches!(
+                            func.inst_data(i),
+                            InstData::Iconst { .. }
+                                | InstData::Binary {
+                                    op: BinaryOp::Iadd
+                                        | BinaryOp::Isub
+                                        | BinaryOp::Imul
+                                        | BinaryOp::And
+                                        | BinaryOp::Or
+                                        | BinaryOp::Xor
+                                        | BinaryOp::Shl
+                                        | BinaryOp::Ushr
+                                        | BinaryOp::Sshr,
+                                    ..
+                                }
+                        )
+                }) {
+                    continue;
+                }
+                pairs.push((cond, compare, select));
+            }
+        }
+        for pair in pairs {
+            if self
+                .fuse_compare_pairs(func, &folds, vec![pair])
+                .contains(&pair.0)
+            {
+                self.select_compares.insert(pair.2, pair.1);
+            }
+        }
     }
 
     fn fuse_compare_pairs(

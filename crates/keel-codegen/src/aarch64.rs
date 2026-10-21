@@ -876,6 +876,9 @@ impl<'a> FunctionCompiler<'a> {
         };
         let absolute_values = absolute::select(func, &mut selection);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
+        selection.fuse_aarch64_selects(func, |data| {
+            folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
+        });
         let packed_low_loads = packed_load::select(func, &mut selection);
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let widening_adds = vector::select_widening_adds(func, &mut selection);
@@ -1762,13 +1765,21 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Select { args } => {
                 let d = self.def_reg(result);
                 let ty = self.ty(args[1]);
-                self.test_value(args[0]);
+                let cc = if let Some(&compare) = self.selection.select_compares.get(&inst) {
+                    self.compare(compare)
+                } else {
+                    self.test_value(args[0]);
+                    "ne"
+                };
+                // CMP uses S0/S1 before either arm is staged. use_reg only
+                // loads, moves wide constants, or computes a stack address;
+                // all preserve NZCV and the other arm's reserved scratch.
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
                 let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
                 self.mach(
                     "csel",
-                    [(rd).into(), (a).into(), (b).into(), Arg::from("ne")],
+                    [(rd).into(), (a).into(), (b).into(), Arg::from(cc)],
                 );
                 self.def_done(result, d);
             }
