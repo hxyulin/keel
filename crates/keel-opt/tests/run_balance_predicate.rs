@@ -119,12 +119,21 @@ fn replacement_selects_retain_the_corresponding_branch_locations() {
     let mut m = keel_ir::parse(BALANCE).unwrap();
     m.files.push("balance.c".into());
     let f = &mut m.functions[0];
-    let branches: Vec<_> = f.layout_insts().filter_map(|(_, i)| match *f.inst_data(i) {
-        D::Brif { cond, .. } => Some((i, cond)), _ => None,
-    }).collect();
+    let branches: Vec<_> = f
+        .layout_insts()
+        .filter_map(|(_, i)| match *f.inst_data(i) {
+            D::Brif { cond, .. } => Some((i, cond)),
+            _ => None,
+        })
+        .collect();
     let mut locations = std::collections::HashMap::new();
     for (i, cond) in branches {
-        let loc = keel_ir::SourceLoc { file: keel_ir::SourceFile::new(0), line: 100 + i.index() as u32, col: 1, scope: None };
+        let loc = keel_ir::SourceLoc {
+            file: keel_ir::SourceFile::new(0),
+            line: 100 + i.index() as u32,
+            col: 1,
+            scope: None,
+        };
         f.set_inst_loc(i, Some(loc));
         locations.insert(cond, loc);
     }

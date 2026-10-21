@@ -146,15 +146,26 @@ fn recognize(f: &Function) -> Option<Candidate> {
     r.end()?;
     params(f, guard_block, &[])?;
     let mut r = Reader::new(f, guard_block);
-    let (compare, D::Icmp { cond: IntCC::Ugt, args: [bound, compared_one] }) = r.next()? else {
+    let (
+        compare,
+        D::Icmp {
+            cond: IntCC::Ugt,
+            args: [bound, compared_one],
+        },
+    ) = r.next()?
+    else {
         return None;
     };
-    if compared_one != one || f.value_type(bound) != Type::I64
-        || !matches!(f.value_def(bound), keel_ir::ValueDef::Param(b, _) if b == entry) {
+    if compared_one != one
+        || f.value_type(bound) != Type::I64
+        || !matches!(f.value_def(bound), keel_ir::ValueDef::Param(b, _) if b == entry)
+    {
         return None;
     }
     let cond = f.first_result(compare);
-    if f.resolve(cond) != cond { return None; }
+    if f.resolve(cond) != cond {
+        return None;
+    }
     let (
         guard,
         D::Brif {
@@ -175,15 +186,26 @@ fn recognize(f: &Function) -> Option<Candidate> {
     let mut r = Reader::new(f, body);
     let two = r.value(icon(2))?;
     let off = r.value(bin(B::Shl, iv, two))?;
-    let (address, D::Binary { op: B::Ptradd, args: [base, offset] }) = r.next()? else {
+    let (
+        address,
+        D::Binary {
+            op: B::Ptradd,
+            args: [base, offset],
+        },
+    ) = r.next()?
+    else {
         return None;
     };
-    if offset != off || f.value_type(base) != Type::Ptr
-        || !matches!(f.value_def(base), keel_ir::ValueDef::Param(b, _) if b == entry) {
+    if offset != off
+        || f.value_type(base) != Type::Ptr
+        || !matches!(f.value_def(base), keel_ir::ValueDef::Param(b, _) if b == entry)
+    {
         return None;
     }
     let addr = f.first_result(address);
-    if f.resolve(addr) != addr { return None; }
+    if f.resolve(addr) != addr {
+        return None;
+    }
     let load_pos = r.pos;
     let x = r.value(D::Load {
         flags: MemoryFlags::default(),
@@ -223,12 +245,20 @@ fn recognize(f: &Function) -> Option<Candidate> {
         }
         D::Binary { op: B::Iadd, args } if args == [sum, abs] => {
             let total = f.first_result(update);
-            if f.resolve(total) != total { return None; }
+            if f.resolve(total) != total {
+                return None;
+            }
             (body, total)
         }
         _ => return None,
     };
-    let one3 = if matches!(f.inst_data(*r.insts.get(r.pos)?), D::Iconst { ty: Type::I64, imm: 1 }) {
+    let one3 = if matches!(
+        f.inst_data(*r.insts.get(r.pos)?),
+        D::Iconst {
+            ty: Type::I64,
+            imm: 1
+        }
+    ) {
         r.value(icon(1))?
     } else {
         one2

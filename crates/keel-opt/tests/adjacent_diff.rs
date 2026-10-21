@@ -28,7 +28,10 @@ fn derives_inputs_from_dataflow_for_ordinary_and_reordered_signatures() {
         raw.replace("(ptr, ptr, ptr, i64)", "(i64, ptr)")
             .replace("(v0: ptr, v1: ptr, v2: ptr, v3: i64)", "(v3: i64, v0: ptr)"),
         raw.replace("(ptr, ptr, ptr, i64)", "(ptr, i64, ptr, ptr)")
-            .replace("(v0: ptr, v1: ptr, v2: ptr, v3: i64)", "(v1: ptr, v3: i64, v0: ptr, v2: ptr)"),
+            .replace(
+                "(v0: ptr, v1: ptr, v2: ptr, v3: i64)",
+                "(v1: ptr, v3: i64, v0: ptr, v2: ptr)",
+            ),
     ] {
         let mut m = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&m).unwrap();
