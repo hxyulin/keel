@@ -30,7 +30,38 @@ impl RegisterAllocator for Controlled {
             _ => unreachable!(),
         };
         a.spill_slots = 6;
-        for (v, l) in [(0, x), (1, y), (3, z)] {
+        let (_, cmp) = input
+            .func
+            .layout_insts()
+            .find(|&(_, i)| {
+                matches!(
+                    input.func.inst_data(i),
+                    keel_ir::InstData::VectorIcmp { .. }
+                )
+            })
+            .unwrap();
+        let keel_ir::InstData::VectorIcmp { args, .. } = *input.func.inst_data(cmp) else {
+            unreachable!()
+        };
+        let (_, root) = input
+            .func
+            .layout_insts()
+            .find(|&(_, i)| {
+                matches!(
+                    input.func.inst_data(i),
+                    keel_ir::InstData::VectorSelect { .. }
+                        | keel_ir::InstData::VectorBinary {
+                            op: keel_ir::VectorBinaryOp::And,
+                            ..
+                        }
+                )
+            })
+            .unwrap();
+        for (v, l) in [
+            (args[0].index(), x),
+            (args[1].index(), y),
+            (input.func.first_result(root).index(), z),
+        ] {
             a.locs[0][v] = Some(l);
         }
         a
@@ -77,6 +108,9 @@ fn module(s: &str) -> keel_ir::Module {
     m
 }
 fn fixture(controlled: bool) -> (String, String, usize) {
+    fixture_mode(controlled, false)
+}
+fn fixture_mode(controlled: bool, zero: bool) -> (String, String, usize) {
     let mut ir = String::new();
     let mut c = String::from(
         "#include <stdint.h>\n#include <string.h>\n#include <stdio.h>\ntypedef uint32_t V __attribute__((vector_size(16)));\n",
@@ -93,6 +127,9 @@ fn fixture(controlled: bool) -> (String, String, usize) {
         ("ugt", false, false),
         ("uge", false, false),
     ] {
+        if zero && !matches!(cc, "sgt" | "slt") {
+            continue;
+        }
         for rev in [false, true] {
             for layout in if controlled {
                 &[
@@ -133,7 +170,7 @@ fn fixture(controlled: bool) -> (String, String, usize) {
                         name.clone()
                     },
                     u8::from(signed),
-                    u8::from(less != rev),
+                    u8::from(if zero { less } else { less != rev }),
                     u8::from(!controlled)
                 );
                 count += 1;
@@ -161,6 +198,31 @@ int main(void){
 "#;
     c += &calls;
     c += "return 0;}\n";
+    if zero {
+        for cc in ["slt", "sgt"] {
+            let (x, y, m, r) = if controlled {
+                ("v0", "v1", "v2", "v3")
+            } else {
+                ("v3", "v4", "v5", "v6")
+            };
+            ir = ir.replace(
+                &format!(" {m} = vicmp.{cc} {x},{y}"),
+                &format!(" v20 = iconst.i32 0\n v21 = vsplat.i32x4 v20\n {m} = vicmp.{cc} {x},v21"),
+            );
+            ir = ir.replace(
+                &format!("{r} = vselect {m},{x},{y}"),
+                &format!("{r} = vand {m},{x}"),
+            );
+            ir = ir.replace(
+                &format!("{r} = vselect {m},{y},{x}"),
+                &format!("{r} = vand {x},{m}"),
+            );
+        }
+        c = c.replace(
+            "  run(x,y,o);",
+            "  for(unsigned l=0;l<4;l++)y[l]=0;\n  run(x,y,o);",
+        );
+    }
     (ir, c, count)
 }
 fn oracle(stem: &str, ir: &str, c: &str, text: &str, obj: &[u8]) {
@@ -195,30 +257,32 @@ fn recipes(s: &str) -> usize {
 #[test]
 fn independent_clang_native_encoding() {
     use object::{Object, ObjectSection};
-    let (ir, _, n) = fixture(true);
-    let m = module(&ir);
-    let (text, p, _) = compile(&m, &SelectionTier::Baseline, &Controlled, false);
-    assert_eq!(recipes(&text), n);
-    assert!(!text.contains("bsl\t"));
-    let d = dir();
-    let input = d.join("encoding.s");
-    let out = d.join("encoding-clang.o");
-    fs::write(&input, &text).unwrap();
-    command(
-        Command::new("clang")
-            .args(["-target", "arm64-apple-macos11", "-c"])
-            .arg(input)
-            .arg("-o")
-            .arg(&out),
-    );
-    let bytes = fs::read(out).unwrap();
-    let f = object::File::parse(&*bytes).unwrap();
-    assert_eq!(
-        keel_asm::assemble_program(&p, Default::default())
-            .unwrap()
-            .text,
-        f.section_by_name("__text").unwrap().data().unwrap()
-    );
+    for zero in [false, true] {
+        let (ir, _, n) = fixture_mode(true, zero);
+        let m = module(&ir);
+        let (text, p, _) = compile(&m, &SelectionTier::Baseline, &Controlled, false);
+        assert_eq!(recipes(&text), n);
+        assert!(!text.contains("bsl\t"));
+        let d = dir();
+        let input = d.join(format!("encoding-{}.s", u8::from(zero)));
+        let out = d.join(format!("encoding-{}-clang.o", u8::from(zero)));
+        fs::write(&input, &text).unwrap();
+        command(
+            Command::new("clang")
+                .args(["-target", "arm64-apple-macos11", "-c"])
+                .arg(input)
+                .arg("-o")
+                .arg(&out),
+        );
+        let bytes = fs::read(out).unwrap();
+        let f = object::File::parse(&*bytes).unwrap();
+        assert_eq!(
+            keel_asm::assemble_program(&p, Default::default())
+                .unwrap()
+                .text,
+            f.section_by_name("__text").unwrap().data().unwrap()
+        );
+    }
 }
 #[test]
 fn all_four_lanes_aliases_spills_live_inputs_and_tiers() {
@@ -277,7 +341,15 @@ impl keel_codegen::InstructionSelector for Constrained {
         let mut s =
             keel_codegen::InstructionSelector::select(&SelectionTier::Baseline, f, t, folds);
         for (_, i) in f.layout_insts() {
-            if let keel_ir::InstData::VectorSelect { args } = *f.inst_data(i) {
+            let source = match *f.inst_data(i) {
+                keel_ir::InstData::VectorSelect { args } => Some(args[1]),
+                keel_ir::InstData::VectorBinary {
+                    op: keel_ir::VectorBinaryOp::And,
+                    args,
+                } => Some(args[1]),
+                _ => None,
+            };
+            if let Some(source) = source {
                 s.set_constraint(
                     i,
                     ValuePart::low(f.first_result(i)),
@@ -286,7 +358,7 @@ impl keel_codegen::InstructionSelector for Constrained {
                 );
                 s.set_constraint(
                     i,
-                    ValuePart::low(args[1]),
+                    ValuePart::low(source),
                     OperandKind::Use,
                     Constraint::Register,
                 );
@@ -297,33 +369,41 @@ impl keel_codegen::InstructionSelector for Constrained {
 }
 #[test]
 fn constraints_and_debug_keep_normal_fallback_correct() {
-    let (ir, c, _) = fixture(false);
-    let mut m = module(&ir);
-    let (text, _, obj) = compile(&m, &Constrained, &AllocationTier::Full, false);
-    assert_eq!(recipes(&text), 0);
-    assert!(text.contains("bsl\t"));
-    oracle("stage1-constraints", &ir, &c, &text, &obj);
-    m.files.push("minmax.c".into());
-    for f in &mut m.functions {
-        let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
-        for (n, i) in insts.into_iter().enumerate() {
-            f.set_inst_loc(
-                i,
-                Some(keel_ir::SourceLoc {
-                    file: keel_ir::SourceFile::new(0),
-                    line: 1 + n as u32,
-                    col: 1,
-                    scope: None,
-                }),
-            );
+    for zero in [false, true] {
+        let (ir, c, _) = fixture_mode(false, zero);
+        let mut m = module(&ir);
+        let (text, _, obj) = compile(&m, &Constrained, &AllocationTier::Full, false);
+        assert_eq!(recipes(&text), 0);
+        assert!(text.contains(if zero { "and\tv" } else { "bsl\t" }));
+        oracle(
+            &format!("constraints-{}", u8::from(zero)),
+            &ir,
+            &c,
+            &text,
+            &obj,
+        );
+        m.files.push("minmax.c".into());
+        for f in &mut m.functions {
+            let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+            for (n, i) in insts.into_iter().enumerate() {
+                f.set_inst_loc(
+                    i,
+                    Some(keel_ir::SourceLoc {
+                        file: keel_ir::SourceFile::new(0),
+                        line: 1 + n as u32,
+                        col: 1,
+                        scope: None,
+                    }),
+                );
+            }
         }
+        let (text, _, obj) = compile(&m, &SelectionTier::Full, &AllocationTier::Full, true);
+        assert_eq!(recipes(&text), 0);
+        assert!(text.contains(if zero { "and\tv" } else { "bsl\t" }));
+        assert!(text.contains(".loc\t1 3 1"));
+        assert!(text.contains(".loc\t1 4 1"));
+        oracle(&format!("debug-{}", u8::from(zero)), &ir, &c, &text, &obj);
     }
-    let (text, _, obj) = compile(&m, &SelectionTier::Full, &AllocationTier::Full, true);
-    assert_eq!(recipes(&text), 0);
-    assert!(text.contains("bsl\t"));
-    assert!(text.contains(".loc\t1 3 1"));
-    assert!(text.contains(".loc\t1 4 1"));
-    oracle("stage1-debug", &ir, &c, &text, &obj);
 }
 #[test]
 fn arbitrary_mask_select_preserves_lane_truth() {
@@ -344,6 +424,104 @@ int main(void){uint32_t m[4]={0,0x55555555,0x80000001,0xffffffff},a[4]={0xffffff
         oracle(
             &format!("arbitrary-{}", u8::from(spill)),
             ir,
+            c,
+            &text,
+            &obj,
+        );
+    }
+}
+
+#[test]
+fn zero_filters_all_lanes_native_aliases_spills_and_tiers() {
+    for controlled in [true, false] {
+        let (ir, c, n) = fixture_mode(controlled, true);
+        let m = module(&ir);
+        for (si, s) in [
+            SelectionTier::Baseline,
+            SelectionTier::Trees,
+            SelectionTier::Full,
+        ]
+        .iter()
+        .enumerate()
+        {
+            for (ai, a) in [AllocationTier::Fast, AllocationTier::Full]
+                .iter()
+                .enumerate()
+            {
+                for spill in [false, true] {
+                    let alloc: &dyn RegisterAllocator = if controlled { &Controlled } else { a };
+                    if controlled && (spill || ai != 0) {
+                        continue;
+                    }
+                    let (text, _, obj) = compile(&m, s, alloc, spill);
+                    assert_eq!(recipes(&text), n, "{text}");
+                    assert!(!text.contains("cmgt\t"));
+                    assert!(!text.contains("and\tv"));
+                    oracle(
+                        &format!(
+                            "stage2-{}-{si}-{ai}-{}",
+                            u8::from(controlled),
+                            u8::from(spill)
+                        ),
+                        &ir,
+                        &c,
+                        &text,
+                        &obj,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn external_masks_and_nonzero_threshold_keep_fallback_results() {
+    let mut ir = String::new();
+    for (name, compare, root) in [
+        ("external_select", "vicmp.slt v3,v4", "vselect v5,v3,v4"),
+        ("external_zero", "vicmp.sgt v3,v8", "vand v5,v3"),
+        ("threshold_one", "vicmp.sgt v3,v8", "vand v5,v3"),
+    ] {
+        let threshold = if name == "threshold_one" { 1 } else { 0 };
+        ir += &format!(
+            "func @{name}(ptr,ptr,ptr) {{\nblock0(v0:ptr,v1:ptr,v2:ptr):\n v3 = load.i32x4 align 1 v0\n v4 = load.i32x4 align 1 v1\n v7 = iconst.i32 {threshold}\n v8 = vsplat.i32x4 v7\n v5 = {compare}\n v6 = {root}\n store align 1 v6,v2\n v9 = iconst.i64 16\n v10 = ptradd v2,v9\n store align 1 v5,v10\n return\n}}\n"
+        );
+    }
+    let c = r#"#include <stdint.h>
+extern void external_select(const uint32_t*,const uint32_t*,uint32_t*);
+extern void external_zero(const uint32_t*,const uint32_t*,uint32_t*);
+extern void threshold_one(const uint32_t*,const uint32_t*,uint32_t*);
+static uint32_t state=0x12345678;
+static uint32_t rnd(void){state^=state<<13;state^=state>>17;state^=state<<5;return state;}
+int main(void){
+ void(*run[])(const uint32_t*,const uint32_t*,uint32_t*)={external_select,external_zero,threshold_one};
+ const uint32_t edges[]={0,1,2,0x7fffffff,0x80000000,0xffffffff};
+ for(unsigned n=0;n<3;n++)for(unsigned k=0;k<36+4096;k++){
+  uint32_t a[4],b[4],out[8];
+  for(unsigned l=0;l<4;l++){a[l]=k<36?edges[(k/6+l)%6]:rnd();b[l]=k<36?edges[(k%6+l)%6]:rnd();}
+  run[n](a,b,out);
+  for(unsigned l=0;l<4;l++){
+   uint32_t m=0u-(uint32_t)(n==0?(int32_t)a[l]<(int32_t)b[l]:(int32_t)a[l]>(n==2?1:0));
+   uint32_t want=n==0?(m?a[l]:b[l]):(m&a[l]);
+   if(out[l]!=want||out[4+l]!=m)return 1;
+  }
+ }
+ return 0;
+}
+"#;
+    for spill in [false, true] {
+        let (text, _, obj) = compile(
+            &module(&ir),
+            &SelectionTier::Full,
+            &AllocationTier::Full,
+            spill,
+        );
+        assert_eq!(recipes(&text), 0);
+        assert!(text.contains("cmgt\t"));
+        assert!(text.contains("bsl\t"));
+        oracle(
+            &format!("external-masks-{}", u8::from(spill)),
+            &ir,
             c,
             &text,
             &obj,

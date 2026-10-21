@@ -1,6 +1,6 @@
 //! Closed adjacent I32x4 integer compare/select covers, across selection tiers.
 use super::*;
-use keel_ir::VectorType;
+use keel_ir::{VectorBinaryOp, VectorType};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -32,6 +32,33 @@ fn producer(f: &Function, i: Inst, ty: Type) -> Option<Value> {
     let [r] = *f.inst_results(i) else { return None };
     (f.resolve(r) == r && f.value_def(r) == ValueDef::Result(i, 0) && f.value_type(r) == ty)
         .then_some(r)
+}
+
+// Fresh exact literal proof; neither folded arithmetic nor a stale producer
+// whose declared result was redirected to a parameter is a zero constant.
+fn zero(f: &Function, v: Value) -> bool {
+    let v = f.resolve(v);
+    let ValueDef::Result(s, 0) = f.value_def(v) else {
+        return false;
+    };
+    if producer(f, s, TY) != Some(v) {
+        return false;
+    }
+    let InstData::VectorSplat { ty: TY, arg } = *f.inst_data(s) else {
+        return false;
+    };
+    let arg = f.resolve(arg);
+    let ValueDef::Result(c, 0) = f.value_def(arg) else {
+        return false;
+    };
+    producer(f, c, Type::I32) == Some(arg)
+        && matches!(
+            f.inst_data(c),
+            InstData::Iconst {
+                ty: Type::I32,
+                imm: 0
+            }
+        )
 }
 
 pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, MinMax> {
@@ -79,34 +106,64 @@ pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashM
             if [a, b].iter().any(|&v| f.value_type(v) != TY) {
                 continue;
             }
-            let (signed, less) = match cond {
-                IntCC::Slt | IntCC::Sle => (true, true),
-                IntCC::Sgt | IntCC::Sge => (true, false),
-                IntCC::Ult | IntCC::Ule => (false, true),
-                IntCC::Ugt | IntCC::Uge => (false, false),
+            let (kind, mask_operand) = match *f.inst_data(root) {
+                InstData::VectorSelect { args } => {
+                    let (signed, less) = match cond {
+                        IntCC::Slt | IntCC::Sle => (true, true),
+                        IntCC::Sgt | IntCC::Sge => (true, false),
+                        IntCC::Ult | IntCC::Ule => (false, true),
+                        IntCC::Ugt | IntCC::Uge => (false, false),
+                        _ => continue,
+                    };
+                    let [m, yes, no] = args.map(|v| f.resolve(v));
+                    if m != mask {
+                        continue;
+                    }
+                    let minimum = if [yes, no] == [a, b] {
+                        less
+                    } else if [yes, no] == [b, a] {
+                        !less
+                    } else {
+                        continue;
+                    };
+                    // At equality either arm has identical bits, including <= and >=.
+                    let kind = match (signed, minimum) {
+                        (true, true) => Kind::Smin,
+                        (true, false) => Kind::Smax,
+                        (false, true) => Kind::Umin,
+                        (false, false) => Kind::Umax,
+                    };
+                    (kind, 0)
+                }
+                InstData::VectorBinary {
+                    op: VectorBinaryOp::And,
+                    args,
+                } => {
+                    // Strict X > 0 / X < 0 only. Every lane is preserved,
+                    // regardless of whether a later widening reads just the low half.
+                    let kind = match cond {
+                        IntCC::Sgt => Kind::Smax,
+                        IntCC::Slt => Kind::Smin,
+                        _ => continue,
+                    };
+                    if !zero(f, b) {
+                        continue;
+                    }
+                    let args = args.map(|v| f.resolve(v));
+                    let position = if args == [mask, a] {
+                        0
+                    } else if args == [a, mask] {
+                        1
+                    } else {
+                        continue;
+                    };
+                    (kind, position)
+                }
                 _ => continue,
             };
-            let InstData::VectorSelect { args } = *f.inst_data(root) else {
-                continue;
-            };
-            let [m, yes, no] = args.map(|v| f.resolve(v));
-            if m != mask || uses[mask.index()] != [(root, 0)] {
+            if uses[mask.index()] != [(root, mask_operand)] {
                 continue;
             }
-            let minimum = if [yes, no] == [a, b] {
-                less
-            } else if [yes, no] == [b, a] {
-                !less
-            } else {
-                continue;
-            };
-            // At equality either arm has identical bits, including <= and >=.
-            let kind = match (signed, minimum) {
-                (true, true) => Kind::Smin,
-                (true, false) => Kind::Smax,
-                (false, true) => Kind::Umin,
-                (false, false) => Kind::Umax,
-            };
             plan.cover(cmp);
             // Preserve occurrences even when A and B resolve to the same leaf.
             plan.set_operands(root, vec![a, b]);
