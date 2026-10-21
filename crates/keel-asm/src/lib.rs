@@ -489,7 +489,10 @@ impl ProgramAssembler {
         self.0.push(program)
     }
     pub fn finish(self) -> Result<Vec<u8>, Error> {
-        parser::assemble_compact(&self.0)?.to_macho()
+        let assembly = parser::assemble_compact(&self.0)?;
+        // Release the program before the Mach-O writer allocates.
+        drop(self);
+        assembly.to_macho()
     }
 }
 

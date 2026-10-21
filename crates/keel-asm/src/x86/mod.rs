@@ -869,6 +869,9 @@ fn assemble_items_inner<const PROFILE: bool>(
             if let Some(e) = pending_leb_error {
                 return Err(e);
             }
+            // The layout is final: release the collected program before
+            // the object writer allocates its own tables and output.
+            *items = Items::new(items.features);
             let object = a.object()?;
             if let Some(start) = start {
                 profile.object_ms = start.elapsed().as_secs_f64() * 1000.0;
