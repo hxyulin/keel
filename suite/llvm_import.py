@@ -58,6 +58,9 @@ class LLVM:
             'GetCallSiteAttributeCount': (U, [P, U]),
             'GetCallSiteAttributes': (None, [P, U, C.POINTER(P)]),
             'IsStringAttribute': (C.c_int, [P]),
+            'GetEnumAttributeKind': (U, [P]), 'GetTypeAttributeValue': (P, [P]),
+            'CountParamTypes': (U, [P]), 'GetParamTypes': (None, [P, C.POINTER(P)]),
+            'IsPackedStruct': (C.c_int, [P]),
             'GetStringAttributeKind': (P, [P, C.POINTER(U)]),
             'GetFirstBasicBlock': (P, [P]), 'GetNextBasicBlock': (P, [P]),
             'GetFirstInstruction': (P, [P]), 'GetNextInstruction': (P, [P]),
@@ -67,7 +70,7 @@ class LLVM:
             'ConstIntGetZExtValue': (C.c_ulonglong, [P]),
             'ConstIntGetSExtValue': (C.c_longlong, [P]),
             'GetICmpPredicate': (U, [P]), 'GetCalledValue': (P, [P]),
-            'GetCalledFunctionType': (P, [P]),
+            'GetCalledFunctionType': (P, [P]), 'GetTailCallKind': (U, [P]),
             'GetNumArgOperands': (U, [P]), 'GetVolatile': (C.c_int, [P]),
             'GetOrdering': (U, [P]), 'GetNUW': (C.c_int, [P]),
             'GetNSW': (C.c_int, [P]), 'GetExact': (C.c_int, [P]),
@@ -128,7 +131,17 @@ class LLVM:
         get = self.GetCallSiteAttributes if call else self.GetAttributesAtIndex
         attributes = (P * count(value, index))()
         get(value, index, attributes)
+        # Calls carry their own contracts, especially when there is no named
+        # declaration to consult. Accept known non-ABI function attributes only.
+        call_allowed = ('nounwind', 'willreturn', 'nofree', 'nosync', 'nocallback',
+                        'noinline', 'alwaysinline', 'inlinehint', 'cold', 'hot',
+                        'memory', 'allocsize', 'allockind', 'speculatable',
+                        'mustprogress', 'norecurse', 'nobuiltin', 'builtin')
+        call_kinds = {self.GetEnumAttributeKindForName(n.encode(), len(n)) for n in call_allowed}
         for attribute in attributes:
+            if call and (self.IsStringAttribute(attribute)
+                         or self.GetEnumAttributeKind(attribute) not in call_kinds):
+                raise Unsupported('unsupported call function ABI contract')
             if self.IsStringAttribute(attribute):
                 length = U()
                 key = self.GetStringAttributeKind(attribute, C.byref(length))
@@ -193,20 +206,62 @@ class Importer:
         if l.GetGC(fn) or l.GetSection(fn) or l.HasPrefixData(fn) or l.HasPrologueData(fn) or l.GetDLLStorageClass(fn):
             raise Unsupported(f'{self.symbol(fn)}: GC, section, prefix/prologue data or DLL storage')
         l.check_function_attributes(fn)
-        types = [l.GetReturnType(fty)] + [l.TypeOf(l.GetParam(fn, i)) for i in range(l.CountParams(fn))]
+        return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)))
+
+    def abi_signature(self, value, fty, call=False, definition=False):
+        """Use LLVM's function type and explicit ABI contract, never infer C types."""
+        l = self.l
+        if l.IsFunctionVarArg(fty):
+            raise Unsupported('variadic signature')
+        params = (P * l.CountParamTypes(fty))()
+        l.GetParamTypes(fty, params)
+        types = [l.GetReturnType(fty), *params]
+        # These attributes constrain valid values/memory but do not change the
+        # machine calling convention. All other parameter/return contracts fail
+        # closed, including new LLVM ABI attributes such as noext.
+        allowed = ('signext', 'zeroext', 'sret', 'noundef', 'nonnull', 'noalias',
+                   'nocapture', 'captures', 'nofree', 'readonly', 'readnone', 'writeonly',
+                   'dereferenceable', 'dereferenceable_or_null', 'align', 'range',
+                   'dead_on_unwind', 'writable', 'initializes')
+        kinds = {l.GetEnumAttributeKindForName(n.encode(), len(n)) for n in allowed}
+        count = l.GetCallSiteAttributeCount if call else l.GetAttributeCountAtIndex
+        get = l.GetCallSiteAttributes if call else l.GetAttributesAtIndex
         result = []
         for index, ty in enumerate(types):
-            for attr in self.ABI_UNSUPPORTED:
-                if l.attribute(fn, index, attr):
-                    raise Unsupported(f'{self.symbol(fn)}: unsupported ABI attribute {attr}')
+            attrs = (P * count(value, index))()
+            get(value, index, attrs)
+            for attr in attrs:
+                if l.IsStringAttribute(attr) or l.GetEnumAttributeKind(attr) not in kinds:
+                    raise Unsupported('unsupported parameter/return ABI attribute')
             text = self.type(ty, abi=True)
-            if index == 0 and text in ('i8', 'i16') and l.GetFirstBasicBlock(fn) and not any(
-                l.attribute(fn, 0, attr) for attr in ('signext', 'zeroext')
-            ):
-                raise Unsupported(f'{self.symbol(fn)}: i8/i16 return definitions require signext or zeroext')
-            for attr, keel in [('signext', 'sext'), ('zeroext', 'uext')]:
-                if l.attribute(fn, index, attr):
-                    text += ' ' + keel
+            sret = l.attribute(value, index, 'sret', call=call)
+            if sret:
+                # LLVM already lowered this result to x8. Keel reclassifies sret
+                # layouts, so accept only the proven 24-byte integer triple.
+                # In particular, small structs and HFAs must NOT be copied here.
+                if index != 1 or text != 'ptr' or l.GetTypeKind(types[0]) != 0:
+                    raise Unsupported('sret requires first pointer parameter and void result')
+                getter = l.GetCallSiteEnumAttribute if call else l.GetEnumAttributeAtIndex
+                layout = l.GetTypeAttributeValue(getter(value, index, l.attribute_kinds['sret']))
+                if (l.GetTypeKind(layout) != 10 or l.IsOpaqueStruct(layout)
+                        or l.IsPackedStruct(layout) or l.CountStructElementTypes(layout) != 3
+                        or any(l.GetTypeKind(l.StructGetTypeAtIndex(layout, i)) != 8
+                               or l.GetIntTypeWidth(l.StructGetTypeAtIndex(layout, i)) != 64
+                               for i in range(3))
+                        or l.ABISizeOfType(self.td, layout) != 24
+                        or l.ABIAlignmentOfType(self.td, layout) != 8
+                        or any(l.OffsetOfElement(self.td, layout, i) != i * 8 for i in range(3))):
+                    raise Unsupported('sret layout outside proven unpacked three-i64 contract')
+                text += ' sret {i64, i64, i64}'
+            extensions = [a for a in ('signext', 'zeroext') if l.attribute(value, index, a, call=call)]
+            if extensions and (sret or l.GetTypeKind(ty) != 8):
+                raise Unsupported('extension requires integer ABI type')
+            if len(extensions) > 1:
+                raise Unsupported('conflicting ABI extensions')
+            if index == 0 and text in ('i8', 'i16') and (definition or call) and not extensions:
+                raise Unsupported('i8/i16 return definitions/calls require signext or zeroext')
+            for attr in extensions:
+                text += ' ' + {'signext': 'sext', 'zeroext': 'uext'}[attr]
             result.append(text)
         return result[0], result[1:]
 
@@ -224,6 +279,8 @@ class Importer:
             ty = self.type(l.TypeOf(value))
             n = l.ConstIntGetZExtValue(value) if self.width(value) == 1 else l.ConstIntGetSExtValue(value)
             return self.emit(f'iconst.{ty} {n}')
+        if l.IsAFunction(value):
+            return self.emit(f'symbol_addr {self.symbol(value)}')
         if l.IsAConstantPointerNull(value):
             zero = self.emit('iconst.i64 0')
             return self.emit(f'inttoptr.ptr {zero}')
@@ -381,26 +438,33 @@ class Importer:
         if op == 45:
             l.check_function_attributes(inst, call=True)
             callee = l.GetCalledValue(inst)
-            if not l.IsAFunction(callee) or l.GetInstructionCallConv(inst) != 0:
-                raise Unsupported('indirect or non-C call')
+            if l.GetInstructionCallConv(inst) != 0:
+                raise Unsupported('non-C call')
             if l.GetNumOperandBundles(inst):
                 raise Unsupported('call operand bundles')
-            if l.GetCalledFunctionType(inst) != l.GlobalGetValueType(callee):
-                raise Unsupported('call type differs from declaration')
-            if l.name(callee).startswith('llvm.'):
-                raise Unsupported('LLVM intrinsic ' + l.name(callee))
-            if 'musttail' in l.printed(inst):
+            if l.GetTailCallKind(inst) == 2:  # LLVMTailCallKindMustTail
                 raise Unsupported('musttail call')
-            ret, params = self.signatures[callee]
-            for index in range(l.GetNumArgOperands(inst) + 1):
-                for attr in self.ABI_UNSUPPORTED:
-                    if l.attribute(inst, index, attr, call=True):
-                        raise Unsupported('call-site ABI attribute ' + attr)
-                for attr in ('signext', 'zeroext'):
-                    if l.attribute(inst, index, attr, call=True) != l.attribute(callee, index, attr):
-                        raise Unsupported('call-site extension differs from declaration')
-            args = ', '.join(self.value(l.GetOperand(inst, i)) for i in range(l.GetNumArgOperands(inst)))
-            expr = f'call {self.symbol(callee)}({args})'
+            fty = l.GetCalledFunctionType(inst)
+            ret, params = self.abi_signature(inst, fty, call=True)
+            if l.GetNumArgOperands(inst) != len(params):
+                raise Unsupported('call argument count differs from signature')
+            direct = bool(l.IsAFunction(callee))
+            if direct:
+                if fty != l.GlobalGetValueType(callee):
+                    raise Unsupported('call type differs from declaration')
+                if l.name(callee).startswith('llvm.'):
+                    raise Unsupported('LLVM intrinsic ' + l.name(callee))
+                if (ret, params) != self.signatures[callee]:
+                    raise Unsupported('call-site ABI differs from declaration')
+            args = ', '.join(self.value(l.GetOperand(inst, i)) for i in range(len(params)))
+            if direct:
+                expr = f'call {self.symbol(callee)}({args})'
+            else:
+                pointer = self.value(callee)
+                signature = '(' + ', '.join(params) + ')'
+                if ret != 'void':
+                    signature += ' -> ' + ret
+                expr = f'call_indirect {pointer}({args}) : {signature} cc(c)'
             if ret == 'void':
                 self.lines.append('    ' + expr)
                 return None
