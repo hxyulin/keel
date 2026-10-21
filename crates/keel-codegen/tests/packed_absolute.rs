@@ -10,6 +10,21 @@ const EMPTY: Pools = Pools {
     float_caller_saved: &[],
     float_callee_saved: &[],
 };
+// PSRAD also lowers standalone sign comparisons. Identify the complete abs
+// recipe rather than treating that shared instruction as proof of fusion.
+fn abs_recipes(text: &str, arm: bool) -> usize {
+    if arm {
+        return text.matches("abs\t").count();
+    }
+    let opcodes: Vec<_> = text
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    opcodes
+        .windows(4)
+        .filter(|w| *w == ["psrad", "pshufd", "pxor", "psubq"])
+        .count()
+}
 struct Controlled;
 impl RegisterAllocator for Controlled {
     fn name(&self) -> &'static str {
@@ -266,11 +281,7 @@ fn controlled_aliases_and_spills() {
             SelectionTier::Full,
         ] {
             let (text, obj) = compile(arm, &ir, sel, &Controlled, false);
-            assert_eq!(
-                text.matches(if arm { "abs\t" } else { "psrad\t" }).count(),
-                10,
-                "{text}"
-            );
+            assert_eq!(abs_recipes(&text, arm), 10, "{text}");
             oracle(arm, &format!("controlled-{sel:?}"), &ir, &c, &text, &obj);
         }
     }
@@ -287,11 +298,7 @@ fn live_sources_full_fast_and_all_spills() {
             for alloc in [AllocationTier::Fast, AllocationTier::Full] {
                 for spill in [false, true] {
                     let (text, obj) = compile(arm, &ir, sel, &alloc, spill);
-                    assert_eq!(
-                        text.matches(if arm { "abs\t" } else { "psrad\t" }).count(),
-                        2,
-                        "{text}"
-                    );
+                    assert_eq!(abs_recipes(&text, arm), 2, "{text}");
                     oracle(
                         arm,
                         &format!("live-{sel:?}-{alloc:?}-{spill}"),
@@ -340,10 +347,7 @@ r=swapped(a,b);memcpy(o,&r,16);for(unsigned l=0;l<2;l++)if(o[l]!=((x[l]>>63)?x[l
     for arm in [true, false] {
         for spill in [false, true] {
             let (text, obj) = compile(arm, &ir, SelectionTier::Full, &AllocationTier::Full, spill);
-            assert!(
-                !text.contains(if arm { "abs\t" } else { "psrad\t" }),
-                "{text}"
-            );
+            assert!(abs_recipes(&text, arm) == 0, "{text}");
             oracle(arm, &format!("negative-{spill}"), &ir, &c, &text, &obj);
         }
     }
@@ -393,10 +397,7 @@ fn custom_constraints_and_debug_lines_keep_fallback_semantics() {
     for arm in [true, false] {
         let mut m = keel_ir::parse(&ir).unwrap();
         let (text, obj) = compile_module(arm, &m, &Constrained, &AllocationTier::Full, false);
-        assert!(
-            !text.contains(if arm { "abs\t" } else { "psrad\t" }),
-            "{text}"
-        );
+        assert!(abs_recipes(&text, arm) == 0, "{text}");
         oracle(arm, "custom-constraints", &ir, &c, &text, &obj);
         m.files.push("packed-abs.c".into());
         for f in &mut m.functions {
@@ -415,10 +416,7 @@ fn custom_constraints_and_debug_lines_keep_fallback_semantics() {
         }
         let (text, obj) =
             compile_module(arm, &m, &SelectionTier::Full, &AllocationTier::Full, true);
-        assert!(
-            !text.contains(if arm { "abs\t" } else { "psrad\t" }),
-            "{text}"
-        );
+        assert!(abs_recipes(&text, arm) == 0, "{text}");
         for function in text.split(".globl").skip(1) {
             let mut cursor = 0;
             for line in 12..=14 {
