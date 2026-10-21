@@ -5,6 +5,34 @@
 //! as eight bytes, in ascending stream order. No notrap promise is invented.
 //! A nonwrapping byte-range guard retains the scalar loop for wrapping inputs.
 //! This deliberately does not relax the generic multi-stream trapping rule.
+//!
+//! Invariant at the chunk check: 2 <= k <= n; previous lane 1 is a[k-1];
+//! the scalar seed contains |a[1]-a[0]|, and the two wrapping vector sums
+//! contain exactly differences 2..k. The initial splat of a[1] establishes
+//! this without reading a[0] again. The loaded low lanes are [a[k],a[k+1]];
+//! shuffle(previous,current,[1,2]) gives [a[k-1],a[k]]. Updating k by two
+//! establishes the invariant again. With n-k<2, the optional scalar tail
+//! reads only a[k], reusing previous lane 1. n=2 never enters either body.
+//!
+//! The n>1 guard executes before all loads. The fast-path guard requires
+//! n <= UINT64_MAX/4 and base+4*n >= base. Thus every byte in [base,base+4*n)
+//! has a nonwrapping address; k+2<=n proves the exact eight-byte load fits.
+//! A false guard executes the original scalar loop, including wrapping
+//! address/induction behavior. All guard operations themselves are total.
+//!
+//! Only default ordinary memory loads are accepted, and the complete function
+//! has no other memory effects. Previously successful reads can be reused
+//! without a write/call/volatile/atomic barrier. After the two prefix reads,
+//! newly visited samples are strictly increasing, including within each
+//! packed load. The packed load covers exactly two consecutive scalar loads,
+//! without an overread. Either earlier prefix fault therefore stays first;
+//! subsequent failing bytes belong to the same first newly visited sample.
+//! This relies on ordinary read-only memory semantics, not volatile/MMIO or
+//! asynchronous mapping mutation. It adds neither alignment nor notrap flags.
+//!
+//! Sign widening precedes subtraction. Differences lie in [-4294967295,
+//! 4294967295], so i64 negation cannot overflow. Summation is in the u64
+//! wrapping ring: regrouping into independent lanes preserves the result.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp as C, Function, Inst, InstData as D, IntCC,
@@ -101,7 +129,7 @@ fn params(f: &Function, b: Block, types: &[Type]) -> Option<Vec<Value>> {
     .then(|| p.to_vec())
 }
 fn recognize(f: &Function) -> Option<Candidate> {
-    if f.blocks().count() != 5 || f.layout_insts().count() > 40 {
+    if f.blocks().take(6).count() != 5 || f.layout_insts().take(41).count() > 40 {
         return None;
     }
     let entry = f.entry_block()?;
