@@ -74,9 +74,11 @@ impl ControlFlowGraph {
         let Some(entry) = func.entry_block() else {
             return Vec::new();
         };
-        let mut order = Vec::new();
-        let mut visited = vec![false; func.num_blocks()];
-        let mut stack = vec![(entry, 0usize)];
+        let n = func.num_blocks();
+        let mut order = Vec::with_capacity(n);
+        let mut visited = vec![false; n];
+        let mut stack = Vec::with_capacity(n.min(64));
+        stack.push((entry, 0usize));
         visited[entry.index()] = true;
         while let Some((block, next)) = stack.last_mut() {
             let block = *block;
