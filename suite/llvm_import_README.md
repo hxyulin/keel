@@ -42,6 +42,11 @@ rename; unsupported input leaves an existing destination intact.
   visibility remain rejected.
   Definitions returning i8/i16 require `signext` or `zeroext`; no extension is
   guessed. Function COMDAT membership is rejected.
+  Boolean i1 parameters and returns require explicit `zeroext` on declarations,
+  definitions and call sites, and map to canonical Keel `i8 uext`. Unspecified
+  or signed i1 extension is rejected (sign-extending true is not i8's value 1).
+  `llvm_import_bool_validate.py` checks untouched Clang O0/O1/O2 IR against a
+  native C caller and callbacks through None/Fast/Full, including stack arguments.
 - Wrapping integer arithmetic, division/remainder, bit operations and shifts;
   integer comparisons and selects; truncation, sign/zero extension and
   pointer/integer conversions. Internal i1 values become normalized Keel i8
@@ -136,7 +141,7 @@ security-hardening, or source-level tooling replacement for LLVM.
 Global aliases/ifuncs, TLS/common/weak-any/linkonce-any/COMDAT/sections and unsupported
 global attributes, half/bfloat/x87/FP128, vectors, `frem`,
 aggregate SSA beyond dedicated EH pairs and ABIs beyond the bounded sret contract,
-i128, i1 ABI parameters/returns, ordinary varargs, non-C calls, intrinsics other
+i128, i1 ABI parameters/returns without explicit zeroext, ordinary varargs, non-C calls, intrinsics other
 than EH typeid and bounded lifetime markers, operand bundles, inline assembly, atomics, unsupported EH forms,
 GC, special sections, explicit prefix/prologue data and
 unsupported ABI attributes are outside this first implementation. Failure is

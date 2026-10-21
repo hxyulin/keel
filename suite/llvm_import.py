@@ -214,11 +214,11 @@ class Importer:
             return {2: 'f32', 3: 'f64'}[kind]
         if kind == 8:
             width = self.l.GetIntTypeWidth(ty)
-            if width in (8, 16, 32, 64) or (width == 1 and not abi):
+            if width in (1, 8, 16, 32, 64):
                 return 'i8' if width == 1 else f'i{width}'
         if kind == 12 and self.l.GetPointerAddressSpace(ty) == 0:
             return 'ptr'
-        raise Unsupported('supported types are scalar i8/i16/i32/i64/f32/f64 and address-space-zero pointers; i1 is internal only')
+        raise Unsupported('supported types are scalar i1/i8/i16/i32/i64/f32/f64 and address-space-zero pointers')
 
     def width(self, value):
         ty = self.l.TypeOf(value)
@@ -314,6 +314,13 @@ class Importer:
                 raise Unsupported('extension requires integer ABI type')
             if len(extensions) > 1:
                 raise Unsupported('conflicting ABI extensions')
+            # A zero-extended i1 is physically the same canonical 0/1 value
+            # as Keel i8 uext on the supported Apple AArch64 target. Sign
+            # extension is NOT equivalent: true would be -1 rather than 1.
+            # Unspecified extension remains outside the proven contract.
+            if (l.GetTypeKind(ty) == 8 and l.GetIntTypeWidth(ty) == 1
+                    and extensions != ['zeroext']):
+                raise Unsupported('i1 ABI parameters/returns require explicit zeroext')
             if index == 0 and text in ('i8', 'i16') and (definition or call) and not extensions:
                 raise Unsupported('i8/i16 return definitions/calls require signext or zeroext')
             for attr in extensions:
@@ -747,7 +754,12 @@ class Importer:
                 self.personalities.add(personality)
         if self.localize_odr:
             self.local_copies = local_copies(self, module, functions, Unsupported)
-        self.signatures = {fn: self.signature(fn) for fn in functions}
+        self.signatures = {}
+        for fn in functions:
+            try:
+                self.signatures[fn] = self.signature(fn)
+            except Unsupported as e:
+                raise Unsupported(f'{self.symbol(fn)}: {e}') from e
         self.needs_resume = False
         self.globals = Globals(self, module, functions, Unsupported)
         for personality in self.personalities:
