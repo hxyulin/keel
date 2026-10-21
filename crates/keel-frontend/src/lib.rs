@@ -155,6 +155,7 @@ pub struct FunctionBuilderContext {
     incoming: Vec<Vec<(Inst, usize)>>,
     incoming_used: usize,
     indexed_terms: Vec<Option<Inst>>,
+    chains: Vec<Option<Block>>,
 }
 
 impl FunctionBuilderContext {
@@ -178,6 +179,7 @@ impl FunctionBuilderContext {
         }
         self.incoming_used = 0;
         self.indexed_terms.clear();
+        self.chains.clear();
     }
 }
 
@@ -206,6 +208,9 @@ pub struct FunctionBuilder<'f> {
     incoming_used: usize,
     /// The branch terminator already indexed for each source block.
     indexed_terms: Vec<Option<Inst>>,
+    /// The only predecessor of each sealed block that has one: reads
+    /// follow these chains without looking at the edges.
+    chains: Vec<Option<Block>>,
     /// `ins()` lends out a builder; its insertion is observed on the next
     /// source change or seal, once that mutable borrow has ended.
     pending: Option<Block>,
@@ -229,6 +234,7 @@ impl<'f> FunctionBuilder<'f> {
             incoming,
             incoming_used,
             indexed_terms,
+            chains,
         } = context;
         Self {
             func,
@@ -243,6 +249,7 @@ impl<'f> FunctionBuilder<'f> {
             incoming,
             incoming_used,
             indexed_terms,
+            chains,
             pending: None,
         }
     }
@@ -350,6 +357,12 @@ impl<'f> FunctionBuilder<'f> {
         state
             .preds
             .sort_unstable_by_key(|&(inst, dest)| (func.inst_block(inst), dest));
+        if let &[(branch, _)] = state.preds.as_slice() {
+            if self.chains.len() <= block.index() {
+                self.chains.resize(block.index() + 1, None);
+            }
+            self.chains[block.index()] = Some(func.inst_block(branch));
+        }
         let incomplete = std::mem::take(&mut self.blocks[block.index()].incomplete);
         for &(var, param) in &incomplete {
             self.add_param_args(var, block, param);
@@ -415,6 +428,7 @@ impl<'f> FunctionBuilder<'f> {
             incoming: self.incoming,
             incoming_used: self.incoming_used,
             indexed_terms: self.indexed_terms,
+            chains: self.chains,
         }
     }
 
@@ -429,10 +443,35 @@ impl<'f> FunctionBuilder<'f> {
         &mut self.blocks[i]
     }
 
+    /// The value of `var` at the end of `block`. Along a chain of sealed
+    /// blocks with one predecessor each, the value is the predecessor's, so
+    /// the walk follows the chain to the nearest block that defines `var`
+    /// or must work it out. The value is recorded there and in `block`,
+    /// where the next reads look, but not in the blocks between: they
+    /// would only memoize the same walk.
     fn read(&mut self, var: Variable, block: Block) -> Value {
         if let Some(value) = self.blocks.get(block.index()).and_then(|s| s.defs.get(var)) {
             return self.func.resolve(value);
         }
+        let mut at = block;
+        while let Some(&Some(pred)) = self.chains.get(at.index()) {
+            at = pred;
+            if let Some(value) = self.blocks[at.index()].defs.get(var) {
+                let value = self.func.resolve(value);
+                self.blocks[block.index()].defs.insert(var, value);
+                return value;
+            }
+        }
+        let value = self.read_here(var, at);
+        if at != block {
+            self.blocks[block.index()].defs.insert(var, value);
+        }
+        value
+    }
+
+    /// The value of `var` at the end of `block`, which does not define it
+    /// and is not a sealed block with one predecessor.
+    fn read_here(&mut self, var: Variable, block: Block) -> Value {
         let ty = self.var_types[var.index()];
         let state = &self.blocks[block.index()];
         let value = if !state.sealed.expect("unregistered SSA block") {
