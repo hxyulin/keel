@@ -762,13 +762,13 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         for (_, callee) in func.callees() {
-            let what = format!("call to @{}", callee.name);
-            check_call_signature(&what, &callee.sig, symbols.is_external(&callee.name))
+            let what = || format!("call to @{}", callee.name);
+            check_call_signature(what, &callee.sig, symbols.is_external(&callee.name))
                 .map_err(err)?;
         }
         // The target of an indirect call may be an external function.
         for (_, sig) in func.signatures() {
-            check_call_signature(&format!("indirect call {sig}"), sig, true).map_err(err)?;
+            check_call_signature(|| format!("indirect call {sig}"), sig, true).map_err(err)?;
         }
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match.
@@ -5219,11 +5219,17 @@ impl ExceptionTable {
 
 /// Rejects calls the C convention support cannot make yet. `external`
 /// callees may be C code relying on the full ABI.
-fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(), String> {
+/// `what` describes the call, only when reporting an error.
+fn check_call_signature(
+    what: impl Fn() -> String,
+    sig: &Signature,
+    external: bool,
+) -> Result<(), String> {
     let (CallConv::C | CallConv::Fast) = sig.cc;
     if sig.returns.len() > 1 {
         return Err(format!(
-            "{what}: multiple return values are not supported by the C convention"
+            "{}: multiple return values are not supported by the C convention",
+            what()
         ));
     }
     // The Apple ABI has the caller extend narrow arguments to 32 bits by C
@@ -5237,7 +5243,8 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
             .any(|p| matches!(p.ty, Type::I8 | Type::I16) && p.ext == ArgExt::None)
     {
         return Err(format!(
-            "{what}: i8/i16 arguments to external code need `sext` or `uext`"
+            "{}: i8/i16 arguments to external code need `sext` or `uext`",
+            what()
         ));
     }
     Ok(())
