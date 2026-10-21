@@ -3205,16 +3205,12 @@ mod alignment_tests {
     use crate::strings::Strings;
 
     fn parser(arena: &bumpalo::Bump) -> Parser<'_> {
-        let mut text = Strings::new(arena);
-        let mut files = Vec::new();
-        let toks = crate::lex::tokenize(
+        let mut p = Parser::new(
             "int first; int second; int collision;",
             "align.c",
-            &mut files,
-            &mut text,
-        )
-        .unwrap();
-        let mut p = Parser::new(toks, crate::Options::default().target, text);
+            crate::Options::default().target,
+            Strings::new(arena),
+        );
         p.translation_unit().unwrap();
         p.globals[0].symbol = "shared";
         p.globals[0].align = 8;

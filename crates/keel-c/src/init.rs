@@ -268,6 +268,7 @@ impl<'a> Parser<'a> {
                 self.expect("}")?;
                 break;
             }
+            self.release_tokens();
         }
         Ok(count)
     }

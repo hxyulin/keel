@@ -105,8 +105,7 @@ pub struct Options {
 /// Compiles preprocessed C source, read from `path`, to a keel module.
 pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, Diagnostic> {
     let arena = bumpalo::Bump::new();
-    let mut text = crate::strings::Strings::new(&arena);
-    let mut files = Vec::new();
+    let text = crate::strings::Strings::new(&arena);
     let diagnostic = |files: &[&str], e: Error| Diagnostic {
         file: files
             .get(e.loc.file as usize)
@@ -116,12 +115,10 @@ pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, 
         col: e.loc.col,
         message: e.message,
     };
-    let toks =
-        lex::tokenize(src, path, &mut files, &mut text).map_err(|e| diagnostic(&files, e))?;
-    let mut parser = parse::Parser::new(toks, opts.target, text);
-    parser
-        .translation_unit()
-        .map_err(|e| diagnostic(&files, e))?;
+    let mut parser = parse::Parser::new(src, path, opts.target, text);
+    let parsed = parser.translation_unit();
+    let files = parser.take_files();
+    parsed.map_err(|e| diagnostic(&files, e))?;
     irgen::Gen::new(&parser, &files, opts.debug_info)
         .run()
         .map_err(|e| diagnostic(&files, e))

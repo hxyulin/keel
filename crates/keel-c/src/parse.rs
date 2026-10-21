@@ -12,7 +12,7 @@
 //! qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::lex::{Lexer, Tok, Token};
 use crate::strings::Strings;
 use crate::types::*;
 use crate::{Error, Loc};
@@ -132,7 +132,17 @@ pub(crate) struct FuncState<'a> {
 }
 
 pub struct Parser<'a> {
+    lexer: Lexer<'a>,
+    /// Tokens of the file-scope declaration being parsed, and those read
+    /// ahead. Earlier ones are dropped between declarations; only
+    /// backtracking within a declaration revisits tokens.
     toks: Vec<Token<'a>>,
+    /// The lexer has given `Eof`, the last of `toks`.
+    lexed_all: bool,
+    /// The first lexical error, which wins over any parse error.
+    lex_error: Option<Error>,
+    /// Token positions are saved to come back to: earlier tokens must stay.
+    pinned: u32,
     pub(crate) text: Strings<'a>,
     pos: usize,
     scopes: Vec<Scope<'a>>,
@@ -291,9 +301,14 @@ const IGNORED_QUALIFIERS: &[&str] = &[
 ];
 
 impl<'a> Parser<'a> {
-    pub fn new(toks: Vec<Token<'a>>, target: Target, text: Strings<'a>) -> Self {
-        Self {
-            toks,
+    pub fn new(src: &'a str, path: &str, target: Target, mut text: Strings<'a>) -> Self {
+        let lexer = Lexer::new(src, path, &mut text);
+        let mut p = Self {
+            lexer,
+            toks: Vec::new(),
+            lexed_all: false,
+            lex_error: None,
+            pinned: 0,
             text,
             pos: 0,
             scopes: vec![Scope::default()],
@@ -313,7 +328,14 @@ impl<'a> Parser<'a> {
             unique: 0,
             target,
             va_list_tag: None,
-        }
+        };
+        p.fill();
+        p
+    }
+
+    /// The file names line markers mentioned; a `Loc::file` indexes them.
+    pub fn take_files(&mut self) -> Vec<&'a str> {
+        std::mem::take(&mut self.lexer.files)
     }
 
     /// `__builtin_va_list`. Apple's is a pointer to the next argument.
@@ -369,10 +391,61 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn advance(&mut self) -> Tok<'a> {
         let tok = self.toks[self.pos].tok;
-        if self.pos < self.toks.len() - 1 {
+        self.bump();
+        tok
+    }
+
+    /// Moves to the next token, staying on `Eof`. At least the token after
+    /// the current one is always lexed.
+    #[inline]
+    fn bump(&mut self) {
+        if self.pos + 2 < self.toks.len() {
+            self.pos += 1;
+        } else {
+            self.bump_slow();
+        }
+    }
+
+    #[cold]
+    fn bump_slow(&mut self) {
+        self.fill();
+        if self.pos + 1 < self.toks.len() {
             self.pos += 1;
         }
-        tok
+    }
+
+    /// Lexes the next tokens. A lexical error ends the input there, and
+    /// is reported in place of whatever the parser makes of it.
+    fn fill(&mut self) {
+        const CHUNK: usize = 256;
+        for _ in 0..CHUNK {
+            if self.lexed_all {
+                return;
+            }
+            let tok = match self.lexer.token(&mut self.text) {
+                Ok(tok) => tok,
+                Err(e) => {
+                    let eof = Token {
+                        tok: Tok::Eof,
+                        loc: e.loc,
+                        pack: None,
+                    };
+                    self.lex_error = Some(e);
+                    eof
+                }
+            };
+            self.lexed_all = tok.tok == Tok::Eof;
+            self.toks.push(tok);
+        }
+    }
+
+    /// Drops the tokens before the current one, between declarations,
+    /// statements and initializers, unless a position is saved.
+    pub(crate) fn release_tokens(&mut self) {
+        if self.pos >= 4096 && self.pinned == 0 {
+            self.toks.drain(..self.pos);
+            self.pos = 0;
+        }
     }
 
     pub(crate) fn pos_save(&self) -> usize {
@@ -393,7 +466,7 @@ impl<'a> Parser<'a> {
 
     pub(crate) fn eat(&mut self, p: &str) -> bool {
         if self.is(p) {
-            self.pos = (self.pos + 1).min(self.toks.len() - 1);
+            self.bump();
             true
         } else {
             false
@@ -682,12 +755,26 @@ impl<'a> Parser<'a> {
     // ---- translation unit ----
 
     pub fn translation_unit(&mut self) -> R<()> {
-        while self.peek() != Tok::Eof {
-            if self.eat(";") {
-                continue;
+        let parsed = self.declarations();
+        // A lexical error anywhere comes first, as if the whole input had
+        // been lexed before parsing.
+        if parsed.is_err() && !self.lexed_all {
+            loop {
+                match self.lexer.token(&mut self.text) {
+                    Ok(t) if t.tok == Tok::Eof => break,
+                    Ok(_) => {}
+                    Err(e) => {
+                        self.lex_error = Some(e);
+                        break;
+                    }
+                }
             }
-            self.declaration(true)?;
         }
+        self.toks = Vec::new();
+        if let Some(e) = self.lex_error.take() {
+            return Err(e);
+        }
+        parsed?;
         // Until now `internal` records explicit static linkage only. C99
         // inline-only emission depends on all file-scope declarations in this
         // unit, including declarations that follow the definition.
@@ -695,6 +782,16 @@ impl<'a> Parser<'a> {
             if !self.external_def.contains(&f.global) {
                 self.globals[f.global].internal = true;
             }
+        }
+        Ok(())
+    }
+
+    fn declarations(&mut self) -> R<()> {
+        while self.peek() != Tok::Eof {
+            if !self.eat(";") {
+                self.declaration(true)?;
+            }
+            self.release_tokens();
         }
         Ok(())
     }
@@ -1655,6 +1752,7 @@ impl<'a> Parser<'a> {
             // so skip the inner declarator, read the suffix, and come back.
             self.advance();
             let start = self.pos;
+            self.pinned += 1;
             self.skip_parens()?;
             let (ty, sugar) = self.type_suffix(ty, sugar, &mut attrs)?;
             // The current layer's attributes retain their incoming owner.
@@ -1673,6 +1771,7 @@ impl<'a> Parser<'a> {
             Self::merge_declarator_attrs(&mut d.attrs, attrs, owner.as_ref(), &d.ty);
             self.expect(")")?;
             self.pos = end;
+            self.pinned -= 1;
             return Ok(d);
         }
         let name = match self.peek() {
@@ -2091,6 +2190,7 @@ impl<'a> Parser<'a> {
             } else {
                 out.push(self.statement()?);
             }
+            self.release_tokens();
         }
         Ok(out)
     }
@@ -2434,7 +2534,8 @@ mod tests {
     fn binding_stacks_match_scope_search_through_shadowing_and_root_insertions() {
         let arena = bumpalo::Bump::new();
         let mut p = Parser::new(
-            vec![],
+            "",
+            "test.c",
             crate::Options::default().target,
             Strings::new(&arena),
         );
@@ -2484,7 +2585,8 @@ mod tests {
     fn inner_extern_restores_outer_shadow_and_file_binding() {
         let arena = bumpalo::Bump::new();
         let mut p = Parser::new(
-            vec![],
+            "",
+            "test.c",
             crate::Options::default().target,
             Strings::new(&arena),
         );

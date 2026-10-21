@@ -140,71 +140,73 @@ const IDENT: [bool; 256] = {
     table
 };
 
-/// Splits `src` into tokens. `files` collects the file names line markers
-/// mention; a token's `Loc::file` indexes it.
+/// Splits all of `src` into tokens. `files` receives the file names line
+/// markers mention; a token's `Loc::file` indexes it. The parser instead
+/// pulls tokens from a [`Lexer`] as it goes.
 pub fn tokenize<'a>(
-    src: &str,
+    src: &'a str,
     path: &str,
     files: &mut Vec<&'a str>,
     text: &mut Strings<'a>,
 ) -> Result<Vec<Token<'a>>, Error> {
-    let file = file_index(files, path, text);
-    let file_ids = files
-        .iter()
-        .enumerate()
-        .map(|(i, &name)| (name, i as u32))
-        .collect();
-    let mut lx = Lexer {
-        src: src.as_bytes(),
-        pos: 0,
-        line: 1,
-        line_start: 0,
-        file,
-        file_ids,
-        text,
-        files,
-        pack: Vec::new(),
-    };
+    let mut lx = Lexer::new(src, path, text);
     let mut out = Vec::new();
     loop {
-        let tok = lx.next()?;
-        // GNU's `__extension__` only silences pedantic warnings, and may
-        // come before a declaration or any expression.
-        if matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
-            continue;
-        }
+        let tok = lx.token(text)?;
         let end = tok.tok == Tok::Eof;
         out.push(tok);
         if end {
+            *files = lx.files;
             return Ok(out);
         }
     }
 }
 
-fn file_index<'a>(files: &mut Vec<&'a str>, name: &str, text: &mut Strings<'a>) -> u32 {
-    match files.iter().position(|f| *f == name) {
-        Some(i) => i as u32,
-        None => {
-            files.push(text.intern(name));
-            files.len() as u32 - 1
-        }
-    }
-}
-
-struct Lexer<'s, 'b, 'a> {
-    src: &'s [u8],
+pub struct Lexer<'a> {
+    source: &'a str,
+    src: &'a [u8],
     pos: usize,
     line: u32,
     line_start: usize,
     file: u32,
-    files: &'b mut Vec<&'a str>,
-    text: &'b mut Strings<'a>,
+    /// The file names line markers mention; a token's `Loc::file` indexes
+    /// it.
+    pub files: Vec<&'a str>,
     file_ids: HashMap<&'a str, u32>,
     /// `#pragma pack` limits: the last is in force, `None` for none.
     pack: Vec<Option<u64>>,
 }
 
-impl<'a> Lexer<'_, '_, 'a> {
+impl<'a> Lexer<'a> {
+    pub fn new(src: &'a str, path: &str, text: &mut Strings<'a>) -> Self {
+        let path = text.intern(path);
+        let mut file_ids = HashMap::default();
+        file_ids.insert(path, 0);
+        Lexer {
+            source: src,
+            src: src.as_bytes(),
+            pos: 0,
+            line: 1,
+            line_start: 0,
+            file: 0,
+            files: vec![path],
+            file_ids,
+            pack: Vec::new(),
+        }
+    }
+
+    /// The next token. After `Eof`, `Eof` again.
+    pub fn token(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
+        loop {
+            let tok = self.next(text)?;
+            // GNU's `__extension__` only silences pedantic warnings, and may
+            // come before a declaration or any expression.
+            if !matches!(&tok.tok, Tok::Ident(s) if *s == "__extension__") {
+                return Ok(tok);
+            }
+        }
+    }
+
     fn peek(&self, n: usize) -> u8 {
         self.src.get(self.pos + n).copied().unwrap_or(0)
     }
@@ -229,7 +231,7 @@ impl<'a> Lexer<'_, '_, 'a> {
 
     /// Skips whitespace, comments (in case the preprocessor kept them) and
     /// `#` lines, applying line markers.
-    fn skip_space(&mut self) -> Result<(), Error> {
+    fn skip_space(&mut self, text: &mut Strings<'a>) -> Result<(), Error> {
         loop {
             match self.peek(0) {
                 b'\n' => self.newline(),
@@ -264,7 +266,7 @@ impl<'a> Lexer<'_, '_, 'a> {
                     .iter()
                     .all(|c| c.is_ascii_whitespace()) =>
                 {
-                    self.directive();
+                    self.directive(text);
                 }
                 _ => return Ok(()),
             }
@@ -274,12 +276,12 @@ impl<'a> Lexer<'_, '_, 'a> {
     /// A `#` line: a line marker (`# 12 "file.c" 1 3`, or `#line 12
     /// "file.c"`) sets where the next line came from; anything else is
     /// ignored.
-    fn directive(&mut self) {
+    fn directive(&mut self, strings: &mut Strings<'a>) {
         let start = self.pos + 1;
         while !matches!(self.peek(0), b'\n' | 0) {
             self.pos += 1;
         }
-        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
+        let text = &self.source[start..self.pos];
         let text = text.trim_start();
         if let Some(rest) = text.strip_prefix("pragma") {
             self.pragma(rest);
@@ -297,7 +299,7 @@ impl<'a> Lexer<'_, '_, 'a> {
             self.file = if let Some(&id) = self.file_ids.get(name) {
                 id
             } else {
-                let name = self.text.intern(name);
+                let name = strings.intern(name);
                 let id = self.files.len() as u32;
                 self.files.push(name);
                 self.file_ids.insert(name, id);
@@ -334,8 +336,8 @@ impl<'a> Lexer<'_, '_, 'a> {
         }
     }
 
-    fn next(&mut self) -> Result<Token<'a>, Error> {
-        self.skip_space()?;
+    fn next(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
+        self.skip_space(text)?;
         let loc = self.loc();
         let c = self.peek(0);
         let tok = if c == 0 {
@@ -343,23 +345,21 @@ impl<'a> Lexer<'_, '_, 'a> {
         } else if (c == b'L' || c == b'u' || c == b'U') && matches!(self.peek(1), b'"' | b'\'') {
             // `u` and `U` literals are treated like `L` (32-bit units).
             self.pos += 1;
-            self.quoted(true)?
+            self.quoted(true, text)?
         } else if c == b'u' && self.peek(1) == b'8' && self.peek(2) == b'"' {
             self.pos += 2;
-            self.quoted(false)?
+            self.quoted(false, text)?
         } else if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
             let start = self.pos;
             while IDENT[self.peek(0) as usize] {
                 self.pos += 1;
             }
-            Tok::Ident(
-                self.text
-                    .intern(std::str::from_utf8(&self.src[start..self.pos]).unwrap()),
-            )
+            // ASCII bounds: slicing the source needs no UTF-8 validation.
+            Tok::Ident(text.intern(&self.source[start..self.pos]))
         } else if c.is_ascii_digit() || (c == b'.' && self.peek(1).is_ascii_digit()) {
-            self.number()?
+            self.number(text)?
         } else if c == b'"' || c == b'\'' {
-            self.quoted(false)?
+            self.quoted(false, text)?
         } else {
             let rest = &self.src[self.pos..];
             let Some(p) = punctuation(rest) else {
@@ -373,7 +373,7 @@ impl<'a> Lexer<'_, '_, 'a> {
     }
 
     /// A preprocessing number, then its value.
-    fn number(&mut self) -> Result<Tok<'a>, Error> {
+    fn number(&mut self, strings: &mut Strings<'a>) -> Result<Tok<'a>, Error> {
         let start = self.pos;
         loop {
             let c = self.peek(0);
@@ -385,12 +385,12 @@ impl<'a> Lexer<'_, '_, 'a> {
                 break;
             }
         }
-        let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap();
-        Ok(parse_number(text).unwrap_or_else(|| Tok::BadNumber(self.text.intern(text))))
+        let text = &self.source[start..self.pos];
+        Ok(parse_number(text).unwrap_or_else(|| Tok::BadNumber(strings.intern(text))))
     }
 
     /// A character constant or string literal, the opening quote next.
-    fn quoted(&mut self, wide: bool) -> Result<Tok<'a>, Error> {
+    fn quoted(&mut self, wide: bool, text: &mut Strings<'a>) -> Result<Tok<'a>, Error> {
         let quote = self.peek(0);
         self.pos += 1;
         let string = quote == b'"';
@@ -454,7 +454,7 @@ impl<'a> Lexer<'_, '_, 'a> {
         }
         if string {
             return Ok(Tok::Str {
-                bytes: self.text.bytes(&bytes),
+                bytes: text.bytes(&bytes),
                 wide,
             });
         }

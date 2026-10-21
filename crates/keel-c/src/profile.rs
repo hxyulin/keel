@@ -1,5 +1,6 @@
 //! Optional stage measurements. Input reading and IR destruction are separate
-//! from `compile`'s boundary. Parsing includes name resolution and type checking.
+//! from `compile`'s boundary. Parsing includes lexing, name resolution and
+//! type checking; `lex_ms` times a separate lexing pass.
 use crate::{Diagnostic, Options, irgen, lex, parse};
 use std::time::Instant;
 
@@ -18,8 +19,7 @@ pub fn compile(
     opts: Options,
 ) -> Result<(keel_ir::Module, Timings), Diagnostic> {
     let arena = bumpalo::Bump::new();
-    let mut text = crate::strings::Strings::new(&arena);
-    let mut files = Vec::new();
+    let text = crate::strings::Strings::new(&arena);
     let diagnostic = |files: &[&str], e: crate::Error| Diagnostic {
         file: files
             .get(e.loc.file as usize)
@@ -29,16 +29,27 @@ pub fn compile(
         col: e.loc.col,
         message: e.message,
     };
+    // The parser lexes as it goes; lexing alone is measured separately,
+    // with its own strings.
     let start = Instant::now();
-    let toks =
-        lex::tokenize(src, path, &mut files, &mut text).map_err(|e| diagnostic(&files, e))?;
+    let lex_arena = bumpalo::Bump::new();
+    let mut files = Vec::new();
+    let toks = lex::tokenize(
+        src,
+        path,
+        &mut files,
+        &mut crate::strings::Strings::new(&lex_arena),
+    )
+    .map_err(|e| diagnostic(&files, e))?;
     let tokens = toks.len();
     let lex_ms = start.elapsed().as_secs_f64() * 1000.;
+    drop(toks);
+    drop(lex_arena);
     let start = Instant::now();
-    let mut parser = parse::Parser::new(toks, opts.target, text);
-    parser
-        .translation_unit()
-        .map_err(|e| diagnostic(&files, e))?;
+    let mut parser = parse::Parser::new(src, path, opts.target, text);
+    let parsed = parser.translation_unit();
+    let files = parser.take_files();
+    parsed.map_err(|e| diagnostic(&files, e))?;
     let parse_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
     let module = irgen::Gen::new(&parser, &files, opts.debug_info)
