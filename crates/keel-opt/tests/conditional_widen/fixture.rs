@@ -25,6 +25,16 @@ pub fn source() -> String {
             "v12 = iconst.i32 1\n v13 = iadd v10,v12\n v14 = icmp.ult v13,v10\n v15 = select v14,v13,v10\n v16 = sext.i64 v15\n v17 = iconst.i64 7\n v18 = select v14,v16,v17",
             "v18",
         ),
+        (
+            "clamped",
+            "v22 = iconst.i32 -128\n v12 = icmp.slt v10,v22\n v13 = iconst.i32 127\n v14 = icmp.sgt v10,v13\n v15 = iconst.i32 128\n v16 = iadd v10,v15\n v17 = sext.i64 v16\n v18 = iconst.i64 255\n v19 = select v14,v18,v17\n v20 = iconst.i64 0\n v21 = select v12,v20,v19",
+            "v21",
+        ),
+        (
+            "clamped_unsigned",
+            "v22 = iconst.i32 -256\n v12 = icmp.ugt v10,v22\n v13 = uext.i64 v10\n v14 = iconst.i64 4294967295\n v21 = select v12,v14,v13",
+            "v21",
+        ),
     ];
     let mut source = String::new();
     for (name, expr, contribution) in cases {
