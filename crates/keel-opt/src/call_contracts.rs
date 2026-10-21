@@ -3,17 +3,27 @@ use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashSet;
 use keel_ir::{Block, Clause, EntityRef, Function, Inst, InstData, ValueDef};
 
+fn noreturn_call(func: &Function, inst: Inst) -> bool {
+    matches!(func.inst_data(inst), InstData::Call { func: callee, .. }
+    if func.callee(*callee).attrs.noreturn)
+}
+
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     // Keep invoke result handles and locations: call has the same result signature.
-    let invokes: Vec<_> = func
-        .layout_insts()
-        .filter_map(|(_, inst)| {
-            matches!(func.inst_data(inst), InstData::Invoke { func: callee, .. }
-            if func.callee(*callee).attrs.nounwind)
-            .then_some(inst)
-        })
-        .collect();
+    // One scan finds both kinds of site; calls are rescanned only after an
+    // invoke has become a call.
+    let mut invokes = Vec::new();
+    let mut calls = Vec::new();
+    for (_, inst) in func.layout_insts() {
+        match func.inst_data(inst) {
+            InstData::Invoke { func: callee, .. } if func.callee(*callee).attrs.nounwind => {
+                invokes.push(inst)
+            }
+            _ if noreturn_call(func, inst) => calls.push(inst),
+            _ => {}
+        }
+    }
     for inst in invokes {
         if func.is_removed(inst) {
             continue;
@@ -67,14 +77,12 @@ pub fn run(func: &mut Function) -> bool {
         }
         changed = true;
     }
-    let calls: Vec<_> = func
-        .layout_insts()
-        .filter_map(|(_, inst)| {
-            matches!(func.inst_data(inst), InstData::Call { func: callee, .. }
-            if func.callee(*callee).attrs.noreturn)
-            .then_some(inst)
-        })
-        .collect();
+    if changed {
+        calls = func
+            .layout_insts()
+            .filter_map(|(_, inst)| noreturn_call(func, inst).then_some(inst))
+            .collect();
+    }
     for inst in calls {
         if func.is_removed(inst) {
             continue;
