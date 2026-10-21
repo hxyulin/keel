@@ -1,6 +1,6 @@
-//! Bounded integer if-conversion. Only complete, single-predecessor diamonds
-//! and parallel edges to the same join are admitted. Arm instructions use an
-//! explicit nontrapping scalar allowlist; memory, calls, division, floating
+//! Bounded integer if-conversion for diamonds, direct-to-join triangles,
+//! and nested shapes reduced from the inside out through private jump chains.
+//! Arm instructions use an explicit nontrapping scalar allowlist; memory, calls, division, floating
 //! point, exception operations and aliased definitions are never speculated.
 use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::{
@@ -11,11 +11,15 @@ use std::collections::{HashMap, HashSet};
 
 const ARM_BUDGET: usize = 8;
 const SELECT_BUDGET: usize = 8;
+const BLOCK_BUDGET: usize = 8;
 
 pub fn run(f: &mut Function) -> bool {
     let mut changed = false;
-    // At most one decision per original block; recompute CFG after mutations.
-    for head in f.blocks().collect::<Vec<_>>() {
+    // Visit children first, independent of layout order. Each original head is
+    // considered once; newly exposed outer shapes retain the same arm budgets
+    // (including selects already introduced by inner conversions).
+    let heads = ControlFlowGraph::compute(f).reverse_postorder(f);
+    for head in heads.into_iter().rev() {
         if !f.is_block_inserted(head) {
             continue;
         }
@@ -41,29 +45,26 @@ pub fn run(f: &mut Function) -> bool {
             changed = true;
             continue;
         }
-        let arms = [dests[0].block, dests[1].block];
-        if arms.contains(&head)
-            || arms.iter().any(|&b| {
-                cfg.preds(b) != [head] || Some(b) == f.entry_block() || !canonical_params(f, b)
-            })
-        {
-            continue;
-        }
-        let Some((left, left_insts)) = arm(f, arms[0]) else {
-            continue;
-        };
-        let Some((right, right_insts)) = arm(f, arms[1]) else {
-            continue;
-        };
-        if left.block != right.block
-            || left.block == head
-            || arms.contains(&left.block)
-            || !canonical_params(f, left.block)
-            || left_insts.len() + right_insts.len() > ARM_BUDGET
-            || left.args.len() > SELECT_BUDGET
-        {
-            continue;
-        }
+        let paths = [
+            paths(f, &cfg, head, &dests[0]),
+            paths(f, &cfg, head, &dests[1]),
+        ];
+        // The zero-block prefix represents a direct edge to the join. Longer
+        // prefixes admit private forwarding blocks left by nested ternaries.
+        let pair = paths[0]
+            .iter()
+            .flat_map(|left| paths[1].iter().map(move |right| (left, right)))
+            .find(|(left, right)| {
+                left.edge.block == right.edge.block
+                    && left.edge.block != head
+                    && canonical_params(f, left.edge.block)
+                    && left.edge.args.len() <= SELECT_BUDGET
+                    && left.insts.len() + right.insts.len() <= ARM_BUDGET
+                    && left.blocks.len() + right.blocks.len() <= BLOCK_BUDGET
+                    && !left.blocks.iter().any(|b| right.blocks.contains(b))
+            });
+        let Some((left, right)) = pair else { continue };
+        let arms: Vec<_> = left.blocks.iter().chain(&right.blocks).copied().collect();
         // Moving definitions must not change their availability to other
         // users, including uses in unreachable blocks and noncanonical IR.
         let defs: HashSet<_> = arms
@@ -87,36 +88,17 @@ pub fn run(f: &mut Function) -> bool {
         }) {
             continue;
         }
-        let mut edges = [left, right];
-        for n in 0..2 {
-            // Substitute the arm's incoming parameters simultaneously, before
-            // moving instructions. Outgoing join arguments observe the same
-            // substitution, including empty arms and permuted edge operands.
-            let mapping: HashMap<_, _> = f
-                .block_params(arms[n])
-                .iter()
-                .copied()
-                .zip(dests[n].args.iter().map(|&v| f.resolve(v)))
-                .collect();
-            let rewrite = |v: Value| {
-                let v = f.resolve(v);
-                mapping.get(&v).copied().unwrap_or(v)
-            };
-            let instructions = if n == 0 { &left_insts } else { &right_insts };
-            let rewritten: Vec<_> = instructions
-                .iter()
-                .map(|&i| {
-                    let mut d = f.inst_data(i).clone();
-                    d.for_each_operand_mut(|v| *v = rewrite(*v));
-                    (i, d)
-                })
-                .collect();
-            for v in &mut edges[n].args {
-                *v = rewrite(*v);
+        let mut edges = [left.edge.clone(), right.edge.clone()];
+        for (n, path) in [left, right].into_iter().enumerate() {
+            // Each path was planned without mutation, using simultaneous
+            // incoming-parameter substitution at every forwarding edge.
+            for (i, d) in &path.insts {
+                *f.inst_data_mut(*i) = d.clone();
+                f.move_inst(*i, InsertPoint::Before(term));
             }
-            for (i, d) in rewritten {
-                *f.inst_data_mut(i) = d;
-                f.move_inst(i, InsertPoint::Before(term));
+            // Resolve aliases even for the zero-block (direct) path.
+            for v in &mut edges[n].args {
+                *v = f.resolve(*v);
             }
         }
         let args = selects(f, term, cond, &edges[0].args, &edges[1].args);
@@ -142,19 +124,72 @@ fn canonical_params(f: &Function, b: Block) -> bool {
             )
     })
 }
-fn arm(f: &Function, b: Block) -> Option<(BlockCall, Vec<Inst>)> {
-    let (&term, body) = f.block_insts(b).split_last()?;
-    let D::Jump { dest } = f.inst_data(term) else {
-        return None;
+#[derive(Clone)]
+struct Path {
+    edge: BlockCall,
+    blocks: Vec<Block>,
+    insts: Vec<(Inst, D)>,
+}
+fn paths(f: &Function, cfg: &ControlFlowGraph, head: Block, edge: &BlockCall) -> Vec<Path> {
+    let mut path = Path {
+        edge: edge.clone(),
+        blocks: vec![],
+        insts: vec![],
     };
-    if body.len() > ARM_BUDGET
-        || body
+    let mut result = vec![path.clone()];
+    let mut previous = head;
+    let mut mapping = HashMap::new();
+    while path.blocks.len() < BLOCK_BUDGET {
+        let b = path.edge.block;
+        if b == head
+            || path.blocks.contains(&b)
+            || Some(b) == f.entry_block()
+            || cfg.preds(b) != [previous]
+            || !canonical_params(f, b)
+        {
+            break;
+        }
+        let Some((&term, body)) = f.block_insts(b).split_last() else {
+            break;
+        };
+        let D::Jump { dest } = f.inst_data(term) else {
+            break;
+        };
+        if path.insts.len() + body.len() > ARM_BUDGET
+            || body.iter().any(|&i| {
+                f.inst_results(i).iter().any(|&v| f.resolve(v) != v) || !speculatable(f, i)
+            })
+        {
+            break;
+        }
+        // Edge operands were already rewritten in the predecessor's scope.
+        // Extend only after collecting all replacements, never by repeatedly
+        // applying substitutions to operands (which breaks permutations).
+        let incoming: Vec<_> = f
+            .block_params(b)
             .iter()
-            .any(|&i| f.inst_results(i).iter().any(|&v| f.resolve(v) != v) || !speculatable(f, i))
-    {
-        return None;
+            .copied()
+            .zip(path.edge.args.iter().map(|&v| f.resolve(v)))
+            .collect();
+        mapping.extend(incoming);
+        let rewrite = |v: Value| {
+            let v = f.resolve(v);
+            mapping.get(&v).copied().unwrap_or(v)
+        };
+        for &i in body {
+            let mut d = f.inst_data(i).clone();
+            d.for_each_operand_mut(|v| *v = rewrite(*v));
+            path.insts.push((i, d));
+        }
+        path.edge = dest.clone();
+        for v in &mut path.edge.args {
+            *v = rewrite(*v);
+        }
+        path.blocks.push(b);
+        previous = b;
+        result.push(path.clone());
     }
-    Some((dest.clone(), body.to_vec()))
+    result
 }
 fn speculatable(f: &Function, i: Inst) -> bool {
     // Keep the scalar subset explicit instead of equating "pure" with safe
