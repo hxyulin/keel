@@ -303,6 +303,111 @@ impl KeyTable {
     }
 }
 
+/// Many short lists of `Copy` items in one buffer, such as a function's
+/// block parameter and instruction lists, instead of a heap allocation each.
+///
+/// A list owns a [`ListRange`] of the buffer with room to grow. The list
+/// at the end of the buffer grows in place; another one that outgrows its
+/// room moves to the end with twice the room, leaving its old space unused.
+/// Like arena entries, unused space is only reclaimed with the whole pool;
+/// it is bounded by the room the lists have had.
+#[derive(Clone)]
+pub(crate) struct ListPool<T> {
+    items: Vec<T>,
+}
+
+/// A list in a [`ListPool`]: `len` items at `start`, with room for `cap`.
+#[derive(Copy, Clone, Default)]
+pub(crate) struct ListRange {
+    start: u32,
+    len: u32,
+    cap: u32,
+}
+
+impl ListRange {
+    #[inline]
+    pub(crate) fn len(self) -> usize {
+        self.len as usize
+    }
+
+    /// Empties the list, keeping its room.
+    #[inline]
+    pub(crate) fn clear(&mut self) {
+        self.len = 0;
+    }
+}
+
+impl<T> Default for ListPool<T> {
+    fn default() -> Self {
+        Self { items: Vec::new() }
+    }
+}
+
+impl<T: EntityRef> ListPool<T> {
+    #[inline]
+    pub(crate) fn get(&self, list: ListRange) -> &[T] {
+        let start = list.start as usize;
+        &self.items[start..start + list.len as usize]
+    }
+
+    #[inline]
+    pub(crate) fn push(&mut self, list: &mut ListRange, item: T) {
+        if list.len == list.cap {
+            self.grow(list);
+        }
+        self.items[(list.start + list.len) as usize] = item;
+        list.len += 1;
+    }
+
+    /// Inserts `item` at `index`, shifting the items after it.
+    pub(crate) fn insert(&mut self, list: &mut ListRange, index: usize, item: T) {
+        assert!(index <= list.len as usize, "list index out of bounds");
+        if list.len == list.cap {
+            self.grow(list);
+        }
+        let start = list.start as usize;
+        let end = start + list.len as usize;
+        self.items
+            .copy_within(start + index..end, start + index + 1);
+        self.items[start + index] = item;
+        list.len += 1;
+    }
+
+    /// Removes and returns the item at `index`, shifting the items after it.
+    pub(crate) fn remove(&mut self, list: &mut ListRange, index: usize) -> T {
+        assert!(index < list.len as usize, "list index out of bounds");
+        let start = list.start as usize;
+        let end = start + list.len as usize;
+        let item = self.items[start + index];
+        self.items
+            .copy_within(start + index + 1..end, start + index);
+        list.len -= 1;
+        item
+    }
+
+    /// Makes room for at least one more item in `list`.
+    #[cold]
+    fn grow(&mut self, list: &mut ListRange) {
+        let extra = list.cap.max(4) as usize;
+        let end = list.start as usize + list.cap as usize;
+        if list.cap > 0 && end == self.items.len() {
+            // Last in the buffer: grow in place.
+            self.items.resize(end + extra, T::new(0));
+        } else {
+            let start = self.items.len();
+            let len = list.len as usize;
+            self.items.reserve(len + extra);
+            self.items
+                .extend_from_within(list.start as usize..list.start as usize + len);
+            self.items
+                .resize(start + list.cap as usize + extra, T::new(0));
+            list.start = start as u32;
+        }
+        u32::try_from(self.items.len()).expect("list pool overflow");
+        list.cap += extra as u32;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +432,34 @@ mod tests {
         assert_eq!(format!("{max} {:?}", Thing::new(10)), "t4294967295 t10");
         entity!(Long, "fifteen_letters");
         assert_eq!(Long::new(7).to_string(), "fifteen_letters7");
+    }
+
+    #[test]
+    fn pooled_lists_grow_move_and_shift_independently() {
+        let mut pool: ListPool<Thing> = ListPool::default();
+        let mut lists = [ListRange::default(); 3];
+        let mut expected: [Vec<Thing>; 3] = Default::default();
+        // Interleave so lists outgrow their room away from the end.
+        for i in 0..100 {
+            let n = [0, 1, 1, 2, 0][i % 5];
+            pool.push(&mut lists[n], Thing::new(i));
+            expected[n].push(Thing::new(i));
+            if i % 7 == 0 {
+                let at = expected[n].len() / 2;
+                pool.insert(&mut lists[n], at, Thing::new(1000 + i));
+                expected[n].insert(at, Thing::new(1000 + i));
+            }
+            if i % 11 == 0 {
+                assert_eq!(pool.remove(&mut lists[n], 0), expected[n].remove(0));
+            }
+            for (list, expected) in lists.iter().zip(&expected) {
+                assert_eq!(pool.get(*list), &expected[..]);
+            }
+        }
+        lists[1].clear();
+        assert!(pool.get(lists[1]).is_empty());
+        pool.push(&mut lists[1], Thing::new(7));
+        assert_eq!(pool.get(lists[1]), &[Thing::new(7)]);
+        assert_eq!(pool.get(lists[0]), &expected[0][..]);
     }
 }

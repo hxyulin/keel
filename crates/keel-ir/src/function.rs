@@ -6,11 +6,12 @@
 //! Removing an instruction or block takes it out of the layout but leaves
 //! its arena entry (handles stay valid, and nothing is renumbered). Values
 //! it defined still exist; using one is an error the verifier reports.
-//! Blocks store their instructions in a `Vec`, so inserting or removing in
-//! the middle of a block is linear in its size; fine for now, and the
-//! methods hide the representation if it needs to change.
+//! Blocks store their instructions as an array (in one pool shared by all
+//! blocks), so inserting or removing in the middle of a block is linear in
+//! its size; fine for now, and the methods hide the representation if it
+//! needs to change.
 
-use crate::entity::KeyIndex;
+use crate::entity::{KeyIndex, ListPool, ListRange};
 use crate::inst::{BlockCall, Clause, InstData, Symbol};
 use crate::layout::Layout;
 use crate::{
@@ -278,10 +279,14 @@ impl fmt::Display for SourceLoc {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+/// A block's lists, in [`Function::block_values`] and
+/// [`Function::block_insts`].
+#[derive(Copy, Clone, Default)]
 struct BlockData {
-    params: Vec<Value>,
-    insts: Vec<Inst>,
+    params: ListRange,
+    insts: ListRange,
+    /// Whether the block is in [`Function::layout`].
+    in_layout: bool,
 }
 
 /// Kept small: there is one per instruction ever created.
@@ -352,6 +357,9 @@ pub struct Function {
     pub name: String,
     pub sig: Signature,
     blocks: Arena<Block, BlockData>,
+    /// Every block's parameters and instructions.
+    block_values: ListPool<Value>,
+    block_insts: ListPool<Inst>,
     insts: Arena<Inst, InstNode>,
     values: Arena<Value, ValueData>,
     result_pool: Vec<Value>,
@@ -377,8 +385,8 @@ pub struct Function {
     sig_index: KeyIndex,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
-    /// Whether each block is in `layout`.
-    in_layout: Vec<bool>,
+    /// Number of instructions in the layout's blocks.
+    layout_len: usize,
     /// The function that interprets this function's landing pads while
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
@@ -424,12 +432,29 @@ impl fmt::Debug for Function {
                     .finish()
             }
         }
+        struct Blocks<'a>(&'a Function);
+        struct BlockLists<'a>(&'a Function, Block);
+        impl fmt::Debug for BlockLists<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct("BlockData")
+                    .field("params", &self.0.block_params(self.1))
+                    .field("insts", &self.0.block_insts(self.1))
+                    .finish()
+            }
+        }
+        impl fmt::Debug for Blocks<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_map()
+                    .entries(self.0.blocks.keys().map(|b| (b, BlockLists(self.0, b))))
+                    .finish()
+            }
+        }
         f.debug_struct("Function")
             .field("restrict_params", &self.restrict_params)
             .field("attrs", &self.attrs)
             .field("name", &self.name)
             .field("sig", &self.sig)
-            .field("blocks", &self.blocks)
+            .field("blocks", &Blocks(self))
             .field("insts", &Nodes(self))
             .field("values", &self.values)
             .field("stack_slots", &self.stack_slots)
@@ -456,6 +481,8 @@ impl Function {
             name: name.into(),
             sig,
             blocks: Arena::new(),
+            block_values: ListPool::default(),
+            block_insts: ListPool::default(),
             insts: Arena::new(),
             values: Arena::new(),
             result_pool: Vec::new(),
@@ -469,7 +496,7 @@ impl Function {
             data_index: KeyIndex::default(),
             sig_index: KeyIndex::default(),
             layout: Vec::new(),
-            in_layout: Vec::new(),
+            layout_len: 0,
             personality: None,
             local: false,
             weak_odr: false,
@@ -583,19 +610,22 @@ impl Function {
 
     /// Creates a block at the end of the layout.
     pub fn create_block(&mut self) -> Block {
-        let block = self.blocks.push(BlockData::default());
+        let block = self.blocks.push(BlockData {
+            in_layout: true,
+            ..BlockData::default()
+        });
         self.layout.push(block);
-        self.in_layout.push(true);
         block
     }
 
     pub fn append_block_param(&mut self, block: Block, ty: Type) -> Value {
-        let n = self.blocks[block].params.len() as u32;
+        let params = &mut self.blocks[block].params;
+        let n = params.len() as u32;
         let value = self.values.push(ValueData {
             ty,
             def: ValueDef::Param(block, n),
         });
-        self.blocks[block].params.push(value);
+        self.block_values.push(params, value);
         value
     }
 
@@ -757,21 +787,28 @@ impl Function {
     fn place(&mut self, inst: Inst, at: InsertPoint) {
         debug_assert!(self.is_removed(inst));
         let (block, index) = match at {
-            InsertPoint::End(block) => (block, self.blocks[block].insts.len()),
+            InsertPoint::End(block) => {
+                let data = &mut self.blocks[block];
+                self.block_insts.push(&mut data.insts, inst);
+                self.layout_len += usize::from(data.in_layout);
+                self.insts[inst].block = block.index() as u32;
+                return;
+            }
             InsertPoint::Before(before) => {
                 let block = self.inst_block(before);
                 (block, self.position(before))
             }
         };
-        self.blocks[block].insts.insert(index, inst);
+        let data = &mut self.blocks[block];
+        self.block_insts.insert(&mut data.insts, index, inst);
+        self.layout_len += usize::from(data.in_layout);
         self.insts[inst].block = block.index() as u32;
     }
 
     /// Index of `inst` within its block.
     fn position(&self, inst: Inst) -> usize {
         let block = self.inst_block(inst);
-        self.blocks[block]
-            .insts
+        self.block_insts(block)
             .iter()
             .position(|&i| i == inst)
             .expect("an instruction is in its block")
@@ -782,7 +819,9 @@ impl Function {
     pub fn remove_inst(&mut self, inst: Inst) {
         let block = self.inst_block(inst);
         let index = self.position(inst);
-        self.blocks[block].insts.remove(index);
+        let data = &mut self.blocks[block];
+        self.block_insts.remove(&mut data.insts, index);
+        self.layout_len -= usize::from(data.in_layout);
         self.insts[inst].block = NO_BLOCK;
     }
 
@@ -847,24 +886,33 @@ impl Function {
             Some(block),
             "cannot remove the entry block"
         );
-        for inst in std::mem::take(&mut self.blocks[block].insts) {
+        let data = &mut self.blocks[block];
+        for &inst in self.block_insts.get(data.insts) {
             self.insts[inst].block = NO_BLOCK;
         }
+        if data.in_layout {
+            self.layout_len -= data.insts.len();
+        }
+        data.insts.clear();
+        data.in_layout = false;
         self.layout.retain(|&b| b != block);
-        self.in_layout[block.index()] = false;
     }
 
     /// Whether `block` is in the layout.
+    #[inline]
     pub fn is_block_inserted(&self, block: Block) -> bool {
-        self.in_layout[block.index()]
+        self.blocks[block].in_layout
     }
 
     /// Removes parameter `index` of `block` and returns its value, which
     /// must be unused (or replaced). Branches to `block` still pass the
     /// argument; the caller removes it from each of them.
     pub fn remove_block_param(&mut self, block: Block, index: usize) -> Value {
-        let value = self.blocks[block].params.remove(index);
-        for (n, &param) in self.blocks[block].params.iter().enumerate().skip(index) {
+        let value = self
+            .block_values
+            .remove(&mut self.blocks[block].params, index);
+        let params = self.block_values.get(self.blocks[block].params);
+        for (n, &param) in params.iter().enumerate().skip(index) {
             if matches!(self.values[param].def, ValueDef::Param(..)) {
                 self.values[param].def = ValueDef::Param(block, n as u32);
             }
@@ -920,12 +968,12 @@ impl Function {
 
     #[inline]
     pub fn block_params(&self, block: Block) -> &[Value] {
-        &self.blocks[block].params
+        self.block_values.get(self.blocks[block].params)
     }
 
     #[inline]
     pub fn block_insts(&self, block: Block) -> &[Inst] {
-        &self.blocks[block].insts
+        self.block_insts.get(self.blocks[block].insts)
     }
 
     #[inline]
@@ -947,8 +995,13 @@ impl Function {
     /// Every instruction in the layout, block by block.
     #[inline]
     pub fn layout_insts(&self) -> impl Iterator<Item = (Block, Inst)> + '_ {
-        self.blocks()
-            .flat_map(move |b| self.block_insts(b).iter().map(move |&i| (b, i)))
+        LayoutInsts {
+            func: self,
+            blocks: self.layout.iter(),
+            block: Block::new(0),
+            insts: [].iter(),
+            remaining: self.layout_len,
+        }
     }
 
     /// Whether `value` is still defined: by an instruction in the layout,
@@ -958,7 +1011,7 @@ impl Function {
             ValueDef::Result(inst, _) => !self.is_removed(inst),
             ValueDef::Param(block, n) => {
                 self.is_block_inserted(block)
-                    && self.blocks[block].params.get(n as usize) == Some(&self.resolve(value))
+                    && self.block_params(block).get(n as usize) == Some(&self.resolve(value))
             }
             ValueDef::Alias(_) => unreachable!("resolved"),
         }
@@ -978,6 +1031,41 @@ impl Function {
     #[inline]
     pub fn value_def(&self, value: Value) -> ValueDef {
         self.values[value].def
+    }
+}
+
+/// [`Function::layout_insts`]: a flattened walk that knows its length, so
+/// collecting it allocates once.
+struct LayoutInsts<'a> {
+    func: &'a Function,
+    blocks: std::slice::Iter<'a, Block>,
+    block: Block,
+    insts: std::slice::Iter<'a, Inst>,
+    remaining: usize,
+}
+
+impl Iterator for LayoutInsts<'_> {
+    type Item = (Block, Inst);
+
+    #[inline]
+    fn next(&mut self) -> Option<(Block, Inst)> {
+        loop {
+            if let Some(&inst) = self.insts.next() {
+                self.remaining -= 1;
+                return Some((self.block, inst));
+            }
+            let Some(&block) = self.blocks.next() else {
+                debug_assert_eq!(self.remaining, 0, "layout length is stale");
+                return None;
+            };
+            self.block = block;
+            self.insts = self.func.block_insts(block).iter();
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.remaining, Some(self.remaining))
     }
 }
 
