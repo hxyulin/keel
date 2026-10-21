@@ -116,6 +116,7 @@ use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
 mod constant_plan;
+mod extended_add;
 mod native;
 mod output;
 mod packed_load;
@@ -587,6 +588,7 @@ struct FunctionCompiler<'a> {
     packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
     packed_minmax: HashMap<Inst, packed_minmax::MinMax>,
+    extended_adds: HashMap<Inst, extended_add::ExtendedAdd>,
     absolute_values: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
     absolute_differences: HashMap<Inst, absolute_diff::ExactSabal>,
@@ -882,6 +884,7 @@ impl<'a> FunctionCompiler<'a> {
         let absolute_differences = absolute_diff::select(func, &mut selection);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         let packed_minmax = packed_minmax::select(func, &mut selection);
+        let extended_adds = extended_add::select(func, &mut selection);
         selection.fuse_aarch64_selects(func, |data| {
             folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
         });
@@ -973,6 +976,7 @@ impl<'a> FunctionCompiler<'a> {
             replicate_loads,
             packed_low_loads,
             packed_minmax,
+            extended_adds,
             packed_absolute_values,
             absolute_values,
             widening_adds,
@@ -1402,6 +1406,22 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&p) = self.extended_adds.get(&inst) {
+            let a = self.use_reg(p.base, S0);
+            let b = self.use_reg(p.index, S1);
+            let d = self.def_reg(result);
+            self.mach(
+                "add",
+                [
+                    Reg::x(d).into(),
+                    Reg::x(a).into(),
+                    Reg::w(b).into(),
+                    Arg::shift(if p.signed { "sxtw" } else { "uxtw" }, p.shift),
+                ],
+            );
+            self.def_done(result, d);
             return;
         }
         if let Some(&value) = self.absolute_values.get(&inst) {
