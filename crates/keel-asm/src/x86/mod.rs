@@ -5,6 +5,7 @@ mod encode;
 mod metadata;
 mod sections;
 use crate::Error;
+use crate::fxhash::{FxHashMap, FxHashSet};
 pub use keel_asm_ir::x86::{Features, Syntax};
 use keel_asm_ir::{
     Directive, Expression, Item, Program,
@@ -15,7 +16,7 @@ use object::{
     Architecture, BinaryFormat, ComdatKind, Endianness, RelocationFlags, SectionFlags, SectionKind,
     SymbolFlags, SymbolKind, SymbolScope,
 };
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 struct Section {
     name: String,
@@ -75,7 +76,7 @@ struct Fix {
 #[derive(Default)]
 struct Assembler {
     sections: Vec<Section>,
-    symbols: HashMap<String, Sym>,
+    symbols: FxHashMap<String, Sym>,
     fixes: Vec<Fix>,
     current: usize,
     cfi: Option<metadata::Frame>,
@@ -86,6 +87,9 @@ struct Assembler {
     leb_widths: Vec<usize>,
     lebs: Vec<(usize, u64, Expression, bool, usize)>,
     pref_powers: Vec<u32>,
+    /// Section sizes from the previous layout pass, which declares the same
+    /// sections in the same order: reserve them instead of regrowing.
+    size_hints: Vec<u64>,
     prefs: Vec<(usize, u64, u64, u32, String, usize)>,
 }
 
@@ -471,11 +475,16 @@ fn assemble_items_inner<const PROFILE: bool>(
     let mut checkpoint = None;
     let (mut period, mut distance) = (1usize, 0usize);
     let mut variable_work = 0usize;
+    // Every pass defines the same symbols; size later tables from the first.
+    let mut symbol_count = 0;
+    let mut size_hints = Vec::new();
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
+        a.symbols.reserve(symbol_count);
         a.leb_widths = leb_widths.clone();
         a.pref_powers = pref_powers.clone();
+        a.size_hints = std::mem::take(&mut size_hints);
         let mut branches = Vec::new();
         let mut run = 0;
         for (index, entry) in items.entries.iter().enumerate() {
@@ -515,13 +524,15 @@ fn assemble_items_inner<const PROFILE: bool>(
                 .push(start.elapsed().as_secs_f64() * 1000.0);
         }
         let start = PROFILE.then(std::time::Instant::now);
+        symbol_count = a.symbols.len();
+        size_hints = a.sections.iter().map(|s| s.data.len() as u64).collect();
         let mut changed = 0;
         for (index, fix) in branches {
             let f = &a.fixes[fix];
             let name = f.address.expression.add.as_deref().unwrap();
             let fits = a.local_symbol(name, 0)
-                && a.eval(&f.address.expression, 0)
-                    .is_ok_and(|(section, value)| {
+                && a.try_eval(&f.address.expression, 0)
+                    .is_some_and(|(section, value)| {
                         section == Some(f.section)
                             && (-128..=127).contains(&(value - i128::from(f.offset)))
                     });
@@ -737,7 +748,11 @@ impl Assembler {
             section_type,
             unique,
             align: 1,
-            data: Vec::new(),
+            data: Vec::with_capacity(
+                self.size_hints
+                    .get(self.sections.len())
+                    .map_or(0, |&n| n as usize),
+            ),
             size: 0,
         });
         Ok(())
@@ -824,7 +839,7 @@ impl Assembler {
             };
             if address.modifier == Modifier::None
                 && address.expression.add.is_some()
-                && let Ok((None, value)) = self.eval(&address.expression, 0)
+                && let Some((None, value)) = self.try_eval(&address.expression, 0)
             {
                 if matches!(
                     i.opcode,
@@ -1369,6 +1384,35 @@ impl Assembler {
             _ => Err(format!("unsupported ELF directive `{op}`")),
         }
     }
+    /// [`Self::eval_symbol`] for callers that discard why it fails, without
+    /// formatting a diagnostic: forward references fail on every early pass.
+    fn try_eval_symbol(&self, name: &str, depth: usize) -> Option<(Option<usize>, i128)> {
+        if depth > 64 {
+            return None;
+        }
+        let s = self.symbols.get(name)?;
+        if let Some(e) = &s.alias {
+            return self.try_eval(e, depth + 1);
+        }
+        Some((Some(s.section?), s.value.into()))
+    }
+    fn try_eval(&self, e: &Expression, depth: usize) -> Option<(Option<usize>, i128)> {
+        let (mut section, mut value) = (None, e.constant);
+        if let Some(n) = &e.add {
+            let (s, v) = self.try_eval_symbol(n, depth)?;
+            section = s;
+            value += v
+        }
+        if let Some(n) = &e.subtract {
+            let (s, v) = self.try_eval_symbol(n, depth)?;
+            if s != section {
+                return None;
+            }
+            section = None;
+            value -= v
+        }
+        Some((section, value))
+    }
     fn eval_symbol(&self, name: &str, depth: usize) -> Result<(Option<usize>, i128), String> {
         if depth > 64 {
             return Err("cyclic or excessively nested symbol alias".into());
@@ -1457,8 +1501,8 @@ impl Assembler {
         }
         // A signature may also be an ordinary external relocation target.
         // Only group-only names may receive a synthetic .group definition.
-        let ordinary_references: BTreeSet<_> = if groups.is_empty() {
-            BTreeSet::new()
+        let ordinary_references: FxHashSet<_> = if groups.is_empty() {
+            FxHashSet::default()
         } else {
             self.fixes
                 .iter()
@@ -1517,7 +1561,7 @@ impl Assembler {
             }
             sections.push(id);
         }
-        let identity: BTreeSet<_> = self
+        let identity: FxHashSet<_> = self
             .fixes
             .iter()
             .filter(|f| {
@@ -1532,11 +1576,11 @@ impl Assembler {
                             .subtract
                             .as_deref()
                             .is_some_and(|name| {
-                                self.eval_symbol(name, 0)
-                                    .is_ok_and(|(section, _)| section == Some(f.section))
+                                self.try_eval_symbol(name, 0)
+                                    .is_some_and(|(section, _)| section == Some(f.section))
                             });
                 let merge_target = f.address.expression.add.as_deref().is_some_and(|name| {
-                    self.eval_symbol(name, 0).is_ok_and(|(section, _)| {
+                    self.try_eval_symbol(name, 0).is_some_and(|(section, _)| {
                         section.is_some_and(|i| self.sections[i].flags & 0x12 == 0x12)
                     })
                 });
@@ -1544,8 +1588,8 @@ impl Assembler {
                     || f.address.modifier != Modifier::None
                     || pc_relative
                         && f.address.expression.add.as_deref().is_some_and(|name| {
-                            self.eval_symbol(name, 0)
-                                .is_ok_and(|(section, _)| section.is_none())
+                            self.try_eval_symbol(name, 0)
+                                .is_some_and(|(section, _)| section.is_none())
                         })
             })
             .filter_map(|f| f.address.expression.add.as_deref())
@@ -1554,14 +1598,42 @@ impl Assembler {
         if let Some(names) = &self.addrsig {
             retained.extend(names.iter().map(String::as_str));
         }
-        let mut symbols = BTreeMap::new();
+        let mut symbols = FxHashMap::default();
+        symbols.reserve(self.symbols.len());
         // Lookup order is irrelevant during layout; ELF symbol order is stable.
-        let mut entries: Vec<_> = self.symbols.iter().collect();
+        // Temporary local labels without an ELF symbol table entry.
+        let discard = |name: &str, s: &Sym, section: Option<usize>, tls: bool| {
+            name.starts_with(".L")
+                && !s.global
+                && !s.weak
+                && !s.hidden
+                && s.common.is_none()
+                && !tls
+                && !retained.contains(name)
+                && !groups.contains_key(name)
+                && (section.is_some() || s.alias.is_some())
+                && self.local_symbol(name, 0)
+        };
+        // Most symbols are plain local labels that cannot fail evaluation
+        // below and are discarded there; only the rest need ordering.
+        let mut entries: Vec<_> = self
+            .symbols
+            .iter()
+            .filter(|(name, s)| {
+                let tls = s.kind == SymbolKind::Tls
+                    || s.section
+                        .is_some_and(|i| self.sections[i].flags & 0x400 != 0);
+                s.kind == SymbolKind::Section
+                    || s.alias.is_some()
+                    || s.size.is_some()
+                    || !discard(name, s, s.section, tls)
+            })
+            .collect();
         entries.sort_unstable_by_key(|(name, _)| *name);
         for (name, s) in entries {
             if s.kind == SymbolKind::Section {
                 symbols.insert(
-                    name.clone(),
+                    name.as_str(),
                     object.section_symbol(sections[s.section.unwrap()]),
                 );
                 continue;
@@ -1587,17 +1659,7 @@ impl Assembler {
             };
             let tls = kind == SymbolKind::Tls
                 || section.is_some_and(|i| self.sections[i].flags & 0x400 != 0);
-            if name.starts_with(".L")
-                && !s.global
-                && !s.weak
-                && !s.hidden
-                && s.common.is_none()
-                && !tls
-                && !retained.contains(name.as_str())
-                && !groups.contains_key(name)
-                && (section.is_some() || s.alias.is_some())
-                && self.local_symbol(name, 0)
-            {
+            if discard(name, s, section, tls) {
                 continue;
             }
             let synthetic = synthetic_signatures.contains(name);
@@ -1649,12 +1711,12 @@ impl Assembler {
             } else {
                 object.add_symbol(symbol)
             };
-            symbols.insert(name.clone(), id);
+            symbols.insert(name.as_str(), id);
         }
         for (signature, members) in &groups {
             object.add_comdat(Comdat {
                 kind: ComdatKind::Any,
-                symbol: symbols[signature],
+                symbol: symbols[signature.as_str()],
                 sections: members.iter().map(|&i| sections[i]).collect(),
             });
         }
@@ -1664,13 +1726,11 @@ impl Assembler {
             let mut addend = expr.constant;
             let name = expr
                 .add
-                .as_ref()
-                .ok_or_else(|| Error::new(f.line, "relocation requires a positive symbol"))?
-                .clone();
-            let defined = self.eval_symbol(&name, 0).ok();
+                .as_deref()
+                .ok_or_else(|| Error::new(f.line, "relocation requires a positive symbol"))?;
+            let defined = self.try_eval_symbol(name, 0);
             let absolute = if expr.subtract.is_some() {
-                self.eval(expr, 0)
-                    .ok()
+                self.try_eval(expr, 0)
                     .filter(|(s, _)| s.is_none())
                     .map(|(_, n)| n)
             } else if matches!(kind, 1 | 10 | 11 | 12 | 14)
@@ -1717,10 +1777,10 @@ impl Assembler {
             // Relocations against section-relative aliases use their underlying section symbol.
             let debug_reference = self.sections[f.section].name.starts_with(".debug_");
             let symbol = if defined.is_some()
-                && (debug_reference || !identity.contains(name.as_str()))
+                && (debug_reference || !identity.contains(name))
                 && f.address.modifier == Modifier::None
-                && self.local_symbol(&name, 0)
-                && self.symbols[&name].kind != SymbolKind::Tls
+                && self.local_symbol(name, 0)
+                && self.symbols[name].kind != SymbolKind::Tls
                 && !defined.is_some_and(|(section, _)| {
                     section.is_some_and(|sec| self.sections[sec].flags & 0x400 != 0)
                 }) {
@@ -1731,10 +1791,10 @@ impl Assembler {
                 } else {
                     // GOT/TLS modifiers still require a linker relocation
                     // even when the referenced symbol is absolute.
-                    symbols[&name]
+                    symbols[name]
                 }
             } else {
-                symbols[&name]
+                symbols[name]
             };
             object
                 .add_relocation(

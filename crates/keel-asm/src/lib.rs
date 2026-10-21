@@ -9,6 +9,7 @@
 //! supported, including Darwin exception personality/LSDA references.
 //! Symbol-defined subsections support linker reordering and dead stripping.
 //! Unsupported instructions/directives are errors.
+mod fxhash;
 mod generated;
 mod macho;
 mod parser;

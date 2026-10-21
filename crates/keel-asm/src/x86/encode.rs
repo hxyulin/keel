@@ -18,8 +18,10 @@ pub(super) struct Fixup {
 }
 #[derive(Default)]
 pub(super) struct Encoding {
-    pub bytes: Vec<u8>,
-    pub fixups: Vec<Fixup>,
+    // x86 instructions are at most 15 bytes: never allocate.
+    pub bytes: smallvec::SmallVec<[u8; 16]>,
+    // Rarely more than one symbolic operand.
+    pub fixups: smallvec::SmallVec<[Fixup; 1]>,
 }
 fn width(o: &Operand) -> u16 {
     match o {

@@ -8,6 +8,7 @@ license = "(MIT OR Apache-2.0) AND BSD-3-Clause"
 [dependencies]
 keel-asm-ir = { path = "../keel-asm-ir" }
 memchr = "2"
+smallvec = "1"
 object = { version = "0.36", default-features = false, features = ["write", "std"] }
 bumpalo = { version = "3", features = ["collections"] }
 
