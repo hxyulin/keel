@@ -50,6 +50,10 @@ impl AliasInfo {
                 }
             }
         }
+        // Only restricted roots can lose their contract below.
+        if info.restricted.is_empty() {
+            return info;
+        }
         for (_, inst) in func.layout_insts() {
             let data = func.inst_data(inst);
             data.for_each_operand(|v| {
@@ -85,10 +89,20 @@ impl AliasInfo {
 
     fn record(&mut self, func: &Function, value: Value) {
         let mut v = func.resolve(value);
-        let mut path = Vec::new();
+        let mut path: Vec<(Value, i64)> = Vec::new();
+        // Every value visited so far is on `path`; short paths are searched
+        // directly, and only a long chain pays for a set.
         let mut seen = FxHashSet::default();
         while !self.addresses.contains_key(&v) {
-            if !seen.insert(v) {
+            let revisit = if path.len() < 16 {
+                path.iter().any(|&(p, _)| p == v)
+            } else {
+                if seen.is_empty() {
+                    seen.extend(path.iter().map(|&(p, _)| p));
+                }
+                !seen.insert(v)
+            };
+            if revisit {
                 for (v, _) in path {
                     self.addresses.insert(v, Address { root: v, offset: 0 });
                 }
