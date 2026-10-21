@@ -1,8 +1,9 @@
 //! Bounded direct-call inlining of definitions with proven binding. Templates
 //! are frozen at
 //! pass entry: newly cloned calls are not reconsidered, so growth and recursion
-//! cannot recursively reconsider cloned sites. The module budget is consumed in
-//! layout order. ABI by-value arguments get a fresh snapshot.
+//! cannot recursively reconsider cloned sites. Full schedules bounded tiny
+//! alwaysinline leaves first; each phase otherwise retains layout order. Other
+//! policies consume budgets in layout order. ABI by-value arguments get a fresh snapshot.
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
 use crate::{InlineSite, Pass};
@@ -321,6 +322,38 @@ fn byval_copy_cost(size: u64) -> usize {
         .sum::<usize>()
 }
 
+// Include ABI snapshots in scheduling as well as admission. This is a small
+// structural priority class, not an alwaysinline budget exemption. Calls and
+// cycles are excluded so a tiny wrapper cannot compete as a constructor leaf.
+fn tiny_priority_leaf(f: &Function) -> bool {
+    let (cost, stack) = inline_cost(f);
+    cost <= 32
+        && stack <= 64
+        && f.blocks().count() <= 4
+        && !f.layout_insts().any(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                InstData::Call { .. } | InstData::CallIndirect { .. } | InstData::Intrinsic { .. }
+            )
+        })
+        && acyclic_cfg(f)
+}
+
+fn inline_cost(callee: &Function) -> (usize, u64) {
+    let mut cost = callee.layout_insts().count();
+    let mut stack = callee
+        .stack_slots()
+        .map(|(_, s)| u64::from(s.size))
+        .sum::<u64>();
+    for p in &callee.sig.params {
+        if let Purpose::ByVal(l) = &p.purpose {
+            cost += byval_copy_cost(l.size());
+            stack += l.size();
+        }
+    }
+    (cost, stack)
+}
+
 /// Reasons an explicit alwaysinline request could not be honored. No stderr
 /// side effects: embedders can display this report alongside their diagnostics.
 #[derive(Debug, Default)]
@@ -598,217 +631,244 @@ fn run_observed_policy(
     let mut report = InlineReport::default();
     let mut module_growth = 0;
     let mut module_reserve_sites = 0;
-    for caller in &mut module.functions {
-        let large_scc_caller =
-            !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS;
-        let calls: Vec<_> = caller
-            .layout_insts()
-            .filter_map(|(_, i)| {
-                matches!(
-                    caller.inst_data(i),
-                    InstData::Call { .. } | InstData::Invoke { .. } | InstData::ReturnCall { .. }
-                )
-                .then_some(i)
-            })
-            .collect();
-        let mut growth = 0;
-        let mut reserve_sites = 0;
-        let mut count = 0;
-        let mut stack_growth = 0;
-        for call in calls {
-            let reference = match caller.inst_data(call) {
-                InstData::Call { func, .. }
-                | InstData::Invoke { func, .. }
-                | InstData::ReturnCall { func, .. } => *func,
-                _ => unreachable!(),
-            };
-            let decl = caller.callee(reference);
-            let requested = decl.attrs.alwaysinline
-                || templates
-                    .get(&decl.name)
-                    .is_some_and(|f| f.attrs.alwaysinline);
-            let reason = if caller.sig.returns_twice || caller.personality.is_some() {
-                Some((
-                    "unsupported caller",
-                    if caller.sig.returns_twice {
-                        "returns_twice_caller"
+    // Freeze original sites and caller-size decisions before either phase.
+    // The ledgers span both phases: priority changes order, never capacity.
+    let original_sites: Vec<Vec<_>> = module
+        .functions
+        .iter()
+        .map(|caller| {
+            caller
+                .layout_insts()
+                .filter_map(|(_, i)| {
+                    matches!(
+                        caller.inst_data(i),
+                        InstData::Call { .. }
+                            | InstData::Invoke { .. }
+                            | InstData::ReturnCall { .. }
+                    )
+                    .then_some(i)
+                })
+                .collect()
+        })
+        .collect();
+    let tiny_templates: HashSet<_> = templates
+        .values()
+        .filter(|f| admit_noninterposable && tiny_priority_leaf(f))
+        .map(|f| f.name.as_str())
+        .collect();
+    let priority_sites: Vec<HashSet<_>> = module
+        .functions
+        .iter()
+        .zip(&original_sites)
+        .map(|(caller, calls)| {
+            calls
+                .iter()
+                .copied()
+                .filter(|&call| {
+                    let InstData::Call { func, .. } = caller.inst_data(call) else {
+                        return false;
+                    };
+                    let decl = caller.callee(*func);
+                    admit_noninterposable
+                        && templates.get(&decl.name).is_some_and(|f| {
+                            (decl.attrs.alwaysinline || f.attrs.alwaysinline)
+                                && tiny_templates.contains(f.name.as_str())
+                        })
+                })
+                .collect()
+        })
+        .collect();
+    let large_scc_callers: Vec<_> = module
+        .functions
+        .iter()
+        .map(|caller| {
+            !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS
+        })
+        .collect();
+    let mut ledgers = vec![(0, 0, 0, 0u64); module.functions.len()];
+    for phase in 0..if admit_noninterposable { 2 } else { 1 } {
+        for (index, caller) in module.functions.iter_mut().enumerate() {
+            let large_scc_caller = large_scc_callers[index];
+            let (mut growth, mut reserve_sites, mut count, mut stack_growth) = ledgers[index];
+            for &call in &original_sites[index] {
+                if admit_noninterposable && priority_sites[index].contains(&call) != (phase == 0) {
+                    continue;
+                }
+                let reference = match caller.inst_data(call) {
+                    InstData::Call { func, .. }
+                    | InstData::Invoke { func, .. }
+                    | InstData::ReturnCall { func, .. } => *func,
+                    _ => unreachable!(),
+                };
+                let decl = caller.callee(reference);
+                let requested = decl.attrs.alwaysinline
+                    || templates
+                        .get(&decl.name)
+                        .is_some_and(|f| f.attrs.alwaysinline);
+                let reason = if caller.sig.returns_twice || caller.personality.is_some() {
+                    Some((
+                        "unsupported caller",
+                        if caller.sig.returns_twice {
+                            "returns_twice_caller"
+                        } else {
+                            "caller_personality"
+                        },
+                    ))
+                } else if !matches!(caller.inst_data(call), InstData::Call { .. }) {
+                    Some((
+                        "unsupported call instruction",
+                        "unsupported_call_instruction",
+                    ))
+                } else if decl.attrs.noinline {
+                    Some(("noinline policy", "noinline"))
+                } else if recursive_bodies.contains(&caller.name) {
+                    Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
+                } else if large_scc_caller && wrappers.contains(&decl.name) {
+                    Some((
+                        "recursive wrapper caller size",
+                        "recursive_wrapper_caller_size",
+                    ))
+                } else if let Some(callee) = templates.get(&decl.name) {
+                    if decl.sig != callee.sig {
+                        Some(("ABI signature mismatch", "abi_signature_mismatch"))
+                    } else if callee.name == caller.name {
+                        Some(("recursive callee", "recursive_callee"))
                     } else {
-                        "caller_personality"
-                    },
-                ))
-            } else if !matches!(caller.inst_data(call), InstData::Call { .. }) {
-                Some((
-                    "unsupported call instruction",
-                    "unsupported_call_instruction",
-                ))
-            } else if decl.attrs.noinline {
-                Some(("noinline policy", "noinline"))
-            } else if recursive_bodies.contains(&caller.name) {
-                Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
-            } else if large_scc_caller && wrappers.contains(&decl.name) {
-                Some((
-                    "recursive wrapper caller size",
-                    "recursive_wrapper_caller_size",
-                ))
-            } else if let Some(callee) = templates.get(&decl.name) {
-                if decl.sig != callee.sig {
-                    Some(("ABI signature mismatch", "abi_signature_mismatch"))
-                } else if callee.name == caller.name {
-                    Some(("recursive callee", "recursive_callee"))
+                        None
+                    }
+                } else {
+                    Some({
+                        let detail = rejected.get(&decl.name).copied().unwrap_or("no_definition");
+                        let legacy = match detail {
+                            "noinline" => "noinline policy",
+                            "recursive_callee" => "recursive callee",
+                            "no_definition" => "no private definition",
+                            r if r.starts_with("profitability_") => "profitability threshold",
+                            _ => "unsupported callee or hard stack bound",
+                        };
+                        (legacy, detail)
+                    })
+                };
+                if let Some((reason, detail)) = reason {
+                    if let Some(sites) = sites.as_deref_mut() {
+                        sites.push(InlineSite::new(
+                            caller,
+                            &decl.name,
+                            call,
+                            requested
+                                || explicit_definitions
+                                    .as_ref()
+                                    .is_some_and(|names| names.contains(&decl.name)),
+                            detail,
+                        ));
+                    }
+                    if requested {
+                        report.skipped.push(InlineSkip {
+                            caller: caller.name.clone(),
+                            callee: decl.name.clone(),
+                            site: call,
+                            reason,
+                        });
+                    }
+                    continue;
+                }
+                let callee = &templates[&decl.name];
+                // Bound net layout growth before cleanup. The entry jump replaces
+                // the removed call; each cloned return becomes one jump. The
+                // continuation only receives moved instructions and parameters.
+                // Counting all callee instructions also covers unreachable blocks
+                // that the dominator traversal may omit. Snapshot IR is additional.
+                let (cost, stack_cost) = inline_cost(callee);
+                let budget = if count == MAX_CALLS {
+                    Some("caller_call_count_budget")
+                } else if growth + cost > MAX_GROWTH {
+                    Some("caller_instruction_growth_budget")
+                } else if module_growth + cost > MAX_MODULE_GROWTH {
+                    Some("module_instruction_growth_budget")
+                } else if stack_growth + stack_cost > HARD_STACK {
+                    Some("caller_stack_growth_budget")
                 } else {
                     None
+                };
+                // Reserve cannot bypass call-count, stack, legality or profitability.
+                // Ordinary growth ledgers retain their exact original limits. Reserve
+                // sites have separate worst-case 8*32/caller and 8*32/module bounds.
+                let use_reserve = experimental
+                    && matches!(
+                        budget,
+                        Some(
+                            "caller_instruction_growth_budget" | "module_instruction_growth_budget"
+                        )
+                    )
+                    && count < MAX_CALLS
+                    && stack_growth + stack_cost <= HARD_STACK
+                    && reserve_sites < RESERVE_CALLER_SITES
+                    && module_reserve_sites < RESERVE_MODULE_SITES
+                    && aggregate_leaf(callee, cost, stack_cost);
+                if let Some(detail) = budget.filter(|_| !use_reserve) {
+                    if let Some(sites) = sites.as_deref_mut() {
+                        sites.push(InlineSite::new(
+                            caller,
+                            &callee.name,
+                            call,
+                            requested
+                                || explicit_definitions
+                                    .as_ref()
+                                    .is_some_and(|names| names.contains(&decl.name)),
+                            detail,
+                        ));
+                    }
+                    if requested {
+                        report.skipped.push(InlineSkip {
+                            caller: caller.name.clone(),
+                            callee: callee.name.clone(),
+                            site: call,
+                            reason: "hard growth safeguard",
+                        });
+                    }
+                    continue;
                 }
-            } else {
-                Some({
-                    let detail = rejected.get(&decl.name).copied().unwrap_or("no_definition");
-                    let legacy = match detail {
-                        "noinline" => "noinline policy",
-                        "recursive_callee" => "recursive callee",
-                        "no_definition" => "no private definition",
-                        r if r.starts_with("profitability_") => "profitability threshold",
-                        _ => "unsupported callee or hard stack bound",
-                    };
-                    (legacy, detail)
-                })
-            };
-            if let Some((reason, detail)) = reason {
-                if let Some(sites) = sites.as_deref_mut() {
-                    sites.push(InlineSite::new(
-                        caller,
-                        &decl.name,
-                        call,
-                        requested
-                            || explicit_definitions
-                                .as_ref()
-                                .is_some_and(|names| names.contains(&decl.name)),
-                        detail,
-                    ));
-                }
-                if requested {
-                    report.skipped.push(InlineSkip {
-                        caller: caller.name.clone(),
-                        callee: decl.name.clone(),
-                        site: call,
-                        reason,
-                    });
-                }
-                continue;
-            }
-            let callee = &templates[&decl.name];
-            // Bound net layout growth before cleanup. The entry jump replaces
-            // the removed call; each cloned return becomes one jump. The
-            // continuation only receives moved instructions and parameters.
-            // Counting all callee instructions also covers unreachable blocks
-            // that the dominator traversal may omit. Snapshot IR is additional.
-            let cost = callee.layout_insts().count()
-                + callee
-                    .sig
-                    .params
-                    .iter()
-                    .map(|p| match &p.purpose {
-                        Purpose::ByVal(l) => byval_copy_cost(l.size()),
-                        _ => 0,
-                    })
-                    .sum::<usize>();
-            let stack_cost = callee
-                .stack_slots()
-                .map(|(_, s)| u64::from(s.size))
-                .sum::<u64>()
-                + callee
-                    .sig
-                    .params
-                    .iter()
-                    .map(|p| match &p.purpose {
-                        Purpose::ByVal(l) => l.size(),
-                        _ => 0,
-                    })
-                    .sum::<u64>();
-            let budget = if count == MAX_CALLS {
-                Some("caller_call_count_budget")
-            } else if growth + cost > MAX_GROWTH {
-                Some("caller_instruction_growth_budget")
-            } else if module_growth + cost > MAX_MODULE_GROWTH {
-                Some("module_instruction_growth_budget")
-            } else if stack_growth + stack_cost > HARD_STACK {
-                Some("caller_stack_growth_budget")
-            } else {
-                None
-            };
-            // Reserve cannot bypass call-count, stack, legality or profitability.
-            // Ordinary growth ledgers retain their exact original limits. Reserve
-            // sites have separate worst-case 8*32/caller and 8*32/module bounds.
-            let use_reserve = experimental
-                && matches!(
-                    budget,
-                    Some("caller_instruction_growth_budget" | "module_instruction_growth_budget")
-                )
-                && count < MAX_CALLS
-                && stack_growth + stack_cost <= HARD_STACK
-                && reserve_sites < RESERVE_CALLER_SITES
-                && module_reserve_sites < RESERVE_MODULE_SITES
-                && aggregate_leaf(callee, cost, stack_cost);
-            if let Some(detail) = budget.filter(|_| !use_reserve) {
                 if let Some(sites) = sites.as_deref_mut() {
                     sites.push(InlineSite::new(
                         caller,
                         &callee.name,
                         call,
-                        requested
-                            || explicit_definitions
-                                .as_ref()
-                                .is_some_and(|names| names.contains(&decl.name)),
-                        detail,
+                        requested,
+                        if use_reserve {
+                            "experimental_reserve_inlined"
+                        } else {
+                            "inlined"
+                        },
                     ));
                 }
-                if requested {
-                    report.skipped.push(InlineSkip {
-                        caller: caller.name.clone(),
-                        callee: callee.name.clone(),
-                        site: call,
-                        reason: "hard growth safeguard",
-                    });
+                let before = use_reserve.then(|| caller.layout_insts().count());
+                inline_call(caller, call, callee);
+                if let Some(before) = before {
+                    // Fail compilation before codegen on an accounting violation.
+                    // No recoverable post-mutation fallback or artifact is allowed.
+                    let actual_net_growth = caller
+                        .layout_insts()
+                        .count()
+                        .checked_sub(before)
+                        .expect("reserve inlining unexpectedly shrank layout");
+                    assert!(
+                        actual_net_growth <= cost && cost <= RESERVE_SITE_GROWTH,
+                        "reserve emitted net growth exceeds conservative preflight"
+                    );
+                    if let Some(site) = sites.as_deref_mut().and_then(|s| s.last_mut()) {
+                        site.experimental_net_growth = Some(actual_net_growth);
+                    }
+                    reserve_sites += 1;
+                    module_reserve_sites += 1;
+                } else {
+                    growth += cost;
+                    module_growth += cost;
                 }
-                continue;
+                count += 1;
+                stack_growth += stack_cost;
+                report.changed = true;
             }
-            if let Some(sites) = sites.as_deref_mut() {
-                sites.push(InlineSite::new(
-                    caller,
-                    &callee.name,
-                    call,
-                    requested,
-                    if use_reserve {
-                        "experimental_reserve_inlined"
-                    } else {
-                        "inlined"
-                    },
-                ));
-            }
-            let before = use_reserve.then(|| caller.layout_insts().count());
-            inline_call(caller, call, callee);
-            if let Some(before) = before {
-                // Fail compilation before codegen on an accounting violation.
-                // No recoverable post-mutation fallback or artifact is allowed.
-                let actual_net_growth = caller
-                    .layout_insts()
-                    .count()
-                    .checked_sub(before)
-                    .expect("reserve inlining unexpectedly shrank layout");
-                assert!(
-                    actual_net_growth <= cost && cost <= RESERVE_SITE_GROWTH,
-                    "reserve emitted net growth exceeds conservative preflight"
-                );
-                if let Some(site) = sites.as_deref_mut().and_then(|s| s.last_mut()) {
-                    site.experimental_net_growth = Some(actual_net_growth);
-                }
-                reserve_sites += 1;
-                module_reserve_sites += 1;
-            } else {
-                growth += cost;
-                module_growth += cost;
-            }
-            count += 1;
-            stack_growth += stack_cost;
-            report.changed = true;
+            ledgers[index] = (growth, reserve_sites, count, stack_growth);
         }
     }
     report
