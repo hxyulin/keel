@@ -1,0 +1,30 @@
+description = "yyjson 0.13.0: strict JSON DOM parsing, traversal and compact/pretty roundtrips"
+
+[[fetch]]
+url = "https://github.com/ibireme/yyjson/archive/refs/tags/0.13.0.tar.gz"
+sha256 = "34e0f62a2bc11ab20d601e8ca1cc2b2079503aa45119a19133d89d19b94a0fae"
+
+[build]
+dir = "yyjson-0.13.0"
+std = "c11"
+includes = ["src"]
+sources = ["src/yyjson.c", "{suite}/driver.c"]
+prepare = ["python3 {suite}/corpus.py {gen}/corpus"]
+libs = ["m"]
+binary = "yyjson-workload"
+
+[test]
+run = ["python3 {suite}/check.py {bin} {gen}/corpus"]
+compare = "clang-O2"
+
+[[bench]]
+name = "api"
+run = "{bin} {gen}/corpus/api.json 40"
+
+[[bench]]
+name = "config"
+run = "{bin} {gen}/corpus/config.json 120"
+
+[[bench]]
+name = "telemetry"
+run = "{bin} {gen}/corpus/telemetry.json 40"
