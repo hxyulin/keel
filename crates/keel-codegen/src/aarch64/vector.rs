@@ -381,52 +381,63 @@ impl FunctionCompiler<'_> {
     }
     pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
+        // Comparisons produce whole-lane masks. Other nonzero lane values
+        // must still be normalized before the bitwise blend.
+        let canonical = match self.func.value_def(self.func.resolve(args[0])) {
+            ValueDef::Result(inst, _) => {
+                matches!(self.func.inst_data(inst), InstData::VectorIcmp { .. })
+            }
+            _ => false,
+        };
         let mask = self.use_freg(args[0], FS0);
         self.move_vector(FS0, mask);
-        self.native(
-            Opcode::EOR_asimdsame_only,
-            [
-                (FieldId::Q, 1),
-                (FieldId::Rd, FS1.into()),
-                (FieldId::Rn, FS1.into()),
-                (FieldId::Rm, FS1.into()),
-            ],
-            |out| write!(out, "eor\tv{FS1}.16b, v{FS1}.16b, v{FS1}.16b"),
-        );
-        self.native(
-            Opcode::CMEQ_asimdsame_only,
-            [
-                (FieldId::Q, 1),
-                (
-                    FieldId::size,
-                    shape.lane_type().bytes().unwrap().trailing_zeros(),
-                ),
-                (FieldId::Rd, FS0.into()),
-                (FieldId::Rn, FS0.into()),
-                (FieldId::Rm, FS1.into()),
-            ],
-            |out| {
-                write!(
-                    out,
-                    "cmeq\tv{FS0}.{}, v{FS0}.{}, v{FS1}.{}",
-                    arrangement(shape),
-                    arrangement(shape),
-                    arrangement(shape)
-                )
-            },
-        );
+        if !canonical {
+            self.native(
+                Opcode::EOR_asimdsame_only,
+                [
+                    (FieldId::Q, 1),
+                    (FieldId::Rd, FS1.into()),
+                    (FieldId::Rn, FS1.into()),
+                    (FieldId::Rm, FS1.into()),
+                ],
+                |out| write!(out, "eor\tv{FS1}.16b, v{FS1}.16b, v{FS1}.16b"),
+            );
+            self.native(
+                Opcode::CMEQ_asimdsame_only,
+                [
+                    (FieldId::Q, 1),
+                    (
+                        FieldId::size,
+                        shape.lane_type().bytes().unwrap().trailing_zeros(),
+                    ),
+                    (FieldId::Rd, FS0.into()),
+                    (FieldId::Rn, FS0.into()),
+                    (FieldId::Rm, FS1.into()),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "cmeq\tv{FS0}.{}, v{FS0}.{}, v{FS1}.{}",
+                        arrangement(shape),
+                        arrangement(shape),
+                        arrangement(shape)
+                    )
+                },
+            );
+        }
+        // The generic path has an inverted mask (mask == 0).
         let a = self.use_freg(args[1], FS1);
         let b = self.use_freg(args[2], FS2);
-        // Select the false arm where mask == 0, preserving arbitrary mask bits.
+        let (a, b) = if canonical { (a, b) } else { (b, a) };
         self.native(
             Opcode::BSL_asimdsame_only,
             [
                 (FieldId::Q, 1),
                 (FieldId::Rd, FS0.into()),
-                (FieldId::Rn, b.into()),
-                (FieldId::Rm, a.into()),
+                (FieldId::Rn, a.into()),
+                (FieldId::Rm, b.into()),
             ],
-            |out| write!(out, "bsl\tv{FS0}.16b, v{b}.16b, v{a}.16b"),
+            |out| write!(out, "bsl\tv{FS0}.16b, v{a}.16b, v{b}.16b"),
         );
         let d = self.def_freg(result);
         self.move_vector(d, FS0);
