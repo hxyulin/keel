@@ -127,6 +127,7 @@ mod packed_minmax;
 mod vector;
 use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
+use native::Piece::{Class, Hex, Number, Reg as R, Text};
 use native::{Address, Arg, Reg};
 use output::Output;
 
@@ -1309,7 +1310,18 @@ impl<'a> FunctionCompiler<'a> {
                             (FieldId::Rn, 31),
                             (FieldId::imm7, 126),
                         ],
-                        |out| write!(out, "stp\t{class}{a}, {class}{b}, [sp, #-16]!"),
+                        |out| {
+                            native::write_pieces(
+                                out,
+                                &[
+                                    Text("stp\t"),
+                                    Class(class, *a),
+                                    Text(", "),
+                                    Class(class, *b),
+                                    Text(", [sp, #-16]!"),
+                                ],
+                            )
+                        },
                     );
                     self.out.directive(Directive::Cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
@@ -1332,7 +1344,12 @@ impl<'a> FunctionCompiler<'a> {
                             (FieldId::Rn, 31),
                             (FieldId::imm9, 496),
                         ],
-                        |out| write!(out, "str\t{class}{a}, [sp, #-16]!"),
+                        |out| {
+                            native::write_pieces(
+                                out,
+                                &[Text("str\t"), Class(class, *a), Text(", [sp, #-16]!")],
+                            )
+                        },
                     );
                     self.out.directive(Directive::Cfi(Cfi::Offset {
                         register: *a + if class == 'd' { 64 } else { 0 },
@@ -3630,7 +3647,18 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm7, 2),
                     ],
-                    |out| write!(out, "ldp\td{a}, d{b}, [sp], #16"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text("ldp\t"),
+                                Class('d', *a),
+                                Text(", "),
+                                Class('d', *b),
+                                Text(", [sp], #16"),
+                            ],
+                        )
+                    },
                 ),
                 [a] => self.native(
                     Opcode::LDR_D_ldst_immpost,
@@ -3639,7 +3667,12 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm9, 16),
                     ],
-                    |out| write!(out, "ldr\td{a}, [sp], #16"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[Text("ldr\t"), Class('d', *a), Text(", [sp], #16")],
+                        )
+                    },
                 ),
                 _ => unreachable!(),
             }
@@ -3654,7 +3687,18 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm7, 2),
                     ],
-                    |out| write!(out, "ldp\tx{a}, x{b}, [sp], #16"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text("ldp\t"),
+                                Class('x', *a),
+                                Text(", "),
+                                Class('x', *b),
+                                Text(", [sp], #16"),
+                            ],
+                        )
+                    },
                 ),
                 [a] => self.native(
                     Opcode::LDR_64_ldst_immpost,
@@ -3663,7 +3707,12 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rn, 31),
                         (FieldId::imm9, 16),
                     ],
-                    |out| write!(out, "ldr\tx{a}, [sp], #16"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[Text("ldr\t"), Class('x', *a), Text(", [sp], #16")],
+                        )
+                    },
                 ),
                 _ => unreachable!(),
             }
@@ -3800,7 +3849,20 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::imm12, k as u32),
                         (FieldId::sh, 0),
                     ],
-                    |out| write!(out, "{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text(mnemonic),
+                                Text("\t"),
+                                R(rd),
+                                Text(", "),
+                                R(reg(a, ty)),
+                                Text(", #"),
+                                Number(k.into()),
+                            ],
+                        )
+                    },
                 );
             } else {
                 let amount = k as u32;
@@ -3817,7 +3879,20 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::immr, immr),
                         (FieldId::imms, imms),
                     ],
-                    |out| write!(out, "{mnemonic}\t{rd}, {}, #{k}", reg(a, ty)),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text(mnemonic),
+                                Text("\t"),
+                                R(rd),
+                                Text(", "),
+                                R(reg(a, ty)),
+                                Text(", #"),
+                                Number(k.into()),
+                            ],
+                        )
+                    },
                 );
             }
             return;
@@ -3863,7 +3938,20 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::Rm, b.into()),
                         (FieldId::Ra, 31),
                     ],
-                    |out| write!(out, "{mnemonic}\t{rd}, {ra}, {rb}"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text(mnemonic),
+                                Text("\t"),
+                                R(rd),
+                                Text(", "),
+                                R(ra),
+                                Text(", "),
+                                R(rb),
+                            ],
+                        )
+                    },
                 );
             } else {
                 self.native(
@@ -3875,7 +3963,20 @@ impl<'a> FunctionCompiler<'a> {
                         (FieldId::shift, 0),
                         (FieldId::imm6, 0),
                     ],
-                    |out| write!(out, "{mnemonic}\t{rd}, {ra}, {rb}"),
+                    |out| {
+                        native::write_pieces(
+                            out,
+                            &[
+                                Text(mnemonic),
+                                Text("\t"),
+                                R(rd),
+                                Text(", "),
+                                R(ra),
+                                Text(", "),
+                                R(rb),
+                            ],
+                        )
+                    },
                 );
             }
             return;
@@ -4606,23 +4707,43 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::shift, 0),
                     (FieldId::imm6, 0),
                 ],
-                |out| write!(out, "mov\tx{d}, x{s}"),
+                |out| {
+                    native::write_pieces(
+                        out,
+                        &[Text("mov\t"), Class('x', d), Text(", "), Class('x', s)],
+                    )
+                },
             ),
             (Loc::FReg(d), Loc::FReg(s)) if self.copy_temp.is_some() => self.move_vector(d, s),
             (Loc::FReg(d), Loc::FReg(s)) => self.native(
                 Opcode::FMOV_D_floatdp1,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                |out| write!(out, "fmov\td{d}, d{s}"),
+                |out| {
+                    native::write_pieces(
+                        out,
+                        &[Text("fmov\t"), Class('d', d), Text(", "), Class('d', s)],
+                    )
+                },
             ),
             (Loc::Reg(d), Loc::FReg(s)) => self.native(
                 Opcode::FMOV_64D_float2int,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                |out| write!(out, "fmov\tx{d}, d{s}"),
+                |out| {
+                    native::write_pieces(
+                        out,
+                        &[Text("fmov\t"), Class('x', d), Text(", "), Class('d', s)],
+                    )
+                },
             ),
             (Loc::FReg(d), Loc::Reg(s)) => self.native(
                 Opcode::FMOV_D64_float2int,
                 [(FieldId::Rd, d.into()), (FieldId::Rn, s.into())],
-                |out| write!(out, "fmov\td{d}, x{s}"),
+                |out| {
+                    native::write_pieces(
+                        out,
+                        &[Text("fmov\t"), Class('d', d), Text(", "), Class('x', s)],
+                    )
+                },
             ),
             (Loc::Reg(d), Loc::Stack(s)) => self.spill(false, false, d, s),
             (Loc::FReg(d), Loc::Stack(s)) => self.spill(false, true, d, s),
@@ -4686,9 +4807,21 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::hw, seed_lane.into()),
             ],
             |out| {
-                write!(out, "{mnemonic}\t{class}{reg}, #{seed_imm:#x}")?;
+                native::write_pieces(
+                    out,
+                    &[
+                        Text(mnemonic),
+                        Text("\t"),
+                        Class(class, reg),
+                        Text(", #"),
+                        Hex(seed_imm.into()),
+                    ],
+                )?;
                 if seed_lane != 0 {
-                    write!(out, ", lsl #{}", 16 * seed_lane)?;
+                    native::write_pieces(
+                        out,
+                        &[Text(", lsl #"), Number(16 * i128::from(seed_lane))],
+                    )?;
                 }
                 Ok(())
             },
@@ -4705,7 +4838,19 @@ impl<'a> FunctionCompiler<'a> {
                     (FieldId::imm16, imm.into()),
                     (FieldId::hw, lane.into()),
                 ],
-                |out| write!(out, "movk\t{class}{reg}, #{imm:#x}, lsl #{}", 16 * lane),
+                |out| {
+                    native::write_pieces(
+                        out,
+                        &[
+                            Text("movk\t"),
+                            Class(class, reg),
+                            Text(", #"),
+                            Hex(imm.into()),
+                            Text(", lsl #"),
+                            Number(16 * i128::from(lane)),
+                        ],
+                    )
+                },
             );
         }
     }
@@ -5035,11 +5180,17 @@ impl<'a> FunctionCompiler<'a> {
                 (FieldId::imm12, (offset / 8) as u32),
             ],
             |out| {
-                write!(
+                native::write_pieces(
                     out,
-                    "{}\t{}{register}, [{base}, #{offset}]",
-                    if store { "str" } else { "ldr" },
-                    if float { 'd' } else { 'x' }
+                    &[
+                        Text(if store { "str\t" } else { "ldr\t" }),
+                        Class(if float { 'd' } else { 'x' }, register),
+                        Text(", ["),
+                        Text(base),
+                        Text(", #"),
+                        Number(offset as i128),
+                        Text("]"),
+                    ],
                 )
             },
         );

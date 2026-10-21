@@ -284,6 +284,43 @@ impl Arg {
         }
     }
 }
+/// A piece of instruction text, for writing a line without `fmt::write`.
+#[derive(Clone, Copy)]
+pub(super) enum Piece<'a> {
+    Text(&'a str),
+    Number(i128),
+    /// A register class and number, such as `x9`.
+    Class(char, u8),
+    /// `{:#x}`.
+    Hex(u64),
+    Reg(Reg),
+}
+
+/// Writes `pieces` one after the other.
+pub(super) fn write_pieces(out: &mut String, pieces: &[Piece<'_>]) -> fmt::Result {
+    for piece in pieces {
+        match *piece {
+            Piece::Text(text) => out.push_str(text),
+            Piece::Number(n) => crate::text::write_decimal(out, "", n)?,
+            Piece::Class(class, n) => crate::text::write_class(out, class, n.into())?,
+            Piece::Hex(n) => {
+                out.push_str("0x");
+                let digits = (64 - (n | 1).leading_zeros()).div_ceil(4);
+                for shift in (0..digits).rev() {
+                    let digit = (n >> (4 * shift)) as u8 & 0xf;
+                    out.push(char::from(if digit < 10 {
+                        b'0' + digit
+                    } else {
+                        b'a' + digit - 10
+                    }));
+                }
+            }
+            Piece::Reg(r) => r.write_to(out)?,
+        }
+    }
+    Ok(())
+}
+
 impl fmt::Display for Arg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.write_to(f)
