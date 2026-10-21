@@ -71,6 +71,8 @@ pub(super) fn prepare(
             continue;
         }
         budget -= count;
+        #[cfg(feature = "backend-profile")]
+        let _function_profile = crate::backend_profile::function(&original.name);
         let func = vector::lower(original);
         let compiler =
             FunctionCompiler::new(&func, module, pools, pipeline, structured, &summaries)?;
