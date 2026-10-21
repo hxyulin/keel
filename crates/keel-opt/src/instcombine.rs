@@ -74,8 +74,7 @@ impl Uses<'_> {
     fn single(self, func: &Function, value: Value) -> bool {
         match self {
             Uses::Users(users) => users
-                .get(func)
-                .len
+                .counts(func)
                 .get(value.index())
                 .is_some_and(|&n| n == 1),
             Uses::Unknown => false,
@@ -86,9 +85,11 @@ impl Uses<'_> {
 /// The worklist's user lists, built on first need. Until the worklist first
 /// changes the function, only new instructions can appear, so building from
 /// the instructions present at entry gives the lists an eager build would.
-/// Most functions never fold, nor ask for a single use.
+/// Most functions never fold, nor ask for a single use. A use count alone
+/// answers `single` until the lists exist, and is cheaper to build.
 struct LazyUsers {
     users: std::cell::OnceCell<Users>,
+    counts: std::cell::OnceCell<Scratch<u32>>,
     insts: usize,
     values: usize,
 }
@@ -97,6 +98,7 @@ impl LazyUsers {
     fn new(func: &Function) -> Self {
         Self {
             users: std::cell::OnceCell::new(),
+            counts: std::cell::OnceCell::new(),
             insts: func.num_insts(),
             values: func.num_values(),
         }
@@ -113,6 +115,23 @@ impl LazyUsers {
                 }
             }
             users
+        })
+    }
+
+    /// Each value's use count: `Users::len`, from the lists once built.
+    fn counts(&self, func: &Function) -> &[u32] {
+        if let Some(users) = self.users.get() {
+            return &users.len;
+        }
+        self.counts.get_or_init(|| {
+            let mut counts = Scratch::filled(self.values, 0u32);
+            for (_, inst) in func.layout_insts() {
+                if inst.index() < self.insts {
+                    func.inst_data(inst)
+                        .for_each_operand(|v| counts[func.resolve(v).index()] += 1);
+                }
+            }
+            counts
         })
     }
 
