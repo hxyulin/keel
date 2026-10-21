@@ -24,13 +24,14 @@ impl<'a> Input<'a> {
         match self {
             Self::Text(s) => s.contains(needle),
             Self::Program(Program { items }) | Self::Compact(Compact { items, .. }) => {
+                // One searcher for the many short names, not one per name.
+                let finder = memchr::memmem::Finder::new(needle);
+                let found = |s: &str| finder.find(s.as_bytes()).is_some();
                 items.iter().any(|item| match item {
-                    Item::Text(s) | Item::Label(s) | Item::Branch { target: s, .. } => {
-                        s.contains(needle)
-                    }
+                    Item::Text(s) | Item::Label(s) | Item::Branch { target: s, .. } => found(s),
                     Item::Instruction(_) | Item::X86Instruction(_) => false,
                     Item::Directive(d) => d.contains(needle),
-                    Item::Symbolic(s) => s.target().contains(needle),
+                    Item::Symbolic(s) => found(s.target()),
                 })
             }
         }

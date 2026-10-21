@@ -3,9 +3,10 @@
 use super::compact::{self, Rule};
 use super::data::{self, Location};
 use super::text::Trim;
+use crate::fxhash::FxHashMap;
 use crate::{Assembly, Error, Relocation, RelocationKind, SectionKind};
 use bumpalo::{Bump, collections::Vec as BumpVec};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 pub(super) struct Debug<'a> {
     arena: &'a Bump,
@@ -770,7 +771,7 @@ impl<'a> Debug<'a> {
     pub(super) fn finish(
         self,
         a: &mut Assembly,
-        labels: &mut BTreeMap<&'a str, Location>,
+        labels: &mut super::Labels<'a>,
         prefix: &str,
     ) -> Result<(), Error> {
         if let Some(frame) = self.active {
@@ -1115,7 +1116,7 @@ fn tables5(
     let crate::SectionContents::Bytes(table) = &mut a.sections[section - 1].contents else {
         unreachable!("debug sections are file-backed");
     };
-    let mut offsets = HashMap::new();
+    let mut offsets = FxHashMap::default();
     let mut strp = |text: &[u8], bytes: &mut Vec<u8>| -> Result<(), Error> {
         let offset = match offsets.get(text) {
             Some(&offset) => offset,
@@ -1184,7 +1185,7 @@ fn tables5(
 /// represent PC-relative native-width pointers without inventing a new kind.
 struct References<'a, 'b> {
     arena: &'a Bump,
-    labels: &'b mut BTreeMap<&'a str, Location>,
+    labels: &'b mut super::Labels<'a>,
     prefix: &'b str,
     counter: usize,
 }

@@ -2,42 +2,52 @@
 //! belongs to that function even when the next function starts at the same
 //! offset; retain source order rather than inferring all ownership by address.
 use super::data::Location;
+use crate::fxhash::{FxHashMap, FxHashSet};
 use crate::{Assembly, Error, RelocationKind};
-use bumpalo::{Bump, collections::Vec as BumpVec};
+use bumpalo::Bump;
 use std::collections::BTreeMap;
 
+/// Atoms are identified by an index into `names`, so ownership checks
+/// compare integers rather than (often long, shared-prefix) names.
 pub(super) struct Atoms<'a> {
     arena: &'a Bump,
-    boundaries: BTreeMap<(usize, u64), &'a str>,
-    owners: BTreeMap<&'a str, &'a str>,
-    defaults: BTreeMap<usize, &'a str>,
+    names: Vec<&'a str>,
+    boundaries: BTreeMap<(usize, u64), u32>,
+    owners: FxHashMap<&'a str, u32>,
+    defaults: BTreeMap<usize, u32>,
 }
 impl<'a> Atoms<'a> {
     pub(super) fn new(
         arena: &'a Bump,
         order: &[(&'a str, Location)],
-        globals: &BTreeMap<&'a str, usize>,
-        labels: &mut BTreeMap<&'a str, Location>,
+        globals: &FxHashMap<&'a str, usize>,
+        labels: &mut super::Labels<'a>,
         prefix: &str,
         enabled: bool,
     ) -> Self {
         let mut result = Self {
             arena,
+            names: Vec::new(),
             boundaries: BTreeMap::new(),
-            owners: BTreeMap::new(),
+            owners: FxHashMap::default(),
             defaults: BTreeMap::new(),
         };
         if !enabled {
             return result;
         }
+        result.owners.reserve(order.len());
         let mut current = BTreeMap::new();
         for (name, location) in order {
             if !name.starts_with('L') || globals.contains_key(name) {
                 // Aliases at one address share an atom.
+                let next = result.names.len() as u32;
                 let owner = *result
                     .boundaries
                     .entry((location.section, location.offset))
-                    .or_insert(*name);
+                    .or_insert(next);
+                if owner == next {
+                    result.names.push(*name);
+                }
                 // A leading temporary label can precede its public alias.
                 // Both denote the initial atom at offset zero.
                 if location.offset == 0
@@ -57,9 +67,9 @@ impl<'a> Atoms<'a> {
                 .unwrap_or_else(|| result.default(location.section, prefix));
             result.owners.insert(*name, owner);
         }
-        for (section, name) in &result.defaults {
+        for (section, &atom) in &result.defaults {
             labels.insert(
-                *name,
+                result.names[atom as usize],
                 Location {
                     section: *section,
                     offset: 0,
@@ -68,19 +78,23 @@ impl<'a> Atoms<'a> {
         }
         result
     }
-    fn default(&mut self, section: usize, prefix: &str) -> &'a str {
-        self.defaults.entry(section).or_insert_with(|| {
-            bumpalo::format!(in self.arena, "ltmp_{}section{}", prefix, section).into_bump_str()
+    fn default(&mut self, section: usize, prefix: &str) -> u32 {
+        *self.defaults.entry(section).or_insert_with(|| {
+            self.names.push(
+                bumpalo::format!(in self.arena, "ltmp_{}section{}", prefix, section)
+                    .into_bump_str(),
+            );
+            self.names.len() as u32 - 1
         })
     }
-    pub(super) fn owner(&self, name: &str, location: Location) -> Option<&'a str> {
+    fn owner(&self, name: &str, location: Location) -> Option<u32> {
         self.owners.get(name).copied().or_else(|| self.at(location))
     }
-    fn at(&self, location: Location) -> Option<&'a str> {
+    fn at(&self, location: Location) -> Option<u32> {
         self.boundaries
             .range((location.section, 0)..=(location.section, location.offset))
             .next_back()
-            .map(|(_, s)| *s)
+            .map(|(_, &atom)| atom)
             .or_else(|| self.defaults.get(&location.section).copied())
     }
     pub(super) fn same(&self, a: (&str, Location), b: (&str, Location)) -> bool {
@@ -94,20 +108,20 @@ impl<'a> Atoms<'a> {
     pub(super) fn rebase(
         &mut self,
         a: &mut Assembly,
-        labels: &mut BTreeMap<&'a str, Location>,
-        globals: &BTreeMap<&'a str, usize>,
+        labels: &mut super::Labels<'a>,
+        globals: &FxHashMap<&'a str, usize>,
         prefix: &str,
     ) -> Result<(), Error> {
-        let mut names = BumpVec::from_iter_in(
-            a.relocations
-                .iter()
-                .flat_map(|r| std::iter::once(&r.symbol).chain(r.subtract_symbol.iter()))
-                .map(String::as_str),
-            self.arena,
-        );
-        names.sort_unstable();
-        names.dedup();
-        let mut targets = BTreeMap::new();
+        // Each name resolves independently of the others, so visit order
+        // does not matter; skip only repeats.
+        let mut seen = FxHashSet::default();
+        let names = a
+            .relocations
+            .iter()
+            .flat_map(|r| std::iter::once(&r.symbol).chain(r.subtract_symbol.iter()))
+            .map(String::as_str)
+            .filter(|name| seen.insert(*name));
+        let mut targets = FxHashMap::default();
         for name in names {
             if !name.starts_with('L') || globals.contains_key(&name) {
                 continue;
@@ -118,6 +132,7 @@ impl<'a> Atoms<'a> {
             let owner = self
                 .owner(name, location)
                 .unwrap_or_else(|| self.default(location.section, prefix));
+            let owner = self.names[owner as usize];
             let base = labels.get(&owner).copied().unwrap_or(Location {
                 section: location.section,
                 offset: 0,

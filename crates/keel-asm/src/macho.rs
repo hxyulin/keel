@@ -1,7 +1,8 @@
 //! Multi-section MH_OBJECT with instruction, pointer, and difference relocations.
 //! Serialize fields explicitly so host layout never affects the object format.
 use super::{Assembly, Error, RelocationKind, SectionContents, SectionKind};
-use std::collections::{BTreeMap, BTreeSet};
+use crate::fxhash::{FxHashMap, FxHashSet};
+use std::collections::BTreeSet;
 
 fn u32le(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
@@ -133,7 +134,8 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     let data_end = file;
     let first_file = first_file.unwrap_or(data_end);
     // Validate once and keep source indices for both definitions and nlist IDs.
-    let mut by_name = BTreeMap::new();
+    let mut by_name = FxHashMap::default();
+    by_name.reserve(assembly.symbols.len());
     for (source_index, symbol) in assembly.symbols.iter().enumerate() {
         if symbol.name.is_empty()
             || symbol.name.contains('\0')
@@ -173,7 +175,7 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
     };
     // Darwin temporary labels are not independent function entries. Keeping
     // interior L labels in nlist makes ld generate spurious no-unwind ranges.
-    let referenced: BTreeSet<_> = assembly
+    let referenced: FxHashSet<_> = assembly
         .relocations
         .iter()
         .flat_map(|r| {
@@ -199,7 +201,13 @@ pub(super) fn write(assembly: &Assembly) -> Result<Vec<u8>, Error> {
             0
         }
     };
-    symbols.sort_by(|a, b| (group(a), &a.name).cmp(&(group(b), &b.name)));
+    // Assemblers emit symbols in name order (and names are unique), so a
+    // stable sort by group alone usually gives the same order.
+    if symbols.is_sorted_by(|a, b| a.name < b.name) {
+        symbols.sort_by_key(|s| group(s));
+    } else {
+        symbols.sort_by(|a, b| (group(a), &a.name).cmp(&(group(b), &b.name)));
+    }
     let nsyms = size(symbols.len())?;
     if nsyms > 1 << 24 {
         return Err(Error::new(

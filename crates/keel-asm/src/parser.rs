@@ -53,9 +53,14 @@ mod text;
 mod vector;
 
 use super::{Assembly, Error, InstructionLocation, Symbol, encode};
+use crate::fxhash::{FxHashMap, FxHashSet};
 use bumpalo::{Bump, collections::Vec as BumpVec};
 use keel_asm_ir::Opcode;
 use std::collections::BTreeMap;
+
+/// Label locations by name. Only looked up: wherever their order matters,
+/// names are collected and sorted.
+type Labels<'a> = FxHashMap<&'a str, data::Location>;
 use storage::{Operands, encode_opcode, lower};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -393,15 +398,14 @@ fn instruction_with_features(
 }
 
 fn symbol(s: &str) -> Result<(), String> {
-    let mut chars = s.chars();
-    if !chars
-        .next()
-        .is_some_and(|c| c.is_ascii_alphabetic() || "_.$".contains(c))
-        || !chars.all(|c| c.is_ascii_alphanumeric() || "_.$".contains(c))
-    {
-        return Err(format!("invalid symbol `{s}`"));
+    // Bytes of non-ASCII characters are rejected like the characters.
+    let valid = |b: &u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$');
+    match s.as_bytes() {
+        [first, rest @ ..] if valid(first) && !first.is_ascii_digit() && rest.iter().all(valid) => {
+            Ok(())
+        }
+        _ => Err(format!("invalid symbol `{s}`")),
     }
-    Ok(())
 }
 struct Branch<'a> {
     section: usize,
@@ -543,17 +547,17 @@ fn assemble_pass(
     }
     let mut aliases = BTreeMap::new();
     let mut current = 0;
-    let mut labels: BTreeMap<&str, data::Location> = BTreeMap::new();
-    let mut globals = BTreeMap::new();
-    let mut private_externs = BTreeMap::new();
-    let mut weak_definitions = BTreeMap::new();
-    let mut weak_hidden = BTreeMap::new();
+    let mut labels: Labels = FxHashMap::default();
+    let mut globals: FxHashMap<&str, usize> = FxHashMap::default();
+    let mut private_externs = FxHashMap::default();
+    let mut weak_definitions = FxHashMap::default();
+    let mut weak_hidden = FxHashMap::default();
     let mut common = BTreeMap::new();
     let mut branches = BumpVec::new_in(&arena);
     let mut loh = BumpVec::new_in(&arena);
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
-    let mut relocation_lines = BTreeMap::new();
+    let mut relocation_lines = FxHashMap::default();
     for (statement, raw) in source.lines(&arena).enumerate() {
         let (line, raw) = raw?;
         let err = |message| Error::new(line, message);
@@ -1822,14 +1826,18 @@ fn assemble_pass(
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
-    let mut names = BumpVec::from_iter_in(
-        labels
-            .keys()
-            .chain(globals.keys())
-            .chain(weak_definitions.keys())
-            .copied(),
-        &arena,
-    );
+    // Label names are unique; dedupe the other (mostly repeated) references
+    // here so that only distinct names are sorted.
+    let mut names = BumpVec::from_iter_in(labels.keys().copied(), &arena);
+    let mut others = FxHashSet::default();
+    let mut add = |name| {
+        if !labels.contains_key(name) && others.insert(name) {
+            names.push(name);
+        }
+    };
+    for &name in globals.keys().chain(weak_definitions.keys()) {
+        add(name);
+    }
     for relocation in &result.relocations {
         for name in std::iter::once(&relocation.symbol).chain(relocation.subtract_symbol.iter()) {
             if name.starts_with('L')
@@ -1844,11 +1852,10 @@ fn assemble_pass(
                     format!("undefined local symbol `{name}`"),
                 ));
             }
-            names.push(name.as_str());
+            add(name.as_str());
         }
     }
     names.sort_unstable();
-    names.dedup();
     for name in common.keys() {
         if labels.contains_key(name) {
             return Err(Error::new(
