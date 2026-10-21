@@ -283,3 +283,93 @@ fn emitted_range_guard_matches_exact_u128_arithmetic_at_wrap_boundaries() {
         check(base, random);
     }
 }
+
+#[test]
+fn unrolled_loads_keep_cover_adjacency_and_only_the_last_history_is_carried() {
+    use keel_ir::{BinaryOp as B, ConvertOp as C, InstData as D, IntCC, Type, VectorBinaryOp as V};
+    let mut m = canonical();
+    assert!(adjacent_diff::run(&mut m.functions[0]));
+    let f = &m.functions[0];
+    let main = f
+        .blocks()
+        .find(|&b| {
+            f.block_insts(b)
+                .iter()
+                .filter(|&&i| matches!(f.inst_data(i), D::Load { ty: Type::I64, .. }))
+                .count()
+                == 4
+        })
+        .unwrap();
+    let insts = f.block_insts(main);
+    let mut currents = Vec::new();
+    let mut sums = Vec::new();
+    for (pos, &i) in insts.iter().enumerate() {
+        if !matches!(f.inst_data(i), D::Load { ty: Type::I64, .. }) {
+            continue;
+        }
+        let bits = f.first_result(i);
+        assert!(matches!(f.inst_data(insts[pos+1]), D::VectorSplat { arg, .. } if *arg == bits));
+        let packed = f.first_result(insts[pos + 1]);
+        assert!(
+            matches!(f.inst_data(insts[pos+2]), D::Convert { op: C::Bitcast, arg, .. } if *arg == packed)
+        );
+        let narrow = f.first_result(insts[pos + 2]);
+        assert!(
+            matches!(f.inst_data(insts[pos+3]), D::Convert { op: C::SwidenLow, arg, .. } if *arg == narrow)
+        );
+        let current = f.first_result(insts[pos + 3]);
+        let D::VectorShuffle { args, lanes } = f.inst_data(insts[pos + 4]) else {
+            panic!()
+        };
+        assert_eq!(lanes, &[1, 2]);
+        assert_eq!(args[1], current);
+        if let Some(&last) = currents.last() {
+            assert_eq!(args[0], last);
+        }
+        currents.push(current);
+    }
+    let D::Jump { dest } = f.inst_data(*insts.last().unwrap()) else {
+        panic!()
+    };
+    let check = dest.block;
+    let params = f.block_params(check);
+    assert_eq!(dest.args[1], currents[3]);
+    for &i in insts {
+        if let D::VectorBinary { op: V::Iadd, args } = f.inst_data(i) {
+            sums.push(args[0]);
+        }
+    }
+    assert_eq!(sums, params[2..6]); // four independent accumulator inputs
+    let keel_ir::ValueDef::Result(next_inst, _) = f.value_def(dest.args[0]) else {
+        panic!()
+    };
+    let D::Binary { op: B::Iadd, args } = f.inst_data(next_inst) else {
+        panic!()
+    };
+    assert_eq!(args[0], params[0]);
+    let keel_ir::ValueDef::Result(eight_inst, _) = f.value_def(args[1]) else {
+        panic!()
+    };
+    assert!(matches!(f.inst_data(eight_inst), D::Iconst { imm: 8, .. }));
+    let check_insts = f.block_insts(check);
+    assert!(check_insts.iter().any(|&i| matches!(
+        f.inst_data(i),
+        D::Icmp {
+            cond: IntCC::Uge,
+            ..
+        }
+    )));
+    let D::Brif { dests, .. } = f.inst_data(*check_insts.last().unwrap()) else {
+        panic!()
+    };
+    assert_eq!(dests[0].block, main);
+    let merge = dests[1].block;
+    assert_eq!(
+        f.block_insts(merge)
+            .iter()
+            .filter(|&&i| matches!(f.inst_data(i), D::VectorBinary { op: V::Iadd, .. }))
+            .count(),
+        3
+    );
+    keel_ir::verify_module(&m).unwrap();
+}

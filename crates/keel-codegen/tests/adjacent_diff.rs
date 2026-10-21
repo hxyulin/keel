@@ -91,6 +91,46 @@ fn evidence() -> std::path::PathBuf {
     p
 }
 
+// Check the generated main block rather than counting the pair cleanup or
+// scalar fallback. Register names and edge-copy strategy remain allocator-owned.
+fn assert_arm_unrolled_load_cover(text: &str) {
+    let function = text.split("Lrk_adjacent_end:").next().unwrap();
+    let blocks: Vec<_> = function
+        .split("Lrk_adjacent_block")
+        .filter(|block| {
+            block
+                .lines()
+                .filter(|line| line.starts_with("\tldr\td"))
+                .count()
+                == 4
+        })
+        .collect();
+    assert_eq!(blocks.len(), 1, "{text}");
+    let instructions: Vec<_> = blocks[0]
+        .lines()
+        .filter(|line| line.starts_with('\t') && !line.starts_with("\t;"))
+        .collect();
+    for (i, line) in instructions.iter().enumerate() {
+        if line.starts_with("\tldr\td") {
+            assert!(instructions[i + 1].starts_with("\tsshll\t"), "{text}");
+        }
+        if (line.starts_with("\tldr\t") || line.starts_with("\tstr\t"))
+            && !line.contains("[sp")
+            && !line.contains("[x29")
+        {
+            assert!(line.starts_with("\tldr\td"), "{text}");
+        }
+    }
+    assert_eq!(
+        instructions
+            .iter()
+            .filter(|line| line.starts_with("\tabs\t"))
+            .count(),
+        4,
+        "{text}"
+    );
+}
+
 #[test]
 fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
     for optimize in [false, true] {
@@ -107,6 +147,9 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                         let obj = match target {
                             Target::Aarch64AppleDarwin => {
                                 assert!(text.contains(".2d"), "{text}");
+                                if !spills {
+                                    assert_arm_unrolled_load_cover(&text);
+                                }
                                 let obj =
                                     keel_asm::assemble_program_object(&program, Default::default())
                                         .unwrap();

@@ -16,7 +16,7 @@
 typedef uint64_t (*kernel)(const void *,const void *,const void *,uint64_t);
 extern uint64_t rk_adjacent(const void *,const void *,const void *,uint64_t);
 extern uint64_t rk_adjacent_scalar(const void *,const void *,const void *,uint64_t);
-static unsigned cases, faults;
+static unsigned cases, faults, unroll_values, unroll_faults;
 static uint64_t oracle(const unsigned char *a,uint64_t n) {
     uint64_t sum=0;
     for (uint64_t i=1;i<n;i++) {
@@ -89,6 +89,44 @@ int main(void) {
         unsigned char *a=mem+page-4*n;
         check(a,n); // last byte immediately precedes the guard page
     }
+    // Explicit zero/one/two/three-main-trip boundaries and every residue.
+    // Distinct extrema per lane expose lost accumulators and wrong history
+    // at main-to-main, main-to-pair and pair-to-tail transitions.
+    for (unsigned offset=0;offset<16;offset++) {
+        unsigned char *a=mem+offset;
+        for (unsigned i=0;i<64;i++) {
+            int32_t values[]={INT32_MIN,7,INT32_MAX,-31,0,INT32_MIN,73,INT32_MAX};
+            int32_t v=values[i%8]; memcpy(a+4*i,&v,4);
+        }
+        const uint64_t boundaries[]={8,9,10,11,16,17,18,19};
+        for (unsigned i=0;i<sizeof(boundaries)/sizeof(*boundaries);i++) {
+            check(a,boundaries[i]); ++unroll_values;
+        }
+        for (uint64_t groups=0;groups<=3;groups++)
+            for (uint64_t residue=0;residue<8;residue++) {
+                uint64_t n=2+8*groups+residue;
+                check(a,n); ++unroll_values;
+                check(mem+page-4*n,n); ++unroll_values;
+            }
+    }
+    // Enter the main loop with each of its four ordered 8-byte loads
+    // independently meeting the guard page, in both the first and second
+    // groups. Test either sample and a sample straddling the page boundary.
+    // n includes the entire group, so these cannot fall back to pair cleanup.
+    for (uint64_t group=0;group<2;group++)
+        for (uint64_t load=0;load<4;load++)
+            for (uint64_t lane=0;lane<2;lane++)
+                for (unsigned misalign=0;misalign<4;misalign++) {
+                    uint64_t valid=2+8*group+2*load+lane;
+                    compare_fault(mem+page-4*valid+misalign,2+8*(group+1));
+                    ++unroll_faults;
+                }
+    // Pair cleanup and scalar tail after a completed unrolled group, all
+    // residues; the extra sample must fault exactly as the scalar does.
+    for (uint64_t residue=0;residue<8;residue++) {
+        uint64_t valid=10+residue;
+        compare_fault(mem+page-4*valid,valid+1); ++unroll_faults;
+    }
     // The very first scalar read faults before a[0]; also test a[0] faulting
     // after a valid a[1], then vector chunks and scalar tails reaching a guard.
     compare_fault(mem+page-4,2);
@@ -103,6 +141,6 @@ int main(void) {
     compare_fault(mem+page-4,UINT64_MAX);
     compare_fault((void *)(UINTPTR_MAX-3),2);
     assert(munmap(region,3*page)==0);
-    printf("{\"status\":\"pass\",\"value_cases\":%u,\"first_fault_cases\":%u,\"performance_measured\":false}\n",cases,faults);
+    printf("{\"status\":\"pass\",\"value_cases\":%u,\"first_fault_cases\":%u,\"unroll_value_cases\":%u,\"unroll_first_fault_cases\":%u,\"performance_measured\":false}\n",cases,faults,unroll_values,unroll_faults);
     return 0;
 }
