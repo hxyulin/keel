@@ -4250,10 +4250,25 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     /// Emits `moves`, each `(dst, src)`, as if they all happened at once.
-    /// A 16-byte stack temporary breaks cycles in vector functions; otherwise
-    /// x16 suffices for either register class. Slot-to-slot moves use x17.
+    /// Pure FP-register copies in vector functions can use reserved v18 for
+    /// full-width cycles. Other vector copies need the 16-byte stack temporary;
+    /// otherwise x16 suffices for either register class.
     fn parallel_copy(&mut self, moves: &[(Loc, Loc)]) {
-        let temp = self.copy_temp.map_or(Loc::Reg(S0), Loc::Stack);
+        // FS2 is outside the supported allocation pools. Check even self-copies
+        // for its presence: the sequentializer requires an absent temporary.
+        // Only FReg-to-FReg moves are safe while it holds a cycle value;
+        // notably, vector stack-to-stack emit_move uses FS2 itself.
+        let register_only = self.copy_temp.is_some()
+            && moves.iter().all(|&(dst, src)| {
+                dst != Loc::FReg(FS2)
+                    && src != Loc::FReg(FS2)
+                    && (dst == src || matches!((dst, src), (Loc::FReg(_), Loc::FReg(_))))
+            });
+        let temp = if register_only {
+            Loc::FReg(FS2)
+        } else {
+            self.copy_temp.map_or(Loc::Reg(S0), Loc::Stack)
+        };
         for (dst, src) in sequentialize(moves, temp) {
             self.emit_move(dst, src);
         }
