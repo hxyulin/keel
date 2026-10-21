@@ -560,3 +560,38 @@ fn altered_scalar_induction_and_bounds_are_rejected_without_mutation() {
         assert_eq!(changed.to_string(), before);
     }
 }
+
+#[test]
+fn rejects_unmatched_fifth_block_before_mutation() {
+    let mut m = keel_ir::parse(include_str!("adjacent_diff/rotated.keel")).unwrap();
+    let f = &mut m.functions[0];
+    let extra = f.create_block();
+    f.append_inst(extra, keel_ir::InstData::Return { args: vec![] });
+    let before = f.to_string();
+    assert!(!adjacent_diff::run(f));
+    assert_eq!(before, f.to_string());
+}
+
+#[test]
+fn every_producer_and_parameter_alias_is_rejected_before_mutation() {
+    let m = canonical();
+    let f = &m.functions[0];
+    let values: Vec<_> = f
+        .blocks()
+        .flat_map(|b| f.block_params(b).iter().copied())
+        .chain(
+            f.layout_insts()
+                .flat_map(|(_, i)| f.inst_results(i).iter().copied()),
+        )
+        .collect();
+    for old in values {
+        let mut changed = m.clone();
+        let f = &mut changed.functions[0];
+        let entry = f.entry_block().unwrap();
+        let replacement = f.append_block_param(entry, f.value_type(old));
+        f.replace_all_uses(old, replacement);
+        let before = f.to_string();
+        assert!(!adjacent_diff::run(f), "aliased {old:?}");
+        assert_eq!(before, f.to_string());
+    }
+}

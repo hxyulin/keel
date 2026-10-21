@@ -42,7 +42,7 @@
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp as C, Function, Inst, InstData as D, IntCC,
-    MemoryFlags, Type, UnaryOp, Value, VectorBinaryOp as V, VectorType,
+    MemoryFlags, Type, UnaryOp, Value, ValueDef, VectorBinaryOp as V, VectorType,
 };
 
 const WIDE: Type = Type::Vector(VectorType::I64x2);
@@ -137,6 +137,22 @@ fn params(f: &Function, b: Block, types: &[Type]) -> Option<Vec<Value>> {
 fn recognize(f: &Function) -> Option<Candidate> {
     if !(4..=5).contains(&f.blocks().take(6).count()) || f.layout_insts().take(41).count() > 40 {
         return None;
+    }
+    // Audit every laid-out definition before resolving operands. In particular,
+    // Reader::next also consumes producers, and entry parameters are inputs.
+    for b in f.blocks() {
+        for (index, &v) in f.block_params(b).iter().enumerate() {
+            if f.resolve(v) != v || f.value_def(v) != ValueDef::Param(b, index as u32) {
+                return None;
+            }
+        }
+        for &i in f.block_insts(b) {
+            for (index, &v) in f.inst_results(i).iter().enumerate() {
+                if f.resolve(v) != v || f.value_def(v) != ValueDef::Result(i, index as u32) {
+                    return None;
+                }
+            }
+        }
     }
     let entry = f.entry_block()?;
     let mut r = Reader::new(f, entry);
@@ -286,6 +302,19 @@ fn recognize(f: &Function) -> Option<Candidate> {
         return None;
     }
     r.end()?;
+    // Every instruction in every block must belong to the exact shape scanned
+    // above. A spare unreachable block can contain an independent effect stream.
+    let mut recognized = vec![entry, guard_block, body, exit];
+    if latch != body {
+        recognized.push(latch);
+    }
+    let unique: std::collections::HashSet<_> = recognized.iter().copied().collect();
+    if unique.len() != recognized.len()
+        || f.blocks().count() != unique.len()
+        || f.blocks().any(|b| !unique.contains(&b))
+    {
+        return None;
+    }
     let cfg = ControlFlowGraph::compute(f);
     let dom = DominatorTree::compute(f, &cfg);
     if !dom.dominates(guard_block, body)
