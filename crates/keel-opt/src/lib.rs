@@ -11,7 +11,6 @@
 //! or the `verify-each` feature. Scoped options can override that default.
 //! Callers must validate input modules before optimization; the CLI always does.
 
-use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
@@ -571,17 +570,32 @@ pub fn run_pipeline_for_target(
 struct Versions {
     version: Vec<u64>,
     next: u64,
-    clean: FxHashMap<(&'static str, usize), u64>,
+    /// Per pass name, the version each function was left clean at, or
+    /// [`NOT_CLEAN`]; dense, since most passes visit every function.
+    clean: Vec<(&'static str, Vec<u64>)>,
     changed: Vec<bool>,
 }
+
+const NOT_CLEAN: u64 = u64::MAX;
 
 impl Versions {
     fn new(functions: usize) -> Self {
         Self {
             version: (0..functions as u64).collect(),
             next: functions as u64,
-            clean: FxHashMap::default(),
+            clean: Vec::new(),
             changed: Vec::new(),
+        }
+    }
+
+    /// The `clean` slot for passes named `name`.
+    fn slot(&mut self, name: &'static str) -> usize {
+        match self.clean.iter().position(|&(n, _)| n == name) {
+            Some(slot) => slot,
+            None => {
+                self.clean.push((name, Vec::new()));
+                self.clean.len() - 1
+            }
         }
     }
 
@@ -604,15 +618,19 @@ impl Versions {
         }
     }
 
-    fn is_clean(&self, pass: &dyn Pass, index: usize) -> bool {
-        pass.deterministic() && self.clean.get(&(pass.name(), index)) == Some(&self.version[index])
+    fn is_clean(&self, pass: &dyn Pass, slot: usize, index: usize) -> bool {
+        pass.deterministic() && self.clean[slot].1.get(index) == Some(&self.version[index])
     }
 
-    fn record(&mut self, pass: &dyn Pass, index: usize, changed: bool) {
+    fn record(&mut self, pass: &dyn Pass, slot: usize, index: usize, changed: bool) {
         if changed {
             self.renew(index);
         } else if pass.deterministic() {
-            self.clean.insert((pass.name(), index), self.version[index]);
+            let clean = &mut self.clean[slot].1;
+            if clean.len() <= index {
+                clean.resize(self.version.len().max(index + 1), NOT_CLEAN);
+            }
+            clean[index] = self.version[index];
         }
     }
 }
@@ -650,9 +668,10 @@ pub fn run_pipeline_for_target_with_options(
             }
             continue;
         }
+        let slot = versions.slot(pass.name());
         for (index, func) in module.functions.iter_mut().enumerate() {
             // A skipped run's input was canonical when the pass required it.
-            if versions.is_clean(pass, index) {
+            if versions.is_clean(pass, slot, index) {
                 canonical[index] |= pass.requires_canonical_form();
                 canonical[index] |= pass.produces_canonical_form();
                 continue;
@@ -670,7 +689,7 @@ pub fn run_pipeline_for_target_with_options(
                 pass.run_for_target(func, target)
             };
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
-            versions.record(pass, index, changed);
+            versions.record(pass, slot, index, changed);
             verify_after(func, pass.name(), verification_enabled)?;
         }
     }
@@ -780,9 +799,10 @@ pub fn run_pipeline_for_target_with_report_and_options(
             result?;
             continue;
         }
+        let slot = versions.slot(pass.name());
         for (index, func) in module.functions.iter_mut().enumerate() {
             let before = IrCounts::function(func);
-            if versions.is_clean(pass, index) {
+            if versions.is_clean(pass, slot, index) {
                 canonical[index] |= pass.requires_canonical_form();
                 canonical[index] |= pass.produces_canonical_form();
                 report.invocations.push(PassObservation {
@@ -831,7 +851,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
             };
             let pass_ns = start.elapsed().as_nanos();
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
-            versions.record(pass, index, changed);
+            versions.record(pass, slot, index, changed);
             let (result, verification_ns) = observe_verification(verification_enabled, || {
                 verify_after(func, pass.name(), verification_enabled)
             });
