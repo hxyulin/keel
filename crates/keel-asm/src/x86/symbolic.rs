@@ -151,7 +151,7 @@ impl Cache {
         s.count = count;
         for f in e.fixups {
             let e = &f.address.expression;
-            let Ok(constant) = i64::try_from(e.constant) else {
+            let Ok(constant) = i64::try_from(e.constant + f.adjust) else {
                 return;
             };
             self.fixups.push(CachedFix {

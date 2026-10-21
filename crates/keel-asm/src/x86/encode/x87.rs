@@ -10,7 +10,7 @@ fn st(o: &Operand) -> Option<u8> {
     }
 }
 
-pub(super) fn encode(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
+pub(super) fn encode<'a>(e: &mut Encoding<'a>, i: &'a Instruction) -> Result<(), String> {
     let op = i.opcode;
     let o = i.operands.as_slice();
     let invalid = || format!("unsupported operands for {op}: {o:?}");

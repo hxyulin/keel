@@ -2,7 +2,11 @@
 use super::*;
 use keel_asm_ir::x86::Opcode;
 
-pub(super) fn encode(e: &mut Encoding, op: Opcode, operands: &[Operand]) -> Result<(), String> {
+pub(super) fn encode<'a>(
+    e: &mut Encoding<'a>,
+    op: Opcode,
+    operands: &'a [Operand],
+) -> Result<(), String> {
     let invalid = || {
         format!(
             "unsupported operands for {op:?}: expected matching 32/64-bit GPRs and at most one r/m source"
@@ -81,15 +85,15 @@ pub(super) fn encode(e: &mut Encoding, op: Opcode, operands: &[Operand]) -> Resu
 }
 
 #[allow(clippy::too_many_arguments)]
-fn vex(
-    e: &mut Encoding,
+fn vex<'a>(
+    e: &mut Encoding<'a>,
     map: u8,
     pp: u8,
     opcode: u8,
     w: u16,
     field: u8,
     v: u8,
-    rm: &Operand,
+    rm: &'a Operand,
 ) -> Result<(), String> {
     let (b, x) = match rm {
         R(r) => (r.number >> 3, 0),

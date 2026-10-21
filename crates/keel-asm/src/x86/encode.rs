@@ -9,19 +9,23 @@ use keel_asm_ir::x86::{
     Address, Instruction, Memory, Modifier, Opcode::*, Operand, Register, RegisterClass,
 };
 
+/// A field for the operand address it borrows, which keeps its own
+/// constant: `adjust` is added to it (PC-relative fields count from the
+/// end of the whole instruction), so no symbol name is copied.
 #[derive(Debug)]
-pub(super) struct Fixup {
+pub(super) struct Fixup<'a> {
     pub offset: usize,
     pub width: u8,
-    pub address: Address,
+    pub address: &'a Address,
+    pub adjust: i128,
     pub kind: u32,
 }
 #[derive(Default)]
-pub(super) struct Encoding {
+pub(super) struct Encoding<'a> {
     // x86 instructions are at most 15 bytes: never allocate.
     pub bytes: smallvec::SmallVec<[u8; 16]>,
     // Rarely more than one symbolic operand.
-    pub fixups: smallvec::SmallVec<[Fixup; 1]>,
+    pub fixups: smallvec::SmallVec<[Fixup<'a>; 1]>,
 }
 fn width(o: &Operand) -> u16 {
     match o {
@@ -58,12 +62,12 @@ fn constant(a: &Address) -> Option<i128> {
         None
     }
 }
-impl Encoding {
+impl<'a> Encoding<'a> {
     fn number(&mut self, n: i128, bytes: u8) {
         self.bytes
             .extend_from_slice(&n.to_le_bytes()[..usize::from(bytes)]);
     }
-    fn imm(&mut self, a: &Address, bytes: u8, signed: bool) -> Result<(), String> {
+    fn imm(&mut self, a: &'a Address, bytes: u8, signed: bool) -> Result<(), String> {
         if let Some(n) = constant(a) {
             let bits = 8 * u32::from(bytes);
             if n < -(1i128 << (bits - 1)) || n >= (1i128 << (bits - u32::from(signed))) {
@@ -86,21 +90,23 @@ impl Encoding {
             self.fixups.push(Fixup {
                 offset: self.bytes.len(),
                 width: bytes,
-                address: a.clone(),
+                address: a,
+                adjust: 0,
                 kind,
             });
             self.number(0, bytes);
         }
         Ok(())
     }
-    fn branch(&mut self, a: &Address, plt: bool, width: u8) -> Result<(), String> {
+    fn branch(&mut self, a: &'a Address, plt: bool, width: u8) -> Result<(), String> {
         if !matches!(a.modifier, Modifier::None | Modifier::Plt) {
             return Err("invalid branch relocation modifier".into());
         }
         self.fixups.push(Fixup {
             offset: self.bytes.len(),
             width,
-            address: a.clone(),
+            address: a,
+            adjust: 0,
             kind: if width == 1 {
                 15
             } else if plt || a.modifier == Modifier::Plt {
@@ -119,7 +125,7 @@ impl Encoding {
         opcode: &[u8],
         bits: u16,
         field: u8,
-        rm: &Operand,
+        rm: &'a Operand,
         field_byte: Option<Register>,
     ) -> Result<(), String> {
         let (b, x) = match rm {
@@ -163,7 +169,7 @@ impl Encoding {
         }
         Ok(())
     }
-    fn memory(&mut self, field: u8, m: &Memory) -> Result<(), String> {
+    fn memory(&mut self, field: u8, m: &'a Memory) -> Result<(), String> {
         let a = &m.displacement;
         let symbolic = a.expression.add.is_some()
             || a.expression.subtract.is_some()
@@ -184,7 +190,8 @@ impl Encoding {
                 self.fixups.push(Fixup {
                     offset: self.bytes.len(),
                     width: 4,
-                    address: a.clone(),
+                    address: a,
+                    adjust: 0,
                     kind,
                 });
                 self.number(0, 4);
@@ -221,7 +228,7 @@ impl Encoding {
     }
 }
 
-pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
+pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding<'_>, String> {
     validate(i)?;
     let mut e = Encoding::default();
     let o = &i.operands;
@@ -732,7 +739,7 @@ pub(super) fn encode(i: &Instruction, short: bool) -> Result<Encoding, String> {
     let len = e.bytes.len();
     for fix in &mut e.fixups {
         if matches!(fix.kind, 2 | 4 | 9 | 15 | 22) {
-            fix.address.expression.constant -= (len - fix.offset) as i128;
+            fix.adjust -= (len - fix.offset) as i128;
         }
     }
     Ok(e)
@@ -758,7 +765,7 @@ fn infer_width(a: &Operand, b: &Operand) -> Result<u16, String> {
     Ok(w)
 }
 
-fn encode_sse(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
+fn encode_sse<'a>(e: &mut Encoding<'a>, i: &'a Instruction) -> Result<(), String> {
     let o = &i.operands;
     let op = i.opcode;
     let err = || "unsupported SSE operands".to_string();

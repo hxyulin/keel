@@ -2,7 +2,7 @@
 //! MMX, VEX, and post-SSE2 opcodes deliberately use separate identities.
 use super::*;
 
-fn imm8(e: &mut Encoding, o: &Operand) -> Result<(), String> {
+fn imm8(e: &mut Encoding<'_>, o: &Operand) -> Result<(), String> {
     let n = constant(immediate(o)?)
         .filter(|n| (0..=255).contains(n))
         .ok_or("SSE control requires a constant imm8 in 0..255")?;
@@ -10,7 +10,7 @@ fn imm8(e: &mut Encoding, o: &Operand) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn encode(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
+pub(super) fn encode<'a>(e: &mut Encoding<'a>, i: &'a Instruction) -> Result<(), String> {
     let o = i.operands.as_slice();
     let op = i.opcode;
     let invalid = || {

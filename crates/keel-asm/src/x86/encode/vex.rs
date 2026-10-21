@@ -2,7 +2,7 @@
 //! predictable encodings. Reuses legacy address emission and final fixup bias.
 use super::*;
 
-impl Encoding {
+impl<'a> Encoding<'a> {
     fn vex_rm(
         &mut self,
         map: u8,
@@ -10,7 +10,7 @@ impl Encoding {
         byte: u8,
         field: u8,
         source: Option<u8>,
-        rm: &Operand,
+        rm: &'a Operand,
     ) -> Result<(), String> {
         let (b, x) = match rm {
             R(r) => (r.number >> 3, 0),
@@ -55,7 +55,7 @@ enum Form {
     Round,
 }
 
-pub(super) fn encode(e: &mut Encoding, i: &Instruction) -> Result<(), String> {
+pub(super) fn encode<'a>(e: &mut Encoding<'a>, i: &'a Instruction) -> Result<(), String> {
     let o = i.operands.as_slice();
     let err = || format!("unsupported AVX operands for {:?}", i.opcode);
     if i.opcode == Vzeroupper {

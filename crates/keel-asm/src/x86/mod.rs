@@ -1170,7 +1170,8 @@ impl Assembler {
         let e = encode::encode(folded.as_ref().unwrap_or(i), short)?;
         let at = self.offset();
         for f in e.fixups {
-            let expr = self.symbols.expr(&f.address.expression);
+            let mut expr = self.symbols.expr(&f.address.expression);
+            expr.constant += f.adjust;
             self.fixes.push(Fix {
                 section: self.current,
                 offset: at + f.offset as u64,
