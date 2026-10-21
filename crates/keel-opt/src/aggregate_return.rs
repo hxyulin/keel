@@ -3,7 +3,10 @@
 //! Intentionally standalone: the parent owns pass registration and scheduling.
 //! No ABI-derived nocapture assumption: only a local, straight-line, write-only
 //! constructor with a fully initialized result can qualify. Both homes remain
-//! fixed, distinct, non-debug stack objects; the destination is private too.
+//! fixed, distinct, non-debug stack objects. Destination calls are permitted
+//! only after the completed copy in the same block: the proven leaf cannot
+//! observe the destination through another argument or a previously captured
+//! pointer (no loads, calls, frame observers, or traps).
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, Module, Purpose, Signature,
     StackSlot, Value, ValueDef,
@@ -220,6 +223,13 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
             else {
                 continue;
             };
+            if args.iter().skip(1).any(|v| {
+                addresses
+                    .get(&f.resolve(*v))
+                    .is_some_and(|&(s, _)| s == source)
+            }) {
+                continue;
+            }
             if slots[&source].size as usize != *size {
                 continue;
             }
@@ -227,9 +237,10 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
             let mut erase = HashSet::new();
             let mut destination = None;
             let mut copied = vec![false; *size];
+            let mut copy_end = position;
             // Exact local copy, with at most 128 intervening address/constant
             // instructions. No effect or potentially trapping instruction moves.
-            for &i in body.iter().skip(position + 1).take(128) {
+            for (copy_position, &i) in body.iter().enumerate().skip(position + 1).take(128) {
                 if removed.contains(&i) {
                     break;
                 }
@@ -277,6 +288,7 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
                     _ => break,
                 }
                 if copied.iter().all(|&b| b) {
+                    copy_end = copy_position;
                     break;
                 }
             }
@@ -292,6 +304,7 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
                 return changed;
             }
             budget -= scan_cost;
+            let later: HashSet<_> = body[copy_end + 1..].iter().copied().collect();
             let mut closed = true;
             for &i in &insts {
                 if removed.contains(&i) {
@@ -329,10 +342,8 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
                                 && s == dest
                         }
                         InstData::Call { args, .. } => {
-                            i == call
-                                && s == source
-                                && args.iter().filter(|&&a| f.resolve(a) == v).count() == 1
-                                && f.resolve(args[0]) == v
+                            (s == dest && later.contains(&i))
+                                || (i == call && s == source && f.resolve(args[0]) == v)
                         }
                         _ => false,
                     };
