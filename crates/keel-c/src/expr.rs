@@ -35,10 +35,6 @@ fn binary_prec(p: &str) -> Option<u8> {
     })
 }
 
-const ASSIGN_OPS: [&str; 11] = [
-    "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
-];
-
 impl<'a> Parser<'a> {
     /// A full expression, commas included.
     pub(crate) fn expr(&mut self) -> R<Expr<'a>> {
@@ -60,7 +56,10 @@ impl<'a> Parser<'a> {
         let Tok::Punct(p) = self.peek() else {
             return Ok(lhs);
         };
-        if !ASSIGN_OPS.contains(&p) {
+        if !matches!(
+            p,
+            "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>="
+        ) {
             return Ok(lhs);
         }
         let loc = self.loc();
@@ -643,7 +642,12 @@ impl<'a> Parser<'a> {
     fn postfix_ops(&mut self, mut e: Expr<'a>) -> R<Expr<'a>> {
         loop {
             let loc = self.loc();
-            if self.eat("[") {
+            // One dispatch on the spelling rather than a test per operator.
+            let Tok::Punct(p @ ("[" | "(" | "." | "->" | "++" | "--")) = self.peek() else {
+                return Ok(e);
+            };
+            self.advance();
+            if p == "[" {
                 let idx = self.expr()?;
                 self.expect("]")?;
                 let sum = self.binop("+", e, idx, loc)?;
@@ -652,11 +656,11 @@ impl<'a> Parser<'a> {
                 };
                 let sugar = sum.sugar.pointee(&self.typedefs);
                 e = mk(ExprKind::Deref(self.node(sum)), elem, loc).with_sugar(sugar);
-            } else if self.eat("(") {
+            } else if p == "(" {
                 e = self.call(e, loc)?;
-            } else if self.eat(".") {
+            } else if p == "." {
                 e = self.member(e, loc)?;
-            } else if self.eat("->") {
+            } else if p == "->" {
                 let p = self.rvalue(e);
                 let Some(pointee) = p.ty.pointee().cloned() else {
                     return Err(Error::new(loc, "`->` on a non-pointer"));
@@ -664,12 +668,8 @@ impl<'a> Parser<'a> {
                 let sugar = p.sugar.pointee(&self.typedefs);
                 e = mk(ExprKind::Deref(self.node(p)), pointee, loc).with_sugar(sugar);
                 e = self.member(e, loc)?;
-            } else if self.is("++") || self.is("--") {
-                let inc = self.is("++");
-                self.advance();
-                e = self.incdec(e, inc, false, loc)?;
             } else {
-                return Ok(e);
+                e = self.incdec(e, p == "++", false, loc)?;
             }
         }
     }
