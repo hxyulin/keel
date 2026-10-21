@@ -273,7 +273,9 @@ impl crate::metadata::Sink for Output {
     fn directive(&mut self, d: keel_asm_ir::Directive) {
         match self {
             Self::Text(text) => {
-                writeln!(text, "\t{d}").unwrap();
+                if !write_common_directive(text, &d) {
+                    writeln!(text, "\t{d}").unwrap();
+                }
             }
             Self::Structured(p) => p.items.push(Item::Directive(d)),
         }
@@ -281,4 +283,105 @@ impl crate::metadata::Sink for Output {
     fn label(&mut self, name: String) {
         Output::label(self, name);
     }
+    fn bytes(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        match self {
+            Self::Text(text) => write_bytes(text, bytes),
+            Self::Structured(p) => p.items.push(Item::Directive(keel_asm_ir::Directive::Bytes(
+                bytes.to_vec(),
+            ))),
+        }
+    }
+}
+
+/// Writes `\t{d}\n` without `fmt::write` for the directives functions and
+/// data use most, and returns whether `d` was one of them.
+fn write_common_directive(out: &mut String, d: &keel_asm_ir::Directive) -> bool {
+    use crate::text::write_decimal;
+    use keel_asm_ir::{Cfi, Directive as D};
+    // The DWARF register numbering of `.cfi` directives.
+    let register = |out: &mut String, r: u8| match r {
+        0..=30 => write_decimal(out, "x", r.into()),
+        64..=95 => write_decimal(out, "d", (r - 64).into()),
+        _ => write_decimal(out, "", r.into()),
+    };
+    match d {
+        D::Align(n) => write_decimal(out, "\t.p2align\t", (*n).into()),
+        D::Global(name) => {
+            out.push_str("\t.globl\t");
+            out.push_str(name);
+            Ok(())
+        }
+        D::Space(n) => write_decimal(out, "\t.space\t", (*n).into()),
+        D::Bytes(bytes) if !bytes.is_empty() => {
+            write_bytes(out, bytes);
+            return true;
+        }
+        D::Integer {
+            width,
+            expression,
+            got: false,
+        } => {
+            out.push_str(match width {
+                1 => "\t.byte\t",
+                2 => "\t.short\t",
+                4 => "\t.long\t",
+                8 => "\t.quad\t",
+                _ => return false,
+            });
+            match &expression.add {
+                Some(add) => {
+                    out.push_str(add);
+                    if let Some(sub) = &expression.subtract {
+                        out.push('-');
+                        out.push_str(sub);
+                    }
+                    match expression.constant {
+                        0 => Ok(()),
+                        n if n > 0 => write_decimal(out, "+", n),
+                        n => write_decimal(out, "", n),
+                    }
+                }
+                None => write_decimal(out, "", expression.constant),
+            }
+        }
+        D::Cfi(Cfi::Start) => {
+            out.push_str("\t.cfi_startproc");
+            Ok(())
+        }
+        D::Cfi(Cfi::End) => {
+            out.push_str("\t.cfi_endproc");
+            Ok(())
+        }
+        D::Cfi(Cfi::DefCfa {
+            register: r,
+            offset,
+        }) => {
+            out.push_str("\t.cfi_def_cfa ");
+            register(out, *r).and_then(|()| write_decimal(out, ", ", (*offset).into()))
+        }
+        D::Cfi(Cfi::Offset {
+            register: r,
+            offset,
+        }) => {
+            out.push_str("\t.cfi_offset ");
+            register(out, *r).and_then(|()| write_decimal(out, ", ", (*offset).into()))
+        }
+        _ => return false,
+    }
+    .unwrap();
+    out.push('\n');
+    true
+}
+
+/// `\t.byte\t` and the decimal bytes separated by `, `, then a newline.
+fn write_bytes(out: &mut String, bytes: &[u8]) {
+    out.push_str("\t.byte\t");
+    for (i, &b) in bytes.iter().enumerate() {
+        let separator = if i > 0 { ", " } else { "" };
+        crate::text::write_decimal(out, separator, b.into()).unwrap();
+    }
+    out.push('\n');
 }
