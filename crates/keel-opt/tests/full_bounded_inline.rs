@@ -94,3 +94,137 @@ fn readonly_allowance_does_not_bypass_binding_effect_or_cfg_limits() {
         "profitability_blocks"
     );
 }
+
+const QUICKJS: &str = include_str!("fixtures/full-inline-quickjs.keel");
+fn direct_calls(m: &Module, caller: &str) -> Vec<(String, bool)> {
+    let f = m.functions.iter().find(|f| f.name == caller).unwrap();
+    f.layout_insts()
+        .filter_map(|(_, i)| match f.inst_data(i) {
+            InstData::Call { func, .. } => {
+                let d = f.callee(*func);
+                Some((d.name.clone(), d.attrs.noinline))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn retained_quickjs_wrappers_inline_one_level_over_three_rounds() {
+    for name in ["js_poll_interrupts", "JS_FreeValue", "JS_Call"] {
+        assert_eq!(outcome(QUICKJS, "inline", "vm", name), "recursive_callee");
+        assert_eq!(
+            outcome(QUICKJS, "inline-noninterposable", "vm", name),
+            "inlined"
+        );
+    }
+    let mut m = keel_ir::parse(QUICKJS).unwrap();
+    let wrappers: Vec<_> = m
+        .functions
+        .iter()
+        .take(3)
+        .map(ToString::to_string)
+        .collect();
+    for _ in 0..3 {
+        run(&mut m, "inline-noninterposable");
+        assert_eq!(
+            direct_calls(&m, "vm"),
+            vec![
+                ("__js_poll_interrupts".into(), false),
+                ("__JS_FreeValue".into(), false),
+                ("JS_CallInternal".into(), false),
+            ]
+        );
+        assert_eq!(
+            m.functions
+                .iter()
+                .take(3)
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            wrappers
+        );
+    }
+    assert!(m.functions[3].layout_insts().any(|(_, i)| matches!(
+        m.functions[3].inst_data(i),
+        InstData::Intrinsic {
+            id: keel_ir::Intrinsic::FrameAddress,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn scc_admission_keeps_noinline_binding_and_self_recursion_guards() {
+    let public = QUICKJS.replace("cc(c) noninterposable {", "cc(c) {");
+    assert_eq!(
+        outcome(&public, "inline-noninterposable", "vm", "JS_Call"),
+        "recursive_callee"
+    );
+    let noinline = QUICKJS.replacen("cc(c) inlinehint local", "cc(c) noinline local", 1);
+    assert_eq!(
+        outcome(
+            &noinline,
+            "inline-noninterposable",
+            "vm",
+            "js_poll_interrupts"
+        ),
+        "noinline"
+    );
+    let self_recursive = "func @self(i64) -> i64 alwaysinline local {\nblock0(v0: i64):\n v1 = call @self(v0)\n return v1\n}\nfunc @outer(i64) -> i64 {\nblock0(v0: i64):\n v1 = call @self(v0)\n return v1\n}";
+    assert_eq!(
+        outcome(self_recursive, "inline-noninterposable", "outer", "self"),
+        "recursive_callee"
+    );
+}
+
+#[test]
+fn recursive_wrapper_sites_still_consume_ordinary_growth_budget() {
+    let mut source = QUICKJS.to_owned();
+    source.push_str("\nfunc @many(ptr) {\nblock0(v0: ptr):\n");
+    for i in 0..130 {
+        source.push_str(&format!(" v{i} = call @js_poll_interrupts(v0)\n"));
+    }
+    source.push_str(" return\n}\n");
+    // Avoid result/parameter ID collision.
+    source = source.replace(
+        " v0 = call @js_poll_interrupts(v0)",
+        " v999 = call @js_poll_interrupts(v0)",
+    );
+    let mut m = keel_ir::parse(&source).unwrap();
+    let r = run(&mut m, "inline-noninterposable");
+    let sites: Vec<_> = r
+        .invocations
+        .iter()
+        .flat_map(|p| &p.inline_sites)
+        .filter(|s| s.caller == "many")
+        .collect();
+    assert_eq!(sites.iter().filter(|s| s.outcome == "inlined").count(), 128);
+    assert_eq!(
+        sites
+            .iter()
+            .filter(|s| s.outcome == "caller_call_count_budget")
+            .count(),
+        2
+    );
+    for _ in 0..2 {
+        run(&mut m, "inline-noninterposable");
+    }
+    assert_eq!(
+        direct_calls(&m, "many")
+            .iter()
+            .filter(|(name, _)| name == "__js_poll_interrupts")
+            .count(),
+        130
+    );
+}
+
+#[test]
+fn wrapper_cycles_and_wrapper_to_wrapper_edges_stay_out_of_line() {
+    let source = "func @a(i64) -> i64 inlinehint local {\nblock0(v0: i64):\n v1 = call @b(v0)\n return v1\n}\nfunc @b(i64) -> i64 inlinehint local {\nblock0(v0: i64):\n v1 = call @a(v0)\n return v1\n}\nfunc @outer(i64) -> i64 {\nblock0(v0: i64):\n v1 = call @a(v0)\n return v1\n}";
+    let mut m = keel_ir::parse(source).unwrap();
+    let before = m.to_string();
+    for _ in 0..3 {
+        run(&mut m, "inline-noninterposable");
+    }
+    assert_eq!(m.to_string(), before);
+}

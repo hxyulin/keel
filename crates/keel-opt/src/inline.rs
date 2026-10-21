@@ -62,9 +62,9 @@ impl Pass for InlineAggregateReserve {
     }
 }
 
-/// Explicit binding-aware integration. No tier schedules this pass. It shares
-/// ordinary inlining's legality, profitability, budgets and cloning machinery;
-/// only exported definitions with a producer binding promise gain admission.
+/// Binding-aware Full integration. Shares ordinary legality, growth budgets
+/// and cloning, with bounded read-only leaves and one-level SCC wrappers.
+/// Exported definitions still require an explicit producer binding promise.
 pub struct InlineNoninterposable;
 impl Pass for InlineNoninterposable {
     fn name(&self) -> &'static str {
@@ -247,6 +247,48 @@ fn readonly_leaf(f: &Function) -> bool {
         }
     }
     loads > 0 && acyclic_cfg(f)
+}
+
+// Full-only one-edge SCC wrappers. An inline hint or aggregate result identifies
+// the narrow wrapper domain; neither overrides legality or ordinary budgets.
+// Candidate bodies stay frozen as callers. Admit only edges whose sole slow
+// target is outside that domain, so contracting an incoming wrapper edge leaves
+// a recursive slow edge, never another admitted wrapper site. In particular a
+// wrapper cycle has no admissible member. Templates and sites are pass-frozen;
+// each of Full's three rounds has the same finite call/module growth limits.
+fn small_scc_wrapper(f: &Function) -> bool {
+    if !(f.attrs.inlinehint
+        || f.sig
+            .params
+            .iter()
+            .any(|p| matches!(p.purpose, Purpose::Sret(_))))
+        || f.blocks().count() > MAX_BLOCKS
+        || f.layout_insts().count() > MAX_INSTS
+        || f.stack_slots().map(|(_, s)| u64::from(s.size)).sum::<u64>() > MAX_STACK
+    {
+        return false;
+    }
+    let mut calls = 0;
+    let mut edges = 0;
+    for (_, i) in f.layout_insts() {
+        let data = f.inst_data(i);
+        edges += data.branch_dests().len();
+        match data {
+            InstData::Call { func, .. } => {
+                let decl = f.callee(*func);
+                if decl.name == f.name {
+                    return false;
+                }
+                calls += 1;
+            }
+            InstData::CallIndirect { .. }
+            | InstData::ReturnCall { .. }
+            | InstData::ReturnCallIndirect { .. }
+            | InstData::Invoke { .. } => return false,
+            _ => {}
+        }
+    }
+    calls == 1 && edges <= 32 && acyclic_cfg(f)
 }
 
 fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
@@ -483,6 +525,30 @@ fn run_observed_policy(
     admit_noninterposable: bool,
 ) -> InlineReport {
     let recursive = recursive_definitions(module);
+    // Use the entire structural candidate set for edge checks, including
+    // candidates outside an SCC or without legal binding. Binding changes must
+    // not turn a formerly opaque small wrapper into a second expansion level.
+    let wrapper_bodies: HashSet<_> = module
+        .functions
+        .iter()
+        .filter(|f| admit_noninterposable && small_scc_wrapper(f))
+        .map(|f| f.name.clone())
+        .collect();
+    let wrappers: HashSet<_> = module
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(i, f)| {
+            recursive[*i]
+                && wrapper_bodies.contains(&f.name)
+                && eligibility_reason(f, true).is_none()
+                && !f.layout_insts().any(|(_, inst)| match f.inst_data(inst) {
+                    InstData::Call { func, .. } => wrapper_bodies.contains(&f.callee(*func).name),
+                    _ => false,
+                })
+        })
+        .map(|(_, f)| f.name.clone())
+        .collect();
     let explicit_definitions = sites.as_ref().map(|_| {
         module
             .functions
@@ -506,7 +572,7 @@ fn run_observed_policy(
         let recursion = !f.attrs.noinline && recursive[index];
         let reason = if f.attrs.noinline {
             Some("noinline")
-        } else if recursion {
+        } else if recursion && !wrappers.contains(&f.name) {
             Some("recursive_callee")
         } else {
             legality.or(profitability)
@@ -563,6 +629,8 @@ fn run_observed_policy(
                 ))
             } else if decl.attrs.noinline {
                 Some(("noinline policy", "noinline"))
+            } else if wrapper_bodies.contains(&caller.name) {
+                Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
             } else if let Some(callee) = templates.get(&decl.name) {
                 if decl.sig != callee.sig {
                     Some(("ABI signature mismatch", "abi_signature_mismatch"))
