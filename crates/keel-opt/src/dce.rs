@@ -14,28 +14,51 @@
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
-    // Every branch into each block: (branch instruction, destination index).
-    let mut incoming: Vec<Vec<(Inst, usize)>> = vec![Vec::new(); func.num_blocks()];
-    for (_, inst) in func.layout_insts() {
-        for (i, dest) in func.inst_data(inst).branch_dests().iter().enumerate() {
-            incoming[dest.block.index()].push((inst, i));
+    // Every branch into each block: (branch instruction, destination index),
+    // packed by destination block. Only terminators branch.
+    let mut incoming_start = vec![0u32; func.num_blocks() + 1];
+    for block in func.blocks() {
+        if let Some(&term) = func.block_insts(block).last() {
+            for dest in func.inst_data(term).branch_dests() {
+                incoming_start[dest.block.index() + 1] += 1;
+            }
         }
     }
+    for i in 1..incoming_start.len() {
+        incoming_start[i] += incoming_start[i - 1];
+    }
+    let mut fill = incoming_start.clone();
+    let mut incoming_edges = vec![(Inst::new(0), 0usize); *incoming_start.last().unwrap() as usize];
+    for block in func.blocks() {
+        if let Some(&term) = func.block_insts(block).last() {
+            for (i, dest) in func.inst_data(term).branch_dests().iter().enumerate() {
+                let slot = &mut fill[dest.block.index()];
+                incoming_edges[*slot as usize] = (term, i);
+                *slot += 1;
+            }
+        }
+    }
+    let incoming = |block: Block| {
+        let b = block.index();
+        &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
+    };
 
     let mut live_value = vec![false; func.num_values()];
     let mut live_inst = vec![false; func.num_insts()];
     let mut worklist: Vec<Value> = Vec::new();
 
     // Roots: the operands of pinned instructions, minus branch arguments.
-    for (_, inst) in func.layout_insts() {
-        let data = func.inst_data(inst);
-        let dead_read_eligible = matches!(data, InstData::Load { flags, .. }
-            if flags.notrap && !flags.volatile);
-        if data.is_pinned() && !dead_read_eligible {
-            live_inst[inst.index()] = true;
-            uses_except_branch_args(func, inst, |value| {
-                enqueue(func, value, &mut live_value, &mut worklist);
-            });
+    for block in func.blocks() {
+        for &inst in func.block_insts(block) {
+            let data = func.inst_data(inst);
+            let dead_read_eligible = matches!(data, InstData::Load { flags, .. }
+                if flags.notrap && !flags.volatile);
+            if data.is_pinned() && !dead_read_eligible {
+                live_inst[inst.index()] = true;
+                uses_except_branch_args(func, inst, |value| {
+                    enqueue(func, value, &mut live_value, &mut worklist);
+                });
+            }
         }
     }
     // Entry parameters are the function's arguments, so they stay.
@@ -56,7 +79,7 @@ pub fn run(func: &mut Function) -> bool {
             }
             // A needed parameter needs the argument every branch passes it.
             ValueDef::Param(block, n) => {
-                for &(branch, i) in &incoming[block.index()] {
+                for &(branch, i) in incoming(block) {
                     let arg = func.inst_data(branch).branch_dests()[i].args[n as usize];
                     enqueue(func, arg, &mut live_value, &mut worklist);
                 }
@@ -66,11 +89,14 @@ pub fn run(func: &mut Function) -> bool {
     }
 
     let mut changed = false;
-    let dead_insts: Vec<Inst> = func
-        .layout_insts()
-        .map(|(_, inst)| inst)
-        .filter(|inst| !live_inst[inst.index()])
-        .collect();
+    let mut dead_insts: Vec<Inst> = Vec::new();
+    for block in func.blocks() {
+        for &inst in func.block_insts(block) {
+            if !live_inst[inst.index()] {
+                dead_insts.push(inst);
+            }
+        }
+    }
     for inst in dead_insts {
         func.remove_inst(inst);
         changed = true;
@@ -85,7 +111,7 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             func.remove_block_param(block, n);
-            for &(branch, i) in &incoming[block.index()] {
+            for &(branch, i) in incoming(block) {
                 let dests = func.inst_data_mut(branch).branch_dests_mut();
                 dests[i].args.remove(n);
             }
