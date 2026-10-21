@@ -19,6 +19,13 @@ fn clif(src: &str) -> String {
 }
 
 #[test]
+fn explicit_memcmp_intrinsic_preserves_i32_libcall_result() {
+    let src = "func @f(ptr,ptr,i64)->i32 {\nblock0(v0:ptr,v1:ptr,v2:i64):\n v3 = intrinsic memcmp(v0,v1,v2)\n return v3\n}";
+    assert!(clif(src).contains("%Memcmp"));
+    assert!(!compile(src).unwrap().is_empty());
+}
+
+#[test]
 fn rejects_unsupported_instructions_with_context() {
     let cases = [
         (

@@ -575,6 +575,7 @@ impl InstData {
             Self::VaArg { .. } => ReadWrite,
             Self::Intrinsic { id, .. } => match id {
                 Intrinsic::Memcpy | Intrinsic::Memmove => ReadWrite,
+                Intrinsic::Memcmp => Read,
                 Intrinsic::Memset | Intrinsic::VaStart => Write,
                 Intrinsic::FrameAddress => None,
                 Intrinsic::StackAlloc

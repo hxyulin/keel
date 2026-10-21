@@ -130,6 +130,36 @@ pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
             }
         }
     }
+    // Standard comparison intrinsics use the same ABI as libc when not
+    // expanded. Merge this import before emitting declarations, including
+    // modules that also contain an ordinary call to memcmp.
+    if module.functions.iter().any(|f| {
+        f.layout_insts().any(|(_, i)| {
+            matches!(
+                f.inst_data(i),
+                InstData::Intrinsic {
+                    id: Intrinsic::Memcmp,
+                    ..
+                }
+            )
+        })
+    }) {
+        let sig = Signature::new(&[Type::Ptr, Type::Ptr, Type::I64], &[Type::I32]);
+        if module.data.iter().any(|d| d.name == "memcmp")
+            || module
+                .functions
+                .iter()
+                .any(|f| f.name == "memcmp" && f.sig != sig)
+            || decls.get("memcmp").is_some_and(|d| d.sig != sig)
+        {
+            return Err("@memcmp: incompatible builtin fallback signature".into());
+        }
+        decls.entry("memcmp".into()).or_insert(FuncDecl {
+            name: "memcmp".into(),
+            sig,
+            attrs: Default::default(),
+        });
+    }
     let mut out = format!(
         "; Diagnostic Keel export; no production backend guarantee\ntarget datalayout = \"{}\"\ntarget triple = \"{}\"\n\n",
         target.data_layout(),
@@ -642,6 +672,13 @@ impl Emitter<'_> {
             .map(|v| self.typed(*v))
             .collect::<ExportResult<Vec<_>>>()?;
         match id {
+            Intrinsic::Memcmp => {
+                self.line(format!(
+                    "{dst} = call i32 {}({})",
+                    symbol("memcmp"),
+                    a.join(", ")
+                ));
+            }
             Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
                 let (name, params) = match id {
                     Intrinsic::Memcpy => ("llvm.memcpy.p0.p0.i64", "ptr, ptr, i64, i1"),

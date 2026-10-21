@@ -1024,6 +1024,10 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                     k::Intrinsic::Memcpy => self.b.call_memcpy(self.config, a[0], a[1], a[2]),
                     k::Intrinsic::Memmove => self.b.call_memmove(self.config, a[0], a[1], a[2]),
                     k::Intrinsic::Memset => self.b.call_memset(self.config, a[0], a[1], a[2]),
+                    k::Intrinsic::Memcmp => {
+                        let value = self.b.call_memcmp(self.config, a[0], a[1], a[2]);
+                        self.def(inst, 0, value);
+                    }
                     k::Intrinsic::Debugtrap => {
                         self.b.ins().debugtrap();
                     }

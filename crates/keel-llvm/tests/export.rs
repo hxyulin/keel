@@ -4,6 +4,24 @@ fn translate(src: &str) -> Result<String, String> {
     export(&keel_ir::parse(src).unwrap(), TargetProfile::AppleArm64)
 }
 #[test]
+fn memcmp_builtin_fallback_merges_ordinary_import_and_rejects_conflicts() {
+    let body = "func @f(ptr,ptr,i64)->i32 {\nblock0(v0:ptr,v1:ptr,v2:i64):\n v3 = intrinsic memcmp(v0,v1,v2)\n return v3\n}";
+    for prefix in ["", "decl @memcmp(ptr,ptr,i64)->i32\n"] {
+        let ll = translate(&format!("{prefix}{body}")).unwrap();
+        assert_eq!(
+            ll.lines().filter(|s| s.starts_with("declare i32")).count(),
+            1,
+            "{ll}"
+        );
+        assert!(ll.contains("call i32"), "{ll}");
+    }
+    assert!(
+        translate(&format!("decl @memcmp(ptr,ptr,i64)->i64\n{body}"))
+            .unwrap_err()
+            .contains("incompatible builtin fallback")
+    );
+}
+#[test]
 fn definition_restrict_facts_are_conservatively_omitted() {
     let ll = translate("func @read(ptr) -> i32 restrict_params(0) {\nblock0(v0: ptr):\n v1 = load.i32 v0\n return v1\n}\n").unwrap();
     assert!(ll.contains("define i32"));
@@ -264,7 +282,9 @@ fn cli_whole_module_buffering_and_errors() {
 #[test]
 fn low_lane_widening_keeps_the_exporters_explicit_vector_rejection() {
     for op in ["swiden_low", "uwiden_low"] {
-        let source = format!("func @widen(ptr, ptr) {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.i8x16 v0\n v3 = {op}.i64x2 v2\n store v3, v1\n return\n}}\n");
+        let source = format!(
+            "func @widen(ptr, ptr) {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.i8x16 v0\n v3 = {op}.i64x2 v2\n store v3, v1\n return\n}}\n"
+        );
         let module = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&module).unwrap();
         let error = export(&module, TargetProfile::AppleArm64).unwrap_err();

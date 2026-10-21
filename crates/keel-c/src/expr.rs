@@ -964,7 +964,7 @@ impl<'a> Parser<'a> {
             ));
         }
         match base {
-            "memcpy" | "memmove" | "memset" => {
+            "memcpy" | "memmove" | "memset" | "memcmp" => {
                 if !self.is("(") {
                     // Library builtins also denote their ordinary library
                     // function when used as an address or parenthesized callee.
@@ -1283,7 +1283,7 @@ impl<'a> Parser<'a> {
                     "memory builtin cannot discard volatile qualification",
                 ));
             }
-            if i == 0 && memory_builtin_const(&pointee, &self.typedefs) {
+            if i == 0 && name != "memcmp" && memory_builtin_const(&pointee, &self.typedefs) {
                 return Err(Error::new(
                     arg.loc,
                     "memory builtin destination must not be const",
@@ -1303,9 +1303,15 @@ impl<'a> Parser<'a> {
         let id = match name {
             "memcpy" => Intrinsic::Memcpy,
             "memmove" => Intrinsic::Memmove,
+            "memcmp" => Intrinsic::Memcmp,
             _ => Intrinsic::Memset,
         };
-        Ok(mk(ExprKind::Builtin(Builtin::Memory(id), args), ptr, loc))
+        let result = if name == "memcmp" { INT } else { ptr };
+        Ok(mk(
+            ExprKind::Builtin(Builtin::Memory(id), args),
+            result,
+            loc,
+        ))
     }
 
     /// GCC's `__atomic_load_n` and `__atomic_store_n` on a scalar.

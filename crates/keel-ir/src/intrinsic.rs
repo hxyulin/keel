@@ -18,6 +18,8 @@ pub enum Intrinsic {
     Memmove,
     /// `memset(dst, byte, len)`.
     Memset,
+    /// Explicit standard builtin semantics, independent of symbol interposition.
+    Memcmp,
     /// Stops in the debugger, which can resume past it. Without a debugger
     /// the process gets SIGTRAP.
     Debugtrap,
@@ -52,10 +54,11 @@ pub struct IntrinsicInfo {
 }
 
 impl Intrinsic {
-    pub const ALL: [Intrinsic; 9] = [
+    pub const ALL: [Intrinsic; 10] = [
         Intrinsic::Memcpy,
         Intrinsic::Memmove,
         Intrinsic::Memset,
+        Intrinsic::Memcmp,
         Intrinsic::Debugtrap,
         Intrinsic::VaStart,
         Intrinsic::StackAlloc,
@@ -69,6 +72,7 @@ impl Intrinsic {
         let (name, params, returns, pure): (_, &'static [Type], &'static [Type], _) = match self {
             Intrinsic::Memcpy => ("memcpy", MEM, &[], false),
             Intrinsic::Memmove => ("memmove", MEM, &[], false),
+            Intrinsic::Memcmp => ("memcmp", MEM, &[Type::I32], false),
             Intrinsic::Memset => ("memset", &[Type::Ptr, Type::I8, Type::I64], &[], false),
             Intrinsic::Debugtrap => ("debugtrap", &[], &[], false),
             Intrinsic::VaStart => ("va_start", &[Type::Ptr], &[], false),

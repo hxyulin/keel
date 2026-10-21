@@ -15,7 +15,7 @@ pub fn run(f: &mut Function) -> bool {
         };
         // Intrinsic metadata is compiler-owned semantic provenance; never
         // recognize an ordinary call by its linker symbol.
-        if id.info().name == "memcmp" {
+        if *id == Intrinsic::Memcmp {
             let args = args.clone();
             changed |= expand_memcmp_equality(f, at, &args);
             continue;

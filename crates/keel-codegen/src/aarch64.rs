@@ -534,7 +534,7 @@ fn is_call(func: &Function, data: &InstData) -> bool {
             op.can_trap() && func.value_type(func.resolve(args[0])) == Type::I128
         }
         InstData::Intrinsic { id, .. } => match id {
-            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => true,
+            Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => true,
             Intrinsic::Debugtrap
             | Intrinsic::VaStart
             | Intrinsic::StackAlloc
@@ -2107,7 +2107,7 @@ impl<'a> FunctionCompiler<'a> {
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
+                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
                     let params: Vec<AbiParam> = id
                         .info()
                         .params
@@ -2116,6 +2116,9 @@ impl<'a> FunctionCompiler<'a> {
                         .collect();
                     self.move_args(&args, &params);
                     self.out.branch(true, format!("_{id}"));
+                    if id == Intrinsic::Memcmp {
+                        self.call_result(result, None);
+                    }
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // step past it.

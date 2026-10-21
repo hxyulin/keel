@@ -309,7 +309,7 @@ fn is_call(func: &Function, data: &InstData) -> bool {
         InstData::Intrinsic { id, .. } => {
             matches!(
                 id,
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset
+                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp
             )
         }
         _ => false,
@@ -1535,10 +1535,15 @@ impl<'a> FunctionCompiler<'a> {
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
                 // unspecified upper bits of the i8 are harmless.
-                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset => {
+                Intrinsic::Memcpy | Intrinsic::Memmove | Intrinsic::Memset | Intrinsic::Memcmp => {
                     let sig = keel_ir::Signature {
                         params: id.info().params.iter().map(|&t| AbiParam::new(t)).collect(),
-                        returns: Vec::new(),
+                        returns: id
+                            .info()
+                            .returns
+                            .iter()
+                            .map(|&t| AbiParam::new(t))
+                            .collect(),
                         cc: CallConv::C,
                         variadic: false,
                         returns_twice: false,
@@ -1548,6 +1553,9 @@ impl<'a> FunctionCompiler<'a> {
                         Opcode::Call,
                         [asm_arg(&(symbol_address(&id.to_string(), Modifier::Plt)))],
                     );
+                    if id == Intrinsic::Memcmp {
+                        self.call_result(result, None);
+                    }
                 }
                 // What clang emits for __builtin_debugtrap; a debugger can
                 // continue past it.

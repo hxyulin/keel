@@ -1,5 +1,4 @@
-//! Run after applying target/arm-memory-handoff/memcmp-parent-integration.patch.
-//! The parent owns the intrinsic registry and backend fallback plumbing.
+//! Explicit builtin equality expansion and ordinary-call fallback contracts.
 use keel_ir::{InstData, Target};
 use std::{fs, process::Command};
 
@@ -28,7 +27,6 @@ fn run(c: &mut Command) {
 }
 
 #[test]
-#[ignore = "requires parent memcmp builtin integration patch"]
 fn builtin_equality_native_guard_pages_and_both_target_objects() {
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("memcmp-builtin-native");
     fs::create_dir_all(&dir).unwrap();
