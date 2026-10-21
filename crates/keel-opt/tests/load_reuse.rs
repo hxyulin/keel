@@ -496,3 +496,22 @@ block2:
     );
     assert_eq!(loads(&m), 2);
 }
+
+#[test]
+fn completed_merge_predecessor_budget_has_an_exact_boundary() {
+    for count in [8, 9] {
+        let join = count + 1;
+        let cases = (2..=count)
+            .map(|i| format!("{}: block{i}", i - 2))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut source = format!(
+            "func @f(ptr, i64) -> i64 {{\nblock0(v0: ptr, v1: i64):\n v2 = load.i64 v0\n switch v1, block1, [{cases}]\n"
+        );
+        for i in 1..=count {
+            source += &format!("block{i}:\n jump block{join}\n");
+        }
+        source += &format!("block{join}:\n v3 = load.i64 v0\n return v3\n}}");
+        assert_eq!(loads(&optimize(&source)), if count == 8 { 1 } else { 2 });
+    }
+}
