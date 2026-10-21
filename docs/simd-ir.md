@@ -347,3 +347,8 @@ only nontrapping arm operations may be speculated. The trial replaces the
 original function only when a reduction actually vectorizes, so rejected
 candidates retain their original CFG. Scalar tails, zero-trip behavior, access
 widths, memory effects and first-fault restrictions remain unchanged.
+
+For a comparison-controlled contribution with a zero false arm, reduction
+emission uses `vand` directly with the canonical comparison mask. This is local
+to predicates proven by the reduction matcher; general `vselect` still accepts
+arbitrary nonzero lane masks and keeps its explicit normalization.

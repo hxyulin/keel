@@ -515,7 +515,7 @@ fn conditional_reductions_use_packed_predicates_only_where_available() {
                     || matches!(predicate, "eq" | "ne");
                 assert_eq!(
                     f.layout_insts()
-                        .any(|(_, i)| matches!(f.inst_data(i), InstData::VectorSelect { .. })),
+                        .any(|(_, i)| matches!(f.inst_data(i), InstData::VectorIcmp { .. })),
                     supported,
                     "{target:?} {index} {predicate}"
                 );
@@ -569,7 +569,7 @@ fn bounded_c_diamond_normalization_commits_only_successful_vectorization() {
     assert!(
         m.functions[0]
             .layout_insts()
-            .any(|(_, i)| matches!(m.functions[0].inst_data(i), InstData::VectorSelect { .. }))
+            .any(|(_, i)| matches!(m.functions[0].inst_data(i), InstData::VectorIcmp { .. }))
     );
     for rejected in [
         source.replace("load.i32 v12", "load.i32 volatile v12"),
@@ -581,5 +581,30 @@ fn bounded_c_diamond_normalization_commits_only_successful_vectorization() {
         let before = m.to_string();
         keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::X86Sse2).unwrap();
         assert_eq!(before, m.to_string());
+    }
+}
+
+#[test]
+fn conditional_zero_arms_use_canonical_mask_and_but_other_arms_keep_lane_selects() {
+    for zero in [true, false] {
+        let source = include_str!("conditional_reduce/loops.keel");
+        let source = if zero {
+            source.to_string()
+        } else {
+            source
+                .replace("v13 = iconst.i32 0", "v13 = iconst.i32 7")
+                .replace("v13 = iconst.i64 0", "v13 = iconst.i64 7")
+        };
+        let mut m = keel_ir::parse(&source).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::Aarch64Neon)
+            .unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        for f in &m.functions {
+            assert_eq!(
+                f.layout_insts()
+                    .any(|(_, i)| matches!(f.inst_data(i), InstData::VectorSelect { .. })),
+                !zero
+            );
+        }
     }
 }

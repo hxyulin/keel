@@ -952,6 +952,13 @@ fn reduce_body(
                     cond,
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
+                // Every accepted select predicate is an integer comparison:
+                // its vector mask is canonical, so selecting zero needs only
+                // a packed AND, with no second mask normalization or blending.
+                D::Select { args } if constant(f, args[2]) == Some(0) => D::VectorBinary {
+                    op: V::And,
+                    args: [mapping[&f.resolve(args[0])], mapping[&f.resolve(args[1])]],
+                },
                 D::Select { args } => D::VectorSelect {
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
@@ -1390,7 +1397,10 @@ fn normalize_conditional_loop(f: &mut Function, target: VectorTarget) -> bool {
     if f.layout_insts().take(257).count() > 256 || f.blocks().take(17).count() > 16 {
         return false;
     }
-    if !f.blocks().any(|b| Some(b) != f.entry_block() && f.block_params(b).len() >= 2) {
+    if !f
+        .blocks()
+        .any(|b| Some(b) != f.entry_block() && f.block_params(b).len() >= 2)
+    {
         return false;
     }
     let mut trial = f.clone();
