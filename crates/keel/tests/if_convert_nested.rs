@@ -66,7 +66,9 @@ fn nested_c_ternaries_preserve_scalar_results_and_both_object_paths() {
                 target,
                 "--verify-each",
                 "--opt-tier",
-                "full",
+                // Keep the pass oracle scalar: Full can now convert these
+                // shapes privately during successful loop vectorization.
+                "basic",
                 "--emit-ir",
                 "kernels.c",
                 "-o",
@@ -81,7 +83,7 @@ fn nested_c_ternaries_preserve_scalar_results_and_both_object_paths() {
                 target,
                 "--verify-each",
                 "-p",
-                "if-convert,simplify-cfg,phi-simplify,dce",
+                "gvn,load-reuse,if-convert,simplify-cfg,phi-simplify,dce",
                 "before.keel",
                 "-o",
                 "after.keel",
