@@ -1,6 +1,45 @@
 use keel_ir::{InstData, Target};
 
 #[test]
+fn wide_expression_trees_cannot_prove_away_required_checks() {
+    for target in Target::ALL {
+        for op in ["memcpy", "memmove", "memset"] {
+            for (length, bound) in [
+                ("(unsigned long)(((__int128)1 << 64) > 8)", "0"),
+                ("8", "(unsigned long)(((__int128)1 << 64) - 1)"),
+                ("8", "(unsigned long)(((__int128)1 << 64) > 8)"),
+                (
+                    "8",
+                    "(unsigned long)(((__int128)1 << 64) == 1 ? -1UL : 0UL)",
+                ),
+            ] {
+                let value = if op == "memset" { "511" } else { "s" };
+                let source = format!(
+                    "void *f(void*d,const void*s){{return __builtin___{op}_chk(d,{value},{length},{bound});}}"
+                );
+                let mut m = keel_c::compile(
+                    &source,
+                    "wide-checked.c",
+                    keel_c::Options {
+                        target,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                for optimized in [false, true] {
+                    if optimized {
+                        keel_opt::optimize(&mut m).unwrap();
+                    }
+                    keel_ir::verify_module(&m).unwrap();
+                    assert!(m.functions[0].layout_insts().any(|(_,i)|matches!(m.functions[0].inst_data(i),InstData::Call{func,..} if m.functions[0].callee(*func).name==format!("__{op}_chk"))),"{source}");
+                    keel_codegen::compile(&m, target).unwrap();
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn unsigned_checked_proofs_and_fallbacks() {
     for target in Target::ALL {
         for op in ["memcpy", "memmove", "memset"] {

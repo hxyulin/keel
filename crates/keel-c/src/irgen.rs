@@ -2806,11 +2806,47 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             declared = Some(g);
         }
-        // Arguments have already been evaluated exactly once. Interpret the
-        // canonical size_t operands as unsigned, including SIZE_MAX (-1 in
-        // the constant evaluator). A maximal bound covers every runtime size.
-        let bound = crate::eval::eval_int(&args[3]).map(|n| n as u64);
-        let length = crate::eval::eval_int(&args[2]).map(|n| n as u64);
+        // Prove the values actually emitted, after all argument evaluation.
+        // The AST evaluator represents integers as i64 and is not a sound
+        // proof for expression trees containing __int128 arithmetic. A
+        // canonical size_t constant in IR already has its final 64-bit bits.
+        fn constant(f: &Function, v: Value, depth: u8) -> Option<u64> {
+            let depth = depth.checked_sub(1)?;
+            let v = f.resolve(v);
+            let ValueDef::Result(i, 0) = f.value_def(v) else {
+                return None;
+            };
+            let mask = |ty: Type| match ty {
+                Type::I8 => Some(0xff),
+                Type::I16 => Some(0xffff),
+                Type::I32 => Some(0xffff_ffff),
+                Type::I64 => Some(u64::MAX),
+                _ => None,
+            };
+            if f.inst_results(i) != [v] {
+                return None;
+            }
+            match f.inst_data(i) {
+                InstData::Iconst { ty, imm } => Some(*imm as u64 & mask(*ty)?),
+                InstData::Convert {
+                    op: op @ (ConvertOp::Uext | ConvertOp::Sext | ConvertOp::Trunc),
+                    ty,
+                    arg,
+                } => {
+                    let from = f.value_type(f.resolve(*arg));
+                    let from_mask = mask(from)?;
+                    let mut value = constant(f, *arg, depth)? & from_mask;
+                    if *op == ConvertOp::Sext {
+                        let shift = 64 - from.bytes()? * 8;
+                        value = (((value << shift) as i64) >> shift) as u64;
+                    }
+                    Some(value & mask(*ty)?)
+                }
+                _ => None,
+            }
+        }
+        let bound = constant(self.b.function(), vals[3], 32);
+        let length = constant(self.b.function(), vals[2], 32);
         if bound
             .is_some_and(|bound| bound == u64::MAX || length.is_some_and(|length| length <= bound))
         {
