@@ -174,16 +174,22 @@ impl FunctionCompiler<'_> {
     // Each qword sign comes from its high dword. Copy before destructive shifts:
     // x can remain live, alias the result, or occupy a spill slot.
     pub(super) fn vector_absolute(&mut self, value: Value, result: Option<Value>) {
-        self.vector_stage(value, FS1);
-        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        let a = self.use_freg(value, FS0);
+        let d = self.def_freg(result);
+        // Capture the sign before overwriting a coalesced input/result. Neither
+        // reserved FS1 nor a spilled result's FS0 can hold an allocated input.
+        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(a))]);
+        if d != a {
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
+        }
         self.emit(Opcode::Psrad, [asm_arg(&xmm(FS1)), asm_arg(&31i64)]);
         self.emit(
             Opcode::Pshufd,
             [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
         );
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
-        self.emit(Opcode::Psubq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
-        self.vector_publish(result);
+        self.emit(Opcode::Pxor, [asm_arg(&xmm(d)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Psubq, [asm_arg(&xmm(d)), asm_arg(&xmm(FS1))]);
+        self.def_done(result, d);
     }
     pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
         self.vector_stage(value, FS1);
