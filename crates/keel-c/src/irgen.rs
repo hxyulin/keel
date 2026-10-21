@@ -2862,12 +2862,17 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         Ok(Some(match op {
             Builtin::Memory(id) => {
                 // All arguments were evaluated once above, including at
-                // length zero. The intrinsic has no result; C returns dst.
+                // length zero. Copy/fill intrinsics return dst in C; a
+                // comparison builtin returns the intrinsic's integer result.
                 if id == Intrinsic::Memset {
                     vals[1] = ins.trunc(Type::I8, vals[1]);
                 }
-                self.b.ins().intrinsic(id, &vals);
-                vals[0]
+                let inst = self.b.ins().intrinsic(id, &vals);
+                if id.info().returns.is_empty() {
+                    vals[0]
+                } else {
+                    self.b.function().inst_results(inst)[0]
+                }
             }
             Builtin::Bswap => ins.bswap(vals[0]),
             Builtin::Fabs => ins.fabs(vals[0]),
