@@ -49,6 +49,66 @@ fn eliminates_exact_leaf_result_copy() {
     );
     assert_eq!(aggregate_return::run(&mut m.clone()), 0);
 }
+
+#[test]
+fn redirected_home_preserves_offset_specific_constructor_alignment() {
+    let source = "func @make(ptr sret {i64,i64,i64},i64) noinline local {
+block0(v0:ptr,v1:i64):
+ v2 = iconst.i64 8
+ v3 = iconst.i64 16
+ v4 = ptradd v0,v2
+ v5 = ptradd v0,v3
+ store align 8 v1,v0
+ store align 16 v1,v4
+ store align 8 v1,v5
+ return
+}
+func @test(i64)->i64 {
+ ss0 = stack_slot 8, align 16
+ ss1 = stack_slot 24, align 8
+ ss2 = stack_slot 24, align 16
+block0(v0:i64):
+ v1 = stack_addr ss0
+ store volatile v0,v1
+ v2 = stack_addr ss1
+ v3 = stack_addr ss2
+ v4 = iconst.i64 8
+ v5 = iconst.i64 16
+ call @make(v2,v0)
+ v6 = load.i64 v2
+ store v6,v3
+ v7 = ptradd v2,v4
+ v8 = ptradd v3,v4
+ v9 = load.i64 v7
+ store v9,v8
+ v10 = ptradd v2,v5
+ v11 = ptradd v3,v5
+ v12 = load.i64 v10
+ store v12,v11
+ v13 = load.i64 v3
+ return v13
+}";
+    // The source can be 8 modulo 16 while the destination is 0 modulo 16.
+    // A larger destination base alignment does not preserve the offset-8 promise.
+    check(source, 0);
+    let ordinary = source.replace("store align 16 v1,v4", "store align 8 v1,v4");
+    check(&ordinary, 1);
+    let strong_base = ordinary.replace("store align 8 v1,v0", "store align 16 v1,v0");
+    check(
+        &strong_base.replace(
+            "ss2 = stack_slot 24, align 16",
+            "ss2 = stack_slot 24, align 8",
+        ),
+        0,
+    );
+    check(
+        &strong_base.replace(
+            "ss1 = stack_slot 24, align 8",
+            "ss1 = stack_slot 24, align 16",
+        ),
+        1,
+    );
+}
 #[test]
 fn rejects_capture_observation_traps_incomplete_and_interposition() {
     for constructor in [

@@ -17,6 +17,13 @@ const MAX_VALUES: usize = 100_000;
 const WORK: usize = 2_000_000;
 const MAX_BYTES: usize = 64;
 
+struct Constructor {
+    sig: Signature,
+    size: usize,
+    align: u32,
+    stores: Vec<(usize, u32)>,
+}
+
 fn constant(f: &Function, v: Value) -> Option<usize> {
     let ValueDef::Result(i, _) = f.value_def(f.resolve(v)) else {
         return None;
@@ -51,7 +58,7 @@ fn pure(data: &InstData) -> bool {
             }
     )
 }
-fn constructor(f: &Function) -> Option<(Signature, usize)> {
+fn constructor(f: &Function) -> Option<Constructor> {
     if !f.local
         || f.sig.returns_twice
         || f.sig.variadic
@@ -65,6 +72,7 @@ fn constructor(f: &Function) -> Option<(Signature, usize)> {
         return None;
     };
     let size = usize::try_from(layout.size()).ok()?;
+    let align = u32::try_from(layout.align()).ok()?;
     if size == 0 || size > MAX_BYTES || f.num_values() > 512 {
         return None;
     }
@@ -75,6 +83,7 @@ fn constructor(f: &Function) -> Option<(Signature, usize)> {
     }
     let mut addr = HashMap::from([(f.block_params(block)[0], 0usize)]);
     let mut written = vec![false; size];
+    let mut stores = Vec::new();
     for &i in insts {
         let d = f.inst_data(i);
         let mut allowed_address = None;
@@ -106,6 +115,7 @@ fn constructor(f: &Function) -> Option<(Signature, usize)> {
                     return None;
                 }
                 written[off..end].fill(true);
+                stores.push((off, flags.align));
                 allowed_address = Some(f.resolve(*a));
                 if addr.contains_key(&f.resolve(*value)) {
                     return None;
@@ -126,7 +136,12 @@ fn constructor(f: &Function) -> Option<(Signature, usize)> {
             return None;
         }
     }
-    written.iter().all(|&b| b).then(|| (f.sig.clone(), size))
+    written.iter().all(|&b| b).then(|| Constructor {
+        sig: f.sig.clone(),
+        size,
+        align,
+        stores,
+    })
 }
 
 /// Run after inlining/scalar cleanup and before small-memory expansion/DCE.
@@ -148,7 +163,7 @@ pub fn run(module: &mut Module) -> usize {
     changes
 }
 
-fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>) -> usize {
+fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usize {
     if f.num_values() > MAX_VALUES || !f.debug_vars.is_empty() {
         return 0;
     }
@@ -212,7 +227,13 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
                 continue;
             };
             let decl = f.callee(*func);
-            let Some((sig, size)) = constructors.get(&decl.name) else {
+            let Some(Constructor {
+                sig,
+                size,
+                align,
+                stores,
+            }) = constructors.get(&decl.name)
+            else {
                 continue;
             };
             if &decl.sig != sig {
@@ -295,6 +316,13 @@ fn forward(f: &mut Function, constructors: &HashMap<String, (Signature, usize)>)
             if !copied.iter().all(|&b| b)
                 || slots[&dest].size as usize != *size
                 || slots[&dest].align < slots[&source].align
+                || slots[&dest].align < *align
+                // Preserve each access promise, not merely the largest one:
+                // a 16-aligned base does not align an offset-8 store to 16.
+                || stores.iter().any(|&(offset, alignment)| {
+                    slots[&dest].align < alignment
+                        || !offset.is_multiple_of(alignment as usize)
+                })
             {
                 continue;
             }
