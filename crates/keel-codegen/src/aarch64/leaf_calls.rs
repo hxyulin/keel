@@ -10,7 +10,8 @@ use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 pub(super) type Summaries = HashMap<String, (Signature, u64)>;
 pub(super) type Prepared = HashMap<usize, (Output, Vec<(String, Option<DebugScope>)>)>;
 
-pub(super) fn eligible(func: &Function, module: &Module) -> bool {
+pub(super) fn eligible(func: &Function, symbols: &crate::symbols::Symbols<'_>) -> bool {
+    let module = symbols.module;
     func.local
         && !func.weak_odr
         && func.sig.cc == CallConv::Fast
@@ -27,29 +28,30 @@ pub(super) fn eligible(func: &Function, module: &Module) -> bool {
             let data = func.inst_data(i);
             (is_call(func, data) && !matches!(data, InstData::Call { .. }))
                 || matches!(data, InstData::Intrinsic { .. } | InstData::InlineAsm { .. } | InstData::ReturnCall { .. } | InstData::ReturnCallIndirect { .. } | InstData::LandingPad { .. })
-                || matches!(data, InstData::SymbolAddr { symbol } if module.data_object(func.symbol_name(*symbol)).is_some_and(|d| d.thread_local))
+                || matches!(data, InstData::SymbolAddr { symbol } if symbols.data_object(func.symbol_name(*symbol)).is_some_and(|d| d.thread_local))
         })
 }
 
 pub(super) fn prepare(
-    module: &Module,
+    symbols: &crate::symbols::Symbols<'_>,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<(Summaries, Prepared), CodegenError> {
-    prepare_with_chain_output_limits(module, pools, pipeline, structured, 8 * 1024 * 1024, 65_536)
+    prepare_with_chain_output_limits(symbols, pools, pipeline, structured, 8 * 1024 * 1024, 65_536)
 }
 
 // Leaves retain their original IR allowance; only newly admitted chains spend
 // this output allowance. Separate limits keep boundary tests small.
 fn prepare_with_chain_output_limits(
-    module: &Module,
+    symbols: &crate::symbols::Symbols<'_>,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
     mut chain_output_bytes: usize,
     mut chain_output_items: usize,
 ) -> Result<(Summaries, Prepared), CodegenError> {
+    let module = symbols.module;
     let mut summaries = Summaries::default();
     let mut prepared = Prepared::default();
     if !module.files.is_empty()
@@ -88,7 +90,7 @@ fn prepare_with_chain_output_limits(
         if !called.contains(original.name.as_str())
             || count > 128
             || original.blocks().take(17).count() > 16
-            || !eligible(original, module)
+            || !eligible(original, symbols)
         {
             continue;
         }
@@ -148,7 +150,7 @@ fn prepare_with_chain_output_limits(
             let _function_profile = crate::backend_profile::function(&original.name);
             let func = vector::lower(original);
             let compiler =
-                FunctionCompiler::new(&func, module, pools, pipeline, structured, &summaries)?;
+                FunctionCompiler::new(&func, symbols, pools, pipeline, structured, &summaries)?;
             // finish/validate have accounted for defs AND uses, including
             // allocation transfers. Integer ABI shuffles and lowering scratch
             // use x0-x8/x16/x17, outside this proof's x9-x15 bank. Calls are the
@@ -203,7 +205,7 @@ mod tests {
         let module = keel_ir::parse(source).unwrap();
         // Also exercise defensive producer guards on verifier-rejected IR.
         prepare(
-            &module,
+            &crate::symbols::Symbols::new(&module),
             &REGISTERS,
             &crate::CodegenPipeline {
                 selector: &crate::SelectionTier::Full,
@@ -232,7 +234,7 @@ mod tests {
         reversed.functions.reverse();
         let emit = |m: &Module| {
             prepare(
-                m,
+                &crate::symbols::Symbols::new(m),
                 &REGISTERS,
                 &crate::CodegenPipeline {
                     selector: &crate::SelectionTier::Full,
@@ -375,13 +377,14 @@ block0(v0:i64):
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
+        let symbols = crate::symbols::Symbols::new(&module);
         let pipeline = crate::CodegenPipeline {
             selector: &crate::SelectionTier::Full,
             allocator: &crate::regalloc::AllocationTier::Full,
         };
         for structured in [false, true] {
             let (all_summaries, all_prepared) =
-                prepare(&module, &REGISTERS, &pipeline, structured).unwrap();
+                prepare(&symbols, &REGISTERS, &pipeline, structured).unwrap();
             assert_eq!(all_summaries.len(), 6);
             let size = |body: &Output| match body {
                 Output::Text(text) => text.len(),
@@ -391,7 +394,7 @@ block0(v0:i64):
             assert!(size(&all_prepared[&1].0) > allowance);
             for limit in [0, allowance - 1, allowance] {
                 let (summaries, prepared) = prepare_with_chain_output_limits(
-                    &module, &REGISTERS, &pipeline, structured, limit, limit,
+                    &symbols, &REGISTERS, &pipeline, structured, limit, limit,
                 )
                 .unwrap();
                 assert_eq!(summaries.len(), prepared.len());
@@ -478,7 +481,7 @@ block0(v0:i64):
         let callee = module.functions[1].callees().next().unwrap().0;
         module.functions[1].callee_mut(callee).sig.returns[0].ext = keel_ir::ArgExt::Uext;
         let summaries = prepare(
-            &module,
+            &crate::symbols::Symbols::new(&module),
             &REGISTERS,
             &crate::CodegenPipeline {
                 selector: &crate::SelectionTier::Full,

@@ -92,9 +92,11 @@ fn compiler(module: &Module, structured: bool) -> FunctionCompiler<'_> {
         selector: &crate::SelectionTier::Baseline,
         allocator: &regalloc::AllocationTier::Full,
     };
+    // The compiler borrows the module's symbol index for its whole life.
+    let symbols = Box::leak(Box::new(crate::symbols::Symbols::new(module)));
     let mut c = FunctionCompiler::new(
         &module.functions[0],
-        module,
+        symbols,
         &REGISTERS,
         &pipeline,
         structured,

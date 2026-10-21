@@ -220,9 +220,10 @@ fn compile_output(
         }
     }
     let mut frames = Vec::new();
+    let symbols = crate::symbols::Symbols::new(module);
     for original in &module.functions {
         let func = vector::lower(original);
-        let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
+        let mut compiler = FunctionCompiler::new(&func, &symbols, pools, pipeline, structured)?;
         compiler.debug = debug;
         let slots = if debug {
             compiler.slot_frame_offsets()
@@ -426,7 +427,7 @@ fn stack_slot(func: &Function, addr: Value) -> Option<usize> {
 struct FunctionCompiler<'a> {
     features: keel_asm_ir::x86::Features,
     func: &'a Function,
-    module: &'a Module,
+    symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
@@ -499,11 +500,12 @@ impl<'a> FunctionCompiler<'a> {
 
     fn new(
         func: &'a Function,
-        module: &'a Module,
+        symbols: &'a crate::symbols::Symbols<'a>,
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
     ) -> Result<Self, CodegenError> {
+        let module = symbols.module;
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -677,7 +679,7 @@ impl<'a> FunctionCompiler<'a> {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
         let has_tls_address = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
-            InstData::SymbolAddr { symbol } => module
+            InstData::SymbolAddr { symbol } => symbols
                 .data_object(func.symbol_name(*symbol))
                 .is_some_and(|data| data.thread_local),
             _ => false,
@@ -705,7 +707,7 @@ impl<'a> FunctionCompiler<'a> {
             });
         Ok(Self {
             func,
-            module,
+            symbols,
             alloc,
             current_inst: None,
             allocation_index: None,
@@ -1236,7 +1238,7 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let name = func.symbol_name(symbol);
                 let thread_local = self
-                    .module
+                    .symbols
                     .data_object(name)
                     .is_some_and(|d| d.thread_local);
                 // A thread's copies of the thread-locals are at fixed
@@ -1244,7 +1246,7 @@ impl<'a> FunctionCompiler<'a> {
                 // first word points to itself. An executable knows the
                 // offsets of its own at link time (local-exec); others come
                 // from the GOT (initial-exec).
-                let defined = self.module.defines(name);
+                let defined = self.symbols.defines(name);
                 // Intel operand syntax reserves names such as `offset`, `ptr`
                 // and register names. Quoting keeps C symbols unambiguous.
                 let name = name.to_owned();
@@ -2259,7 +2261,7 @@ impl<'a> FunctionCompiler<'a> {
     fn call_target(&self, name: &str) -> Address {
         symbol_address(
             name,
-            if self.module.defines(name) {
+            if self.symbols.defines(name) {
                 Modifier::None
             } else {
                 Modifier::Plt

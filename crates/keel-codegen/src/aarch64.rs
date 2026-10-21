@@ -256,8 +256,9 @@ fn compile_output(
             });
         }
     }
+    let symbols = crate::symbols::Symbols::new(module);
     let (leaf_summaries, mut prepared_leaves) =
-        leaf_calls::prepare(module, pools, pipeline, structured)?;
+        leaf_calls::prepare(&symbols, pools, pipeline, structured)?;
     let mut frames = Vec::new();
     for (index, original) in module.functions.iter().enumerate() {
         if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
@@ -272,8 +273,14 @@ fn compile_output(
         #[cfg(feature = "backend-profile")]
         let _function_profile = crate::backend_profile::function(&original.name);
         let func = vector::lower(original);
-        let mut compiler =
-            FunctionCompiler::new(&func, module, pools, pipeline, structured, &leaf_summaries)?;
+        let mut compiler = FunctionCompiler::new(
+            &func,
+            &symbols,
+            pools,
+            pipeline,
+            structured,
+            &leaf_summaries,
+        )?;
         compiler.debug = debug;
         let slots = if debug {
             compiler.slot_frame_offsets()
@@ -623,7 +630,7 @@ struct RegisterSret<'a> {
 
 struct FunctionCompiler<'a> {
     func: &'a Function,
-    module: &'a Module,
+    symbols: &'a crate::symbols::Symbols<'a>,
     alloc: Allocation,
     #[cfg(feature = "experimental-dispatch")]
     dispatch_tails: HashMap<Inst, Inst>,
@@ -709,12 +716,13 @@ impl<'a> FunctionCompiler<'a> {
 
     fn new(
         func: &'a Function,
-        module: &'a Module,
+        symbols: &'a crate::symbols::Symbols<'a>,
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
         leaf_summaries: &leaf_calls::Summaries,
     ) -> Result<Self, CodegenError> {
+        let module = symbols.module;
         let err = |message: String| CodegenError {
             func: func.name.clone(),
             message,
@@ -752,7 +760,7 @@ impl<'a> FunctionCompiler<'a> {
         }
         for (_, callee) in func.callees() {
             let what = format!("call to @{}", callee.name);
-            check_call_signature(&what, &callee.sig, module.is_external(&callee.name))
+            check_call_signature(&what, &callee.sig, symbols.is_external(&callee.name))
                 .map_err(err)?;
         }
         // The target of an indirect call may be an external function.
@@ -907,7 +915,7 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
         let has_tls_getter = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
-            InstData::SymbolAddr { symbol } => module
+            InstData::SymbolAddr { symbol } => symbols
                 .data_object(func.symbol_name(*symbol))
                 .is_some_and(|data| data.thread_local),
             _ => false,
@@ -1100,7 +1108,7 @@ impl<'a> FunctionCompiler<'a> {
             #[cfg(feature = "experimental-dispatch")]
             dispatch_tails,
             func,
-            module,
+            symbols,
             alloc,
             current_inst: None,
             allocation_index: None,
@@ -1761,7 +1769,7 @@ impl<'a> FunctionCompiler<'a> {
                 let d = self.def_reg(result);
                 let name = func.symbol_name(symbol);
                 let thread_local = self
-                    .module
+                    .symbols
                     .data_object(name)
                     .is_some_and(|d| d.thread_local);
                 if thread_local {
@@ -1787,7 +1795,7 @@ impl<'a> FunctionCompiler<'a> {
                     );
                     self.mach("blr", [(Reg::x(S0)).into()]);
                     self.mach("mov", [(Reg::x(d)).into(), (Reg::x(0)).into()]);
-                } else if self.module.defines(name) {
+                } else if self.symbols.defines(name) {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Direct,
