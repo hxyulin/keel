@@ -68,7 +68,7 @@ fn leaf(f: &Function) -> bool {
         && f.debug_vars.is_empty()
         && f.debug_loc.is_none()
         && f.num_values() <= 512
-        && f.blocks().count() == 1
+        && f.blocks().take(2).count() == 1
         && f.entry_block().is_some_and(|b| {
             let insts = f.block_insts(b);
             insts.len() <= 128
@@ -99,6 +99,7 @@ fn run(module: &mut Module) -> bool {
             || f.sig.returns_twice
             || !f.debug_vars.is_empty()
             || f.debug_loc.is_some()
+            || f.layout_insts().take(MAX_INSTS + 1).count() > MAX_INSTS
             || f.layout_insts().any(|(_, i)| {
                 matches!(
                     f.inst_data(i),
@@ -108,7 +109,6 @@ fn run(module: &mut Module) -> bool {
                     }
                 )
             })
-            || f.layout_insts().take(MAX_INSTS + 1).count() > MAX_INSTS
         {
             continue;
         }

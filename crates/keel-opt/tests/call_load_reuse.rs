@@ -199,3 +199,81 @@ block2:
     );
     assert_eq!(loads(&optimize(&src)), 2);
 }
+
+#[test]
+fn fact_and_edge_budgets_lose_information_conservatively() {
+    for (edges, expected) in [(8, 1), (9, 2)] {
+        let mut src = "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n v1 = load.i64 v0\n".to_string();
+        for n in 1..=edges {
+            src.push_str(&format!(" jump block{n}\nblock{n}:\n"));
+        }
+        src.push_str(" v2 = load.i64 v0\n return v2\n}");
+        assert_eq!(loads(&optimize(&src)), expected);
+    }
+    for (count, expected) in [(128, 128), (129, 130)] {
+        let mut src = "func @f(ptr) -> i64 {\nblock0(v0: ptr):\n".to_string();
+        for n in 0..count {
+            src.push_str(&format!(
+                " v{} = iconst.i64 {}\n v{} = ptradd v0, v{}\n v{} = load.i64 v{}\n",
+                3 * n + 1,
+                n * 8,
+                3 * n + 2,
+                3 * n + 1,
+                3 * n + 3,
+                3 * n + 2
+            ));
+        }
+        src.push_str(&format!(
+            " v{} = load.i64 v2\n return v{}\n}}",
+            3 * count + 1,
+            3 * count + 1
+        ));
+        assert_eq!(loads(&optimize(&src)), expected);
+    }
+}
+
+#[test]
+fn returned_pointer_is_allowed_but_is_not_a_nocapture_promise() {
+    let helper = "func @id(ptr) -> ptr local {\nblock0(v0: ptr):\n return v0\n}";
+    let src = source(helper, "v4 = call @id(v0)");
+    assert_eq!(loads(&optimize(&src)), 1);
+    // A use of that result can mutate the original object. No escape fact is
+    // exported to let another pass ignore this store.
+    assert_eq!(
+        loads(&optimize(&src.replace(
+            "v4 = call @id(v0)",
+            "v4 = call @id(v0)\n store v1, v4"
+        ))),
+        2
+    );
+}
+
+#[test]
+fn resolved_pointer_aliases_match_but_frame_observers_disable_the_function() {
+    let mut m = keel_ir::parse(&source(LEAF, "v4 = call @leaf(v0, v1)")).unwrap();
+    let f = &mut m.functions[1];
+    let entry = f.entry_block().unwrap();
+    let pointer = f.block_params(entry)[0];
+    // An extra pointer parameter aliases the original parameter in this in-memory
+    // module; exact keys must resolve aliases rather than infer new addresses.
+    let alias = f.append_block_param(entry, keel_ir::Type::Ptr);
+    f.sig
+        .params
+        .push(keel_ir::AbiParam::new(keel_ir::Type::Ptr));
+    let second = f
+        .layout_insts()
+        .filter_map(|(_, i)| matches!(f.inst_data(i), InstData::Load { .. }).then_some(i))
+        .nth(1)
+        .unwrap();
+    if let InstData::Load { addr, .. } = f.inst_data_mut(second) {
+        *addr = alias;
+    }
+    f.replace_all_uses(alias, pointer);
+    keel_opt::run_passes(&mut m, &["call-load-reuse"]).unwrap();
+    assert_eq!(loads(&m), 1);
+    let src = source(LEAF, "v4 = call @leaf(v0, v1)").replace(
+        " v2 = load.i64 v0",
+        " v5 = intrinsic frame_address()\n v2 = load.i64 v0",
+    );
+    assert_eq!(loads(&optimize(&src)), 2);
+}
