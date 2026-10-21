@@ -595,7 +595,7 @@ impl<'p> Gen<'p> {
         // prologue: a breakpoint on the function stops after it, where the
         // debugger can read them.
         fg.set_loc(def.loc);
-        for stmt in &def.body {
+        for stmt in def.body {
             fg.stmt(stmt)?;
         }
         if !fg.terminated {
@@ -1066,7 +1066,7 @@ impl DispatchTable {
             return None;
         }
         let mut selected = None;
-        for stmt in &def.body {
+        for stmt in def.body {
             visit_gotos(stmt, &mut |target| {
                 let (global, _) = dispatch_index(target)?;
                 if target.sugar.is_volatile(&p.typedefs) {
@@ -1104,7 +1104,7 @@ impl DispatchTable {
             return None;
         }
         let mut labels = vec![0; len as usize];
-        for item in &object.init.as_ref()?.items {
+        for item in object.init.as_ref()?.items {
             let InitItem::Expr {
                 offset,
                 expr,
@@ -1143,7 +1143,7 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
         }
         Stmt::Init(_, init, _) => visit_goto_init(init, f)?,
         Stmt::Block(stmts) | Stmt::Scoped(_, stmts) => {
-            for stmt in stmts {
+            for stmt in stmts.iter() {
                 visit_gotos(stmt, f)?;
             }
         }
@@ -1191,7 +1191,7 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
 }
 
 fn visit_goto_init(init: &Init<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> Option<()> {
-    for item in &init.items {
+    for item in init.items {
         if let InitItem::Expr { expr, .. } = item {
             visit_goto_expr(expr, f)?;
         }
@@ -1228,18 +1228,18 @@ fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) ->
         }
         ExprKind::Call(callee, args) => {
             visit_goto_expr(callee, f)?;
-            for arg in args {
+            for arg in args.iter() {
                 visit_goto_expr(arg, f)?;
             }
         }
         ExprKind::Builtin(_, args) => {
-            for arg in args {
+            for arg in args.iter() {
                 visit_goto_expr(arg, f)?;
             }
         }
         ExprKind::CompoundLit(_, init) => visit_goto_init(init, f)?,
         ExprKind::StmtExpr { stmts, value, .. } => {
-            for stmt in stmts {
+            for stmt in stmts.iter() {
                 visit_gotos(stmt, f)?;
             }
             if let Some(value) = value {
@@ -1408,14 +1408,14 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 }
             }
             Stmt::Block(stmts) => {
-                for s in stmts {
+                for s in stmts.iter() {
                     self.stmt(s)?;
                 }
             }
             Stmt::Scoped(scope, stmts) => {
                 let outer = self.scope;
                 self.set_scope(self.scopes.get(*scope).copied().flatten());
-                for s in stmts {
+                for s in stmts.iter() {
                     self.stmt(s)?;
                 }
                 self.set_scope(outer);
@@ -2043,7 +2043,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             } => {
                 let outer = self.scope;
                 self.set_scope(self.scopes.get(*scope).copied().flatten());
-                for s in stmts {
+                for s in stmts.iter() {
                     self.stmt(s)?;
                 }
                 let v = match value {
@@ -2915,7 +2915,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             return Ok(Some(v));
         }
         let mut vals = Vec::new();
-        for a in args {
+        for a in args.iter() {
             vals.push(self.val(a)?);
         }
         if let Builtin::Memory(id) = op
@@ -3181,12 +3181,13 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Storage::Addr(v) | Storage::Aligned { addr: v, .. } => v,
             Storage::Var(_) => unreachable!(),
         };
-        let whole = matches!(init.items.as_slice(), [InitItem::Expr { offset: 0, expr, bits: None }] if expr.ty == ty);
+        let whole =
+            matches!(init.items, [InitItem::Expr { offset: 0, expr, bits: None }] if expr.ty == ty);
         if !whole {
             let size = self.size(&ty);
             self.zero_bytes_with_flags(base, size, flags);
         }
-        for item in &init.items {
+        for item in init.items {
             match item {
                 InitItem::Expr { offset, expr, bits } => {
                     let v = self.val(expr)?;

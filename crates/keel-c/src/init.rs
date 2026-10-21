@@ -37,7 +37,12 @@ impl<'a> Parser<'a> {
             Ty::Array(ArrayTy { elem, len: None }) => self.array_type(*elem, Some(count)),
             _ => *ty,
         };
-        Ok((Init { items }, ty))
+        Ok((
+            Init {
+                items: self.slice(&items),
+            },
+            ty,
+        ))
     }
 
     /// One initializer for `slot`: a braced list, a string for a character
@@ -101,7 +106,7 @@ impl<'a> Parser<'a> {
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
                 offset: slot.offset,
-                expr,
+                expr: self.node(expr),
                 bits: slot.bits,
             });
             return Ok(());

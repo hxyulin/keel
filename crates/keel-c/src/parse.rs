@@ -11,6 +11,7 @@
 //! labels that rename a symbol, `__inline`, `__restrict`, nullability
 //! qualifiers, `__extension__`, `__int128` and a few `__builtin_`s.
 
+use crate::arena::BodyArena;
 use crate::ast::*;
 use crate::lex::{Lexer, Tok, Token};
 use crate::strings::Strings;
@@ -150,6 +151,9 @@ pub struct Parser<'a> {
     /// Names are interned, so they are keyed by address (see `name_key`).
     names: HashMap<usize, SmallVec<[(usize, Sym); 2]>>,
     pub(crate) arena: &'a bumpalo::Bump,
+    /// Where expressions and statements go: the body arena of the function
+    /// being parsed, else `arena`.
+    nodes: &'a bumpalo::Bump,
     type_nodes: TypeNodes<'a>,
     pub structs: Vec<StructDef<'a>>,
     pub typedefs: Vec<TypedefDef<'a>>,
@@ -384,6 +388,7 @@ impl<'a> Parser<'a> {
             scopes: vec![Scope::default()],
             names: HashMap::default(),
             arena,
+            nodes: arena,
             type_nodes: TypeNodes::new(arena),
             structs: Vec::new(),
             typedefs: Vec::new(),
@@ -677,6 +682,24 @@ impl<'a> Parser<'a> {
         Ty::Ptr(self.type_ref(ty))
     }
 
+    /// An expression node, in the arena.
+    pub(crate) fn node(&self, e: Expr<'a>) -> &'a Expr<'a> {
+        self.nodes.alloc(e)
+    }
+
+    pub(crate) fn stmt_node(&self, s: Stmt<'a>) -> &'a Stmt<'a> {
+        self.nodes.alloc(s)
+    }
+
+    pub(crate) fn init_node(&self, init: Init<'a>) -> &'a Init<'a> {
+        self.nodes.alloc(init)
+    }
+
+    /// A copy of `items` (parts of the tree), with the nodes.
+    pub(crate) fn slice<T: Copy>(&self, items: &[T]) -> &'a [T] {
+        self.nodes.alloc_slice_copy(items)
+    }
+
     pub(crate) fn array_type(&self, elem: Ty<'a>, len: Option<u64>) -> Ty<'a> {
         Ty::Array(self.arena.alloc(ArrayTy { elem, len }))
     }
@@ -915,6 +938,26 @@ impl<'a> Parser<'a> {
         if !spec.infer && self.eat(";") {
             return Ok(out);
         }
+        // A block-scope `static` or `extern` declares a global, whose
+        // initializer must outlive the function's body arena.
+        let nodes = self.nodes;
+        if !file_scope && matches!(spec.storage, Storage::Static | Storage::Extern) {
+            self.nodes = self.arena;
+        }
+        let declared = self.declarators(file_scope, &spec, &mut out);
+        self.nodes = nodes;
+        declared?;
+        Ok(out)
+    }
+
+    /// The declarators of a declaration with specifiers `spec`, through
+    /// the `;`.
+    fn declarators(
+        &mut self,
+        file_scope: bool,
+        spec: &DeclSpec<'a>,
+        out: &mut Vec<Stmt<'a>>,
+    ) -> R<()> {
         loop {
             let loc = self.loc();
             let mut d = if spec.infer {
@@ -977,11 +1020,11 @@ impl<'a> Parser<'a> {
                     d.sugar = Sugar::Const(self.sugar_ref(d.sugar));
                 }
                 Some(Init {
-                    items: vec![InitItem::Expr {
+                    items: self.slice(&[InitItem::Expr {
                         offset: 0,
-                        expr,
+                        expr: self.node(expr),
                         bits: None,
-                    }],
+                    }]),
                 })
             } else {
                 None
@@ -1028,7 +1071,7 @@ impl<'a> Parser<'a> {
                 self.globals[g].sugar = d.sugar;
                 if file_scope && self.is("{") {
                     self.function_body(g, fty, name_loc)?;
-                    return Ok(out);
+                    return Ok(());
                 }
             } else if !file_scope && spec.storage == Storage::None {
                 // In scope from the end of its declarator: `T *p =
@@ -1075,7 +1118,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect(";")?;
-        Ok(out)
+        Ok(())
     }
 
     fn static_assert(&mut self) -> R<bool> {
@@ -1308,7 +1351,15 @@ impl<'a> Parser<'a> {
             ids.push(self.new_local(name, ty, sugar, false));
         }
         self.expect("{")?;
-        let body = self.block_items()?;
+        let nodes = BodyArena::new();
+        // SAFETY: the body's nodes all end up in its `FuncDef`, which owns
+        // the arena. Nothing else keeps them: declarations that outlive the
+        // function switch back to `arena` (see `declaration`), and on an
+        // error the whole tree is dropped.
+        self.nodes = unsafe { nodes.get() };
+        let body = self.block_items().map(|body| self.slice(&body));
+        self.nodes = self.arena;
+        let body = body?;
         self.pop_scope();
         let fs = self.fs.take().unwrap();
         self.funcs.push(FuncDef {
@@ -1320,6 +1371,7 @@ impl<'a> Parser<'a> {
             label_addrs: fs.label_addrs,
             body,
             loc,
+            nodes,
         });
         let global = &mut self.globals[g];
         global.func = Some(self.funcs.len() - 1);
@@ -2324,11 +2376,14 @@ impl<'a> Parser<'a> {
                     self.expect(")")?;
                     let then = self.statement()?;
                     let els = if self.eat("else") {
-                        Some(Box::new(self.statement()?))
+                        {
+                            let s = self.statement()?;
+                            Some(self.stmt_node(s))
+                        }
                     } else {
                         None
                     };
-                    return Ok(Stmt::If(cond, Box::new(then), els));
+                    return Ok(Stmt::If(cond, self.stmt_node(then), els));
                 }
                 "while" => {
                     self.advance();
@@ -2336,7 +2391,7 @@ impl<'a> Parser<'a> {
                     let cond = self.condition()?;
                     self.expect(")")?;
                     let body = self.statement()?;
-                    return Ok(Stmt::While(cond, Box::new(body)));
+                    return Ok(Stmt::While(cond, self.stmt_node(body)));
                 }
                 "do" => {
                     self.advance();
@@ -2346,7 +2401,7 @@ impl<'a> Parser<'a> {
                     let cond = self.condition()?;
                     self.expect(")")?;
                     self.expect(";")?;
-                    return Ok(Stmt::DoWhile(Box::new(body), cond));
+                    return Ok(Stmt::DoWhile(self.stmt_node(body), cond));
                 }
                 "for" => {
                     self.advance();
@@ -2355,22 +2410,31 @@ impl<'a> Parser<'a> {
                     let init = if self.eat(";") {
                         None
                     } else if self.is_declaration_start() {
-                        Some(Box::new(Stmt::Block(self.declaration(false)?)))
+                        {
+                            let decls = self.declaration(false)?;
+                            Some(self.stmt_node(Stmt::Block(self.slice(&decls))))
+                        }
                     } else {
                         let e = self.expr()?;
                         self.expect(";")?;
-                        Some(Box::new(Stmt::Expr(e)))
+                        Some(self.stmt_node(Stmt::Expr(e)))
                     };
                     let cond = if self.is(";") {
                         None
                     } else {
-                        Some(Box::new(self.condition()?))
+                        {
+                            let c = self.condition()?;
+                            Some(self.node(c))
+                        }
                     };
                     self.expect(";")?;
                     let step = if self.is(")") {
                         None
                     } else {
-                        Some(Box::new(self.expr()?))
+                        {
+                            let e = self.expr()?;
+                            Some(self.node(e))
+                        }
                     };
                     self.expect(")")?;
                     let body = self.statement()?;
@@ -2379,9 +2443,9 @@ impl<'a> Parser<'a> {
                         init,
                         cond,
                         step,
-                        body: Box::new(body),
+                        body: self.stmt_node(body),
                     };
-                    return Ok(Stmt::Scoped(scope, vec![for_]));
+                    return Ok(Stmt::Scoped(scope, self.slice(&[for_])));
                 }
                 "switch" => {
                     self.advance();
@@ -2402,9 +2466,9 @@ impl<'a> Parser<'a> {
                     let body = self.statement()?;
                     let sw = self.fs.as_mut().unwrap().switches.pop().unwrap();
                     return Ok(Stmt::Switch {
-                        cond: Box::new(cond),
-                        body: Box::new(body),
-                        cases: sw.cases,
+                        cond: self.node(cond),
+                        body: self.stmt_node(body),
+                        cases: self.slice(&sw.cases),
                         default: sw.default,
                         labels: sw.labels,
                     });
@@ -2450,7 +2514,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                     let stmt = self.labeled_statement()?;
-                    return Ok(Stmt::Block(vec![Stmt::Case(label), stmt]));
+                    return Ok(Stmt::Block(self.slice(&[Stmt::Case(label), stmt])));
                 }
                 "break" | "continue" => {
                     self.advance();
@@ -2471,7 +2535,9 @@ impl<'a> Parser<'a> {
                     let ret = self.fs.as_ref().unwrap().ret;
                     if ret == Ty::Void {
                         // `return f();` in a void function, f returning void.
-                        return Ok(Stmt::Block(vec![Stmt::Expr(e), Stmt::Return(None, loc)]));
+                        return Ok(Stmt::Block(
+                            self.slice(&[Stmt::Expr(e), Stmt::Return(None, loc)]),
+                        ));
                     }
                     let e = self.convert_for_assign(e, &ret)?;
                     return Ok(Stmt::Return(Some(e), loc));
@@ -2499,7 +2565,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     self.attributes(&mut Attrs::default())?;
                     let stmt = self.labeled_statement()?;
-                    return Ok(Stmt::Block(vec![Stmt::Label(word), stmt]));
+                    return Ok(Stmt::Block(self.slice(&[Stmt::Label(word), stmt])));
                 }
                 _ => {}
             }
@@ -2508,10 +2574,10 @@ impl<'a> Parser<'a> {
             let scope = self.push_block();
             let items = self.block_items()?;
             self.pop_block();
-            return Ok(Stmt::Scoped(scope, items));
+            return Ok(Stmt::Scoped(scope, self.slice(&items)));
         }
         if self.eat(";") {
-            return Ok(Stmt::Block(Vec::new()));
+            return Ok(Stmt::Block(&[]));
         }
         let e = self.expr()?;
         self.expect(";")?;
@@ -2522,10 +2588,11 @@ impl<'a> Parser<'a> {
     /// so do compilers in practice; so does this.
     fn labeled_statement(&mut self) -> R<Stmt<'a>> {
         if self.is("}") {
-            return Ok(Stmt::Block(Vec::new()));
+            return Ok(Stmt::Block(&[]));
         }
         if self.is_declaration_start() {
-            return Ok(Stmt::Block(self.declaration(false)?));
+            let decls = self.declaration(false)?;
+            return Ok(Stmt::Block(self.slice(&decls)));
         }
         self.statement()
     }

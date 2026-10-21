@@ -50,7 +50,7 @@ impl<'a> Parser<'a> {
             let r = self.rvalue(r);
             let ty = r.ty;
             let sugar = *r.sugar.unqualified(&self.typedefs);
-            e = mk(ExprKind::Comma(Box::new(e), Box::new(r)), ty, loc).with_sugar(sugar);
+            e = mk(ExprKind::Comma(self.node(e), self.node(r)), ty, loc).with_sugar(sugar);
         }
         Ok(e)
     }
@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
                 rhs,
                 mk(ExprKind::Int(5), INT, loc),
             ];
-            return Ok(mk(ExprKind::Builtin(builtin, args), ty, loc).with_sugar(sugar));
+            return Ok(mk(ExprKind::Builtin(builtin, self.slice(&args)), ty, loc).with_sugar(sugar));
         }
         let ty = lhs.ty;
         let result_sugar = *lhs.sugar.unqualified(&self.typedefs);
@@ -112,7 +112,7 @@ impl<'a> Parser<'a> {
             let rhs = self.convert_for_assign(rhs, &ty)?;
             let sugar = *lhs.sugar.unqualified(&self.typedefs);
             return Ok(
-                mk(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), ty, loc).with_sugar(sugar)
+                mk(ExprKind::Assign(self.node(lhs), self.node(rhs)), ty, loc).with_sugar(sugar),
             );
         }
         let rhs = self.rvalue(rhs);
@@ -121,12 +121,12 @@ impl<'a> Parser<'a> {
             let size = self.elem_size(&ty, loc)?;
             let mut n = self.cast(rhs, LONG);
             if bin == "-" {
-                n = mk(ExprKind::Unary(UnOp::Neg, Box::new(n)), LONG, loc);
+                n = mk(ExprKind::Unary(UnOp::Neg, self.node(n)), LONG, loc);
             }
             return Ok(mk(
                 ExprKind::PtrOpAssign {
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(n),
+                    lhs: self.node(lhs),
+                    rhs: self.node(n),
                     size,
                 },
                 ty,
@@ -159,8 +159,8 @@ impl<'a> Parser<'a> {
         Ok(mk(
             ExprKind::OpAssign {
                 op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
+                lhs: self.node(lhs),
+                rhs: self.node(rhs),
             },
             ty,
             loc,
@@ -212,7 +212,7 @@ impl<'a> Parser<'a> {
             let ty = pick.ty;
             let sugar = pick.sugar;
             return Ok(
-                mk(ExprKind::Comma(Box::new(set), Box::new(pick)), ty, loc).with_sugar(sugar)
+                mk(ExprKind::Comma(self.node(set), self.node(pick)), ty, loc).with_sugar(sugar),
             );
         }
         let a = self.expr()?;
@@ -262,7 +262,7 @@ impl<'a> Parser<'a> {
             Sugar::Plain
         };
         Ok(mk(
-            ExprKind::Cond(Box::new(cond), Box::new(a), Box::new(b)),
+            ExprKind::Cond(self.node(cond), self.node(a), self.node(b)),
             ty,
             loc,
         )
@@ -296,9 +296,9 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, format!("`{p}` needs scalars")));
                 }
                 let kind = if p == "&&" {
-                    ExprKind::LogAnd(Box::new(l), Box::new(r))
+                    ExprKind::LogAnd(self.node(l), self.node(r))
                 } else {
-                    ExprKind::LogOr(Box::new(l), Box::new(r))
+                    ExprKind::LogOr(self.node(l), self.node(r))
                 };
                 Ok(mk(kind, INT, loc))
             }
@@ -308,7 +308,7 @@ impl<'a> Parser<'a> {
             "-" if l.ty.is_ptr() && r.ty.is_ptr() => {
                 let size = self.elem_size(&l.ty, loc)?;
                 Ok(mk(
-                    ExprKind::PtrDiff(Box::new(l), Box::new(r), size),
+                    ExprKind::PtrDiff(self.node(l), self.node(r), size),
                     LONG,
                     loc,
                 ))
@@ -330,7 +330,11 @@ impl<'a> Parser<'a> {
                 } else {
                     return Err(Error::new(loc, format!("invalid operands to `{p}`")));
                 };
-                Ok(mk(ExprKind::Binary(op, Box::new(l), Box::new(r)), INT, loc))
+                Ok(mk(
+                    ExprKind::Binary(op, self.node(l), self.node(r)),
+                    INT,
+                    loc,
+                ))
             }
             "<<" | ">>" => {
                 if !l.ty.is_integer() || !r.ty.is_integer() {
@@ -340,7 +344,7 @@ impl<'a> Parser<'a> {
                 let ty = l.ty;
                 let r = self.cast(r, ty);
                 Ok(mk(
-                    ExprKind::Binary(bin_op(p), Box::new(l), Box::new(r)),
+                    ExprKind::Binary(bin_op(p), self.node(l), self.node(r)),
                     ty,
                     loc,
                 ))
@@ -358,7 +362,11 @@ impl<'a> Parser<'a> {
                 }
                 let ty = usual(&l.ty, &r.ty);
                 let (l, r) = (self.cast(l, ty), self.cast(r, ty));
-                Ok(mk(ExprKind::Binary(op, Box::new(l), Box::new(r)), ty, loc))
+                Ok(mk(
+                    ExprKind::Binary(op, self.node(l), self.node(r)),
+                    ty,
+                    loc,
+                ))
             }
         }
     }
@@ -367,11 +375,16 @@ impl<'a> Parser<'a> {
         let size = self.elem_size(&ptr.ty, loc)?;
         let mut n = self.cast(n, LONG);
         if negate {
-            n = mk(ExprKind::Unary(UnOp::Neg, Box::new(n)), LONG, loc);
+            n = mk(ExprKind::Unary(UnOp::Neg, self.node(n)), LONG, loc);
         }
         let ty = ptr.ty;
         let sugar = *ptr.sugar.unqualified(&self.typedefs);
-        Ok(mk(ExprKind::PtrAdd(Box::new(ptr), Box::new(n), size), ty, loc).with_sugar(sugar))
+        Ok(mk(
+            ExprKind::PtrAdd(self.node(ptr), self.node(n), size),
+            ty,
+            loc,
+        )
+        .with_sugar(sugar))
     }
 
     /// The size of what a pointer points to, for arithmetic. `void *`
@@ -423,7 +436,7 @@ impl<'a> Parser<'a> {
             // Keep a distinct value conversion even when the unqualified
             // types match: changing result qualifiers must not rewrite the
             // qualifiers on the operand's actual memory read.
-            return Ok(mk(ExprKind::Cast(Box::new(e)), ty, loc).with_sugar(sugar));
+            return Ok(mk(ExprKind::Cast(self.node(e)), ty, loc).with_sugar(sugar));
         }
         self.unary()
     }
@@ -520,7 +533,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "dereferencing a non-pointer"));
                 };
                 let sugar = e.sugar.pointee(&self.typedefs);
-                Ok(mk(ExprKind::Deref(Box::new(e)), pointee, loc).with_sugar(sugar))
+                Ok(mk(ExprKind::Deref(self.node(e)), pointee, loc).with_sugar(sugar))
             }
             "+" | "-" | "~" => {
                 self.advance();
@@ -535,7 +548,7 @@ impl<'a> Parser<'a> {
                 }
                 let op = if word == "-" { UnOp::Neg } else { UnOp::BitNot };
                 let ty = e.ty;
-                Ok(mk(ExprKind::Unary(op, Box::new(e)), ty, loc))
+                Ok(mk(ExprKind::Unary(op, self.node(e)), ty, loc))
             }
             "!" => {
                 self.advance();
@@ -544,7 +557,7 @@ impl<'a> Parser<'a> {
                 if !e.ty.is_scalar() {
                     return Err(Error::new(loc, "`!` needs a scalar"));
                 }
-                Ok(mk(ExprKind::Unary(UnOp::Not, Box::new(e)), INT, loc))
+                Ok(mk(ExprKind::Unary(UnOp::Not, self.node(e)), INT, loc))
             }
             _ => self.postfix(),
         }
@@ -566,7 +579,7 @@ impl<'a> Parser<'a> {
         self.mark_address_taken(&e);
         let ty = self.ptr_type(e.ty);
         let sugar = Sugar::Ptr(self.sugar_ref(e.sugar));
-        Ok(mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar))
+        Ok(mk(ExprKind::Addr(self.node(e)), ty, loc).with_sugar(sugar))
     }
 
     /// A local whose address is taken must live in memory.
@@ -599,7 +612,7 @@ impl<'a> Parser<'a> {
                 mk(ExprKind::Int(5), INT, loc),
             ];
             let builtin = Builtin::AtomicRmw { op, new: prefix };
-            let result = mk(ExprKind::Builtin(builtin, args), rmw_ty, loc);
+            let result = mk(ExprKind::Builtin(builtin, self.slice(&args)), rmw_ty, loc);
             return Ok(self.cast(result, ty).with_sugar(sugar));
         }
         if !e.ty.is_scalar() {
@@ -612,7 +625,7 @@ impl<'a> Parser<'a> {
         let sugar = *e.sugar.unqualified(&self.typedefs);
         Ok(mk(
             ExprKind::IncDec {
-                lhs: Box::new(e),
+                lhs: self.node(e),
                 inc,
                 prefix,
             },
@@ -638,7 +651,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "subscript of a non-pointer"));
                 };
                 let sugar = sum.sugar.pointee(&self.typedefs);
-                e = mk(ExprKind::Deref(Box::new(sum)), elem, loc).with_sugar(sugar);
+                e = mk(ExprKind::Deref(self.node(sum)), elem, loc).with_sugar(sugar);
             } else if self.eat("(") {
                 e = self.call(e, loc)?;
             } else if self.eat(".") {
@@ -649,7 +662,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "`->` on a non-pointer"));
                 };
                 let sugar = p.sugar.pointee(&self.typedefs);
-                e = mk(ExprKind::Deref(Box::new(p)), pointee, loc).with_sugar(sugar);
+                e = mk(ExprKind::Deref(self.node(p)), pointee, loc).with_sugar(sugar);
                 e = self.member(e, loc)?;
             } else if self.is("++") || self.is("--") {
                 let inc = self.is("++");
@@ -679,7 +692,7 @@ impl<'a> Parser<'a> {
         }
         Ok(mk(
             ExprKind::Member {
-                base: Box::new(base),
+                base: self.node(base),
                 offset,
                 bits: m.bits,
                 align: m.align,
@@ -727,7 +740,12 @@ impl<'a> Parser<'a> {
         }
         let returned = f.sugar.function_return(&self.typedefs);
         let sugar = *returned.unqualified(&self.typedefs);
-        Ok(mk(ExprKind::Call(Box::new(f), args), fty.ret, loc).with_sugar(sugar))
+        Ok(mk(
+            ExprKind::Call(self.node(f), self.slice(&args)),
+            fty.ret,
+            loc,
+        )
+        .with_sugar(sugar))
     }
 
     /// Promotions for arguments without a parameter type.
@@ -797,7 +815,10 @@ impl<'a> Parser<'a> {
                 self.pop_block();
                 self.expect(")")?;
                 let value = match stmts.pop() {
-                    Some(Stmt::Expr(e)) => Some(Box::new(self.rvalue(e))),
+                    Some(Stmt::Expr(e)) => {
+                        let e = self.rvalue(e);
+                        Some(self.node(e))
+                    }
                     Some(s) => {
                         stmts.push(s);
                         None
@@ -811,7 +832,7 @@ impl<'a> Parser<'a> {
                 Ok(mk(
                     ExprKind::StmtExpr {
                         scope,
-                        stmts,
+                        stmts: self.slice(&stmts),
                         value,
                     },
                     ty,
@@ -915,7 +936,7 @@ impl<'a> Parser<'a> {
                 ));
             }
             return Ok(mk(
-                ExprKind::Builtin(Builtin::GenericOverflow(op), args),
+                ExprKind::Builtin(Builtin::GenericOverflow(op), self.slice(&args)),
                 Ty::Int(IntKind::Bool),
                 loc,
             ));
@@ -947,7 +968,7 @@ impl<'a> Parser<'a> {
                 .map(|(arg, ty)| self.convert_for_assign(arg, ty))
                 .collect::<R<Vec<_>>>()?;
             return Ok(mk(
-                ExprKind::Builtin(Builtin::Overflow(op), args),
+                ExprKind::Builtin(Builtin::Overflow(op), self.slice(&args)),
                 Ty::Int(IntKind::Bool),
                 loc,
             ));
@@ -982,7 +1003,7 @@ impl<'a> Parser<'a> {
                         self.expect(",")?;
                         self.assign()?;
                         let ap = self.va_list_addr(ap);
-                        mk(ExprKind::VaStart(Box::new(ap)), Ty::Void, loc)
+                        mk(ExprKind::VaStart(self.node(ap)), Ty::Void, loc)
                     }
                     "va_arg" => {
                         self.expect(",")?;
@@ -991,7 +1012,7 @@ impl<'a> Parser<'a> {
                             return Err(Error::new(loc, "`va_arg` of a non-scalar"));
                         }
                         let ap = self.va_list_addr(ap);
-                        mk(ExprKind::VaArg(Box::new(ap)), ty, loc)
+                        mk(ExprKind::VaArg(self.node(ap)), ty, loc)
                     }
                     // SysV's va_list is an array, so copying is copying the
                     // struct it holds.
@@ -1001,7 +1022,7 @@ impl<'a> Parser<'a> {
                         let [dst, src] = [ap, src].map(|e| {
                             let p = self.va_list_addr(e);
                             let ty = p.ty.pointee().cloned().expect("a pointer");
-                            mk(ExprKind::Deref(Box::new(p)), ty, loc)
+                            mk(ExprKind::Deref(self.node(p)), ty, loc)
                         });
                         self.assignment("=", dst, src, loc)?
                     }
@@ -1067,7 +1088,7 @@ impl<'a> Parser<'a> {
                     return Err(Error::new(loc, "probability must be between 0 and 1"));
                 }
                 Ok(mk(
-                    ExprKind::Builtin(Builtin::Hint, vec![value, expected]),
+                    ExprKind::Builtin(Builtin::Hint, self.slice(&[value, expected])),
                     LONG,
                     loc,
                 ))
@@ -1086,7 +1107,7 @@ impl<'a> Parser<'a> {
                 if !args[1].ty.is_integer() {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 }
-                let alignment = self.cast(args[1].clone(), ULONG);
+                let alignment = self.cast(args[1], ULONG);
                 let Some(Const::Int(n)) = eval_constant(&alignment, false) else {
                     return Err(Error::new(loc, "alignment must be a constant integer"));
                 };
@@ -1105,7 +1126,7 @@ impl<'a> Parser<'a> {
                     values.push(self.cast(offset, ULONG));
                 }
                 Ok(mk(
-                    ExprKind::Builtin(Builtin::AssumeAligned(n as u64), values),
+                    ExprKind::Builtin(Builtin::AssumeAligned(n as u64), self.slice(&values)),
                     ptr,
                     loc,
                 ))
@@ -1206,7 +1227,7 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 Ok(mk(
-                    ExprKind::Builtin(Builtin::FrameAddress, Vec::new()),
+                    ExprKind::Builtin(Builtin::FrameAddress, &[]),
                     self.ptr_type(Ty::Void),
                     loc,
                 ))
@@ -1300,7 +1321,7 @@ impl<'a> Parser<'a> {
         };
         let result = if name == "memcmp" { INT } else { ptr };
         Ok(mk(
-            ExprKind::Builtin(Builtin::Memory(id), args),
+            ExprKind::Builtin(Builtin::Memory(id), self.slice(&args)),
             result,
             loc,
         ))
@@ -1358,7 +1379,11 @@ impl<'a> Parser<'a> {
                 // A signal fence only has to stop the compiler; a real
                 // fence is stronger than needed but correct.
                 want(&args, 1)?;
-                return Ok(mk(ExprKind::Builtin(Builtin::Fence, args), Ty::Void, loc));
+                return Ok(mk(
+                    ExprKind::Builtin(Builtin::Fence, self.slice(&args)),
+                    Ty::Void,
+                    loc,
+                ));
             }
             "always_lock_free" | "is_lock_free" => {
                 let size = args.first().and_then(eval_int);
@@ -1407,7 +1432,7 @@ impl<'a> Parser<'a> {
                 let args = vec![ptr, value, args.remove(0)];
                 if op == "clear" {
                     return Ok(mk(
-                        ExprKind::Builtin(Builtin::AtomicStore, args),
+                        ExprKind::Builtin(Builtin::AtomicStore, self.slice(&args)),
                         Ty::Void,
                         loc,
                     ));
@@ -1417,7 +1442,7 @@ impl<'a> Parser<'a> {
                     new: false,
                 };
                 let old = mk(
-                    ExprKind::Builtin(builtin, args),
+                    ExprKind::Builtin(builtin, self.slice(&args)),
                     Ty::Int(IntKind::UChar),
                     loc,
                 );
@@ -1472,7 +1497,7 @@ impl<'a> Parser<'a> {
             _ => 1..2,
         };
         for i in value_args {
-            let v = args[i].clone();
+            let v = args[i];
             args[i] = self.convert_for_assign(v, &value_ty)?;
         }
         if builtin == Builtin::AtomicCompareExchange && !args[1].ty.is_ptr() {
@@ -1488,7 +1513,7 @@ impl<'a> Parser<'a> {
             _ => value_ty,
         };
         let sugar = args[0].sugar.pointee(&self.typedefs);
-        let result = mk(ExprKind::Builtin(builtin, args), ty, loc);
+        let result = mk(ExprKind::Builtin(builtin, self.slice(&args)), ty, loc);
         // Back from the address to the pointer.
         let result = if value_ty != pointee && result.ty == value_ty {
             self.cast(result, pointee)
@@ -1546,10 +1571,10 @@ impl<'a> Parser<'a> {
             sets.push(self.assignment("=", mk(ExprKind::Local(t), ty, loc), arg, loc)?);
             operands.push(mk(ExprKind::Local(t), ty, loc));
         }
-        let x = operands[0].clone();
+        let x = operands[0];
         let ty = x.ty;
         let float = |v: f64| mk(ExprKind::Float(v), ty, loc);
-        let fabs = mk(ExprKind::Builtin(Builtin::Fabs, vec![x.clone()]), ty, loc);
+        let fabs = mk(ExprKind::Builtin(Builtin::Fabs, self.slice(&[x])), ty, loc);
         let int = |v: i64| mk(ExprKind::Int(v), INT, loc);
         let min_normal = if ty == Ty::Float {
             f64::from(f32::MIN_POSITIVE)
@@ -1558,51 +1583,53 @@ impl<'a> Parser<'a> {
         };
         let cmp = |this: &mut Self, p: &str, a: Expr<'a>, b: Expr<'a>| this.binop(p, a, b, loc);
         let result = match base {
-            "isnan" => cmp(self, "!=", x.clone(), x)?,
+            "isnan" => cmp(self, "!=", x, x)?,
             "isinf" => cmp(self, "==", fabs, float(f64::INFINITY))?,
             "isfinite" => cmp(self, "<", fabs, float(f64::INFINITY))?,
             "isnormal" => {
-                let low = cmp(self, ">=", fabs.clone(), float(min_normal))?;
+                let low = cmp(self, ">=", fabs, float(min_normal))?;
                 let high = cmp(self, "<", fabs, float(f64::INFINITY))?;
                 cmp(self, "&&", low, high)?
             }
             "isinf_sign" => {
-                let pos = cmp(self, "==", x.clone(), float(f64::INFINITY))?;
+                let pos = cmp(self, "==", x, float(f64::INFINITY))?;
                 let neg = cmp(self, "==", x, float(f64::NEG_INFINITY))?;
                 let neg = self.conditional_of(neg, int(-1), int(0), loc)?;
                 self.conditional_of(pos, int(1), neg, loc)?
             }
-            "signbit" | "signbitf" | "signbitl" => {
-                mk(ExprKind::Builtin(Builtin::Signbit, vec![x]), INT, loc)
-            }
+            "signbit" | "signbitf" | "signbitl" => mk(
+                ExprKind::Builtin(Builtin::Signbit, self.slice(&[x])),
+                INT,
+                loc,
+            ),
             // fpclassify(nan, infinite, normal, subnormal, zero, x)
             "fpclassify" => {
                 let [nan, inf, normal, subnormal, zero]: [Expr; 5] =
                     args.try_into().expect("five classes");
-                let is_zero = cmp(self, "==", x.clone(), float(0.0))?;
+                let is_zero = cmp(self, "==", x, float(0.0))?;
                 let tiny = self.conditional_of(is_zero, zero, subnormal, loc)?;
-                let is_normal = cmp(self, ">=", fabs.clone(), float(min_normal))?;
+                let is_normal = cmp(self, ">=", fabs, float(min_normal))?;
                 let finite = self.conditional_of(is_normal, normal, tiny, loc)?;
                 let is_inf = cmp(self, "==", fabs, float(f64::INFINITY))?;
                 let number = self.conditional_of(is_inf, inf, finite, loc)?;
-                let is_number = cmp(self, "==", x.clone(), x)?;
+                let is_number = cmp(self, "==", x, x)?;
                 self.conditional_of(is_number, number, nan, loc)?
             }
             _ => {
-                let y = operands[1].clone();
+                let y = operands[1];
                 match base {
                     "isgreater" => cmp(self, ">", x, y)?,
                     "isgreaterequal" => cmp(self, ">=", x, y)?,
                     "isless" => cmp(self, "<", x, y)?,
                     "islessequal" => cmp(self, "<=", x, y)?,
                     "islessgreater" => {
-                        let lt = cmp(self, "<", x.clone(), y.clone())?;
+                        let lt = cmp(self, "<", x, y)?;
                         let gt = cmp(self, ">", x, y)?;
                         cmp(self, "||", lt, gt)?
                     }
                     _ => {
-                        let a = cmp(self, "!=", x.clone(), x)?;
-                        let b = cmp(self, "!=", y.clone(), y)?;
+                        let a = cmp(self, "!=", x, x)?;
+                        let b = cmp(self, "!=", y, y)?;
                         cmp(self, "||", a, b)?
                     }
                 }
@@ -1610,7 +1637,7 @@ impl<'a> Parser<'a> {
         };
         let ty = result.ty;
         Ok(sets.into_iter().rev().fold(result, |e, set| {
-            mk(ExprKind::Comma(Box::new(set), Box::new(e)), ty, loc)
+            mk(ExprKind::Comma(self.node(set), self.node(e)), ty, loc)
         }))
     }
 
@@ -1655,7 +1682,7 @@ impl<'a> Parser<'a> {
         for (arg, ty) in args.into_iter().zip(params) {
             converted.push(self.convert_for_assign(arg, ty)?);
         }
-        Ok(mk(ExprKind::Builtin(op, converted), ret, loc))
+        Ok(mk(ExprKind::Builtin(op, self.slice(&converted)), ret, loc))
     }
 
     /// `(type){...}`: an unnamed object, local in a function and static
@@ -1672,7 +1699,7 @@ impl<'a> Parser<'a> {
         // The name cannot clash: it is not an identifier.
         let name = self.unique_name("compound literal");
         let id = self.new_local(name, ty, sugar, true);
-        Ok(mk(ExprKind::CompoundLit(id, Box::new(init)), ty, loc))
+        Ok(mk(ExprKind::CompoundLit(id, self.init_node(init)), ty, loc))
     }
 
     // ---- conversions ----
@@ -1683,7 +1710,7 @@ impl<'a> Parser<'a> {
         self.mark_address_taken(&e);
         let ty = self.ptr_type(e.ty);
         let loc = e.loc;
-        mk(ExprKind::Addr(Box::new(e)), ty, loc)
+        mk(ExprKind::Addr(self.node(e)), ty, loc)
     }
 
     /// The address of the `va_list` object `ap` names, which `va_start`
@@ -1696,7 +1723,7 @@ impl<'a> Parser<'a> {
                 self.mark_address_taken(&ap);
                 let ty = self.ptr_type(ap.ty);
                 let loc = ap.loc;
-                mk(ExprKind::Addr(Box::new(ap)), ty, loc)
+                mk(ExprKind::Addr(self.node(ap)), ty, loc)
             }
             Target::X86_64LinuxGnu => self.rvalue(ap),
         }
@@ -1708,20 +1735,25 @@ impl<'a> Parser<'a> {
                 let loc = e.loc;
                 let sugar = e.sugar;
                 let args = vec![self.address_of_atomic(e), mk(ExprKind::Int(5), INT, loc)];
-                mk(ExprKind::Builtin(Builtin::AtomicLoad, args), ty, loc).with_sugar(sugar)
+                mk(
+                    ExprKind::Builtin(Builtin::AtomicLoad, self.slice(&args)),
+                    ty,
+                    loc,
+                )
+                .with_sugar(sugar)
             }
             Ty::Array(a) => {
                 let ty = Ty::Ptr(&a.elem);
                 let loc = e.loc;
                 self.mark_address_taken(&e);
                 let sugar = Sugar::Ptr(self.sugar_ref(e.sugar.pointee(&self.typedefs)));
-                mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
+                mk(ExprKind::Addr(self.node(e)), ty, loc).with_sugar(sugar)
             }
             Ty::Func(_) => {
                 let ty = self.ptr_type(e.ty);
                 let loc = e.loc;
                 let sugar = Sugar::Ptr(self.sugar_ref(e.sugar));
-                mk(ExprKind::Addr(Box::new(e)), ty, loc).with_sugar(sugar)
+                mk(ExprKind::Addr(self.node(e)), ty, loc).with_sugar(sugar)
             }
             _ => e,
         }
@@ -1745,7 +1777,7 @@ impl<'a> Parser<'a> {
         } else {
             Sugar::Plain
         };
-        mk(ExprKind::Cast(Box::new(e)), ty, loc).with_sugar(sugar)
+        mk(ExprKind::Cast(self.node(e)), ty, loc).with_sugar(sugar)
     }
 
     /// The integer promotions.

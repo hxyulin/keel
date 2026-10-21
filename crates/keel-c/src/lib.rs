@@ -21,6 +21,7 @@
 //! attributes are diagnosed; see `docs/c-frontend-coverage.md` and
 //! `docs/design.md`'s C frontend section for compatibility limits.
 
+mod arena;
 mod ast;
 mod debug;
 mod eval;

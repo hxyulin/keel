@@ -5,12 +5,13 @@
 //! generation only has to follow it.
 
 use crate::Loc;
+use crate::arena::BodyArena;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
 
 pub type LocalId = usize;
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Expr<'a> {
     pub kind: ExprKind<'a>,
     /// Qualifier/type shape retained through lvalues and pointer values.
@@ -26,7 +27,7 @@ impl<'a> Expr<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum ExprKind<'a> {
     /// An integer constant, as the bits of its type (sign-extended).
     Int(i64),
@@ -40,58 +41,58 @@ pub enum ExprKind<'a> {
     /// A function or an object with static storage, by index in the
     /// global table.
     Global(usize),
-    Unary(UnOp, Box<Expr<'a>>),
+    Unary(UnOp, &'a Expr<'a>),
     /// Operands of one type (the result's, or for comparisons the type they
     /// are compared as); shifts convert the amount to the left's type.
-    Binary(BinOp, Box<Expr<'a>>, Box<Expr<'a>>),
+    Binary(BinOp, &'a Expr<'a>, &'a Expr<'a>),
     /// `ptr + index * size`, `index` a `long`.
-    PtrAdd(Box<Expr<'a>>, Box<Expr<'a>>, u64),
+    PtrAdd(&'a Expr<'a>, &'a Expr<'a>, u64),
     /// `(a - b) / size`, a `long`.
-    PtrDiff(Box<Expr<'a>>, Box<Expr<'a>>, u64),
-    LogAnd(Box<Expr<'a>>, Box<Expr<'a>>),
-    LogOr(Box<Expr<'a>>, Box<Expr<'a>>),
+    PtrDiff(&'a Expr<'a>, &'a Expr<'a>, u64),
+    LogAnd(&'a Expr<'a>, &'a Expr<'a>),
+    LogOr(&'a Expr<'a>, &'a Expr<'a>),
     /// The right side is already converted to the left's type.
-    Assign(Box<Expr<'a>>, Box<Expr<'a>>),
+    Assign(&'a Expr<'a>, &'a Expr<'a>),
     /// `lhs op= rhs`: the left is converted to the right's type, combined
     /// with the right, and converted back.
     OpAssign {
         op: BinOp,
-        lhs: Box<Expr<'a>>,
-        rhs: Box<Expr<'a>>,
+        lhs: &'a Expr<'a>,
+        rhs: &'a Expr<'a>,
     },
     /// `p += n` / `p -= n` on a pointer: `n` is a `long`, already negated
     /// for `-=`; `size` is the element size.
     PtrOpAssign {
-        lhs: Box<Expr<'a>>,
-        rhs: Box<Expr<'a>>,
+        lhs: &'a Expr<'a>,
+        rhs: &'a Expr<'a>,
         size: u64,
     },
     /// `++` and `--`, prefix or postfix.
     IncDec {
-        lhs: Box<Expr<'a>>,
+        lhs: &'a Expr<'a>,
         inc: bool,
         prefix: bool,
     },
-    Cond(Box<Expr<'a>>, Box<Expr<'a>>, Box<Expr<'a>>),
+    Cond(&'a Expr<'a>, &'a Expr<'a>, &'a Expr<'a>),
     /// GNU's statement expression `({ ...; e; })`: the statements, in
     /// a block scope, then the value of the last one if it is an
     /// expression.
     StmtExpr {
         scope: usize,
-        stmts: Vec<Stmt<'a>>,
-        value: Option<Box<Expr<'a>>>,
+        stmts: &'a [Stmt<'a>],
+        value: Option<&'a Expr<'a>>,
     },
-    Comma(Box<Expr<'a>>, Box<Expr<'a>>),
+    Comma(&'a Expr<'a>, &'a Expr<'a>),
     /// Calls a function pointer. Arguments are converted to the parameter
     /// types, and extra ones promoted.
-    Call(Box<Expr<'a>>, Vec<Expr<'a>>),
+    Call(&'a Expr<'a>, &'a [Expr<'a>]),
     /// Converts the operand to this expression's type.
-    Cast(Box<Expr<'a>>),
-    Deref(Box<Expr<'a>>),
-    Addr(Box<Expr<'a>>),
+    Cast(&'a Expr<'a>),
+    Deref(&'a Expr<'a>),
+    Addr(&'a Expr<'a>),
     /// A member of a struct-typed operand, `offset` bytes in.
     Member {
-        base: Box<Expr<'a>>,
+        base: &'a Expr<'a>,
         offset: u64,
         bits: Option<BitField>,
         align: u64,
@@ -99,11 +100,11 @@ pub enum ExprKind<'a> {
     /// `va_start(ap)` and `va_arg(ap)` (of this expression's type), given
     /// the address of the `va_list` object. `va_copy` is an assignment, of
     /// the pointer on Apple arm64 and of the struct on SysV.
-    VaStart(Box<Expr<'a>>),
-    VaArg(Box<Expr<'a>>),
-    Builtin(Builtin, Vec<Expr<'a>>),
+    VaStart(&'a Expr<'a>),
+    VaArg(&'a Expr<'a>),
+    Builtin(Builtin, &'a [Expr<'a>]),
     /// A compound literal in a function: a local initialized here.
-    CompoundLit(LocalId, Box<Init<'a>>),
+    CompoundLit(LocalId, &'a Init<'a>),
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -197,25 +198,25 @@ pub enum Builtin {
 }
 
 /// An initializer, flattened: the object is zero except for these items.
-#[derive(Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default)]
 pub struct Init<'a> {
-    pub items: Vec<InitItem<'a>>,
+    pub items: &'a [InitItem<'a>],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum InitItem<'a> {
     /// A scalar (converted to the member's type) or a struct-typed
     /// expression to copy, at a byte offset.
     Expr {
         offset: u64,
-        expr: Expr<'a>,
+        expr: &'a Expr<'a>,
         bits: Option<BitField>,
     },
     /// The bytes of a string literal initializing a character array.
     Bytes { offset: u64, bytes: &'a [u8] },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Stmt<'a> {
     Expr(Expr<'a>),
     /// A local's initialization, at its declaration.
@@ -224,27 +225,27 @@ pub enum Stmt<'a> {
     /// is reached it is a new object with an indeterminate value, so its
     /// old value (from the last trip round a loop) is not needed.
     Declare(LocalId),
-    Block(Vec<Stmt<'a>>),
+    Block(&'a [Stmt<'a>]),
     /// Statements in a block scope (a compound statement or a `for`), by
     /// its index in the function's scopes.
-    Scoped(usize, Vec<Stmt<'a>>),
-    If(Expr<'a>, Box<Stmt<'a>>, Option<Box<Stmt<'a>>>),
-    While(Expr<'a>, Box<Stmt<'a>>),
-    DoWhile(Box<Stmt<'a>>, Expr<'a>),
+    Scoped(usize, &'a [Stmt<'a>]),
+    If(Expr<'a>, &'a Stmt<'a>, Option<&'a Stmt<'a>>),
+    While(Expr<'a>, &'a Stmt<'a>),
+    DoWhile(&'a Stmt<'a>, Expr<'a>),
     /// The expressions are boxed, as are a switch's, to keep statements
     /// (which blocks hold by value) small.
     For {
-        init: Option<Box<Stmt<'a>>>,
-        cond: Option<Box<Expr<'a>>>,
-        step: Option<Box<Expr<'a>>>,
-        body: Box<Stmt<'a>>,
+        init: Option<&'a Stmt<'a>>,
+        cond: Option<&'a Expr<'a>>,
+        step: Option<&'a Expr<'a>>,
+        body: &'a Stmt<'a>,
     },
     /// The cases are the values of the `Case` labels in the body, by their
     /// index, and which one is `default`.
     Switch {
-        cond: Box<Expr<'a>>,
-        body: Box<Stmt<'a>>,
-        cases: Vec<(i64, usize)>,
+        cond: &'a Expr<'a>,
+        body: &'a Stmt<'a>,
+        cases: &'a [(i64, usize)],
         default: Option<usize>,
         labels: usize,
     },
@@ -275,7 +276,7 @@ pub struct Local<'a> {
     pub in_memory: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FuncDef<'a> {
     /// Index in the global table.
     pub global: usize,
@@ -286,8 +287,12 @@ pub struct FuncDef<'a> {
     pub scopes: Vec<Option<usize>>,
     /// The labels whose address is taken (`&&label`), numbered from 1.
     pub label_addrs: Vec<&'a str>,
-    pub body: Vec<Stmt<'a>>,
+    pub body: &'a [Stmt<'a>],
     pub loc: Loc,
+    /// Where the body's expressions and statements are. They are freed
+    /// with the definition, all at once.
+    #[allow(dead_code, reason = "owned for its drop")]
+    pub nodes: BodyArena,
 }
 
 /// A file-scope name: a function or an object with static storage
