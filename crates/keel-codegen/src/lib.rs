@@ -98,6 +98,12 @@ impl CodegenPipeline<'_> {
 pub mod x86_features;
 
 pub trait InstructionSelector {
+    /// EXPERIMENTAL: replicate bounded AArch64 switch tails after allocation.
+    /// Disabled by default, including for all built-in selection tiers.
+    fn experimental_aarch64_dispatch_tails(&self) -> bool {
+        false
+    }
+
     fn x86_features(&self) -> keel_asm_ir::x86::Features {
         keel_asm_ir::x86::Features::default()
     }
@@ -111,6 +117,33 @@ pub trait InstructionSelector {
         target: select::Target,
         folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
     ) -> select::Selection;
+}
+
+/// Explicit opt-in to bounded AArch64 dispatch-tail replication. Selection and
+/// allocation policy are unchanged; Fast allocation ignores this experiment.
+/// The wrapped selector still owns target validation and instruction planning.
+pub struct ExperimentalDispatchTails<'a>(pub &'a dyn InstructionSelector);
+impl InstructionSelector for ExperimentalDispatchTails<'_> {
+    fn experimental_aarch64_dispatch_tails(&self) -> bool {
+        true
+    }
+    fn x86_features(&self) -> keel_asm_ir::x86::Features {
+        self.0.x86_features()
+    }
+    fn validate_target(&self, target: Target) -> Result<(), &'static str> {
+        self.0.validate_target(target)
+    }
+    fn name(&self) -> &'static str {
+        "experimental-dispatch-tails"
+    }
+    fn select(
+        &self,
+        func: &keel_ir::Function,
+        target: select::Target,
+        folds: &dyn Fn(&keel_ir::InstData) -> Vec<keel_ir::Value>,
+    ) -> select::Selection {
+        self.0.select(func, target, folds)
+    }
 }
 
 pub struct OptionsSelector(pub SelectionOptions);

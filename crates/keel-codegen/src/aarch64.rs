@@ -116,6 +116,7 @@ use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
 mod constant_plan;
+mod dispatch_tail;
 mod extended_add;
 mod native;
 mod output;
@@ -581,6 +582,7 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    dispatch_tails: HashMap<Inst, Inst>,
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
@@ -963,7 +965,16 @@ impl<'a> FunctionCompiler<'a> {
             };
             folded_values
         };
+        let dispatch_tails = dispatch_tail::plan(
+            func,
+            module,
+            &alloc,
+            &selection,
+            pipeline.selector.experimental_aarch64_dispatch_tails()
+                && pipeline.allocator.name() != "fast",
+        );
         Ok(Self {
+            dispatch_tails,
             func,
             module,
             alloc,
@@ -2053,7 +2064,9 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Jump { dest } => {
                 self.block_args(&dest, 0);
-                self.branch_unless_next(dest.block);
+                if !self.emit_dispatch_tail(inst) {
+                    self.branch_unless_next(dest.block);
+                }
             }
             InstData::Brif {
                 cond,
@@ -2102,7 +2115,7 @@ impl<'a> FunctionCompiler<'a> {
                     self.branch_unless_next(else_dest.block);
                 }
             }
-            InstData::Switch { arg, dests, cases } => self.switch(inst, arg, &dests, &cases),
+            InstData::Switch { arg, dests, cases } => self.switch(inst, arg, &dests, &cases, None),
             InstData::Intrinsic { id, args } => match id {
                 // The libc functions take the same arguments in the same
                 // order. memset's `int c` only uses its low byte, so the
@@ -4062,7 +4075,16 @@ impl<'a> FunctionCompiler<'a> {
     /// Lowers `switch`: a jump table if the cases are dense, else a chain of
     /// compares. Like `brif`, a target with block arguments gets a landing
     /// pad that copies them.
-    fn switch(&mut self, inst: Inst, arg: Value, dests: &[BlockCall], cases: &[i64]) {
+    fn switch(
+        &mut self,
+        inst: Inst,
+        arg: Value,
+        dests: &[BlockCall],
+        cases: &[i64],
+        site: Option<Inst>,
+    ) {
+        // Allocation identity remains `inst`; only assembly identities vary.
+        let inst = site.map_or_else(|| inst.to_string(), |site| format!("{inst}_tail{site}"));
         let ty = self.ty(arg);
         let is64 = ty == Type::I64;
         // Compare the zero-extended bits with the cases as unsigned bits.
