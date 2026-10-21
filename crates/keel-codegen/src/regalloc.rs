@@ -511,15 +511,24 @@ impl<'a> IntoIterator for &'a Ranges {
 
 impl Interval {
     fn start(&self) -> u32 {
-        self.ranges[0].0
+        match &self.ranges {
+            Ranges::One((from, _)) => *from,
+            Ranges::Many(list) => list[0].0,
+        }
     }
 
     fn end(&self) -> u32 {
-        self.ranges[self.ranges.len() - 1].1
+        match &self.ranges {
+            Ranges::One((_, to)) => *to,
+            Ranges::Many(list) => list[list.len() - 1].1,
+        }
     }
 
     /// Whether the value is live at `point`.
     fn covers(&self, point: u32) -> bool {
+        if let Ranges::One((from, to)) = self.ranges {
+            return from <= point && point <= to;
+        }
         let i = self.ranges.partition_point(|&(_, to)| to < point);
         self.ranges.get(i).is_some_and(|&(from, _)| from <= point)
     }
@@ -1304,8 +1313,18 @@ fn linear_scan_with_preference<'a>(
 ) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
     backend_scope!(Scan);
-    let mut sorted: Vec<&Interval> = intervals.iter().collect();
-    sorted.sort_unstable_by_key(|iv| (iv.start(), iv.value, iv.half));
+    // Sort by (start, value, half) on packed integer keys rather than
+    // re-reading each interval's ranges for every comparison.
+    let mut keys: Vec<(u64, u64)> = intervals
+        .iter()
+        .enumerate()
+        .map(|(i, iv)| {
+            let primary = u64::from(iv.start()) << 32 | iv.value.index() as u64;
+            (primary, (iv.half as u64) << 32 | i as u64)
+        })
+        .collect();
+    keys.sort_unstable();
+    let sorted = keys.into_iter().map(|(_, i)| &intervals[i as u32 as usize]);
 
     // Intervals holding a register, with that register: live at the
     // current point (active), or in a hole (inactive).
