@@ -1,7 +1,7 @@
 //! Bounded expansion of ordinary memory intrinsics before register allocation.
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, Intrinsic, MemoryFlags,
-    Type, Value, ValueDef,
+    Type, Value, ValueDef, VectorType,
 };
 
 const MAX_BYTES: i64 = 32;
@@ -43,6 +43,27 @@ pub fn run(f: &mut Function) -> bool {
         }
         let mut chunks = Vec::new();
         let mut offset = 0;
+        // Only builtin memcpy proves the complete source/destination ranges
+        // nonoverlapping. Use exact 16-byte chunks within that one operation;
+        // never combine neighboring copies (LZ4 uses successive 8-byte copies
+        // to propagate overlapping matches). Leave memmove's scalar snapshot
+        // and memset's fill construction unchanged.
+        if id == Intrinsic::Memcpy {
+            while offset + 16 <= size {
+                let addr = address(f, at, args[1], offset);
+                let value = emit(
+                    f,
+                    at,
+                    InstData::Load {
+                        ty: Type::Vector(VectorType::I8x16),
+                        addr,
+                        flags: MemoryFlags::default(),
+                    },
+                );
+                chunks.push((offset, value));
+                offset += 16;
+            }
+        }
         for (width, ty) in [
             (8, Type::I64),
             (4, Type::I32),

@@ -35,12 +35,14 @@ fn all_small_lengths_have_exact_bounded_accesses_and_snapshot_order() {
             let mut read = 0;
             let mut written = 0;
             let mut stores = 0;
+            let mut vector_loads = 0;
             for (_, i) in f.layout_insts() {
                 match f.inst_data(i) {
                     InstData::Load { ty, flags, .. } => {
                         assert_eq!(stores, 0, "all loads must precede stores");
                         assert_eq!(*flags, MemoryFlags::default());
                         read += bytes(*ty);
+                        vector_loads += usize::from(ty.is_vector());
                     }
                     InstData::Store { value, flags, .. } => {
                         assert_eq!(*flags, MemoryFlags::default());
@@ -51,6 +53,7 @@ fn all_small_lengths_have_exact_bounded_accesses_and_snapshot_order() {
                     _ => {}
                 }
             }
+            assert_eq!(vector_loads, if op == "memcpy" { size / 16 } else { 0 });
             assert_eq!(written, size);
             assert_eq!(read, if op == "memset" { 0 } else { size });
             assert!(stores <= 6);
@@ -69,8 +72,43 @@ fn bytes(ty: Type) -> usize {
         Type::I16 => 2,
         Type::I32 => 4,
         Type::I64 => 8,
+        Type::Vector(keel_ir::VectorType::I8x16) => 16,
         _ => panic!("unexpected type"),
     }
+}
+
+#[test]
+fn successive_copies_preserve_overlap_propagation_boundaries() {
+    // Offset eight is legal for each memcpy, but their combined 16-byte
+    // ranges overlap. The second read must observe the first write.
+    let input = "func @f(ptr) {
+block0(v0: ptr):
+v1 = iconst.i64 8
+v2 = ptradd v0, v1
+v3 = ptradd v2, v1
+intrinsic memcpy(v2, v0, v1)
+intrinsic memcpy(v3, v2, v1)
+return
+}";
+    let m = expand(input);
+    let f = &m.functions[0];
+    let accesses: Vec<_> = f
+        .layout_insts()
+        .filter_map(|(_, i)| match f.inst_data(i) {
+            InstData::Load { ty, .. } => Some((false, *ty)),
+            InstData::Store { value, .. } => Some((true, f.value_type(*value))),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        accesses,
+        [
+            (false, Type::I64),
+            (true, Type::I64),
+            (false, Type::I64),
+            (true, Type::I64)
+        ]
+    );
 }
 
 #[test]
@@ -108,25 +146,27 @@ fn zero_preserves_operand_producers() {
 
 #[test]
 fn every_generated_instruction_preserves_source_location() {
-    let mut m = keel_ir::parse(&source("memmove", "31")).unwrap();
-    let loc = keel_ir::SourceLoc {
-        file: keel_ir::SourceFile::new(0),
-        line: 17,
-        col: 4,
-        scope: None,
-    };
-    let f = &mut m.functions[0];
-    let at = f
-        .layout_insts()
-        .find(|(_, i)| matches!(f.inst_data(*i), InstData::Intrinsic { .. }))
-        .unwrap()
-        .1;
-    f.set_inst_loc(at, Some(loc));
-    let old: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
-    keel_opt::run_passes(&mut m, &["small-memory"]).unwrap();
-    let f = &m.functions[0];
-    for (_, i) in f.layout_insts().filter(|(_, i)| !old.contains(i)) {
-        assert_eq!(f.inst_loc(i), Some(loc));
+    for op in ["memcpy", "memmove"] {
+        let mut m = keel_ir::parse(&source(op, "31")).unwrap();
+        let loc = keel_ir::SourceLoc {
+            file: keel_ir::SourceFile::new(0),
+            line: 17,
+            col: 4,
+            scope: None,
+        };
+        let f = &mut m.functions[0];
+        let at = f
+            .layout_insts()
+            .find(|(_, i)| matches!(f.inst_data(*i), InstData::Intrinsic { .. }))
+            .unwrap()
+            .1;
+        f.set_inst_loc(at, Some(loc));
+        let old: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+        keel_opt::run_passes(&mut m, &["small-memory"]).unwrap();
+        let f = &m.functions[0];
+        for (_, i) in f.layout_insts().filter(|(_, i)| !old.contains(i)) {
+            assert_eq!(f.inst_loc(i), Some(loc));
+        }
     }
 }
 
@@ -185,6 +225,9 @@ fn native_clang_differential() {
     }
     // Side effects in all zero-length argument positions and low-byte fill
     // truncation are exercised through the C frontend, not assumed by IR tests.
+    implementation.push_str("void kchain(unsigned char *d,unsigned char *s,int fill){__builtin_memcpy(d,s,8);__builtin_memcpy(d+8,s+8,8);}");
+    implementation.push_str("void kstripes(unsigned char *d,unsigned char *s,int fill){__builtin_memcpy(d,s,16);__builtin_memcpy(d+16,s+16,16);}");
+    declarations.push_str("void kchain(unsigned char*,unsigned char*,int);void kstripes(unsigned char*,unsigned char*,int);\n");
     implementation.push_str("void kvariable(unsigned char *d,unsigned char *s,int fill,unsigned long n){__builtin_memmove(d,s,n);__builtin_memset(s,fill,n);__builtin_memcpy(d,s,n);}\n");
     declarations.push_str("void kvariable(unsigned char*,unsigned char*,int,unsigned long); void rvariable(unsigned char*,unsigned char*,int,unsigned long);\n");
     implementation.push_str("int count; unsigned char dummy[2]; unsigned char *dp(void){count=count*10+1;return dummy;} unsigned char *sp(void){count=count*10+2;return dummy+1;} unsigned long len(void){count=count*10+3;return 0;} int fl(void){count=count*10+2;return 511;} int zero(void){count=0;__builtin_memmove(dp(),sp(),len());if(count!=123)return 1;count=0;__builtin_memset(dp(),fl(),len());if(count!=123)return 2;count=0;__builtin_memcpy(dp(),sp(),len());if(count!=123)return 3;count=0;__builtin_memmove(dp(),sp(),0);if(count!=12)return 4;count=0;__builtin_memset(dp(),fl(),0);if(count!=12)return 5;count=0;__builtin_memcpy(dp(),sp(),0);return count!=12;}\n");
@@ -203,6 +246,8 @@ fn native_clang_differential() {
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
 {declarations}
 int zero(void);
 typedef void (*Fn)(unsigned char*,unsigned char*,int);
@@ -231,14 +276,40 @@ static void guard(Fn k,int n,int set) {{
  long p=sysconf(_SC_PAGESIZE);unsigned char *a=area(p),*b=area(p);
  // Place the EXACT source and destination extents next to protected pages,
  // independently at each end. For n=0 pointers remain within valid objects.
- for(int end=0;end<2;end++) {{
-  unsigned char *d=a+p+(end?p-(n?n:1):0),*s=b+p+(end?p-(n?n:1):0);
+ for(int de=0;de<2;de++) for(int se=0;se<2;se++) {{
+  unsigned char *d=a+p+(de?p-(n?n:1):0),*s=b+p+(se?p-(n?n:1):0);
   k(d,s,511);
   for(int i=0;i<n;i++)if(d[i]!=(set?255:73))abort();
  }}
  munmap(a,(size_t)p*3);munmap(b,(size_t)p*3);
 }}
+static void boundaries(void) {{
+ unsigned char a[96],expect[96];
+ for(int offset=8;offset<=32;offset++) {{
+  for(int i=0;i<96;i++)a[i]=expect[i]=(unsigned char)(i*37+11);
+  memcpy(expect+offset,expect,8);memcpy(expect+offset+8,expect+8,8);
+  kchain(a+offset,a,0);if(memcmp(a,expect,96))abort();
+ }}
+ // Adjacent 16-byte operations may overlap each other, but each has
+ // disjoint ranges at offsets >=16. Preserve their write/read order.
+ for(int offset=16;offset<=32;offset++) {{
+  for(int i=0;i<96;i++)a[i]=expect[i]=(unsigned char)(i*37+11);
+  memcpy(expect+offset,expect,16);memcpy(expect+offset+16,expect+16,16);
+  kstripes(a+offset,a,0);if(memcmp(a,expect,96))abort();
+ }}
+ // A fault in the second stripe must occur after the first stripe store.
+ long p=sysconf(_SC_PAGESIZE);unsigned char *src=area(p);
+ unsigned char *out=mmap(0,p,PROT_READ|PROT_WRITE,MAP_SHARED|MAP_ANON,-1,0);
+ if(out==MAP_FAILED)abort();memset(out,0,p);
+ pid_t child=fork();if(child<0)abort();
+ if(!child){{kstripes(out,src+2*p-16,0);_exit(1);}}
+ int status;if(waitpid(child,&status,0)!=child||!WIFSIGNALED(status))abort();
+ if(WTERMSIG(status)!=SIGBUS&&WTERMSIG(status)!=SIGSEGV)abort();
+ for(int i=0;i<32;i++)if(out[i]!=(i<16?73:0))abort();
+ munmap(src,3*p);munmap(out,p);
+}}
 int main(void) {{
+ boundaries();
  {checks} {guards}
  for(int n=0;n<=33;n++) {{
   unsigned char a[96],b[96],s[96],t[96];
