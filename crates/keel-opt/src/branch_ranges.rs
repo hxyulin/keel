@@ -3,7 +3,7 @@
 //! Exact equality facts also cover pointers; they establish no dereferenceability.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::{EntityRef, Function, InstData, IntCC, Type, Value, ValueDef};
+use keel_ir::{Function, InstData, IntCC, Type, Value, ValueDef};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Range {
@@ -227,7 +227,7 @@ pub fn run(func: &mut Function) -> bool {
                 }
             }
         }
-        for &child in children[block.index()].iter().rev() {
+        for &child in children[block].iter().rev() {
             stack.push((child, 0, 0, false));
         }
     }

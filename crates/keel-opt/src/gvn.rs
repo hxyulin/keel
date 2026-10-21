@@ -64,7 +64,7 @@ pub fn run(func: &mut Function) -> bool {
                 }
             }
         }
-        for &child in children[block.index()].iter().rev() {
+        for &child in children[block].iter().rev() {
             stack.push((child, 0, false));
         }
     }

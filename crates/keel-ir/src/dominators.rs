@@ -18,15 +18,18 @@ pub struct ControlFlowGraph {
 }
 
 impl ControlFlowGraph {
+    /// Edges come from each block's last instruction. Only terminators branch,
+    /// and the verifier rejects a terminator anywhere but at the end of its
+    /// block, so this reads every edge of valid IR without visiting the body.
     pub fn compute(func: &Function) -> Self {
         let n = func.num_blocks();
         let mut succ_range = vec![(0, 0); n];
-        let mut succs = Vec::new();
+        let mut succs = Vec::with_capacity(2 * n);
         let mut pred_count = vec![0u32; n + 1];
         for block in func.blocks() {
             let start = succs.len();
-            for &inst in func.block_insts(block) {
-                for dest in func.inst_data(inst).branch_dests() {
+            if let Some(&term) = func.block_insts(block).last() {
+                for dest in func.inst_data(term).branch_dests() {
                     // A block reached twice (e.g. both arms of a `brif`) is
                     // still one predecessor.
                     if !succs[start..].contains(&dest.block) {
@@ -135,11 +138,17 @@ impl DominatorTree {
         // The entry dominates itself while iterating; reset to `None` at the end.
         tree.idom[entry.index()] = Some(entry);
         let mut changed = true;
-        while changed {
+        // Without a retreating edge every predecessor precedes its block in
+        // RPO, so the first pass is already the fixed point.
+        let mut retreating = true;
+        while changed && retreating {
             changed = false;
+            retreating = false;
             for &block in &tree.rpo[1..] {
+                let number = tree.rpo_number[block.index()];
                 let mut new_idom = None;
                 for &pred in cfg.preds(block) {
+                    retreating |= tree.rpo_number[pred.index()] >= number;
                     if tree.idom[pred.index()].is_none() {
                         continue; // unreachable, or not processed yet
                     }
@@ -177,15 +186,27 @@ impl DominatorTree {
         self.intersect(a, b)
     }
 
-    /// Children of each block in the dominator tree, indexed by block.
-    pub fn children(&self) -> Vec<Vec<Block>> {
-        let mut children = vec![Vec::new(); self.idom.len()];
+    /// Children of each block in the dominator tree, in reverse postorder.
+    pub fn children(&self) -> DominatorChildren {
+        let mut start = vec![0u32; self.idom.len() + 1];
         for &block in &self.rpo {
             if let Some(idom) = self.idom[block.index()] {
-                children[idom.index()].push(block);
+                start[idom.index() + 1] += 1;
             }
         }
-        children
+        for i in 1..start.len() {
+            start[i] += start[i - 1];
+        }
+        let mut fill = start.clone();
+        let mut children = vec![Block::new(0); self.rpo.len().saturating_sub(1)];
+        for &block in &self.rpo {
+            if let Some(idom) = self.idom[block.index()] {
+                let slot = &mut fill[idom.index()];
+                children[*slot as usize] = block;
+                *slot += 1;
+            }
+        }
+        DominatorChildren { start, children }
     }
 
     pub fn is_reachable(&self, block: Block) -> bool {
@@ -212,6 +233,21 @@ impl DominatorTree {
             b = self.idom[b.index()].expect("non-entry reachable block has an idom");
         }
         a == b
+    }
+}
+
+/// Dominator-tree children packed into one array; index by parent block.
+pub struct DominatorChildren {
+    start: Vec<u32>,
+    children: Vec<Block>,
+}
+
+impl std::ops::Index<Block> for DominatorChildren {
+    type Output = [Block];
+
+    fn index(&self, block: Block) -> &[Block] {
+        let i = block.index();
+        &self.children[self.start[i] as usize..self.start[i + 1] as usize]
     }
 }
 
