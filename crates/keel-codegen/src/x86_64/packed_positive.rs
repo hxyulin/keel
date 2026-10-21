@@ -31,11 +31,8 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             }) {
                 continue;
             }
-            let location = func.inst_loc(load).map(|l| (l.file, l.line));
-            if chain
-                .iter()
-                .any(|&i| func.inst_loc(i).map(|l| (l.file, l.line)) != location)
-            {
+            let location = func.inst_loc(load);
+            if chain.iter().any(|&i| func.inst_loc(i) != location) {
                 continue;
             }
             let InstData::Load {
@@ -138,4 +135,79 @@ fn literal_zero(func: &Function, v: Value) -> bool {
             imm: 0
         }
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::select::Selection;
+    const SOURCE: &str = "func @positive(ptr,ptr,i32x4) {\nblock0(v0:ptr,v1:ptr,v20:i32x4):\n v2 = iconst.i32 0\n v3 = vsplat.i32x4 v2\n v4 = load.i64 v0\n v5 = vsplat.i64x2 v4\n v6 = bitcast.i32x4 v5\n v7 = vicmp.sgt v6,v3\n v8 = vand v7,v6\n v9 = uwiden_low.i64x2 v8\n store v9,v1\n return\n}\n";
+    #[test]
+    fn inline_assembly_is_a_boundary() {
+        let source = SOURCE.replace(" return", " v30 = asm \"\", \"=r\"() -> i32\n return");
+        let m = keel_ir::parse(&source).unwrap();
+        assert!(select(&m.functions[0], &mut Selection::default()).is_empty());
+    }
+    #[test]
+    fn closed_operands_alias_resolution_and_existing_covers() {
+        let m = keel_ir::parse(SOURCE).unwrap();
+        let f = &m.functions[0];
+        let chain: Vec<_> = f.layout_insts().skip(2).take(6).map(|(_, i)| i).collect();
+        let mut plan = Selection::default();
+        let address = plan.operands(f, chain[0]);
+        let matches = select(f, &mut plan);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(plan.operands(f, chain[5]), address);
+        for &i in &chain[..5] {
+            assert!(plan.covered(i));
+            assert!(plan.operands(f, i).is_empty());
+        }
+        assert!(!plan.covered(chain[5]));
+        for &i in &chain {
+            let mut plan = Selection::default();
+            plan.cover(i);
+            assert!(select(f, &mut plan).is_empty());
+        }
+        // Columns and lexical scopes are source boundaries too.
+        let location = keel_ir::SourceLoc {
+            file: keel_ir::SourceFile::new(0),
+            line: 2,
+            col: 1,
+            scope: None,
+        };
+        let mut debug = f.clone();
+        for &i in &chain {
+            debug.set_inst_loc(i, Some(location));
+        }
+        assert_eq!(select(&debug, &mut Selection::default()).len(), 1);
+        for &i in &chain {
+            for changed in [
+                keel_ir::SourceLoc { col: 2, ..location },
+                keel_ir::SourceLoc {
+                    scope: Some(keel_ir::DebugScope::new(0)),
+                    ..location
+                },
+            ] {
+                let mut different = debug.clone();
+                different.set_inst_loc(i, Some(changed));
+                assert!(select(&different, &mut Selection::default()).is_empty());
+            }
+        }
+        // An aliased compare operand resolves to X and counts as one occurrence.
+        let mut f = keel_ir::parse(&SOURCE.replace("vicmp.sgt v6,v3", "vicmp.sgt v20,v3"))
+            .unwrap()
+            .functions
+            .remove(0);
+        let alias = f.block_params(f.entry_block().unwrap())[2];
+        f.replace_all_uses(alias, f.first_result(chain[2]));
+        assert_eq!(select(&f, &mut Selection::default()).len(), 1);
+        // An external observation through that same alias closes the opportunity.
+        let mut f = keel_ir::parse(&SOURCE.replace(" return", " store v20,v1\n return"))
+            .unwrap()
+            .functions
+            .remove(0);
+        let alias = f.block_params(f.entry_block().unwrap())[2];
+        f.replace_all_uses(alias, f.first_result(chain[2]));
+        assert!(select(&f, &mut Selection::default()).is_empty());
+    }
 }
