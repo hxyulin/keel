@@ -11,6 +11,25 @@ fn canonical() -> keel_ir::Module {
 }
 
 #[test]
+fn derives_inputs_from_dataflow_for_ordinary_and_reordered_signatures() {
+    let raw = include_str!("adjacent_abs/adjacent.keel");
+    for source in [
+        raw.replace("(ptr, ptr, ptr, i64)", "(ptr, i64)")
+            .replace("(v0: ptr, v1: ptr, v2: ptr, v3: i64)", "(v0: ptr, v3: i64)"),
+        raw.replace("(ptr, ptr, ptr, i64)", "(i64, ptr)")
+            .replace("(v0: ptr, v1: ptr, v2: ptr, v3: i64)", "(v3: i64, v0: ptr)"),
+        raw.replace("(ptr, ptr, ptr, i64)", "(ptr, i64, ptr, ptr)")
+            .replace("(v0: ptr, v1: ptr, v2: ptr, v3: i64)", "(v1: ptr, v3: i64, v0: ptr, v2: ptr)"),
+    ] {
+        let mut m = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&m).unwrap();
+        assert!(adjacent_abs::run(&mut m.functions[0]));
+        assert!(adjacent_diff::run(&mut m.functions[0]));
+        keel_ir::verify_module(&m).unwrap();
+    }
+}
+
+#[test]
 fn exact_shape_verifies_and_is_idempotent() {
     let mut m = canonical();
     assert!(adjacent_diff::run(&mut m.functions[0]));

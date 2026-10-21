@@ -133,8 +133,6 @@ fn recognize(f: &Function) -> Option<Candidate> {
         return None;
     }
     let entry = f.entry_block()?;
-    let p = params(f, entry, &[Type::Ptr, Type::Ptr, Type::Ptr, Type::I64])?;
-    let (base, bound) = (p[0], p[3]);
     let mut r = Reader::new(f, entry);
     let zero = r.value(icon(0))?;
     let one = r.value(icon(1))?;
@@ -148,7 +146,15 @@ fn recognize(f: &Function) -> Option<Candidate> {
     r.end()?;
     params(f, guard_block, &[])?;
     let mut r = Reader::new(f, guard_block);
-    let cond = r.value(cmp(IntCC::Ugt, bound, one))?;
+    let (compare, D::Icmp { cond: IntCC::Ugt, args: [bound, compared_one] }) = r.next()? else {
+        return None;
+    };
+    if compared_one != one || f.value_type(bound) != Type::I64
+        || !matches!(f.value_def(bound), keel_ir::ValueDef::Param(b, _) if b == entry) {
+        return None;
+    }
+    let cond = f.first_result(compare);
+    if f.resolve(cond) != cond { return None; }
     let (
         guard,
         D::Brif {
@@ -169,7 +175,15 @@ fn recognize(f: &Function) -> Option<Candidate> {
     let mut r = Reader::new(f, body);
     let two = r.value(icon(2))?;
     let off = r.value(bin(B::Shl, iv, two))?;
-    let addr = r.value(ptr(base, off))?;
+    let (address, D::Binary { op: B::Ptradd, args: [base, offset] }) = r.next()? else {
+        return None;
+    };
+    if offset != off || f.value_type(base) != Type::Ptr
+        || !matches!(f.value_def(base), keel_ir::ValueDef::Param(b, _) if b == entry) {
+        return None;
+    }
+    let addr = f.first_result(address);
+    if f.resolve(addr) != addr { return None; }
     let load_pos = r.pos;
     let x = r.value(D::Load {
         flags: MemoryFlags::default(),
