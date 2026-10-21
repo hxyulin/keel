@@ -58,12 +58,9 @@ impl Pass for Cfg {
         for block in reverse_postorder(func) {
             reachable[block.index()] = true;
         }
-        for block in func.blocks().collect::<Vec<_>>() {
-            if !reachable[block.index()] {
-                func.remove_block(block);
-                changed = true;
-            }
-        }
+        let dead: Vec<_> = func.blocks().filter(|b| !reachable[b.index()]).collect();
+        func.remove_blocks(&dead);
+        changed |= !dead.is_empty();
         changed | simplify_cfg::merge_small_blocks(func, MERGED_INSTRUCTIONS)
     }
     fn deterministic(&self) -> bool {

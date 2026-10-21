@@ -169,9 +169,7 @@ fn remove_unreachable(func: &mut Function) -> bool {
         .blocks()
         .filter(|&b| !reachable[b.index()])
         .collect();
-    for &block in &dead {
-        func.remove_block(block);
-    }
+    func.remove_blocks(&dead);
     !dead.is_empty()
 }
 
@@ -194,6 +192,9 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
         }
     }
     let mut changed = false;
+    // Merged blocks leave the layout together at the end; until then they
+    // are empty, which is all the walk below observes of them.
+    let mut merged = Vec::new();
     // Only the absorbing predecessor acquires a new terminator. Incoming
     // counts for every surviving block stay unchanged, so earlier rejected
     // predecessors cannot become candidates. Retry pred before advancing to
@@ -236,10 +237,11 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
             for inst in func.block_insts(block).to_vec() {
                 func.move_inst(inst, keel_ir::InsertPoint::End(pred));
             }
-            func.remove_block(block);
+            merged.push(block);
             changed = true;
         }
     }
+    func.remove_blocks(&merged);
     changed
 }
 

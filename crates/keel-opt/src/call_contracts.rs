@@ -71,9 +71,7 @@ pub fn run(func: &mut Function) -> bool {
         *func.inst_data_mut(inst) = data;
         let jump = func.append_inst(block, InstData::Jump { dest: normal });
         func.set_inst_loc(jump, loc);
-        for block in dead {
-            func.remove_block(block);
-        }
+        func.remove_blocks(&dead);
         changed = true;
     }
     if changed {
@@ -104,9 +102,7 @@ pub fn run(func: &mut Function) -> bool {
         }
         let trap = func.append_inst(block, InstData::Trap);
         func.set_inst_loc(trap, loc);
-        for block in dead {
-            func.remove_block(block);
-        }
+        func.remove_blocks(&dead);
         changed = true;
     }
     changed

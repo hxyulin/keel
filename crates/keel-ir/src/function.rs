@@ -941,6 +941,33 @@ impl Function {
         self.cfg_stamp = fresh_cfg_stamp();
     }
 
+    /// [`Function::remove_block`] for each of `blocks`, with one pass over
+    /// the layout instead of one per block.
+    pub fn remove_blocks(&mut self, blocks: &[Block]) {
+        if blocks.is_empty() {
+            return;
+        }
+        for &block in blocks {
+            assert_ne!(
+                self.entry_block(),
+                Some(block),
+                "cannot remove the entry block"
+            );
+            let data = &mut self.blocks[block];
+            for &inst in self.block_insts.get(data.insts) {
+                self.insts[inst].block = NO_BLOCK;
+            }
+            let removed = data.insts.len();
+            self.block_insts.free(&mut data.insts);
+            if std::mem::replace(&mut data.in_layout, false) {
+                self.layout_len -= removed;
+            }
+        }
+        let blocks = &self.blocks;
+        self.layout.retain(|&b| blocks[b].in_layout);
+        self.cfg_stamp = fresh_cfg_stamp();
+    }
+
     /// Identifies the inputs of the control-flow graph: the block count, the
     /// layout, and each block's last instruction. Every change to them gives
     /// the function a stamp no function has had before, so functions with

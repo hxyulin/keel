@@ -442,6 +442,38 @@ mod tests {
     }
 
     #[test]
+    fn batched_block_removal_matches_one_at_a_time() {
+        let module = crate::parse(
+            "\
+            func @f(i8) {
+            block0(v0: i8):
+                return
+            block1:
+                jump block2
+            block2:
+                jump block1
+            block3:
+                return
+            block4:
+                jump block3
+            }",
+        )
+        .unwrap();
+        let mut one = module.functions[0].clone();
+        let mut batch = one.clone();
+        let dead = [1, 4, 2, 4].map(Block::new);
+        for block in dead {
+            one.remove_block(block);
+        }
+        batch.remove_blocks(&dead);
+        assert_eq!(one.to_string(), batch.to_string());
+        assert_eq!(batch.blocks().collect::<Vec<_>>(), [0, 3].map(Block::new));
+        assert!(!batch.is_block_inserted(Block::new(2)));
+        let cfg = ControlFlowGraph::compute(&batch);
+        assert!(cfg.preds(Block::new(3)).is_empty());
+    }
+
+    #[test]
     fn cfg_rpo_is_empty_without_an_entry() {
         let func = Function::new("empty", crate::Signature::new(&[], &[]));
         let cfg = ControlFlowGraph::compute(&func);
