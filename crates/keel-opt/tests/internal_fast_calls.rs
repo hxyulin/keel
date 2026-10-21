@@ -57,3 +57,11 @@ fn refuses_addresses_exports_and_tail_contracts() {
         assert_eq!(m.to_string(), before);
     }
 }
+
+#[test]
+fn promotes_word_helpers_without_extensions_too() {
+    let mut m = parse("func @word(i64) -> i64 local {\nblock0(v0: i64):\n return v0\n}").unwrap();
+    keel_opt::run_passes(&mut m, &["internal-fast-calls"]).unwrap();
+    verify_module(&m).unwrap();
+    assert_eq!(m.functions[0].sig.cc, CallConv::Fast);
+}

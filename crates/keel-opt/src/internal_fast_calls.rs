@@ -1,4 +1,5 @@
-//! Opt-in removal of C-only extension contracts on contained private calls.
+//! Opt-in private transport for contained direct calls, including removal of
+//! C-only extension contracts. Backends may specialize eligible private leaves.
 use crate::Pass;
 use keel_ir::{ArgExt, CallConv, DataItem, Function, InstData, Module, Purpose, Symbol};
 use std::collections::{HashMap, HashSet};
@@ -70,12 +71,6 @@ fn run(module: &mut Module) -> bool {
                 .iter()
                 .chain(&f.sig.returns)
                 .any(|p| p.purpose != Purpose::Normal)
-            || !f
-                .sig
-                .params
-                .iter()
-                .chain(&f.sig.returns)
-                .any(|p| p.ext != ArgExt::None)
         {
             continue;
         }
