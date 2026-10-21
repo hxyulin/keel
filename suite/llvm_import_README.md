@@ -305,3 +305,41 @@ overlapping moves, unaligned accesses and protected-page boundaries. Negative
 cases preserve an existing destination. Intrinsic address-taking is rejected by
 LLVM's verifier; the other cases exercise importer rejections. This gate is
 Apple ARM native coverage, not x86 execution or a timing comparison.
+
+## Private fastcc translation
+
+Keel `cc(fast)` is a separate private convention, not LLVM's machine ABI.
+Version 1 uses the target's established C argument/result locations, stack
+layout, and register-preservation rules. Narrow integer values may travel
+without C's mandatory extension contract; explicit extensions are still honored.
+The versioned internal contract leaves room for later changes to register
+placement and preservation. It does not itself establish a runtime speedup.
+
+The importer accepts LLVM `fastcc` only for internal/private, fixed-arity
+**definitions**. Every use must be a direct call or invoke with exactly the
+definition's LLVM type and fastcc tag. Passing the function itself as an argument
+is an escape, even when it is also the direct callee. Exported definitions,
+external declarations, indirect calls, address escapes, and musttail remain
+rejected. All accepted definitions become `cc(fast) local`; their direct calls
+use that signature. No LLVM argument-register assignment is reproduced.
+Unspecified private narrow returns are legal; private i1 transport chooses a
+canonical zero-extended i8 contract. Explicit sign-extended i1 remains rejected.
+
+Keel verification independently requires local definitions and prohibits fast
+function addresses (including data relocations), indirect fast signatures,
+variadics, returns-twice and multiple results. Ordinary `cc(c)` rules remain.
+Both native backends implement the initial transport. This gate does not
+validate fast calls through the optional Cranelift bridge.
+
+```sh
+python3 suite/fast_opt_locked.py target/fastcc-lock.jsonl \
+  python3 suite/llvm_import_fast_validate.py \
+  --libllvm /absolute/path/to/libLLVM.dylib --keel /absolute/path/to/keel \
+  --out target/fastcc-validation
+```
+
+The gate checks recursion, mixed register/stack arguments, a C callback with live
+values across it, and an unextended byte result. Native execution covers Apple
+ARM through all three optimization tiers, both selection/allocation tiers and
+both object routes. x86 checks emission only. Separate Rust tests exercise empty
+allocation pools on both targets and direct/text object parity.

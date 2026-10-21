@@ -231,7 +231,7 @@ class Importer:
 
     def signature(self, fn):
         l = self.l
-        if l.GetFunctionCallConv(fn) != 0:
+        if l.GetFunctionCallConv(fn) != 0 and fn not in self.fast_functions:
             raise Unsupported(f'{self.symbol(fn)}: non-C calling convention')
         fty = l.GlobalGetValueType(fn)
         if fn in self.personalities:
@@ -260,6 +260,7 @@ class Importer:
         if fn in self.personalities:
             return 'void', []
         return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)),
+                                  internal_fast=fn in self.fast_functions,
                                   memory_intrinsic=l.name(fn) in self.MEMORY_INTRINSICS)
 
     def integer_pair_type(self, ty):
@@ -288,7 +289,7 @@ class Importer:
             return self.aggregate_params[value][index]
         raise Unsupported('unsupported aggregate SSA: requires parameter or insertvalue with defined observed lanes')
 
-    def abi_signature(self, value, fty, call=False, definition=False, memory_intrinsic=False):
+    def abi_signature(self, value, fty, call=False, definition=False, memory_intrinsic=False, internal_fast=False):
         """Use LLVM's function type and explicit ABI contract, never infer C types."""
         l = self.l
         if l.IsFunctionVarArg(fty):
@@ -357,6 +358,10 @@ class Importer:
                     raise Unsupported('sret layout outside proven unpacked three-i64 contract')
                 text += ' sret {i64, i64, i64}'
             extensions = [a for a in ('signext', 'zeroext') if l.attribute(value, index, a, call=call)]
+            if internal_fast and l.GetTypeKind(ty) == 8 and l.GetIntTypeWidth(ty) == 1 and not extensions:
+                # Keel represents i1 by a canonical i8; no outside ABI observes
+                # these private edges. Choose our own zero extension contract.
+                extensions = ['zeroext']
             if extensions and (sret or l.GetTypeKind(ty) != 8):
                 raise Unsupported('extension requires integer ABI type')
             if len(extensions) > 1:
@@ -368,7 +373,7 @@ class Importer:
             if (l.GetTypeKind(ty) == 8 and l.GetIntTypeWidth(ty) == 1
                     and extensions != ['zeroext'] and not (memory_intrinsic and index == 4)):
                 raise Unsupported('i1 ABI parameters/returns require explicit zeroext')
-            if index == 0 and text in ('i8', 'i16') and (definition or call) and not extensions:
+            if index == 0 and text in ('i8', 'i16') and (definition or call) and not extensions and not internal_fast:
                 raise Unsupported('i8/i16 return definitions/calls require signext or zeroext')
             for attr in extensions:
                 text += ' ' + {'signext': 'sext', 'zeroext': 'uext'}[attr]
@@ -691,8 +696,9 @@ class Importer:
         if op in (45, 5):  # call / direct invoke
             l.check_function_attributes(inst, call=True)
             callee = l.GetCalledValue(inst)
-            if l.GetInstructionCallConv(inst) != 0:
-                raise Unsupported('non-C call')
+            fast = callee in self.fast_functions
+            if l.GetInstructionCallConv(inst) != (8 if fast else 0):
+                raise Unsupported('non-C call or fastcc contract mismatch')
             if l.GetNumOperandBundles(inst):
                 raise Unsupported('call operand bundles')
             if op == 45 and l.GetTailCallKind(inst) == 2:  # LLVMTailCallKindMustTail
@@ -701,7 +707,7 @@ class Importer:
                 raise Unsupported('personality may only be a symbolic EH reference')
             fty = l.GetCalledFunctionType(inst)
             memory = l.IsAFunction(callee) and l.name(callee) in self.MEMORY_INTRINSICS
-            ret, params = self.abi_signature(inst, fty, call=True, memory_intrinsic=memory)
+            ret, params = self.abi_signature(inst, fty, call=True, memory_intrinsic=memory, internal_fast=fast)
             if memory:
                 if (op != 45 or fty != l.GlobalGetValueType(callee)
                         or (ret, params) != self.signatures[callee]
@@ -833,6 +839,25 @@ class Importer:
         if l.GetNamedMetadata(module, b'llvm.linker.options', len(b'llvm.linker.options')):
             raise Unsupported('module autolink requests (llvm.linker.options)')
         functions = list(sequence(l.GetFirstFunction, l.GetNextFunction, module))
+        self.fast_functions = set()
+        for fn in functions:
+            if l.GetFunctionCallConv(fn) != 8:  # LLVMFastCallConv, not a machine ABI mapping.
+                continue
+            if (not l.GetFirstBasicBlock(fn) or l.GetLinkage(fn) not in l.LOCAL_LINKAGES
+                    or l.IsFunctionVarArg(l.GlobalGetValueType(fn))):
+                raise Unsupported('fastcc requires a private fixed-arity definition')
+            for use in sequence(l.GetFirstUse, l.GetNextUse, fn):
+                user = l.GetUser(use)
+                if (not l.IsAInstruction(user) or l.GetInstructionOpcode(user) not in (45, 5)
+                        or l.GetCalledValue(user) != fn
+                        or l.GetCalledFunctionType(user) != l.GlobalGetValueType(fn)
+                        or l.GetInstructionCallConv(user) != 8):
+                    raise Unsupported('fastcc requires contained direct calls with matching contracts')
+                # The function may be both the called operand and an escaping
+                # argument of the same call. Checking only GetCalledValue is insufficient.
+                if any(l.GetOperand(user, i) == fn for i in range(l.GetNumArgOperands(user))):
+                    raise Unsupported('fastcc function address escapes through a call argument')
+            self.fast_functions.add(fn)
         self.personalities = set()
         for fn in functions:
             if l.HasPersonalityFn(fn):
@@ -880,7 +905,7 @@ class Importer:
                 local = ' weak_odr'
             personality = (' personality ' + self.symbol(l.GetPersonalityFn(fn))
                            if l.HasPersonalityFn(fn) else '')
-            self.lines = ['func ' + signature + ' cc(c)' + local + personality + ' {']
+            self.lines = ['func ' + signature + (' cc(fast)' if fn in self.fast_functions else ' cc(c)') + local + personality + ' {']
             self.values = {l.GetParam(fn, i): f'v{i}' for i in range(l.CountParams(fn))}
             self.next_value = len(params)
             self.aggregate_params = {}
