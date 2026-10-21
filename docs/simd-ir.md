@@ -323,21 +323,25 @@ to this transformation.
 ## Packed integer predicates and lane selection
 
 NEON emits native comparisons for every integer shape and predicate. Baseline
-SSE2 emits packed equality/inequality and signed ordering for all integer shapes.
+SSE2 emits packed equality/inequality and signed/unsigned ordering for all integer shapes.
 i64 equality combines both dword halves; signed ordering compares signed high
-dwords and breaks ties with unsigned low dwords. Unsigned ordering retains
-scalar legalization on SSE2. No newer CPU feature is assumed.
+dwords and breaks ties with unsigned low dwords. Unsigned ordering biases every
+lane's sign bit; unsigned i64 ordering biases both dword halves for the same
+lexicographic recipe. No newer CPU feature is assumed.
 
 Both backends lower lane selection with packed operations. Each mask lane is
 normalized by comparison with zero: a nonzero mask selects the entire true lane,
 including masks with only one bit set. Float arms are selected bitwise, preserving
 NaN payloads and signed zero. Sources are captured before publishing the result,
-including spilled operands and results; allocated inputs may remain live.
+including spilled operands and results; allocated inputs may remain live. SSE2
+skips normalization when the resolved mask is defined directly by integer vector
+comparison, whose lanes are proven all-ones or zero. Loads, block parameters and
+bitcasts keep the general nonzero-mask path.
 
 Full's integer reduction discovery also accepts same-width integer comparisons
 and selects in independent wrapping i32/i64 contributions. Predicates must use
 packed operations on the selected target: NEON admits all integer predicates;
-SSE2 admits signed i32/i64 ordering and i32/i64 equality. Fast keeps its previous
+SSE2 admits signed/unsigned i32/i64 ordering and i32/i64 equality. Fast keeps its previous
 eligibility rules. Floating comparisons/reassociation, coupled recurrences,
 induction-as-data and multiple potentially faulting streams remain excluded.
 
@@ -352,7 +356,8 @@ widths, memory effects and first-fault restrictions remain unchanged.
 For a comparison-controlled contribution with a zero false arm, reduction
 emission uses `vand` directly with the canonical comparison mask. This is local
 to predicates proven by the reduction matcher; general `vselect` still accepts
-arbitrary nonzero lane masks and keeps its explicit normalization.
+arbitrary nonzero lane masks and normalizes them unless SSA proves a canonical
+integer comparison mask.
 
 ## Low-lane integer widening
 
@@ -366,7 +371,11 @@ scalar lanes, and the diagnostic Cranelift bridge extracts/extends/inserts the
 same lanes.
 
 Full ARM reduction discovery can extend a contiguous i8/i16/i32 load directly
-into an i32/i64 accumulator expression. Its grouped read is exactly the number
+into an i32/i64 accumulator expression. For i32-to-i64 reductions it also keeps
+source-width wrapping arithmetic and selects before explicit extension, and
+widens canonical i32 predicates for i64 selects. Bounded nested ternaries can
+therefore vectorize without changing narrow arithmetic or predicate semantics.
+Its grouped read is exactly the number
 of output lanes times the source element width, never an unconditional 16-byte
 read. It uses a packed scalar read, splat and bitcast before widening. All
 streams share one element width; original first-fault, address overflow, scalar
