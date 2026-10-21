@@ -37,6 +37,19 @@ pub(super) fn prepare(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<(Summaries, Prepared), CodegenError> {
+    prepare_with_chain_output_limits(module, pools, pipeline, structured, 8 * 1024 * 1024, 65_536)
+}
+
+// Leaves retain their original IR allowance; only newly admitted chains spend
+// this output allowance. Separate limits keep boundary tests small.
+fn prepare_with_chain_output_limits(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    structured: bool,
+    mut chain_output_bytes: usize,
+    mut chain_output_items: usize,
+) -> Result<(Summaries, Prepared), CodegenError> {
     let mut summaries = Summaries::new();
     let mut prepared = Prepared::new();
     if !module.files.is_empty()
@@ -67,8 +80,6 @@ pub(super) fn prepare(
     const MAX_CHAIN_FUNCTIONS: usize = 512;
     const MAX_DEPTH: usize = 16;
     const MAX_INSTRUCTIONS: usize = 65_536;
-    const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
-    const MAX_OUTPUT_ITEMS: usize = 65_536;
     let mut budget = MAX_INSTRUCTIONS;
     let mut pending = Vec::new();
     let mut chains = Vec::new();
@@ -106,15 +117,15 @@ pub(super) fn prepare(
         .caller_saved
         .iter()
         .fold(0, |mask, &r| mask | (1u64 << r));
-    let mut output_bytes = 0;
-    let mut output_items = 0;
     for _ in 0..MAX_DEPTH {
         let mut ready = Vec::new();
         pending.retain(|&index| {
             let original = &module.functions[index];
             let mut nested_clobbers = 0;
+            let mut is_chain = false;
             for (_, inst) in original.layout_insts() {
                 if let InstData::Call { func: callee, .. } = original.inst_data(inst) {
+                    is_chain = true;
                     let decl = original.callee(*callee);
                     let Some((sig, preserved)) = summaries.get(&decl.name) else {
                         return true;
@@ -125,13 +136,13 @@ pub(super) fn prepare(
                     nested_clobbers |= caller_mask & !preserved;
                 }
             }
-            ready.push((index, nested_clobbers));
+            ready.push((index, nested_clobbers, is_chain));
             false
         });
         if ready.is_empty() {
             break;
         }
-        for (index, nested_clobbers) in ready {
+        for (index, nested_clobbers, is_chain) in ready {
             let original = &module.functions[index];
             #[cfg(feature = "backend-profile")]
             let _function_profile = crate::backend_profile::function(&original.name);
@@ -146,13 +157,21 @@ pub(super) fn prepare(
             let preserved = caller_mask & !used;
             let mut output = Output::new(structured);
             let marks = compiler.compile(&mut output);
-            match &output {
-                Output::Text(text) => output_bytes += text.len(),
-                Output::Structured(program) => output_items += program.items.len(),
-            }
-            if output_bytes > MAX_OUTPUT_BYTES || output_items > MAX_OUTPUT_ITEMS {
-                // Never publish a summary for a body that will be regenerated.
-                return Ok((summaries, prepared));
+            if is_chain {
+                let remaining = match &output {
+                    Output::Text(_) => &mut chain_output_bytes,
+                    Output::Structured(_) => &mut chain_output_items,
+                };
+                let size = match &output {
+                    Output::Text(text) => text.len(),
+                    Output::Structured(program) => program.items.len(),
+                };
+                if size > *remaining {
+                    // A rejected body has no proof, so its callers cannot
+                    // become ready. Keep trying independent, smaller chains.
+                    continue;
+                }
+                *remaining -= size;
             }
             summaries.insert(original.name.clone(), (original.sig.clone(), preserved));
             prepared.insert(index, (output, marks));
@@ -309,6 +328,105 @@ mod tests {
         super::super::compile_program_with_pipeline(&module, &REGISTERS, &pipeline).unwrap();
         assert_eq!(allocator.0.borrow().len(), 4);
         assert!(allocator.0.borrow().values().all(|&count| count == 1));
+    }
+
+    #[test]
+    fn chain_output_budget_preserves_leaves_and_cached_dependencies() {
+        // Keep the leaves late in source order and make the first ready chain
+        // too large, followed by an exact-fit chain and one that exhausts the
+        // remaining allowance. An ancestor of the rejected chain stays unproved.
+        let module = keel_ir::parse(
+            "func @parent(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ v1 = call @large(v0)
+ return v1
+}
+func @large(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ v1 = call @leaf0(v0)
+ v2 = call @leaf1(v1)
+ return v2
+}
+func @small(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ v1 = call @leaf0(v0)
+ return v1
+}
+func @other(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ v1 = call @leaf1(v0)
+ return v1
+}
+func @leaf0(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ return v0
+}
+func @leaf1(i64) -> i64 cc(fast) local {
+block0(v0:i64):
+ return v0
+}
+func @root(i64) -> i64 {
+block0(v0:i64):
+ v1 = call @parent(v0)
+ v2 = call @small(v1)
+ v3 = call @other(v2)
+ return v3
+}",
+        )
+        .unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let pipeline = crate::CodegenPipeline {
+            selector: &crate::SelectionTier::Full,
+            allocator: &crate::regalloc::AllocationTier::Full,
+        };
+        for structured in [false, true] {
+            let (all_summaries, all_prepared) =
+                prepare(&module, &REGISTERS, &pipeline, structured).unwrap();
+            assert_eq!(all_summaries.len(), 6);
+            let size = |body: &Output| match body {
+                Output::Text(text) => text.len(),
+                Output::Structured(program) => program.items.len(),
+            };
+            let allowance = size(&all_prepared[&2].0);
+            assert!(size(&all_prepared[&1].0) > allowance);
+            for limit in [0, allowance - 1, allowance] {
+                let (summaries, prepared) = prepare_with_chain_output_limits(
+                    &module, &REGISTERS, &pipeline, structured, limit, limit,
+                )
+                .unwrap();
+                assert_eq!(summaries.len(), prepared.len());
+                for name in ["parent", "large"] {
+                    assert!(!summaries.contains_key(name));
+                }
+                assert!(!prepared.contains_key(&0));
+                assert!(!prepared.contains_key(&1));
+                assert_eq!(summaries.contains_key("small"), limit == allowance);
+                assert_eq!(prepared.contains_key(&2), limit == allowance);
+                if limit == 0 || limit == allowance {
+                    assert!(!summaries.contains_key("other"));
+                    assert!(!prepared.contains_key(&3));
+                    assert_eq!(prepared.len(), if limit == 0 { 2 } else { 3 });
+                }
+                for index in [2, 4, 5] {
+                    if index == 2 && limit != allowance {
+                        continue;
+                    }
+                    let name = &module.functions[index].name;
+                    assert_eq!(summaries.get(name), all_summaries.get(name));
+                    // Accepted proofs retain the exact finalized body at its
+                    // original module index, even after other bodies fail.
+                    match (&prepared[&index].0, &all_prepared[&index].0) {
+                        (Output::Text(actual), Output::Text(expected)) => {
+                            assert_eq!(actual, expected);
+                        }
+                        (Output::Structured(actual), Output::Structured(expected)) => {
+                            assert_eq!(actual, expected);
+                        }
+                        _ => panic!("output mode changed"),
+                    }
+                }
+            }
+        }
     }
 
     #[test]
