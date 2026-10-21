@@ -10,17 +10,16 @@ fn needs_lowering(
     data: &InstData,
     keep: &impl Fn(&Function, &InstData) -> bool,
 ) -> bool {
-    if keep(func, data) {
-        return false;
-    }
-    match data {
+    // Ask the target only about vector instructions: most are scalar.
+    let vector = match data {
         InstData::Convert {
             op: ConvertOp::Bitcast | ConvertOp::SwidenLow | ConvertOp::UwidenLow,
             ty,
             arg,
         } => ty.is_vector() || func.value_type(*arg).is_vector(),
         d => d.is_vector_instruction(),
-    }
+    };
+    vector && !keep(func, data)
 }
 
 pub(crate) fn lower(
