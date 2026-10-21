@@ -640,7 +640,8 @@ fn wide_ir_stays_byte_identical_and_registration_only_appends() {
     assert_eq!(m.to_string(), include_str!("adjacent_diff/wide.keel"));
     let names: Vec<_> = keel_opt::PASSES.iter().map(|p| p.name()).collect();
     assert_eq!(
-        &names[names.len() - 4..],
+        // Later opt-in passes may append without shifting these registrations.
+        &names[37..41],
         &[
             "adjacent-abs",
             "adjacent-diff",
