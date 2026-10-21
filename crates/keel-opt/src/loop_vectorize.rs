@@ -168,7 +168,9 @@ struct Candidate {
     extra_sums: Vec<Reduction>,
     // All streams use this scalar memory width. Accumulator lanes may be wider.
     stream_bytes: u32,
-    widening_loads: HashMap<Value, (Value, ConvertOp)>,
+    widening_inputs: HashMap<Value, (Value, ConvertOp)>,
+    // Each expression keeps its scalar ring; only explicit extensions widen.
+    widths: HashMap<Value, VectorType>,
 }
 struct Reduction {
     accumulator: Value,
@@ -318,8 +320,11 @@ impl Analyze<'_> {
         Some(())
     }
     fn expression(&mut self, v: Value, depth: usize) -> Option<()> {
+        self.expression_width(v, depth, self.c.shape)
+    }
+    fn expression_width(&mut self, v: Value, depth: usize, shape: VectorType) -> Option<()> {
         let v = self.f.resolve(v);
-        if depth > 32 || self.f.value_type(v) != self.c.shape.lane_type() {
+        if depth > 32 || self.f.value_type(v) != shape.lane_type() {
             return None;
         }
         if matches!(self.c.output, Output::Sum { accumulator, update, .. } if v == accumulator || v == update)
@@ -332,8 +337,9 @@ impl Analyze<'_> {
             return None;
         }
         if self.c.vectors.contains(&v) {
-            return Some(());
+            return (self.c.widths.get(&v).copied().unwrap_or(self.c.shape) == shape).then_some(());
         }
+        self.c.widths.insert(v, shape);
         if invariant(self.f, self.dom, self.c.pre, v) {
             self.c.vectors.insert(v);
             return Some(());
@@ -344,21 +350,20 @@ impl Analyze<'_> {
         }
         match *self.f.inst_data(i) {
             D::Load { flags, addr, .. } if !flags.volatile => {
-                if self.c.stream_bytes != self.c.shape.lane_type().bytes()? {
+                let bytes = shape.lane_type().bytes()?;
+                if !self.c.addresses.is_empty() && self.c.stream_bytes != bytes {
                     return None;
                 }
+                self.c.stream_bytes = bytes;
                 self.address(addr)?;
             }
             D::Binary { op, args } => {
-                self.target.binary(op, self.c.shape.lane_type())?;
+                self.target.binary(op, shape.lane_type())?;
                 for arg in args {
-                    self.expression(arg, depth + 1)?;
+                    self.expression_width(arg, depth + 1, shape)?;
                 }
             }
             D::Select { args } if self.conditional => {
-                // Only lane-wise integer predicates of the contribution width.
-                // Never turn a carried accumulator or a potentially trapping
-                // instruction in an arm into an unconditional vector operation.
                 let mask = self.f.resolve(args[0]);
                 let compare = def(self.f, mask)?;
                 let D::Icmp {
@@ -368,9 +373,17 @@ impl Analyze<'_> {
                 else {
                     return None;
                 };
+                let predicate_ty = self.f.value_type(operands[0]);
+                let predicate_shape = VectorType::ALL
+                    .into_iter()
+                    .find(|s| s.lane_type() == predicate_ty)?;
                 if self.f.inst_block(compare) != self.c.body
-                    || !matches!(self.c.shape.lane_type(), Type::I32 | Type::I64)
-                    || self.c.shape.lane_type() == Type::I64
+                    || !matches!(predicate_ty, Type::I32 | Type::I64)
+                    || predicate_shape != shape
+                        && !(self.target == VectorTarget::Aarch64Neon
+                            && predicate_ty == Type::I32
+                            && shape.lane_type() == Type::I64)
+                    || predicate_ty == Type::I64
                         && !matches!(
                             self.target,
                             VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
@@ -382,12 +395,13 @@ impl Analyze<'_> {
                     return None;
                 }
                 for operand in operands {
-                    self.expression(operand, depth + 1)?;
+                    self.expression_width(operand, depth + 1, predicate_shape)?;
                 }
                 for arm in &args[1..] {
-                    self.expression(*arm, depth + 1)?;
+                    self.expression_width(*arm, depth + 1, shape)?;
                 }
                 self.allowed.insert(compare);
+                self.c.widths.insert(mask, predicate_shape);
                 self.c.vectors.insert(mask);
             }
             D::Convert {
@@ -397,35 +411,37 @@ impl Analyze<'_> {
             } if self.conditional
                 && self.target == VectorTarget::Aarch64Neon
                 && matches!(self.c.output, Output::Sum { .. })
-                && def(self.f, arg)
-                    .is_some_and(|load| matches!(self.f.inst_data(load), D::Load { .. })) =>
+                && !def(self.f, arg).is_some_and(|i| {
+                    matches!(
+                        self.f.inst_data(i),
+                        D::Convert {
+                            op: ConvertOp::Trunc,
+                            ..
+                        }
+                    )
+                }) =>
             {
-                // A bounded first mixed-width case: extend a contiguous load
-                // before any arithmetic. Never commute extension across narrow
-                // arithmetic, whose wrap/sign bits are observable.
-                let load = def(self.f, arg)?;
-                let D::Load { ty, flags, addr } = *self.f.inst_data(load) else {
-                    unreachable!()
-                };
-                let bytes = ty.bytes()?;
-                if self.f.inst_block(load) != self.c.body
-                    || flags.volatile
-                    || !matches!(ty, Type::I8 | Type::I16 | Type::I32)
-                    || bytes >= self.c.shape.lane_type().bytes()?
-                    || !self.c.addresses.is_empty() && self.c.stream_bytes != bytes
+                let source = self.f.value_type(arg);
+                let source_shape = VectorType::ALL
+                    .into_iter()
+                    .find(|s| s.lane_type() == source)?;
+                if !matches!(source, Type::I8 | Type::I16 | Type::I32)
+                    || source.bytes()? >= shape.lane_type().bytes()?
+                    // Bound arithmetic/select support to i32 -> i64. Existing
+                    // smaller direct loads keep their original eligibility.
+                    || !(source == Type::I32 && shape.lane_type() == Type::I64)
+                        && !def(self.f, arg).is_some_and(|i| matches!(self.f.inst_data(i), D::Load { .. }))
                 {
                     return None;
                 }
-                self.c.stream_bytes = bytes;
-                self.address(addr)?;
-                self.allowed.insert(load);
-                self.c.widening_loads.insert(v, (self.f.resolve(arg), op));
+                self.expression_width(arg, depth + 1, source_shape)?;
+                self.c.widening_inputs.insert(v, (self.f.resolve(arg), op));
             }
             D::Convert {
                 op: ConvertOp::Uext | ConvertOp::Sext,
                 arg,
                 ..
-            } if self.casts => {
+            } if self.casts && shape == self.c.shape => {
                 // Keep lane count and address stride unchanged. A narrow value
                 // may only occur as the private intermediate of a round trip.
                 let narrow = def(self.f, arg)?;
@@ -690,7 +706,8 @@ fn analyze(
         casts: HashMap::new(),
         extra_sums,
         stream_bytes: shape.lane_type().bytes()?,
-        widening_loads: HashMap::new(),
+        widening_inputs: HashMap::new(),
+        widths: HashMap::new(),
     };
     let mut a = Analyze {
         f,
@@ -773,6 +790,93 @@ fn analyze(
         }
     }
     Some(a.c)
+}
+// Source vectors can have more physical lanes than the reduction. Only the
+// low reduction-lane count is observed, including after source-width arithmetic.
+fn reduction_load(
+    f: &mut Function,
+    block: Block,
+    reduction: VectorType,
+    shape: VectorType,
+    source: Type,
+    mut flags: keel_ir::MemoryFlags,
+    addr: Value,
+) -> Value {
+    flags.align = flags.align.min(source.bytes().unwrap());
+    if shape == reduction {
+        return emit(
+            f,
+            block,
+            D::Load {
+                ty: Type::Vector(shape),
+                flags,
+                addr,
+            },
+        );
+    }
+    let packed_bytes = u32::from(reduction.lanes()) * source.bytes().unwrap();
+    let packed_ty = match packed_bytes {
+        2 => Type::I16,
+        4 => Type::I32,
+        8 => Type::I64,
+        _ => unreachable!(),
+    };
+    let bits = emit(
+        f,
+        block,
+        D::Load {
+            ty: packed_ty,
+            flags,
+            addr,
+        },
+    );
+    let packed_shape = VectorType::ALL
+        .into_iter()
+        .find(|s| s.lane_type() == packed_ty)
+        .unwrap();
+    let packed = emit(
+        f,
+        block,
+        D::VectorSplat {
+            ty: Type::Vector(packed_shape),
+            arg: bits,
+        },
+    );
+    emit(
+        f,
+        block,
+        D::Convert {
+            op: ConvertOp::Bitcast,
+            ty: Type::Vector(shape),
+            arg: packed,
+        },
+    )
+}
+fn select_mask(
+    f: &mut Function,
+    block: Block,
+    c: &Candidate,
+    mapping: &HashMap<Value, Value>,
+    mask: Value,
+    shape: VectorType,
+) -> Value {
+    let mask = f.resolve(mask);
+    let value = mapping[&mask];
+    if c.widths[&mask] == shape {
+        value
+    } else {
+        // Integer compares produce all-ones/zero masks. Sign extension keeps
+        // that canonical representation across the explicit lane boundary.
+        emit(
+            f,
+            block,
+            D::Convert {
+                op: ConvertOp::SwidenLow,
+                ty: Type::Vector(shape),
+                arg: value,
+            },
+        )
+    }
 }
 fn emit(f: &mut Function, b: Block, d: D) -> Value {
     let i = f.append_inst(b, d);
@@ -892,7 +996,7 @@ fn reduce_body(
             f,
             setup,
             D::VectorSplat {
-                ty: Type::Vector(c.shape),
+                ty: Type::Vector(c.widths.get(&v).copied().unwrap_or(c.shape)),
                 arg: scalar,
             },
         );
@@ -982,19 +1086,25 @@ fn reduce_body(
             if !result.is_some_and(|v| c.vectors.contains(&v)) {
                 continue;
             }
+            let shape = result
+                .and_then(|v| c.widths.get(&v).copied())
+                .unwrap_or(c.shape);
             let data = match *f.inst_data(i) {
-                D::Load {
-                    mut flags, addr, ..
-                } => {
-                    flags.align = flags.align.min(c.shape.lane_type().bytes().unwrap());
-                    D::Load {
+                D::Load { flags, addr, ty } => {
+                    let loaded = reduction_load(
+                        f,
+                        vector,
+                        c.shape,
+                        shape,
+                        ty,
                         flags,
-                        ty: Type::Vector(c.shape),
-                        addr: mapping[&f.resolve(addr)],
-                    }
+                        mapping[&f.resolve(addr)],
+                    );
+                    mapping.insert(result.unwrap(), loaded);
+                    continue;
                 }
                 D::Binary { op, args } => D::VectorBinary {
-                    op: target.binary(op, c.shape.lane_type()).unwrap(),
+                    op: target.binary(op, shape.lane_type()).unwrap(),
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
                 D::Icmp { cond, args } => D::VectorIcmp {
@@ -1006,74 +1116,28 @@ fn reduce_body(
                 // a packed AND, with no second mask normalization or blending.
                 D::Select { args } if constant(f, args[2]) == Some(0) => D::VectorBinary {
                     op: V::And,
-                    args: [mapping[&f.resolve(args[0])], mapping[&f.resolve(args[1])]],
+                    args: [
+                        select_mask(f, vector, c, &mapping, args[0], shape),
+                        mapping[&f.resolve(args[1])],
+                    ],
                 },
                 D::Select { args } => D::VectorSelect {
-                    args: args.map(|v| mapping[&f.resolve(v)]),
+                    args: [
+                        select_mask(f, vector, c, &mapping, args[0], shape),
+                        mapping[&f.resolve(args[1])],
+                        mapping[&f.resolve(args[2])],
+                    ],
                 },
-                D::Convert { .. } if c.widening_loads.contains_key(&result.unwrap()) => {
-                    let (load, op) = c.widening_loads[&result.unwrap()];
-                    let D::Load {
-                        ty: source,
-                        mut flags,
-                        addr,
-                    } = *f.inst_data(def(f, load).unwrap())
-                    else {
-                        unreachable!()
-                    };
-                    // Load exactly destination_lanes * source_bytes, then
-                    // reinterpret a splat of those packed bits. WidenLow only
-                    // observes those low lanes; repeated high bits are ignored.
-                    let packed_bytes = u32::from(c.shape.lanes()) * source.bytes().unwrap();
-                    let packed_ty = match packed_bytes {
-                        2 => Type::I16,
-                        4 => Type::I32,
-                        8 => Type::I64,
-                        _ => unreachable!(),
-                    };
-                    flags.align = flags.align.min(source.bytes().unwrap());
-                    let bits = emit(
-                        f,
-                        vector,
-                        D::Load {
-                            ty: packed_ty,
-                            flags,
-                            addr: mapping[&f.resolve(addr)],
-                        },
-                    );
-                    let packed_shape = VectorType::ALL
-                        .into_iter()
-                        .find(|s| s.lane_type() == packed_ty)
-                        .unwrap();
-                    let packed = emit(
-                        f,
-                        vector,
-                        D::VectorSplat {
-                            ty: Type::Vector(packed_shape),
-                            arg: bits,
-                        },
-                    );
-                    let source_shape = VectorType::ALL
-                        .into_iter()
-                        .find(|s| s.lane_type() == source)
-                        .unwrap();
-                    let packed = emit(
-                        f,
-                        vector,
-                        D::Convert {
-                            op: ConvertOp::Bitcast,
-                            ty: Type::Vector(source_shape),
-                            arg: packed,
-                        },
-                    );
+                D::Convert { .. } if c.widening_inputs.contains_key(&result.unwrap()) => {
+                    let (input, op) = c.widening_inputs[&result.unwrap()];
                     D::Convert {
                         op: if op == ConvertOp::Sext {
                             ConvertOp::SwidenLow
                         } else {
                             ConvertOp::UwidenLow
                         },
-                        ty: Type::Vector(c.shape),
-                        arg: packed,
+                        ty: Type::Vector(shape),
+                        arg: mapping[&input],
                     }
                 }
                 D::Convert { .. } if c.casts.contains_key(&result.unwrap()) => {
