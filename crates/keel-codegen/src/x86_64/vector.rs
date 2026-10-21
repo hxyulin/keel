@@ -79,6 +79,15 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorBinary { op, args } => {
             packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
         }
+        InstData::Convert {
+            op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+            ..
+        } => true,
+        InstData::Convert {
+            op: ConvertOp::Bitcast,
+            ty,
+            arg,
+        } => ty.is_vector() && func.value_type(*arg).is_vector(),
         InstData::VectorSelect { .. } | InstData::VectorSplat { .. } => true,
         InstData::VectorIcmp { cond, args } => {
             packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
@@ -119,6 +128,44 @@ impl FunctionCompiler<'_> {
             self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(FS0))]);
         }
         self.def_done(result, d);
+    }
+    pub(super) fn vector_convert(
+        &mut self,
+        op: ConvertOp,
+        to: Type,
+        arg: Value,
+        result: Option<Value>,
+    ) {
+        // Stage before defining the result. FS0/FS1 are reserved, so no
+        // allocated source (including one live after this instruction) changes.
+        // A spilled source and result may each use FS0 at different times.
+        self.vector_stage(arg, FS0);
+        if op != ConvertOp::Bitcast {
+            let mut width = self.ty(arg).vector().unwrap().lane_type().bytes().unwrap();
+            let target = to.vector().unwrap().lane_type().bytes().unwrap();
+            if op == ConvertOp::UwidenLow {
+                self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+            }
+            while width < target {
+                let (unpack, compare) = match width {
+                    1 => (Opcode::Punpcklbw, Opcode::Pcmpgtb),
+                    2 => (Opcode::Punpcklwd, Opcode::Pcmpgtw),
+                    4 => (Opcode::Punpckldq, Opcode::Pcmpgtd),
+                    _ => unreachable!("invalid integer widening width"),
+                };
+                if op == ConvertOp::SwidenLow {
+                    // 0 > lane produces its sign extension, then low unpack
+                    // interleaves each original lane with those high bits.
+                    self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+                    self.emit(compare, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0))]);
+                }
+                self.emit(unpack, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                width *= 2;
+            }
+        }
+        // movaps is a bitwise register move for every vector shape, including
+        // FP NaNs and signed zero. Memory traffic remains in the load/store IR.
+        self.vector_publish(result);
     }
     pub(super) fn vector_splat(&mut self, ty: Type, arg: Value, result: Option<Value>) {
         let shape = ty.vector().unwrap();

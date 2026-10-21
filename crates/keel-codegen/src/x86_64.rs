@@ -1277,6 +1277,9 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(Opcode::Mov, [asm_arg(&(r64(d))), asm_arg(&(r64(0)))]);
                 self.def_done(result, d);
             }
+            InstData::Convert { op, ty, arg } if ty.is_vector() && self.ty(arg).is_vector() => {
+                self.vector_convert(op, ty, arg, result);
+            }
             InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
                 self.float_convert(inst, op, ty, arg, result);
             }
