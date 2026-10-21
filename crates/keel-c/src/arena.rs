@@ -30,6 +30,13 @@ impl BodyArena {
         // SAFETY: the box is only freed when `self` is dropped.
         unsafe { self.0.as_ref() }
     }
+
+    /// Bytes of nodes in it, about: a measure of the function's size.
+    pub fn used_bytes(&self) -> usize {
+        // SAFETY: nothing allocated is used.
+        let bump = unsafe { self.get() };
+        bump.allocated_bytes() - bump.chunk_capacity()
+    }
 }
 
 impl Drop for BodyArena {

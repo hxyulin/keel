@@ -957,6 +957,16 @@ impl Function {
         value
     }
 
+    /// Makes room for about this many more instructions, values and
+    /// blocks, for a builder that can estimate the function's size.
+    pub fn reserve(&mut self, insts: usize, values: usize, blocks: usize) {
+        self.insts.reserve(insts);
+        self.values.reserve(values);
+        self.result_pool.reserve(values);
+        self.blocks.reserve(blocks);
+        self.layout.reserve(blocks);
+    }
+
     /// Number of values ever created; value indices are below this.
     #[inline]
     pub fn num_values(&self) -> usize {

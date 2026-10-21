@@ -101,6 +101,12 @@ impl<K: EntityRef, V> Arena<K, V> {
         self.items.len()
     }
 
+    /// Makes room for `additional` more entities.
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.items.reserve(additional);
+    }
+
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()

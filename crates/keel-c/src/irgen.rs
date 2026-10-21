@@ -433,6 +433,12 @@ impl<'p> Gen<'p> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
         let mut func = Function::new(global.symbol.to_owned(), sig.clone());
+        // Most functions take 110 to 180 bytes of tree per instruction (a
+        // little more per value), and 500 to 900 per block. Reserving as if
+        // each took more than nearly any does skips most of the reallocation
+        // without leaving functions with room they never use.
+        let tree = def.nodes.used_bytes();
+        func.reserve(tree / 192, tree / 224, tree / 1024);
         // Only the definition's own parameter objects supply restrict facts.
         // Declarations and ABI signatures deliberately carry none.
         for (index, &id) in def.params.iter().enumerate() {
