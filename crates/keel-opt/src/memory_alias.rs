@@ -9,8 +9,8 @@
 //! callers: read-only restricted pointers may alias. Both roots must retain
 //! their definition-only entry contracts and have only recognized address uses.
 //! Inlined/cloned parameters have no such entry contract; never synthesize one.
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{BinaryOp, Function, InstData, Type, Value, ValueDef};
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Address {
@@ -19,15 +19,15 @@ pub(crate) struct Address {
 }
 
 pub(crate) struct AliasInfo {
-    addresses: HashMap<Value, Address>,
-    restricted: HashSet<Value>,
+    addresses: FxHashMap<Value, Address>,
+    restricted: FxHashSet<Value>,
 }
 
 impl AliasInfo {
     pub(crate) fn compute(func: &Function) -> Self {
         let mut info = Self {
-            addresses: HashMap::new(),
-            restricted: HashSet::new(),
+            addresses: FxHashMap::default(),
+            restricted: FxHashSet::default(),
         };
         if let Some(entry) = func.entry_block() {
             for &index in &func.restrict_params {
@@ -86,7 +86,7 @@ impl AliasInfo {
     fn record(&mut self, func: &Function, value: Value) {
         let mut v = func.resolve(value);
         let mut path = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         while !self.addresses.contains_key(&v) {
             if !seen.insert(v) {
                 for (v, _) in path {

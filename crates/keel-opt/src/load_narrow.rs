@@ -5,7 +5,7 @@
 
 use crate::{Pass, VectorTarget};
 use keel_ir::{BinaryOp, ConvertOp, Function, InsertPoint, InstData, Type, Value, ValueDef};
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap;
 
 pub(crate) struct LoadNarrow;
 
@@ -67,8 +67,8 @@ fn run_little_endian(func: &mut Function) -> bool {
     // Map only owning result keys, never a resolved alias of a dead definition.
     // Each value records bytes remaining in its fixed allocation, so additions
     // are checked without relying on pointer wraparound or dereferenceability.
-    let sizes: HashMap<_, _> = func.stack_slots().map(|(s, d)| (s, d.size)).collect();
-    let mut addresses = HashMap::<Value, u32>::new();
+    let sizes: FxHashMap<_, _> = func.stack_slots().map(|(s, d)| (s, d.size)).collect();
+    let mut addresses = FxHashMap::<Value, u32>::default();
     for &inst in &instructions {
         if let InstData::StackAddr { slot } = func.inst_data(inst) {
             let value = func.first_result(inst);
@@ -140,7 +140,7 @@ fn run_little_endian(func: &mut Function) -> bool {
 
     // Count resolved operands, including operands in alias-bearing instructions
     // still in layout. Overcounting those dead uses is deliberately conservative.
-    let mut uses = HashMap::<Value, usize>::new();
+    let mut uses = FxHashMap::<Value, usize>::default();
     for &inst in &instructions {
         func.inst_data(inst).for_each_operand(|value| {
             *uses.entry(func.resolve(value)).or_default() += 1;

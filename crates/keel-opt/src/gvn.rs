@@ -13,8 +13,8 @@
 //! may see different memory.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp};
-use std::collections::HashMap;
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -24,7 +24,7 @@ pub fn run(func: &mut Function) -> bool {
     };
     let children = domtree.children();
 
-    let mut table: HashMap<InstData, Inst> = HashMap::new();
+    let mut table: FxHashMap<InstData, Inst> = FxHashMap::default();
     // Keys added, in order, so a scope can be popped.
     let mut added: Vec<InstData> = Vec::new();
     // (block, scope start in `added`, whether its instructions were visited)

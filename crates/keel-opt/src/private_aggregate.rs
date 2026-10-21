@@ -8,11 +8,11 @@
 //! Mixed ARM register/stack byval signatures are excluded to preserve source
 //! read/fault order on both supported targets. Sret is preserved verbatim;
 //! result transport optimization is out of scope.
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryEffects,
     MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 /// Explicit named/custom-pipeline entry point; absent from default pipelines.
 pub struct PrivateAggregate;
@@ -231,8 +231,8 @@ pub fn run(m: &mut Module) -> usize {
         return 0;
     }
     let mut work = 0usize;
-    let mut blocked = HashSet::new();
-    let mut seen = HashSet::new();
+    let mut blocked = FxHashSet::default();
+    let mut seen = FxHashSet::default();
     for d in &m.decls {
         blocked.insert(d.name.clone());
     }
@@ -286,7 +286,7 @@ pub fn run(m: &mut Module) -> usize {
             return 0;
         }
     }
-    let mut plans: HashMap<_, _> = m
+    let mut plans: FxHashMap<_, _> = m
         .functions
         .iter()
         .filter(|f| !blocked.contains(&f.name))
@@ -382,7 +382,7 @@ pub fn run(m: &mut Module) -> usize {
         let entry = f.entry_block().unwrap();
         let at = InsertPoint::Before(f.block_insts(entry)[0]);
         let prefix = f.block_insts(entry).to_vec();
-        let mut homes = HashMap::new();
+        let mut homes = FxHashMap::default();
         let old = f.block_params(entry).to_vec();
         for index in (0..old.len()).rev() {
             f.remove_block_param(entry, index);

@@ -6,12 +6,12 @@
 //! Whole iterations are cloned in order, including both loads, before beginning
 //! the next iteration; only the non-observable wrapping sum is reassociated.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::loops::LoopDepth;
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
     Type, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 pub(crate) struct LoopUnroll;
 impl crate::Pass for LoopUnroll {
@@ -186,7 +186,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     }
     let mut loads = 0;
-    let mut local = HashSet::new();
+    let mut local = FxHashSet::default();
     for &i in &insts[..insts.len() - 1] {
         match f.inst_data(i) {
             D::Iconst { ty, .. } if ty.is_int() => {}
@@ -257,7 +257,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             }
         }
     }
-    let mut live = HashSet::from([next_iv, next_sum]);
+    let mut live = FxHashSet::from_iter([next_iv, next_sum]);
     live.extend(extras.iter().map(|e| e.2));
     for &i in insts[..insts.len() - 1].iter().rev() {
         for v in f.inst_results(i) {
@@ -349,7 +349,7 @@ fn transform(f: &mut Function, c: Candidate) {
     let mut sums = [lane0, lane1];
     let mut extra_values = extra_params.clone();
     for lane in &mut sums {
-        let mut map = HashMap::from([(c.iv, next_iv), (c.sum, *lane)]);
+        let mut map = FxHashMap::from_iter([(c.iv, next_iv), (c.sum, *lane)]);
         map.extend(c.extras.iter().zip(&extra_values).map(|(e, &v)| (e.0, v)));
         for &i in &originals[..originals.len() - 1] {
             let mut data = f.inst_data(i).clone();

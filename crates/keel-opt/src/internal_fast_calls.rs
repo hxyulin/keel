@@ -1,8 +1,8 @@
 //! Final private transport for contained direct calls, including removal of
 //! C-only extension contracts. Backends may specialize eligible private leaves.
 use crate::Pass;
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{ArgExt, CallConv, DataItem, Function, InstData, Module, Purpose, Symbol};
-use std::collections::{HashMap, HashSet};
 
 pub struct InternalFastCalls;
 impl Pass for InternalFastCalls {
@@ -21,7 +21,7 @@ impl Pass for InternalFastCalls {
 }
 
 fn run(module: &mut Module) -> bool {
-    let mut blocked = HashSet::new();
+    let mut blocked = FxHashSet::default();
     for object in &module.data {
         if let Some(init) = &object.init {
             for item in &init.items {
@@ -57,7 +57,7 @@ fn run(module: &mut Module) -> bool {
             }
         }
     }
-    let mut signatures = HashMap::new();
+    let mut signatures = FxHashMap::default();
     for f in &mut module.functions {
         if !f.local
             || f.weak_odr

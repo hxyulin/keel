@@ -14,8 +14,8 @@
 //! field, or an explicit notrap promise on the later load. Stores stay pinned.
 use crate::memory_alias::{Address, AliasInfo};
 use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{EntityRef, Function, InstData, Type, Value, ValueDef};
-use std::collections::HashMap;
 
 pub struct LoadReuse;
 impl crate::Pass for LoadReuse {
@@ -39,7 +39,7 @@ struct Fact {
     addr: Value,
     readable: bool,
 }
-type Facts = HashMap<(Address, Type), Fact>;
+type Facts = FxHashMap<(Address, Type), Fact>;
 
 fn incoming(
     func: &Function,
@@ -49,19 +49,19 @@ fn incoming(
 ) -> (usize, Facts) {
     let preds = cfg.preds(block);
     if Some(block) == func.entry_block() || preds.is_empty() || preds.len() > MAX_PREDS {
-        return (0, Facts::new());
+        return (0, Facts::default());
     }
     let mut depth = 0;
     // Refuse the entire merge if any predecessor has not completed, including
     // loop backedges. Never run a fixed point or invent phi memory values.
     for pred in preds {
         let Some((pred_depth, _)) = &exits[pred.index()] else {
-            return (0, Facts::new());
+            return (0, Facts::default());
         };
         depth = depth.max(*pred_depth);
     }
     if depth >= MAX_EDGES {
-        return (0, Facts::new());
+        return (0, Facts::default());
     }
     let mut facts = exits[preds[0].index()].as_ref().unwrap().1.clone();
     for pred in &preds[1..] {

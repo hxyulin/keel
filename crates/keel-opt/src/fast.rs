@@ -7,8 +7,8 @@
 //! these limits are not a claim of strict linear time for arbitrary input.
 
 use crate::{Pass, instcombine, simplify_cfg};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Block, EntityRef, Function, Inst, InstData};
-use std::collections::HashMap;
 
 const LOCAL_EXPRESSIONS: usize = 256;
 const MERGED_INSTRUCTIONS: usize = 64;
@@ -78,8 +78,8 @@ impl Pass for Local {
     }
     fn run(&self, func: &mut Function) -> bool {
         let mut changed = false;
-        let mut table: HashMap<InstData, Inst> = HashMap::new();
-        let mut quotients = instcombine::Quotients::new();
+        let mut table: FxHashMap<InstData, Inst> = FxHashMap::default();
+        let mut quotients = instcombine::Quotients::default();
         for block in reverse_postorder(func) {
             table.clear();
             quotients.clear();

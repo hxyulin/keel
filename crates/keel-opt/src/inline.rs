@@ -8,11 +8,11 @@
 //! the removed call pays for the jump entering the cloned body.
 use crate::{InlineSite, Pass};
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic,
     Module, Purpose, Symbol, Type,
 };
-use std::collections::{HashMap, HashSet};
 
 pub struct Inline;
 impl Pass for Inline {
@@ -514,7 +514,7 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
 // become templates. A cycle can pass through a noinline, public, tail-calling,
 // or exception-handling function. External and indirect calls add no edges.
 fn recursive_definitions(module: &Module) -> Vec<bool> {
-    let definitions: HashMap<_, _> = module
+    let definitions: FxHashMap<_, _> = module
         .functions
         .iter()
         .enumerate()
@@ -616,20 +616,20 @@ fn run_observed_policy(
     // Use the entire structural candidate set for edge checks, including
     // candidates outside an SCC or without legal binding. Binding changes must
     // not turn a formerly opaque small wrapper into a second expansion level.
-    let wrapper_bodies: HashSet<_> = module
+    let wrapper_bodies: FxHashSet<_> = module
         .functions
         .iter()
         .filter(|f| admit_noninterposable && small_scc_wrapper(f))
         .map(|f| f.name.clone())
         .collect();
-    let recursive_bodies: HashSet<_> = module
+    let recursive_bodies: FxHashSet<_> = module
         .functions
         .iter()
         .enumerate()
         .filter(|(i, f)| recursive[*i] && wrapper_bodies.contains(&f.name))
         .map(|(_, f)| f.name.clone())
         .collect();
-    let wrappers: HashSet<_> = module
+    let wrappers: FxHashSet<_> = module
         .functions
         .iter()
         .enumerate()
@@ -650,13 +650,13 @@ fn run_observed_policy(
             .iter()
             .filter(|f| f.attrs.alwaysinline)
             .map(|f| f.name.clone())
-            .collect::<HashSet<_>>()
+            .collect::<FxHashSet<_>>()
     });
     // Freeze both templates and their rejection decisions at pass entry.
     // Keep the existing diagnostic precedence (noinline, recursion, legality,
     // profitability); the event stream uses these decisions, not a later probe.
-    let mut templates = HashMap::new();
-    let mut rejected = HashMap::new();
+    let mut templates = FxHashMap::default();
+    let mut rejected = FxHashMap::default();
     for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f, admit_noninterposable);
         let profitability = if legality.is_none() {
@@ -701,12 +701,12 @@ fn run_observed_policy(
                 .collect()
         })
         .collect();
-    let tiny_templates: HashSet<_> = templates
+    let tiny_templates: FxHashSet<_> = templates
         .values()
         .filter(|f| admit_noninterposable && tiny_priority_leaf(f))
         .map(|f| f.name.as_str())
         .collect();
-    let priority_sites: Vec<HashSet<_>> = module
+    let priority_sites: Vec<FxHashSet<_>> = module
         .functions
         .iter()
         .zip(&original_sites)
@@ -1026,11 +1026,11 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
             *arg = dst;
         }
     }
-    let slots: HashMap<_, _> = callee
+    let slots: FxHashMap<_, _> = callee
         .stack_slots()
         .map(|(slot, data)| (slot, caller.create_stack_slot(data.size, data.align)))
         .collect();
-    let refs: HashMap<_, _> = callee
+    let refs: FxHashMap<_, _> = callee
         .callees()
         .map(|(r, decl)| {
             let imported = caller.import_function(&decl.name, decl.sig.clone());
@@ -1038,11 +1038,11 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
             (r, imported)
         })
         .collect();
-    let data: HashMap<_, _> = callee
+    let data: FxHashMap<_, _> = callee
         .data_symbols()
         .map(|(r, name)| (r, caller.import_data(name)))
         .collect();
-    let sigs: HashMap<_, _> = callee
+    let sigs: FxHashMap<_, _> = callee
         .signatures()
         .map(|(r, sig)| (r, caller.import_signature(sig.clone())))
         .collect();
@@ -1068,8 +1068,8 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
     }
     let cfg = ControlFlowGraph::compute(callee);
     let dom = DominatorTree::compute(callee, &cfg);
-    let mut blocks = HashMap::new();
-    let mut values = HashMap::new();
+    let mut blocks = FxHashMap::default();
+    let mut values = FxHashMap::default();
     for &old in dom.rpo() {
         let new = caller.create_block();
         blocks.insert(old, new);

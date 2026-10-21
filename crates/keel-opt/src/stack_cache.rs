@@ -6,12 +6,12 @@
 //! reads are confined to valid, in-bounds fixed slots; Keel's uninitialized
 //! memory is stable, so this does not invent values or speculate faults.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopDepth;
 use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData as D, MemoryFlags, StackSlot, Type, Value,
     ValueDef,
 };
-use std::collections::HashMap;
 
 pub(crate) struct StackCache;
 impl crate::Pass for StackCache {
@@ -63,8 +63,8 @@ pub fn run(f: &mut Function) -> bool {
     if !cfg.preds(entry).is_empty() || cfg.reverse_postorder(f).len() != blocks.len() {
         return false;
     }
-    let sizes: HashMap<_, _> = f.stack_slots().map(|(s, d)| (s, d.size as usize)).collect();
-    let mut addresses = HashMap::new();
+    let sizes: FxHashMap<_, _> = f.stack_slots().map(|(s, d)| (s, d.size as usize)).collect();
+    let mut addresses = FxHashMap::default();
     for &(_, i) in &instructions {
         if let D::StackAddr { slot } = *f.inst_data(i)
             && f.resolve(f.first_result(i)) == f.first_result(i)
@@ -123,7 +123,7 @@ pub fn run(f: &mut Function) -> bool {
         .map(|i| (entry, i))
         .chain(instructions.iter().copied().filter(|&(b, _)| b != entry))
         .collect();
-    let mut accesses = HashMap::new();
+    let mut accesses = FxHashMap::default();
     let mut fields = Vec::new();
     for &(_, i) in &suffix {
         let key = match *f.inst_data(i) {

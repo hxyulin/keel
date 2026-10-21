@@ -38,9 +38,9 @@
 //! of a loop that runs zero times) is harmless.
 
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopDepth;
 use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
-use std::collections::HashMap;
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -205,7 +205,7 @@ fn rematerialize(
         return true;
     }
     let mut blocks: Vec<Block> = Vec::new();
-    let mut local_users: HashMap<Block, Vec<Inst>> = HashMap::new();
+    let mut local_users: FxHashMap<Block, Vec<Inst>> = FxHashMap::default();
     for &user in users {
         let b = func.inst_block(user);
         let local = local_users.entry(b).or_default();

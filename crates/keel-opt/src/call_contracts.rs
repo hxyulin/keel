@@ -1,7 +1,7 @@
 //! Consume explicit direct-callee contracts, without inferring contracts from bodies.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashSet;
 use keel_ir::{Block, Clause, EntityRef, Function, Inst, InstData, ValueDef};
-use std::collections::HashSet;
 
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
@@ -134,11 +134,11 @@ fn deletion_plan(
         return None;
     }
     let dead: Vec<_> = func.blocks().filter(|b| !reachable[b.index()]).collect();
-    let mut removed: HashSet<Inst> = suffix.iter().copied().collect();
+    let mut removed: FxHashSet<Inst> = suffix.iter().copied().collect();
     for &block in &dead {
         removed.extend(func.block_insts(block));
     }
-    let mut catches = HashSet::new();
+    let mut catches = FxHashSet::default();
     for (_, inst) in func.layout_insts().filter(|(_, i)| !removed.contains(i)) {
         if let InstData::LandingPad { clauses } = func.inst_data(inst) {
             for clause in clauses {

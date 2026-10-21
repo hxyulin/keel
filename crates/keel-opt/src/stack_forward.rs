@@ -5,10 +5,10 @@
 //! handles union temporaries exposed by aggregate helpers without assuming that
 //! arbitrary pointers cannot alias.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 /// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
 /// only when it directly exposes a previously nonconstant branch operand.
@@ -43,8 +43,8 @@ pub fn run_with_cfg(func: &mut Function) -> bool {
 pub fn run(func: &mut Function) -> bool {
     // Propagate addresses only along constant in-bounds ptradd chains. Any
     // other use, including storing/passing/returning an address, escapes it.
-    let mut addresses = HashMap::new();
-    let sizes: HashMap<_, _> = func
+    let mut addresses = FxHashMap::default();
+    let sizes: FxHashMap<_, _> = func
         .stack_slots()
         .map(|(s, d)| (s, d.size as usize))
         .collect();
@@ -79,7 +79,7 @@ pub fn run(func: &mut Function) -> bool {
     // Debugger-visible homes may be edited at a breakpoint. Their reads
     // must continue to observe memory even when the program never escapes
     // the address itself.
-    let mut escaped: HashSet<_> = func.debug_vars.iter().map(|v| v.slot).collect();
+    let mut escaped: FxHashSet<_> = func.debug_vars.iter().map(|v| v.slot).collect();
     // These operations can inspect the frame or invalidate captured state,
     // even without receiving a fixed-slot address as an explicit argument.
     if instructions.iter().any(|&i| match func.inst_data(i) {
@@ -97,7 +97,7 @@ pub fn run(func: &mut Function) -> bool {
     // A saved SP can itself become a frame observer if inspected, converted,
     // passed or used as an address. Only opaque marks used directly by restore
     // qualify; do not infer this from the absence of fixed-slot address escapes.
-    let mut marks = HashSet::new();
+    let mut marks = FxHashSet::default();
     for &inst in &instructions {
         if matches!(
             func.inst_data(inst),
@@ -190,7 +190,7 @@ pub fn run(func: &mut Function) -> bool {
     // of a different type. A cross-block fact is eligible only if every byte
     // in its range has exactly one syntactic writer in the whole function.
     // This avoids phi nodes and iterative memory dataflow at joins/loops.
-    let mut writers = HashMap::<(StackSlot, usize), usize>::new();
+    let mut writers = FxHashMap::<(StackSlot, usize), usize>::default();
     let mut stores = Vec::new();
     for block in func.blocks().filter(|_| !local_only) {
         for (position, &inst) in func.block_insts(block).iter().enumerate() {
@@ -208,7 +208,7 @@ pub fn run(func: &mut Function) -> bool {
             }
         }
     }
-    let unique: HashMap<_, _> = stores
+    let unique: FxHashMap<_, _> = stores
         .into_iter()
         .filter(|&((slot, offset, _), _, width)| {
             (offset..offset + width).all(|n| writers[&(slot, n)] == 1)
@@ -218,7 +218,7 @@ pub fn run(func: &mut Function) -> bool {
     // A uniquely written integer piece also defines its integer subranges.
     // Enumerate at most 20 proper subranges per eight-byte store, retaining
     // the same whole-range writer proof. Never reinterpret floats or pointers.
-    let mut subranges = HashMap::new();
+    let mut subranges = FxHashMap::default();
     for (&(slot, offset, ty), &(block, position, value)) in &unique {
         let Some(width) = integer_width(ty) else {
             continue;
@@ -258,10 +258,10 @@ pub fn run(func: &mut Function) -> bool {
         DominatorTree::compute(func, &cfg)
     });
     let mut changed = false;
-    let mut remaining_loads = HashSet::new();
+    let mut remaining_loads = FxHashSet::default();
     for block in func.blocks().collect::<Vec<_>>() {
-        let mut bytes: HashMap<(StackSlot, usize), (Value, usize)> = HashMap::new();
-        let mut exact: HashMap<(StackSlot, usize, Type), Value> = HashMap::new();
+        let mut bytes: FxHashMap<(StackSlot, usize), (Value, usize)> = FxHashMap::default();
+        let mut exact: FxHashMap<(StackSlot, usize, Type), Value> = FxHashMap::default();
         for (position, inst) in func.block_insts(block).to_vec().into_iter().enumerate() {
             match *func.inst_data(inst) {
                 InstData::Store { addr, value, .. } => {

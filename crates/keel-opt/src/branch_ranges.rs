@@ -2,8 +2,8 @@
 //! dominator subtrees and never transported through memory or block arguments.
 //! Exact equality facts also cover pointers; they establish no dereferenceability.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{EntityRef, Function, InstData, IntCC, Type, Value, ValueDef};
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Range {
@@ -116,9 +116,9 @@ pub fn run(func: &mut Function) -> bool {
         return false;
     };
     let children = dom.children();
-    let mut facts: HashMap<Key, Range> = HashMap::new();
+    let mut facts: FxHashMap<Key, Range> = FxHashMap::default();
     let mut undo: Vec<(Key, Option<Range>)> = Vec::new();
-    let mut equalities: HashMap<Equality, bool> = HashMap::new();
+    let mut equalities: FxHashMap<Equality, bool> = FxHashMap::default();
     let mut equality_undo = Vec::new();
     let mut stack = vec![(entry, 0, 0, false)];
     let mut changed = false;

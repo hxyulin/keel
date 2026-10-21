@@ -3,11 +3,11 @@
 //! Arm instructions use an explicit nontrapping scalar allowlist; memory, calls, division, floating
 //! point, exception operations and aliased definitions are never speculated.
 use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, Type,
     UnaryOp, Value,
 };
-use std::collections::{HashMap, HashSet};
 
 const ARM_BUDGET: usize = 8;
 const SELECT_BUDGET: usize = 8;
@@ -67,7 +67,7 @@ pub fn run(f: &mut Function) -> bool {
         let arms: Vec<_> = left.blocks.iter().chain(&right.blocks).copied().collect();
         // Moving definitions must not change their availability to other
         // users, including uses in unreachable blocks and noncanonical IR.
-        let defs: HashSet<_> = arms
+        let defs: FxHashSet<_> = arms
             .iter()
             .flat_map(|&b| {
                 f.block_params(b).iter().copied().chain(
@@ -138,7 +138,7 @@ fn paths(f: &Function, cfg: &ControlFlowGraph, head: Block, edge: &BlockCall) ->
     };
     let mut result = vec![path.clone()];
     let mut previous = head;
-    let mut mapping = HashMap::new();
+    let mut mapping = FxHashMap::default();
     while path.blocks.len() < BLOCK_BUDGET {
         let b = path.edge.block;
         if b == head

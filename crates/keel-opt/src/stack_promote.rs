@@ -4,10 +4,10 @@
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
 use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 type Field = (StackSlot, usize, Type);
 
@@ -83,8 +83,8 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     if rpo.len() != blocks.len() || !cfg.preds(entry).is_empty() {
         return false;
     }
-    let sizes: HashMap<_, _> = f.stack_slots().map(|(s, d)| (s, d.size as usize)).collect();
-    let mut addresses = HashMap::new();
+    let sizes: FxHashMap<_, _> = f.stack_slots().map(|(s, d)| (s, d.size as usize)).collect();
+    let mut addresses = FxHashMap::default();
     for &i in &insts {
         if let InstData::StackAddr { slot } = *f.inst_data(i) {
             let v = f.first_result(i);
@@ -114,10 +114,10 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             break;
         }
     }
-    let mut escaped: HashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
-    let mut accesses: HashMap<_, Field> = HashMap::new();
+    let mut escaped: FxHashSet<_> = f.debug_vars.iter().map(|v| v.slot).collect();
+    let mut accesses: FxHashMap<_, Field> = FxHashMap::default();
     let mut fields = Vec::new();
-    let mut seen_fields = HashSet::new();
+    let mut seen_fields = FxHashSet::default();
     for &i in &insts {
         let d = f.inst_data(i);
         d.for_each_operand(|v| {
@@ -171,7 +171,7 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     // endianness. Do not reinterpret arbitrary integer bits or pointer values.
     // Keep these stores in memory when they initialize a narrower field: their
     // other bytes may still be read by an unpromoted field (including padding).
-    let splats: HashMap<_, _> = accesses
+    let splats: FxHashMap<_, _> = accesses
         .keys()
         .filter_map(|&i| {
             let InstData::Store { value, .. } = *f.inst_data(i) else {
@@ -182,7 +182,7 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         .collect();
     // Group before overlap checks: escaped objects and unrelated slots must
     // not consume the useful-field budget or induce a quadratic cross product.
-    let mut by_slot: HashMap<_, Vec<_>> = HashMap::new();
+    let mut by_slot: FxHashMap<_, Vec<_>> = FxHashMap::default();
     for (&i, &field) in &accesses {
         by_slot.entry(field.0).or_default().push((i, field));
     }
@@ -217,7 +217,7 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     let mut promoted = 0;
     let mut params_left = 8192usize;
     let mut changed = false;
-    let mut retained_initializers = HashSet::new();
+    let mut retained_initializers = FxHashSet::default();
     for field in eligible {
         if large && promoted == 32 {
             break;

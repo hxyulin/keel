@@ -1,8 +1,8 @@
 //! Bounded guarded rotation. Header tests are copied to the latch; the original
 //! entry guard remains, so no body access executes on an empty loop.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{Block, Function, InstData as D, Value};
-use std::collections::{HashMap, HashSet};
 pub(crate) struct LoopRotate;
 impl crate::Pass for LoopRotate {
     fn name(&self) -> &'static str {
@@ -62,7 +62,7 @@ fn rotate(f: &mut Function, h: Block) -> bool {
             return false;
         }
     }
-    let mut region = HashSet::new();
+    let mut region = FxHashSet::default();
     let mut work = vec![body];
     let mut latch = None;
     while let Some(b) = work.pop() {
@@ -120,7 +120,7 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     }
     // Forward only values used beyond the old header. Forwarding a test result
     // used only by its branch would force compare materialization in codegen.
-    let mut outside_uses = HashSet::new();
+    let mut outside_uses = FxHashSet::default();
     for (b, i) in f.layout_insts() {
         if b != h {
             f.inst_data(i).for_each_operand(|v| {
@@ -134,7 +134,7 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     if f.block_params(h).iter().any(|&v| f.resolve(v) != v) {
         return false;
     }
-    let set: HashSet<_> = carried.iter().copied().collect();
+    let set: FxHashSet<_> = carried.iter().copied().collect();
     for (b, i) in f.layout_insts() {
         if b != h && b != exit && !region.contains(&b) {
             let mut escapes = false;
@@ -145,11 +145,11 @@ fn rotate(f: &mut Function, h: Block) -> bool {
             }
         }
     }
-    let body_map: HashMap<_, _> = carried
+    let body_map: FxHashMap<_, _> = carried
         .iter()
         .map(|&v| (v, f.append_block_param(body, f.value_type(v))))
         .collect();
-    let exit_map: HashMap<_, _> = carried
+    let exit_map: FxHashMap<_, _> = carried
         .iter()
         .map(|&v| (v, f.append_block_param(exit, f.value_type(v))))
         .collect();
@@ -165,7 +165,7 @@ fn rotate(f: &mut Function, h: Block) -> bool {
     }
     let back = *f.block_insts(latch).last().unwrap();
     let args = f.inst_data(back).branch_dests()[0].args.clone();
-    let mut next: HashMap<Value, Value> = f.block_params(h).iter().copied().zip(args).collect();
+    let mut next: FxHashMap<Value, Value> = f.block_params(h).iter().copied().zip(args).collect();
     for &i in &hi[..hi.len() - 1] {
         let mut d = f.inst_data(i).clone();
         d.for_each_operand_mut(|v| {

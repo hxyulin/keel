@@ -333,7 +333,7 @@ fn recognize(f: &Function) -> Option<Candidate> {
     if latch != body {
         recognized.push(latch);
     }
-    let unique: std::collections::HashSet<_> = recognized.iter().copied().collect();
+    let unique: keel_ir::fxhash::FxHashSet<_> = recognized.iter().copied().collect();
     if unique.len() != recognized.len()
         || f.blocks().count() != unique.len()
         || f.blocks().any(|b| !unique.contains(&b))

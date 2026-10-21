@@ -6,13 +6,13 @@
 //! no address comparison, notrap or alignment annotation proves non-aliasing.
 
 use crate::memory_alias::Address;
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Function, InstData, Type, Value};
-use std::collections::HashMap;
 
 pub fn run(func: &mut Function) -> bool {
     let aliases = crate::memory_alias::AliasInfo::compute(func);
     let mut changed = false;
-    let mut available: HashMap<(Address, Type), (Value, Value)> = HashMap::new();
+    let mut available: FxHashMap<(Address, Type), (Value, Value)> = FxHashMap::default();
     let blocks: Vec<_> = func.blocks().collect();
     for block in blocks {
         available.clear();

@@ -5,11 +5,11 @@
 
 use crate::memory_alias::AliasInfo;
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::loops::LoopDepth;
 use keel_ir::{
     BinaryOp, Block, BlockCall, Function, InsertPoint, Inst, InstData as D, Type, Value, ValueDef,
 };
-use std::collections::HashMap;
 
 pub(crate) struct LoopMemory;
 impl crate::Pass for LoopMemory {
@@ -278,13 +278,13 @@ fn analyze(
     })
 }
 
-fn mapped(f: &Function, values: &HashMap<Value, Value>, v: Value) -> Value {
+fn mapped(f: &Function, values: &FxHashMap<Value, Value>, v: Value) -> Value {
     let v = f.resolve(v);
     values.get(&v).copied().unwrap_or(v)
 }
 
 fn transform(f: &mut Function, mut c: Candidate) {
-    let mut values: HashMap<_, _> = f
+    let mut values: FxHashMap<_, _> = f
         .block_params(c.header)
         .iter()
         .zip(&c.incoming.args)
@@ -298,7 +298,7 @@ fn transform(f: &mut Function, mut c: Candidate) {
         f.set_inst_loc(copy, f.inst_loc(i));
         values.insert(f.first_result(i), f.first_result(copy));
     }
-    let mut exit_replacements = HashMap::new();
+    let mut exit_replacements = FxHashMap::default();
     for &v in &c.exit_values {
         let param = f.append_block_param(c.exit.block, f.value_type(v));
         exit_replacements.insert(v, param);

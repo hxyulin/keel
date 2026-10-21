@@ -948,7 +948,7 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
 /// division preserves zero-divisor traps and signed MIN/-1 overflow traps;
 /// introducing a signed division for a standalone remainder would not.
 fn reuse_quotients(func: &mut Function) -> bool {
-    let mut quotients = std::collections::HashMap::new();
+    let mut quotients = keel_ir::fxhash::FxHashMap::default();
     let mut changed = false;
     for block in func.blocks().collect::<Vec<_>>() {
         quotients.clear();
@@ -959,7 +959,7 @@ fn reuse_quotients(func: &mut Function) -> bool {
     changed
 }
 
-pub(crate) type Quotients = std::collections::HashMap<(BinaryOp, [Value; 2]), Value>;
+pub(crate) type Quotients = keel_ir::fxhash::FxHashMap<(BinaryOp, [Value; 2]), Value>;
 
 /// The caller clears this table at every block boundary and may cap its size.
 /// Only an earlier quotient can guard the remainder's zero/overflow behavior.

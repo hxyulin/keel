@@ -6,11 +6,11 @@
 //! only after the completed copy in the same block: the proven leaf cannot
 //! observe the destination through another argument or a previously captured
 //! pointer (no loads, calls, frame observers, or traps).
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, Module, Purpose, Signature,
     StackSlot, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 const MAX_INSTS: usize = 50_000;
 const MAX_VALUES: usize = 100_000;
@@ -81,7 +81,7 @@ fn constructor(f: &Function) -> Option<Constructor> {
     if insts.len() > 128 {
         return None;
     }
-    let mut addr = HashMap::from([(f.block_params(block)[0], 0usize)]);
+    let mut addr = FxHashMap::from_iter([(f.block_params(block)[0], 0usize)]);
     let mut written = vec![false; size];
     let mut stores = Vec::new();
     for &i in insts {
@@ -151,7 +151,7 @@ pub fn run(module: &mut Module) -> usize {
     if !module.files.is_empty() || !module.debug_types.is_empty() {
         return 0;
     }
-    let constructors: HashMap<_, _> = module
+    let constructors: FxHashMap<_, _> = module
         .functions
         .iter()
         .filter_map(|f| constructor(f).map(|proof| (f.name.clone(), proof)))
@@ -163,7 +163,7 @@ pub fn run(module: &mut Module) -> usize {
     changes
 }
 
-fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usize {
+fn forward(f: &mut Function, constructors: &FxHashMap<String, Constructor>) -> usize {
     if f.num_values() > MAX_VALUES || !f.debug_vars.is_empty() {
         return 0;
     }
@@ -193,8 +193,8 @@ fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usi
     if scan_cost > WORK {
         return 0;
     }
-    let slots: HashMap<_, _> = f.stack_slots().collect();
-    let mut addresses = HashMap::<Value, (StackSlot, usize)>::new();
+    let slots: FxHashMap<_, _> = f.stack_slots().collect();
+    let mut addresses = FxHashMap::<Value, (StackSlot, usize)>::default();
     // One layout walk, no fixed point. Unrecognized/cyclic/late aliases reject
     // via the use-closure scan rather than being guessed to be nonescaping.
     for &i in &insts {
@@ -219,7 +219,7 @@ fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usi
     }
     let mut budget = WORK;
     let mut changed = 0;
-    let mut removed = HashSet::new();
+    let mut removed = FxHashSet::default();
     for block in f.blocks().collect::<Vec<_>>() {
         let body = f.block_insts(block).to_vec();
         for (position, &call) in body.iter().enumerate() {
@@ -253,8 +253,8 @@ fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usi
             if slots[&source].size as usize != *size {
                 continue;
             }
-            let mut loads = HashMap::<Value, (usize, usize, Inst)>::new();
-            let mut erase = HashSet::new();
+            let mut loads = FxHashMap::<Value, (usize, usize, Inst)>::default();
+            let mut erase = FxHashSet::default();
             let mut destination = None;
             let mut copied = vec![false; *size];
             let mut copy_end = position;
@@ -331,7 +331,7 @@ fn forward(f: &mut Function, constructors: &HashMap<String, Constructor>) -> usi
                 return changed;
             }
             budget -= scan_cost;
-            let later: HashSet<_> = body[copy_end + 1..].iter().copied().collect();
+            let later: FxHashSet<_> = body[copy_end + 1..].iter().copied().collect();
             let mut closed = true;
             for &i in &insts {
                 if removed.contains(&i) {

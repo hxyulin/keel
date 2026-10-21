@@ -4,11 +4,11 @@
 //! from four private arms move after that load. Both the balance and sum remain
 //! loop-carried; this pass does not introduce a vector reduction.
 use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::fxhash::FxHashSet;
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
     Type, Value, ValueDef,
 };
-use std::collections::HashSet;
 
 pub fn run(f: &mut Function) -> bool {
     let mut changed = false;
@@ -253,7 +253,7 @@ fn convert(f: &mut Function, head: Block, cfg: &mut Option<ControlFlowGraph>) ->
     }
 
     let removed = [positive, negative, debit, empty];
-    let defs: HashSet<Value> = removed
+    let defs: FxHashSet<Value> = removed
         .iter()
         .flat_map(|&b| {
             f.block_insts(b)
@@ -261,7 +261,7 @@ fn convert(f: &mut Function, head: Block, cfg: &mut Option<ControlFlowGraph>) ->
                 .flat_map(|&i| f.inst_results(i).iter().copied())
         })
         .collect();
-    let moved: HashSet<Inst> = [
+    let moved: FxHashSet<Inst> = [
         *widen,
         *credit,
         *limit,

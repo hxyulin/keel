@@ -6,11 +6,12 @@
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, Inst, InstData as D, IntCC, Type, Value,
     ValueDef, VectorBinaryOp as V, VectorType,
 };
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 mod scan;
 
 /// Packed 128-bit capabilities used for vectorization profitability. Portable
@@ -161,16 +162,16 @@ struct Candidate {
     output: Output,
     shape: VectorType,
     // Original scalar stream address -> invariant base pointer.
-    addresses: HashMap<Value, Value>,
-    vectors: HashSet<Value>,
-    offsets: HashMap<Value, Value>,
-    casts: HashMap<Value, NarrowRoundTrip>,
+    addresses: FxHashMap<Value, Value>,
+    vectors: FxHashSet<Value>,
+    offsets: FxHashMap<Value, Value>,
+    casts: FxHashMap<Value, NarrowRoundTrip>,
     extra_sums: Vec<Reduction>,
     // All streams use this scalar memory width. Accumulator lanes may be wider.
     stream_bytes: u32,
-    widening_inputs: HashMap<Value, (Value, ConvertOp)>,
+    widening_inputs: FxHashMap<Value, (Value, ConvertOp)>,
     // Each expression keeps its scalar ring; only explicit extensions widen.
-    widths: HashMap<Value, VectorType>,
+    widths: FxHashMap<Value, VectorType>,
 }
 struct Reduction {
     accumulator: Value,
@@ -218,7 +219,7 @@ struct Analyze<'a> {
     dom: &'a DominatorTree,
     c: Candidate,
     target: VectorTarget,
-    allowed: HashSet<Inst>,
+    allowed: FxHashSet<Inst>,
     affine: bool,
     casts: bool,
     conditional: bool,
@@ -705,21 +706,21 @@ fn analyze(
         signed,
         output,
         shape,
-        addresses: HashMap::new(),
-        vectors: HashSet::new(),
-        offsets: HashMap::new(),
-        casts: HashMap::new(),
+        addresses: FxHashMap::default(),
+        vectors: FxHashSet::default(),
+        offsets: FxHashMap::default(),
+        casts: FxHashMap::default(),
         extra_sums,
         stream_bytes: shape.lane_type().bytes()?,
-        widening_inputs: HashMap::new(),
-        widths: HashMap::new(),
+        widening_inputs: FxHashMap::default(),
+        widths: FxHashMap::default(),
     };
     let mut a = Analyze {
         f,
         dom,
         c,
         target,
-        allowed: HashSet::from([back, step, root]),
+        allowed: FxHashSet::from_iter([back, step, root]),
         affine,
         casts,
         conditional,
@@ -764,7 +765,7 @@ fn analyze(
         .addresses
         .values()
         .copied()
-        .collect::<HashSet<_>>()
+        .collect::<FxHashSet<_>>()
         .len()
         > 4
         || a.c.vectors.len() > 24
@@ -861,7 +862,7 @@ fn select_mask(
     f: &mut Function,
     block: Block,
     c: &Candidate,
-    mapping: &HashMap<Value, Value>,
+    mapping: &FxHashMap<Value, Value>,
     mask: Value,
     shape: VectorType,
 ) -> Value {
@@ -893,7 +894,7 @@ fn narrow_select_arm(
     f: &Function,
     value: Value,
     op: ConvertOp,
-    constants: &HashMap<Value, (i64, Value)>,
+    constants: &FxHashMap<Value, (i64, Value)>,
 ) -> Option<Value> {
     let value = f.resolve(value);
     if let Some(&(imm, narrow)) = constants.get(&value) {
@@ -1016,8 +1017,8 @@ fn reduce_body(
     let sums: Vec<_> = (0..unroll as usize * reductions.len())
         .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
         .collect();
-    let mut invariants = HashMap::new();
-    let mut narrow_constants = HashMap::new();
+    let mut invariants = FxHashMap::default();
+    let mut narrow_constants = FxHashMap::default();
     let narrow_selects = matches!(target, VectorTarget::Aarch64Neon | VectorTarget::X86Sse2)
         && c.shape == VectorType::I64x2
         && c.widths.values().any(|&s| s == VectorType::I32x4);
@@ -1057,7 +1058,7 @@ fn reduce_body(
             }
         }
     }
-    let mut cast_masks = HashMap::new();
+    let mut cast_masks = FxHashMap::default();
     let mut casts: Vec<_> = c.casts.iter().collect();
     casts.sort_by_key(|(v, _)| **v);
     for (&v, cast) in casts {
@@ -1079,7 +1080,7 @@ fn reduce_body(
     let mut bases: Vec<_> = c.addresses.values().copied().collect();
     bases.sort();
     bases.dedup();
-    let mut pointers = HashMap::new();
+    let mut pointers = FxHashMap::default();
     let mut args = vec![length];
     args.extend(sums.iter().map(|_| zero));
     for base in bases {
@@ -1505,7 +1506,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     } else {
         bin(f, setup, B::Iadd, c.start, length)
     };
-    let mut mapping = HashMap::from([(c.iv, vi)]);
+    let mut mapping = FxHashMap::from_iter([(c.iv, vi)]);
     // Broadcast invariants once, outside the vector loop. Local literals are
     // cloned here too; the scalar body retains its original definitions.
     let mut values: Vec<_> = c.vectors.iter().copied().collect();

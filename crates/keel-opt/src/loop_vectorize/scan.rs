@@ -97,7 +97,7 @@ fn analyze(
         };
     }
     let limit = constant(f, character_args[1])?;
-    let mut allowed = HashSet::from([last(f, test)?, character_cmp]);
+    let mut allowed = FxHashSet::from_iter([last(f, test)?, character_cmp]);
     if let Some(i) = def(f, character_args[1]) {
         allowed.insert(i);
     }

@@ -5,11 +5,11 @@
 //! Calls and all original successful reads stay pinned. Only later redundant
 //! reads disappear; there is no speculation, load motion, or store forwarding.
 use keel_ir::dominators::ControlFlowGraph;
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InstData, Intrinsic, Module, Purpose, Signature,
     Type, Value, ValueDef,
 };
-use std::collections::HashMap;
 
 pub struct CallLoadReuse;
 impl crate::Pass for CallLoadReuse {
@@ -126,10 +126,10 @@ fn summary_candidate(f: &Function) -> bool {
         })
 }
 
-type Facts = HashMap<(Value, Type), Value>;
+type Facts = FxHashMap<(Value, Type), Value>;
 fn run(module: &mut Module) -> bool {
     // Names must resolve uniquely even for callers that bypass module verification.
-    let mut counts = HashMap::new();
+    let mut counts = FxHashMap::default();
     for f in &module.functions {
         *counts.entry(f.name.clone()).or_insert(0usize) += 1;
     }
@@ -138,7 +138,7 @@ fn run(module: &mut Module) -> bool {
         .iter()
         .filter(|f| counts[&f.name] == 1 && summary_candidate(f))
         .collect();
-    let mut summaries = HashMap::<String, Signature>::new();
+    let mut summaries = FxHashMap::<String, Signature>::default();
     // Synchronous bottom-up rounds: each round may use only earlier proofs.
     // This rejects recursion (including SCCs with an outgoing pure leaf), makes
     // the depth limit independent of module order, and avoids recursive DFS or
@@ -178,7 +178,7 @@ fn run(module: &mut Module) -> bool {
         let cfg = ControlFlowGraph::compute(f);
         let mut exits: Vec<Option<(usize, Facts)>> = vec![None; f.num_blocks()];
         for b in cfg.reverse_postorder(f) {
-            let mut facts = Facts::new();
+            let mut facts = Facts::default();
             let mut depth = 0;
             let preds = cfg.preds(b);
             // No fixed point: missing exits (including backedges) lose all facts.
