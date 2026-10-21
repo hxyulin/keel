@@ -6,10 +6,27 @@
 //! This is deliberately not pointer substitution or a nocapture inference.
 //! Sret is preserved verbatim; result transport optimization is out of scope.
 use keel_ir::{
-    AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryFlags, Module,
-    Purpose, Signature, Symbol, Type, Value,
+    AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryEffects,
+    MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value, ValueDef,
 };
 use std::collections::{HashMap, HashSet};
+
+/// Explicit custom-pipeline entry point; deliberately absent from PASSES.
+pub struct PrivateAggregate;
+impl crate::Pass for PrivateAggregate {
+    fn name(&self) -> &'static str {
+        "private-aggregate"
+    }
+    fn description(&self) -> &'static str {
+        "scalarize contained private two-word byval transport"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(run(module) != 0)
+    }
+}
 
 const MAX_FUNCTION_INSTS: usize = 50_000;
 const MAX_VALUES: usize = 100_000;
@@ -37,6 +54,20 @@ fn plan(f: &Function) -> Option<Plan> {
         || !f.debug_vars.is_empty()
         || !f.restrict_params.is_empty()
     {
+        return None;
+    }
+    // Do not weaken an over-aligned access contract or add assumptions about
+    // atomic/variadic facilities. Without address closure, reject the entire
+    // definition even when the access may use an unrelated pointer.
+    if f.layout_insts().any(|(_, i)| match f.inst_data(i) {
+        InstData::Load { flags, .. } | InstData::Store { flags, .. } => flags.align > 8,
+        InstData::AtomicLoad { .. }
+        | InstData::AtomicStore { .. }
+        | InstData::AtomicRmw { .. }
+        | InstData::AtomicCas { .. }
+        | InstData::VaArg { .. } => true,
+        _ => false,
+    }) {
         return None;
     }
     let entry = f.entry_block()?;
@@ -154,9 +185,12 @@ pub fn run(m: &mut Module) -> usize {
                 return 0;
             }
             match f.inst_data(i) {
-                // Textual symbol references and frame/nonlocal observers cannot
-                // be reasoned about by this prototype. Abort transactionally.
-                InstData::InlineAsm { .. } | InstData::Intrinsic { .. } => return 0,
+                // Textual symbols disable the module; intrinsic/frame facilities
+                // exclude the containing definition from this prototype.
+                InstData::InlineAsm { .. } => return 0,
+                InstData::Intrinsic { .. } => {
+                    blocked.insert(f.name.clone());
+                }
                 InstData::SymbolAddr {
                     symbol: Symbol::Func(id),
                 } => {
@@ -191,6 +225,23 @@ pub fn run(m: &mut Module) -> usize {
         }
     }
     plans.retain(|name, _| !blocked.contains(name));
+    let mut growth = 0usize;
+    for f in &m.functions {
+        let mut added = plans
+            .get(&f.name)
+            .map_or(0, |p| p.split.iter().filter(|&&b| b).count() * 5);
+        for (_, i) in f.layout_insts() {
+            if let InstData::Call { func, .. } = f.inst_data(i) {
+                if let Some(p) = plans.get(&f.callee(*func).name) {
+                    added = added.saturating_add(p.split.iter().filter(|&&b| b).count() * 4);
+                }
+            }
+        }
+        growth = growth.saturating_add(added);
+        if added > 4096 || growth > 100_000 {
+            return 0;
+        }
+    }
     for f in &mut m.functions {
         // Rewrite calls before definitions so recursive calls snapshot original
         // byval homes as well. All inserted loads precede any callee writes.
@@ -211,13 +262,15 @@ pub fn run(m: &mut Module) -> usize {
             let mut new = Vec::new();
             for (v, split) in args.into_iter().zip(p.split) {
                 if split {
+                    // Byval supplies bytes, not an explicit source-address
+                    // alignment promise. Only the fresh home is known aligned.
                     let lo = insert(
                         f,
                         at,
                         InstData::Load {
                             ty: Type::I64,
                             addr: v,
-                            flags: flags(),
+                            flags: MemoryFlags::default(),
                         },
                     );
                     let hi_addr = offset(f, at, v);
@@ -227,7 +280,7 @@ pub fn run(m: &mut Module) -> usize {
                         InstData::Load {
                             ty: Type::I64,
                             addr: hi_addr,
-                            flags: flags(),
+                            flags: MemoryFlags::default(),
                         },
                     );
                     new.extend([lo, hi]);
@@ -251,6 +304,8 @@ pub fn run(m: &mut Module) -> usize {
         };
         let entry = f.entry_block().unwrap();
         let at = InsertPoint::Before(f.block_insts(entry)[0]);
+        let prefix = f.block_insts(entry).to_vec();
+        let mut homes = HashMap::new();
         let old = f.block_params(entry).to_vec();
         for index in (0..old.len()).rev() {
             f.remove_block_param(entry, index);
@@ -278,6 +333,7 @@ pub fn run(m: &mut Module) -> usize {
                         flags: flags(),
                     },
                 );
+                homes.insert(base, ([lo, hi], 0usize));
                 if f.resolve(v) == v {
                     f.replace_all_uses(v, base);
                 }
@@ -287,6 +343,52 @@ pub fn run(m: &mut Module) -> usize {
                 if f.resolve(v) == v {
                     f.replace_all_uses(v, new);
                 }
+            }
+        }
+        // Forward exact entry-prefix i64 reads from the snapshot words. Stop at
+        // the first effect that could mutate/capture a home; do not infer alias
+        // freedom or nocapture from another parameter or call. Other reads and
+        // arbitrary later mutations still use the independently rebuilt homes.
+        for i in prefix.into_iter().take(128) {
+            match f.inst_data(i).clone() {
+                InstData::Load {
+                    ty: Type::I64,
+                    addr,
+                    flags,
+                } if !flags.volatile => {
+                    if let Some(&(words, off @ (0 | 8))) = homes.get(&f.resolve(addr)) {
+                        let result = f.first_result(i);
+                        if f.resolve(result) == result {
+                            f.replace_all_uses(result, words[off / 8]);
+                            // This exact read is of our initialized fixed home,
+                            // hence cannot fault. Ordinary DCE conservatively
+                            // retains potentially trapping loads.
+                            f.remove_inst(i);
+                        }
+                    }
+                }
+                InstData::Load { flags, .. } if !flags.volatile => {}
+                InstData::Binary {
+                    op: BinaryOp::Ptradd,
+                    args,
+                } => {
+                    if let Some(&(words, off)) = homes.get(&f.resolve(args[0])) {
+                        if let ValueDef::Result(k, _) = f.value_def(f.resolve(args[1])) {
+                            if let InstData::Iconst { imm, .. } = f.inst_data(k) {
+                                if let Ok(delta) = usize::try_from(*imm) {
+                                    if let Some(off) = off.checked_add(delta).filter(|&o| o <= 16) {
+                                        let result = f.first_result(i);
+                                        if f.resolve(result) == result {
+                                            homes.insert(result, (words, off));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                data if data.memory_effects() == MemoryEffects::None => {}
+                _ => break,
             }
         }
         f.sig = p.new.clone();
