@@ -511,6 +511,7 @@ fn conditional_reductions_use_packed_predicates_only_where_available() {
             keel_ir::verify_module(&m).unwrap();
             for (index, f) in m.functions.iter().enumerate() {
                 let supported = target == VectorTarget::Aarch64Neon
+                    || (target == VectorTarget::X86Sse2 && !predicate.starts_with('u'))
                     || (index == 0 && !predicate.starts_with('u'))
                     || matches!(predicate, "eq" | "ne");
                 assert_eq!(
@@ -579,7 +580,7 @@ fn bounded_c_diamond_normalization_commits_only_successful_vectorization() {
     ] {
         let mut m = keel_ir::parse(&rejected).unwrap();
         let before = m.to_string();
-        keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::X86Sse2).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::Portable).unwrap();
         assert_eq!(before, m.to_string());
     }
 }

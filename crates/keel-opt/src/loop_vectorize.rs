@@ -371,7 +371,10 @@ impl Analyze<'_> {
                 if self.f.inst_block(compare) != self.c.body
                     || !matches!(self.c.shape.lane_type(), Type::I32 | Type::I64)
                     || self.c.shape.lane_type() == Type::I64
-                        && self.target != VectorTarget::Aarch64Neon
+                        && !matches!(
+                            self.target,
+                            VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
+                        )
                         && !matches!(cond, IntCC::Eq | IntCC::Ne)
                     || self.target != VectorTarget::Aarch64Neon
                         && matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge)

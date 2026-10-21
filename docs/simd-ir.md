@@ -323,9 +323,10 @@ to this transformation.
 ## Packed integer predicates and lane selection
 
 NEON emits native comparisons for every integer shape and predicate. Baseline
-SSE2 emits packed equality/inequality for all integer shapes (i64 equality combines
-both dword halves), and signed ordering for i8/i16/i32. Unsigned ordering and i64
-signed ordering retain scalar legalization on SSE2. No newer CPU feature is assumed.
+SSE2 emits packed equality/inequality and signed ordering for all integer shapes.
+i64 equality combines both dword halves; signed ordering compares signed high
+dwords and breaks ties with unsigned low dwords. Unsigned ordering retains
+scalar legalization on SSE2. No newer CPU feature is assumed.
 
 Both backends lower lane selection with packed operations. Each mask lane is
 normalized by comparison with zero: a nonzero mask selects the entire true lane,
@@ -336,7 +337,7 @@ including spilled operands and results; allocated inputs may remain live.
 Full's integer reduction discovery also accepts same-width integer comparisons
 and selects in independent wrapping i32/i64 contributions. Predicates must use
 packed operations on the selected target: NEON admits all integer predicates;
-SSE2 admits signed i32 ordering and i32/i64 equality. Fast keeps its previous
+SSE2 admits signed i32/i64 ordering and i32/i64 equality. Fast keeps its previous
 eligibility rules. Floating comparisons/reassociation, coupled recurrences,
 induction-as-data and multiple potentially faulting streams remain excluded.
 

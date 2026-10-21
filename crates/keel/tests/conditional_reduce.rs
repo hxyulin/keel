@@ -188,9 +188,7 @@ fn native_conditional_reductions_match_scalar_at_protected_page_boundaries() {
         ir.contains("load.i32x4"),
         "frontend conditional loop must vectorize: {ir}"
     );
-    if cfg!(target_arch = "aarch64") {
-        assert!(ir.contains("load.i64x2"));
-    }
+    assert!(ir.contains("load.i64x2"));
     for isel in ["none", "all"] {
         for allocation in ["fast", "full"] {
             keel(
