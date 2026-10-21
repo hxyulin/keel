@@ -1,0 +1,120 @@
+decl @callback(i64) -> i64 cc(c)
+
+func @mixed(i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, f64, f64, f64, f64, f64, f64, f64, f64, f64, f64) -> i64 cc(fast) local {
+block0(v0: i64, v1: i64, v2: i64, v3: i64, v4: i64, v5: i64, v6: i64, v7: i64, v8: i64, v9: i64, v10: i64, v11: i64, v12: f64, v13: f64, v14: f64, v15: f64, v16: f64, v17: f64, v18: f64, v19: f64, v20: f64, v21: f64):
+    v55 = iadd v0, v1
+    v56 = iadd v55, v2
+    v57 = iadd v56, v3
+    v58 = iadd v57, v4
+    v59 = iadd v58, v5
+    v60 = iadd v59, v6
+    v61 = iadd v60, v7
+    v62 = iadd v61, v8
+    v63 = iadd v62, v9
+    v64 = iadd v63, v10
+    v65 = iadd v64, v11
+    v66 = fptoui.i64 v12
+    v67 = iadd v65, v66
+    v68 = fptoui.i64 v13
+    v69 = iadd v67, v68
+    v70 = fptoui.i64 v14
+    v71 = iadd v69, v70
+    v72 = fptoui.i64 v15
+    v73 = iadd v71, v72
+    v74 = fptoui.i64 v16
+    v75 = iadd v73, v74
+    v76 = fptoui.i64 v17
+    v77 = iadd v75, v76
+    v78 = fptoui.i64 v18
+    v79 = iadd v77, v78
+    v80 = fptoui.i64 v19
+    v81 = iadd v79, v80
+    v82 = fptoui.i64 v20
+    v83 = iadd v81, v82
+    v84 = fptoui.i64 v21
+    v85 = iadd v83, v84
+    v86 = call @callback(v85)
+    v87 = iadd v86, v85
+    return v87
+}
+
+func @recursive(i64) -> i64 cc(fast) local {
+block0(v0: i64):
+    v5 = iconst.i64 0
+    v6 = icmp.eq v0, v5
+    brif v6, block1, block2
+block1:
+    v7 = iconst.i64 0
+    return v7
+block2:
+    v8 = iconst.i64 1
+    v9 = isub v0, v8
+    v10 = call @recursive(v9)
+    v11 = iadd v10, v0
+    return v11
+}
+
+func @narrow(i8) -> i8 cc(fast) local {
+block0(v0: i8):
+    v2 = iconst.i8 -5
+    v3 = iadd v0, v2
+    return v3
+}
+
+func @predicate(i64) -> i8 uext cc(fast) local {
+block0(v0: i64):
+    v2 = iconst.i64 0
+    v3 = icmp.ne v0, v2
+    return v3
+}
+
+func @entry(i64) -> i64 cc(c) {
+block0(v0: i64):
+    v24 = iconst.i64 0
+    v25 = iadd v0, v24
+    v26 = iconst.i64 1
+    v27 = iadd v0, v26
+    v28 = iconst.i64 2
+    v29 = iadd v0, v28
+    v30 = iconst.i64 3
+    v31 = iadd v0, v30
+    v32 = iconst.i64 4
+    v33 = iadd v0, v32
+    v34 = iconst.i64 5
+    v35 = iadd v0, v34
+    v36 = iconst.i64 6
+    v37 = iadd v0, v36
+    v38 = iconst.i64 7
+    v39 = iadd v0, v38
+    v40 = iconst.i64 8
+    v41 = iadd v0, v40
+    v42 = iconst.i64 9
+    v43 = iadd v0, v42
+    v44 = iconst.i64 10
+    v45 = iadd v0, v44
+    v46 = iconst.i64 11
+    v47 = iadd v0, v46
+    v48 = fconst.f64 0x0000000000000000
+    v49 = fconst.f64 0x3ff0000000000000
+    v50 = fconst.f64 0x4000000000000000
+    v51 = fconst.f64 0x4008000000000000
+    v52 = fconst.f64 0x4010000000000000
+    v53 = fconst.f64 0x4014000000000000
+    v54 = fconst.f64 0x4018000000000000
+    v55 = fconst.f64 0x401c000000000000
+    v56 = fconst.f64 0x4020000000000000
+    v57 = fconst.f64 0x4022000000000000
+    v58 = call @mixed(v25, v27, v29, v31, v33, v35, v37, v39, v41, v43, v45, v47, v48, v49, v50, v51, v52, v53, v54, v55, v56, v57)
+    v59 = iconst.i64 7
+    v60 = and v0, v59
+    v61 = call @recursive(v60)
+    v62 = trunc.i8 v0
+    v63 = call @narrow(v62)
+    v64 = uext.i64 v63
+    v65 = iadd v58, v61
+    v66 = iadd v65, v64
+    v67 = call @predicate(v0)
+    v68 = uext.i64 v67
+    v69 = iadd v66, v68
+    return v69
+}

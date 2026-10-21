@@ -8,9 +8,9 @@
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
 use crate::{
-    ArgExt, AsmOperand, BinaryOp, BlockCall, Clause, ConvertOp, EntityRef, Function, InlineAsm,
-    Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type, UnaryOp, Value,
-    ValueDef,
+    ArgExt, AsmOperand, BinaryOp, BlockCall, CallConv, Clause, ConvertOp, EntityRef, Function,
+    InlineAsm, Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type,
+    UnaryOp, Value, ValueDef,
 };
 use crate::{
     DataInit, DataItem, DataObject, DebugScope, DebugType, DebugTypeData, FunctionAttrs, Module,
@@ -100,6 +100,12 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for decl in &module.decls {
+        if decl.sig.cc == CallConv::Fast {
+            errors.push(VerifierError {
+                location: format!("@{}", decl.name),
+                message: "cc(fast) requires a local definition in this module".into(),
+            });
+        }
         for message in check_signature(&decl.sig).into_iter().chain(
             decl.attrs
                 .validate(decl.sig.returns_twice)
@@ -148,6 +154,17 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     }
     errors.extend(check_debug_info(module, &lookup));
     for func in &module.functions {
+        if func
+            .personality
+            .as_ref()
+            .and_then(|p| lookup.signature(p))
+            .is_some_and(|s| s.cc == CallConv::Fast)
+        {
+            errors.push(VerifierError {
+                location: format!("@{}", func.name),
+                message: "cc(fast) cannot be an exception personality".into(),
+            });
+        }
         if let Some(personality) = &func.personality
             && lookup.signature(personality).is_none()
         {
@@ -374,6 +391,14 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
                 {
                     errors.push(format!("rtti_name requires a data symbol, got @{symbol}"));
                 }
+                if lookup
+                    .signature(symbol)
+                    .is_some_and(|s| s.cc == CallConv::Fast)
+                {
+                    errors.push(format!(
+                        "cc(fast) function @{symbol} cannot have its address taken"
+                    ));
+                }
                 if !lookup.has_symbol(symbol) {
                     errors.push(format!("points to @{symbol}, which is not declared"));
                 } else if lookup.data_object(symbol).is_some_and(|d| d.thread_local) {
@@ -502,6 +527,12 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
         domtree,
         errors: Vec::new(),
     };
+    if func.sig.cc == CallConv::Fast && !func.local {
+        v.error(
+            "linkage".into(),
+            "cc(fast) requires a local definition".into(),
+        );
+    }
     if func.weak_odr && func.local {
         v.error("linkage".into(), "weak_odr cannot be local".into());
     }
@@ -628,6 +659,12 @@ impl Verifier<'_> {
             self.error("signature".into(), message);
         }
         for (sig_ref, sig) in func.signatures() {
+            if sig.cc == CallConv::Fast {
+                self.error(
+                    sig_ref.to_string(),
+                    "cc(fast) does not support indirect calls".into(),
+                );
+            }
             for message in check_signature(sig) {
                 self.error(sig_ref.to_string(), message);
             }
@@ -1123,6 +1160,14 @@ impl Verifier<'_> {
                     );
                 }
             }
+            InstData::SymbolAddr {
+                symbol: crate::Symbol::Func(callee),
+            } if func.callee(*callee).sig.cc == CallConv::Fast => {
+                self.inst_error(
+                    inst,
+                    "cc(fast) functions cannot have their address taken".into(),
+                );
+            }
             InstData::SymbolAddr { .. } => {}
             InstData::Intrinsic { id, args } => {
                 if *id == Intrinsic::VaStart && !func.sig.variadic {
@@ -1462,6 +1507,9 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
 /// Checks the ABI attributes of a signature's parameters and returns.
 fn check_signature(sig: &Signature) -> Vec<String> {
     let mut errors = Vec::new();
+    if sig.cc == CallConv::Fast && (sig.variadic || sig.returns_twice || sig.returns.len() > 1) {
+        errors.push("cc(fast) requires a fixed, single-result, single-return call contract".into());
+    }
     for param in sig.params.iter().chain(&sig.returns) {
         if param.ext != ArgExt::None && !matches!(param.ty, Type::I8 | Type::I16) {
             errors.push(format!(

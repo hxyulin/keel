@@ -713,6 +713,7 @@ impl Parser {
             let (name, loc) = self.ident("a calling convention")?;
             cc = match name.as_str() {
                 "c" => CallConv::C,
+                "fast" => CallConv::Fast,
                 _ => return Err(error(loc, format!("unknown calling convention `{name}`"))),
             };
             self.expect(Tok::Punct(')'))?;

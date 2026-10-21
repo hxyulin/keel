@@ -487,7 +487,7 @@ impl<'a> FunctionCompiler<'a> {
             func: func.name.clone(),
             message,
         };
-        let CallConv::C = func.sig.cc;
+        let (CallConv::C | CallConv::Fast) = func.sig.cc;
         let not_yet = |what: &str| err(format!("{what} not supported on x86-64 yet"));
         match func.sig.returns.as_slice() {
             [] => {}
@@ -498,7 +498,7 @@ impl<'a> FunctionCompiler<'a> {
                     ext: ArgExt::None,
                     ..
                 },
-            ] => {
+            ] if func.sig.cc == CallConv::C => {
                 return Err(err(
                     "an i8/i16 return value needs `sext` or `uext`: C callers expect 32 bits"
                         .into(),

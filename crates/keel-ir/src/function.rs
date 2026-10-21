@@ -19,6 +19,10 @@ use std::fmt;
 pub enum CallConv {
     /// The target's C calling convention.
     C,
+    /// Keel's private direct-call convention. Version 1 reuses target C
+    /// placements/preservation, but narrow values need no C ABI extension.
+    /// Its machine contract may evolve together with every contained caller.
+    Fast,
 }
 
 /// How a narrow integer is widened when it crosses a call. C passes and
@@ -133,6 +137,7 @@ impl fmt::Display for Signature {
         }
         match self.cc {
             CallConv::C => f.write_str(" cc(c)")?,
+            CallConv::Fast => f.write_str(" cc(fast)")?,
         }
         if self.returns_twice {
             f.write_str(" returns_twice")?;

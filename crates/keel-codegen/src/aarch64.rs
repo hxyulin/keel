@@ -683,7 +683,7 @@ impl<'a> FunctionCompiler<'a> {
             func: func.name.clone(),
             message,
         };
-        let CallConv::C = func.sig.cc;
+        let (CallConv::C | CallConv::Fast) = func.sig.cc;
         let param_kinds = param_kinds(&func.sig.params);
         let (param_locs, incoming) = abi::arg_locs(&param_kinds, param_kinds.len());
         if incoming > MAX_STACK_ARGS {
@@ -693,15 +693,15 @@ impl<'a> FunctionCompiler<'a> {
         }
         match func.sig.returns.as_slice() {
             [] => {}
-            // The Apple ABI has the callee extend these to 32 bits, and every
-            // function is exported, so C may be relying on it.
+            // The C ABI has the callee extend these to 32 bits. Private
+            // cc(fast) edges only require the declared narrow value.
             [
                 AbiParam {
                     ty: Type::I8 | Type::I16,
                     ext: ArgExt::None,
                     ..
                 },
-            ] => {
+            ] if func.sig.cc == CallConv::C => {
                 return Err(err(
                     "an i8/i16 return value needs `sext` or `uext`: C callers expect 32 bits"
                         .into(),
@@ -5021,7 +5021,7 @@ impl ExceptionTable {
 /// Rejects calls the C convention support cannot make yet. `external`
 /// callees may be C code relying on the full ABI.
 fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(), String> {
-    let CallConv::C = sig.cc;
+    let (CallConv::C | CallConv::Fast) = sig.cc;
     if sig.returns.len() > 1 {
         return Err(format!(
             "{what}: multiple return values are not supported by the C convention"
@@ -5031,6 +5031,7 @@ fn check_call_signature(what: &str, sig: &Signature, external: bool) -> Result<(
     // signedness. Keel functions do not rely on it, but external ones may,
     // so their signatures must say which.
     if external
+        && sig.cc == CallConv::C
         && sig
             .params
             .iter()
