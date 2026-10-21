@@ -54,9 +54,12 @@ impl Output {
             _ => unreachable!(),
         }
     }
-    pub(super) fn comment(&mut self, comment: impl fmt::Display) {
+    /// The instruction's IR text as a comment, written without `fmt::write`.
+    pub(super) fn inst_comment(&mut self, func: &keel_ir::Function, inst: keel_ir::Inst) {
         if let Self::Text(s) = self {
-            writeln!(s, "\t# {comment}").unwrap();
+            s.push_str("\t# ");
+            func.write_inst_to(s, inst).unwrap();
+            s.push('\n');
         }
     }
 }

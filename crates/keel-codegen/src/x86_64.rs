@@ -822,7 +822,7 @@ impl<'a> FunctionCompiler<'a> {
             self.next_block = order.get(i + 1).copied();
             self.out.label(self.label(block));
             for &inst in func.block_insts(block) {
-                self.out.comment(func.display_inst(inst));
+                self.out.inst_comment(func, inst);
                 if self.debug {
                     self.set_srcloc(func.inst_loc(inst));
                 }

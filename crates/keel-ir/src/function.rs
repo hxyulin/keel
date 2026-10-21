@@ -1038,11 +1038,16 @@ impl Function {
         DisplayInst(self, inst)
     }
 
-    fn write_inst(&self, f: &mut fmt::Formatter<'_>, inst: Inst) -> fmt::Result {
-        use fmt::Display;
+    /// Appends exactly what [`Self::display_inst`] prints to `out`, without
+    /// formatting machinery; codegen writes one per assembly comment.
+    pub fn write_inst_to<W: fmt::Write + ?Sized>(&self, out: &mut W, inst: Inst) -> fmt::Result {
+        self.write_inst(out, inst)
+    }
+
+    fn write_inst<W: fmt::Write + ?Sized>(&self, f: &mut W, inst: Inst) -> fmt::Result {
         // Codegen prints every instruction as an assembly comment. Write the
         // pieces directly rather than nesting `write!`, which re-enters
-        // `fmt::write` for every operand.
+        // `fmt::write` for every operand; mnemonics come from `write_name`.
         let results = self.inst_results(inst);
         if !results.is_empty() {
             write_values(f, results.iter().copied())?;
@@ -1053,7 +1058,7 @@ impl Function {
         match self.inst_data(inst) {
             InstData::Iconst { ty, imm } => {
                 f.write_str("iconst.")?;
-                ty.fmt(f)?;
+                write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
                 write_decimal(f, "", imm.is_negative(), imm.unsigned_abs())
             }
@@ -1141,9 +1146,9 @@ impl Function {
             }
             InstData::InlineAsm { asm, args: a } => {
                 f.write_str("asm ")?;
-                crate::data::write_quoted(f, asm.template.as_bytes())?;
+                write!(f, "{}", Quoted(asm.template.as_bytes()))?;
                 f.write_str(", ")?;
-                crate::data::write_quoted(f, asm.constraints().as_bytes())?;
+                write!(f, "{}", Quoted(asm.constraints().as_bytes()))?;
                 f.write_str("(")?;
                 self.write_args(f, a)?;
                 f.write_str(")")?;
@@ -1160,18 +1165,18 @@ impl Function {
             InstData::Trap => f.write_str("trap"),
             InstData::VectorSplat { ty, arg } => {
                 f.write_str("vsplat.")?;
-                ty.fmt(f)?;
+                write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
                 write_value(f, v(*arg))
             }
             InstData::VectorUnary { op, arg } => {
                 f.write_str("v")?;
-                op.fmt(f)?;
+                write_name(f, Name::Unary(*op))?;
                 f.write_str(" ")?;
                 write_value(f, v(*arg))
             }
             InstData::VectorBinary { op, args: a } => {
-                op.fmt(f)?;
+                write_name(f, Name::Vector(*op))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
@@ -1196,13 +1201,13 @@ impl Function {
             }
             InstData::VectorIcmp { cond, args: a } => {
                 f.write_str("vicmp.")?;
-                cond.fmt(f)?;
+                write_name(f, Name::IntCC(*cond))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
             InstData::VectorFcmp { cond, args: a } => {
                 f.write_str("vfcmp.")?;
-                cond.fmt(f)?;
+                write_name(f, Name::FloatCC(*cond))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
@@ -1211,17 +1216,17 @@ impl Function {
                 self.write_args(f, a)
             }
             InstData::Unary { op, arg } => {
-                op.fmt(f)?;
+                write_name(f, Name::Unary(*op))?;
                 f.write_str(" ")?;
                 write_value(f, v(*arg))
             }
             InstData::Binary { op, args: a } => {
-                op.fmt(f)?;
+                write_name(f, Name::Binary(*op))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
             InstData::Overflow { op, args: a } => {
-                op.fmt(f)?;
+                write_name(f, Name::Overflow(*op))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
@@ -1234,40 +1239,40 @@ impl Function {
                 self.write_args(f, a)
             }
             InstData::Convert { op, ty, arg } => {
-                op.fmt(f)?;
+                write_name(f, Name::Convert(*op))?;
                 f.write_str(".")?;
-                ty.fmt(f)?;
+                write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
                 write_value(f, v(*arg))
             }
             InstData::Icmp { cond, args: a } => {
                 f.write_str("icmp.")?;
-                cond.fmt(f)?;
+                write_name(f, Name::IntCC(*cond))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
             InstData::Fcmp { cond, args: a } => {
                 f.write_str("fcmp.")?;
-                cond.fmt(f)?;
+                write_name(f, Name::FloatCC(*cond))?;
                 f.write_str(" ")?;
                 self.write_args(f, a)
             }
             InstData::Load { ty, addr, flags } => {
                 f.write_str("load.")?;
-                ty.fmt(f)?;
+                write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
-                flags.fmt(f)?;
+                write_flags(f, flags)?;
                 write_value(f, v(*addr))
             }
             InstData::VaArg { ty, list } => {
                 f.write_str("va_arg.")?;
-                ty.fmt(f)?;
+                write_name(f, Name::Type(*ty))?;
                 f.write_str(" ")?;
                 write_value(f, v(*list))
             }
             InstData::Store { value, addr, flags } => {
                 f.write_str("store ")?;
-                flags.fmt(f)?;
+                write_flags(f, flags)?;
                 write_value(f, v(*value))?;
                 f.write_str(", ")?;
                 write_value(f, v(*addr))
@@ -1333,11 +1338,11 @@ impl Function {
         }
     }
 
-    fn write_args(&self, f: &mut fmt::Formatter<'_>, args: &[Value]) -> fmt::Result {
+    fn write_args<W: fmt::Write + ?Sized>(&self, f: &mut W, args: &[Value]) -> fmt::Result {
         write_values(f, args.iter().map(|&a| self.resolve(a)))
     }
 
-    fn write_block_call(&self, f: &mut fmt::Formatter<'_>, call: &BlockCall) -> fmt::Result {
+    fn write_block_call<W: fmt::Write + ?Sized>(&self, f: &mut W, call: &BlockCall) -> fmt::Result {
         write_decimal(
             f,
             "block",
@@ -1355,8 +1360,8 @@ impl Function {
 
 /// `prefix`, an optional minus sign and the decimal digits of `n` in a single
 /// `write_str`, exactly as `Display` prints entities and integers.
-fn write_decimal(
-    f: &mut fmt::Formatter<'_>,
+fn write_decimal<W: fmt::Write + ?Sized>(
+    f: &mut W,
     prefix: &str,
     negative: bool,
     mut n: u64,
@@ -1384,6 +1389,100 @@ fn write_decimal(
     i -= prefix.len();
     buf[i..i + prefix.len()].copy_from_slice(prefix.as_bytes());
     f.write_str(std::str::from_utf8(&buf[i..]).expect("ASCII digits"))
+}
+
+/// Mnemonics and types printed by instructions.
+#[derive(Clone, Copy)]
+enum Name {
+    Type(Type),
+    Binary(crate::BinaryOp),
+    Unary(crate::UnaryOp),
+    Convert(crate::ConvertOp),
+    Overflow(crate::OverflowOp),
+    IntCC(crate::IntCC),
+    FloatCC(crate::FloatCC),
+    Vector(crate::VectorBinaryOp),
+}
+
+impl fmt::Display for Name {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Name::Type(x) => x.fmt(f),
+            Name::Binary(x) => x.fmt(f),
+            Name::Unary(x) => x.fmt(f),
+            Name::Convert(x) => x.fmt(f),
+            Name::Overflow(x) => x.fmt(f),
+            Name::IntCC(x) => x.fmt(f),
+            Name::FloatCC(x) => x.fmt(f),
+            Name::Vector(x) => x.fmt(f),
+        }
+    }
+}
+
+impl Name {
+    /// A dense cache slot: each kind owns 64 consecutive slots.
+    fn slot(self) -> usize {
+        let (kind, index) = match self {
+            Name::Type(ty) => (
+                0,
+                match ty {
+                    Type::I8 => 0,
+                    Type::I16 => 1,
+                    Type::I32 => 2,
+                    Type::I64 => 3,
+                    Type::I128 => 4,
+                    Type::F32 => 5,
+                    Type::F64 => 6,
+                    Type::Ptr => 7,
+                    Type::Vector(v) => 8 + v as usize,
+                },
+            ),
+            Name::Binary(x) => (1, x as usize),
+            Name::Unary(x) => (2, x as usize),
+            Name::Convert(x) => (3, x as usize),
+            Name::Overflow(x) => (4, x as usize),
+            Name::IntCC(x) => (5, x as usize),
+            Name::FloatCC(x) => (6, x as usize),
+            Name::Vector(x) => (7, x as usize),
+        };
+        assert!(index < 64, "too many variants for the name cache");
+        kind * 64 + index
+    }
+}
+
+/// `name`'s `Display` text, remembered per thread so that printing an
+/// instruction does not enter `fmt::write` for its mnemonic.
+fn write_name<W: fmt::Write + ?Sized>(f: &mut W, name: Name) -> fmt::Result {
+    thread_local! {
+        static NAMES: std::cell::RefCell<Vec<Option<Box<str>>>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let slot = name.slot();
+    NAMES.with(|names| {
+        let mut names = names.borrow_mut();
+        if names.len() <= slot {
+            names.resize(8 * 64, None);
+        }
+        let text = names[slot].get_or_insert_with(|| name.to_string().into_boxed_str());
+        f.write_str(text)
+    })
+}
+
+/// A quoted string, as the parser reads it.
+struct Quoted<'a>(&'a [u8]);
+
+impl fmt::Display for Quoted<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        crate::data::write_quoted(f, self.0)
+    }
+}
+
+/// Default flags print nothing; others keep their own `Display`.
+fn write_flags<W: fmt::Write + ?Sized>(f: &mut W, flags: &crate::MemoryFlags) -> fmt::Result {
+    if *flags == crate::MemoryFlags::default() {
+        return Ok(());
+    }
+    write!(f, "{flags}")
 }
 
 /// The decimal text of 0 through 999, back to back.
@@ -1422,12 +1521,12 @@ fn small_decimal(n: usize) -> &'static str {
     &SMALL_DECIMALS[start..start + len]
 }
 
-fn write_value(f: &mut fmt::Formatter<'_>, value: Value) -> fmt::Result {
+fn write_value<W: fmt::Write + ?Sized>(f: &mut W, value: Value) -> fmt::Result {
     write_decimal(f, "v", false, crate::EntityRef::index(value) as u64)
 }
 
-fn write_values(
-    f: &mut fmt::Formatter<'_>,
+fn write_values<W: fmt::Write + ?Sized>(
+    f: &mut W,
     values: impl IntoIterator<Item = Value>,
 ) -> fmt::Result {
     for (i, value) in values.into_iter().enumerate() {
@@ -1439,8 +1538,8 @@ fn write_values(
     Ok(())
 }
 
-fn write_list<T: fmt::Display>(
-    f: &mut fmt::Formatter<'_>,
+fn write_list<W: fmt::Write + ?Sized, T: fmt::Display>(
+    f: &mut W,
     items: impl IntoIterator<Item = T>,
 ) -> fmt::Result {
     for (i, item) in items.into_iter().enumerate() {

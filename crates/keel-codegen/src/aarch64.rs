@@ -1374,7 +1374,9 @@ impl<'a> FunctionCompiler<'a> {
                 self.out.label(label);
                 for &inst in func.block_insts(block) {
                     if !self.out.structured() {
-                        writeln!(self.out, "\t; {}", func.display_inst(inst)).unwrap();
+                        self.out.push_str("\t; ");
+                        func.write_inst_to(&mut self.out, inst).unwrap();
+                        self.out.push_str("\n");
                     }
                     if self.debug {
                         self.set_srcloc(func.inst_loc(inst));
