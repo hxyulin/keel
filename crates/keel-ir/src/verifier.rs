@@ -1752,6 +1752,48 @@ mod name_tests {
 }
 
 #[cfg(test)]
+mod dominance_tests {
+    fn errors(text: &str) -> Vec<String> {
+        let module = crate::parse(text).unwrap();
+        match super::verify_module(&module) {
+            Ok(()) => Vec::new(),
+            Err(errors) => errors.into_iter().map(|e| e.to_string()).collect(),
+        }
+    }
+
+    /// The shortcuts that avoid the dominator tree (entry definitions, same
+    /// block order) still skip unreachable blocks and still catch the rest.
+    #[test]
+    fn shortcuts_agree_with_the_dominator_tree() {
+        let func = |ret: &str| {
+            format!(
+                "func @f(i8) -> i64 cc(c) {{
+block0(v0: i8):
+    v1 = iconst.i64 1
+    brif v0, block1, block2
+block1:
+    v2 = iconst.i64 2
+    jump block3
+block2:
+    jump block3
+block3:
+    {ret}
+block4:
+    v4 = iadd v5, v2
+    v5 = iconst.i64 3
+    return v4
+}}"
+            )
+        };
+        assert_eq!(errors(&func("return v1")), Vec::<String>::new());
+        assert_eq!(
+            errors(&func("return v2")),
+            ["@f inst5 `return v2`: use of v2 is not dominated by its definition"]
+        );
+    }
+}
+
+#[cfg(test)]
 mod args_tests {
     use super::*;
     use crate::VectorType;
