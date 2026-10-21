@@ -407,3 +407,92 @@ block1:
         keel_ir::verify_module(&m).unwrap();
     }
 }
+
+#[test]
+fn merges_retain_only_identical_successful_reads_on_every_path() {
+    for (middle, expected) in [
+        ("", 1),
+        ("store v2, v0", 2),
+        ("call @effect(v0)", 2),
+        ("v9 = load.i64 volatile v0", 3),
+    ] {
+        let source = format!(
+            "decl @effect(ptr)
+func @f(ptr, i8, i64) -> i64 {{
+block0(v0: ptr, v1: i8, v2: i64):
+ v3 = load.i64 v0
+ brif v1, block1, block2
+block1:
+ {middle}
+ jump block3
+block2:
+ jump block3
+block3:
+ v4 = load.i64 v0
+ return v4
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), expected, "{source}");
+    }
+}
+
+#[test]
+fn equal_stores_at_merge_do_not_establish_readability() {
+    for notrap in ["", " notrap"] {
+        let source = format!(
+            "func @f(ptr, i8, i64) -> i64 {{
+block0(v0: ptr, v1: i8, v2: i64):
+ brif v1, block1, block2
+block1:
+ store v2, v0
+ jump block3
+block2:
+ store v2, v0
+ jump block3
+block3:
+ v3 = load.i64{notrap} v0
+ return v3
+}}"
+        );
+        assert_eq!(loads(&optimize(&source)), usize::from(notrap.is_empty()));
+    }
+}
+
+#[test]
+fn merge_readability_requires_a_successful_read_on_every_path() {
+    let m = optimize(
+        "func @f(ptr, i8, i64) -> i64 {
+block0(v0: ptr, v1: i8, v2: i64):
+ brif v1, block1, block2
+block1:
+ v3 = load.i64 v0
+ store v2, v0
+ jump block3
+block2:
+ store v2, v0
+ jump block3
+block3:
+ v4 = load.i64 v0
+ return v4
+}",
+    );
+    assert_eq!(loads(&m), 2);
+    assert!(m.to_string().contains("v4 = load.i64"));
+}
+
+#[test]
+fn unreachable_predecessor_cannot_supply_or_preserve_memory_facts() {
+    let m = optimize(
+        "func @f(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = load.i64 v0
+ jump block1
+block1:
+ v2 = load.i64 v0
+ return v2
+block2:
+ jump block1
+}",
+    );
+    assert_eq!(loads(&m), 2);
+}

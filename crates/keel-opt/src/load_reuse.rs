@@ -1,8 +1,8 @@
 //! Bounded availability of successful ordinary loads, without load motion.
 //!
-//! A reachable non-entry block inherits only its unique predecessor's completed
-//! state. RPO visits that predecessor first; an unvisited predecessor, merge or
-//! backedge cannot supply facts. Each inherited value therefore dominates its
+//! A reachable non-entry block inherits completed predecessor states, retaining
+//! only identical values present on every incoming path. An unvisited
+//! predecessor or backedge cannot supply facts. Each inherited value dominates its
 //! replacement and was already successfully loaded on this execution. Siblings
 //! receive separate snapshots. Block arguments are deliberately not translated.
 //!
@@ -32,6 +32,7 @@ impl crate::Pass for LoadReuse {
 
 const MAX_EDGES: usize = 8;
 const MAX_FACTS: usize = 128;
+const MAX_PREDS: usize = 8;
 #[derive(Clone, Copy)]
 struct Fact {
     value: Value,
@@ -39,6 +40,45 @@ struct Fact {
     readable: bool,
 }
 type Facts = HashMap<(Address, Type), Fact>;
+
+fn incoming(
+    func: &Function,
+    cfg: &ControlFlowGraph,
+    block: keel_ir::Block,
+    exits: &[Option<(usize, Facts)>],
+) -> (usize, Facts) {
+    let preds = cfg.preds(block);
+    if Some(block) == func.entry_block() || preds.is_empty() || preds.len() > MAX_PREDS {
+        return (0, Facts::new());
+    }
+    let mut depth = 0;
+    // Refuse the entire merge if any predecessor has not completed, including
+    // loop backedges. Never run a fixed point or invent phi memory values.
+    for pred in preds {
+        let Some((pred_depth, _)) = &exits[pred.index()] else {
+            return (0, Facts::new());
+        };
+        depth = depth.max(*pred_depth);
+    }
+    if depth >= MAX_EDGES {
+        return (0, Facts::new());
+    }
+    let mut facts = exits[preds[0].index()].as_ref().unwrap().1.clone();
+    for pred in &preds[1..] {
+        let other = &exits[pred.index()].as_ref().unwrap().1;
+        facts.retain(|key, fact| {
+            if let Some(other) = other.get(key)
+                && func.resolve(fact.value) == func.resolve(other.value)
+            {
+                fact.readable &= other.readable;
+                true
+            } else {
+                false
+            }
+        });
+    }
+    (depth + 1, facts)
+}
 
 fn run(func: &mut Function) -> bool {
     // A debugger may edit source variable homes between source locations.
@@ -51,14 +91,7 @@ fn run(func: &mut Function) -> bool {
     let mut exits: Vec<Option<(usize, Facts)>> = vec![None; func.num_blocks()];
     let mut changed = false;
     for block in cfg.reverse_postorder(func) {
-        let (depth, mut facts) = match cfg.preds(block) {
-            [pred] if Some(block) != func.entry_block() => exits[pred.index()]
-                .as_ref()
-                .filter(|(depth, _)| *depth < MAX_EDGES)
-                .map(|(depth, facts)| (depth + 1, facts.clone()))
-                .unwrap_or_default(),
-            _ => (0, Facts::new()),
-        };
+        let (depth, mut facts) = incoming(func, &cfg, block, &exits);
         for inst in func.block_insts(block).to_vec() {
             match *func.inst_data(inst) {
                 InstData::Load { ty, addr, flags } if !flags.volatile => {
