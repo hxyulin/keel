@@ -37,8 +37,10 @@
 //! trap, so running one on a path that did not run it before (hoisting out
 //! of a loop that runs zero times) is harmless.
 
-use keel_ir::fxhash::FxHashMap;
 use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
+
+/// No instruction or block, in the dense per-instruction arrays below.
+const NONE: u32 = u32::MAX;
 
 pub fn run(func: &mut Function) -> bool {
     let analysis = crate::analysis::get(func);
@@ -57,7 +59,7 @@ pub fn run(func: &mut Function) -> bool {
     // Who uses each value, among reachable instructions: (value, user) pairs
     // in layout order, then packed by value with `user_start`.
     let mut uses: Vec<(u32, Inst)> = Vec::with_capacity(2 * layout);
-    let mut last_user = vec![None; func.num_values()];
+    let mut last_user = vec![NONE; func.num_values()];
     let mut user_start = vec![0u32; func.num_values() + 1];
     for &block in domtree.rpo() {
         for &inst in func.block_insts(block) {
@@ -69,8 +71,8 @@ pub fn run(func: &mut Function) -> bool {
                 let v = func.resolve(v).index();
                 // All operands of one instruction are visited together;
                 // repeated operands therefore only repeat the last user.
-                if last_user[v] != Some(inst) {
-                    last_user[v] = Some(inst);
+                if last_user[v] != inst.index() as u32 {
+                    last_user[v] = inst.index() as u32;
                     user_start[v + 1] += 1;
                     uses.push((v as u32, inst));
                 }
@@ -95,37 +97,49 @@ pub fn run(func: &mut Function) -> bool {
 
     // Early placement, with operands before users: blocks in RPO and
     // definitions before uses within a block.
-    let mut early = vec![None; func.num_insts()];
+    // Placement never changes an operand count, so record which floating
+    // instructions have none (in `floating` order) while visiting operands.
+    let mut early = vec![NONE; func.num_insts()];
+    let mut leaf = Vec::with_capacity(floating.len());
     for &inst in &floating {
         let mut block = func.entry_block().expect("reachable code has an entry");
+        let mut operands = 0;
         func.inst_data(inst).for_each_operand(|v| {
+            operands += 1;
             let def_block = match func.value_def(func.resolve(v)) {
                 ValueDef::Param(b, _) => b,
-                ValueDef::Result(def, _) => {
-                    early[def.index()].unwrap_or_else(|| func.inst_block(def))
-                }
+                ValueDef::Result(def, _) => match early[def.index()] {
+                    NONE => func.inst_block(def),
+                    b => Block::new(b as usize),
+                },
                 ValueDef::Alias(_) => unreachable!("resolved"),
             };
             if dom_depth[def_block.index()] > dom_depth[block.index()] {
                 block = def_block;
             }
         });
-        early[inst.index()] = Some(block);
+        early[inst.index()] = block.index() as u32;
+        leaf.push(operands == 0);
     }
 
     // Late placement and the final choice, users first.
     let mut changed = false;
     // Generation markers avoid allocating or clearing a membership set for
     // every instruction. Each producer is its own unique generation.
-    let mut membership = vec![None; func.num_insts()];
+    let mut membership = vec![NONE; func.num_insts()];
+    let mut groups = Groups {
+        slot: vec![(NONE, 0); func.num_blocks()],
+        blocks: Vec::new(),
+        members: Vec::new(),
+    };
     let mut inst_users: Vec<Inst> = Vec::new();
-    for &inst in floating.iter().rev() {
+    for (&inst, &leaf) in floating.iter().zip(&leaf).rev() {
         // The users of all its results (`*_overflow` has two).
         inst_users.clear();
         for &result in func.inst_results(inst) {
             for &user in users(result) {
-                if membership[user.index()] != Some(inst) {
-                    membership[user.index()] = Some(inst);
+                if membership[user.index()] != inst.index() as u32 {
+                    membership[user.index()] = inst.index() as u32;
                     inst_users.push(user);
                 }
             }
@@ -140,24 +154,25 @@ pub fn run(func: &mut Function) -> bool {
         }
         // Unused: leave it for DCE.
         let Some(late) = late else { continue };
-        let early = early[inst.index()].unwrap();
+        let early = Block::new(early[inst.index()] as usize);
 
-        let mut operands = 0;
-        func.inst_data(inst).for_each_operand(|_| operands += 1);
-        if operands == 0 {
-            changed |= rematerialize(func, inst, &inst_users, &membership);
+        if leaf {
+            changed |= rematerialize(func, inst, &inst_users, &membership, &mut groups);
             continue;
         }
 
         let mut best = late;
         let mut block = late;
-        let cheap_address = fixed_address(func, func.first_result(inst));
+        let mut cheap_address = None;
         while block != early {
             block = domtree.idom(block).expect("early dominates late");
             // An address of a fixed object plus a constant is cheap to
             // recompute. Hoisting it keeps a separate pointer live across
             // the loop (and calls), often costing more spills than it saves.
-            if !cheap_address && loops.depth(block) < loops.depth(best) {
+            if loops.depth(block) < loops.depth(best)
+                && !*cheap_address
+                    .get_or_insert_with(|| fixed_address(func, func.first_result(inst)))
+            {
                 best = block;
             }
         }
@@ -200,11 +215,22 @@ fn fixed_address(func: &Function, value: Value) -> bool {
 /// Gives each block using operand-free `inst` its own copy, just before the
 /// first use in that block. `inst` itself serves its own block if it has
 /// users there, or else the first user block.
+/// Scratch for grouping a constant's users by block, reused across calls.
+struct Groups {
+    /// Per block: the producer that last grouped it, and its group there.
+    slot: Vec<(u32, u32)>,
+    /// Each group's block, in order of first use.
+    blocks: Vec<Block>,
+    /// (group, user), sorted stably by group.
+    members: Vec<(u32, Inst)>,
+}
+
 fn rematerialize(
     func: &mut Function,
     inst: Inst,
     users: &[Inst],
-    membership: &[Option<Inst>],
+    membership: &[u32],
+    groups: &mut Groups,
 ) -> bool {
     let result = func.first_result(inst);
     let home = func.inst_block(inst);
@@ -223,33 +249,54 @@ fn rematerialize(
         func.move_inst(inst, InsertPoint::Before(first));
         return true;
     }
-    let mut blocks: Vec<Block> = Vec::new();
-    let mut local_users: FxHashMap<Block, Vec<Inst>> = FxHashMap::default();
+    // Group the users by block, blocks in order of first use and users in
+    // their given order within each.
+    let Groups {
+        slot,
+        blocks,
+        members,
+    } = groups;
+    let producer = inst.index() as u32;
+    blocks.clear();
+    members.clear();
     for &user in users {
         let b = func.inst_block(user);
-        let local = local_users.entry(b).or_default();
-        if local.is_empty() {
+        let slot = &mut slot[b.index()];
+        if slot.0 != producer {
+            *slot = (producer, blocks.len() as u32);
             blocks.push(b);
         }
-        local.push(user);
+        members.push((slot.1, user));
     }
-    if let Some(i) = blocks.iter().position(|&b| b == home) {
+    members.sort_by_key(|&(group, _)| group);
+    // The group that keeps `inst` itself rather than a copy.
+    let kept = match blocks.iter().position(|&b| b == home) {
         // Keep its place in its own block.
-        blocks.remove(i);
-    } else {
-        let first = blocks.remove(0);
-        let user = first_user_in(func, first, inst, membership).expect("a user in its block");
-        func.move_inst(inst, InsertPoint::Before(user));
-    }
-    let changed = !blocks.is_empty() || func.inst_block(inst) != home;
+        Some(i) => i,
+        None => {
+            let user =
+                first_user_in(func, blocks[0], inst, membership).expect("a user in its block");
+            func.move_inst(inst, InsertPoint::Before(user));
+            0
+        }
+    };
+    let changed = blocks.len() > 1 || func.inst_block(inst) != home;
     let data = func.inst_data(inst).clone();
-    for block in blocks {
+    let mut start = 0;
+    for (group, &block) in blocks.iter().enumerate() {
+        let end = start + members[start..].partition_point(|&(g, _)| g as usize == group);
+        let local = &members[start..end];
+        start = end;
+        if group == kept {
+            continue;
+        }
         let first = first_user_in(func, block, inst, membership).expect("a user in its block");
         let copy = func.insert_inst(InsertPoint::Before(first), data.clone());
         func.set_inst_loc(copy, func.inst_loc(inst));
         let copy = func.first_result(copy);
-        for &user in &local_users[&block] {
-            let mut data = func.inst_data(user).clone();
+        for &(_, user) in local {
+            // Rewrite in place: resolving reads only values, not `user`.
+            let mut data = std::mem::replace(func.inst_data_mut(user), InstData::Trap);
             data.for_each_operand_mut(|v| {
                 if func.resolve(*v) == result {
                     *v = copy;
@@ -266,12 +313,12 @@ fn first_user_in(
     func: &Function,
     block: Block,
     producer: Inst,
-    membership: &[Option<Inst>],
+    membership: &[u32],
 ) -> Option<Inst> {
     func.block_insts(block)
         .iter()
         .copied()
         // Rematerialization creates new instructions after the membership
         // array was built; they cannot be users of an original instruction.
-        .find(|inst| membership.get(inst.index()) == Some(&Some(producer)))
+        .find(|inst| membership.get(inst.index()) == Some(&(producer.index() as u32)))
 }
