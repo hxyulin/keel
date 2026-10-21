@@ -983,7 +983,11 @@ impl Function {
 
     #[inline]
     pub fn inst_results(&self, inst: Inst) -> &[Value] {
-        &self.result_pool[self.insts[inst].results.as_range()]
+        let range = self.insts[inst].results.as_range();
+        debug_assert!(range.end <= self.result_pool.len());
+        // SAFETY: `create_inst` gives a node its range only once nothing
+        // can stop it filling that range in, and the pool never shrinks.
+        unsafe { self.result_pool.get_unchecked(range) }
     }
 
     /// The block containing `inst`. Panics if it was removed.
