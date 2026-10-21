@@ -6,12 +6,21 @@
 
 use keel_ir::{BinaryOp, Function, InstData, Type, Value, ValueDef};
 
-fn order(func: &Function, value: Value) -> (bool, Value) {
-    let literal = match func.value_def(func.resolve(value)) {
+fn literal(func: &Function, value: Value) -> bool {
+    match func.value_def(func.resolve(value)) {
         ValueDef::Result(inst, _) => matches!(func.inst_data(inst), InstData::Iconst { .. }),
         _ => false,
-    };
-    (literal, value)
+    }
+}
+
+/// Whether `(literal, value)` orders `a` after `b`, so the pair needs a swap.
+/// Decides on the value IDs first, which spares one or both literal lookups.
+fn out_of_order(func: &Function, a: Value, b: Value) -> bool {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Equal => false,
+        std::cmp::Ordering::Less => literal(func, a) && !literal(func, b),
+        std::cmp::Ordering::Greater => !literal(func, b) || literal(func, a),
+    }
 }
 
 // Only full-width, nonzero constant shifts are eligible. In particular, do
@@ -71,16 +80,16 @@ pub(crate) fn normalize(func: &Function, data: &mut InstData) {
     }
     match data {
         InstData::Binary { op, args } if !op.is_float() && crate::gvn::is_commutative(*op) => {
-            if order(func, args[0]) > order(func, args[1]) {
+            if out_of_order(func, args[0], args[1]) {
                 args.swap(0, 1);
             }
         }
         InstData::Overflow { op, args } if crate::gvn::is_commutative_overflow(*op) => {
-            if order(func, args[0]) > order(func, args[1]) {
+            if out_of_order(func, args[0], args[1]) {
                 args.swap(0, 1);
             }
         }
-        InstData::Icmp { cond, args } if order(func, args[0]) > order(func, args[1]) => {
+        InstData::Icmp { cond, args } if out_of_order(func, args[0], args[1]) => {
             args.swap(0, 1);
             *cond = crate::gvn::reverse(*cond);
         }
@@ -101,12 +110,12 @@ pub(crate) fn needs_normalize(func: &Function, data: &InstData) -> bool {
             (op == BinaryOp::Or && rotate(func, args).is_some())
                 || (!op.is_float()
                     && crate::gvn::is_commutative(op)
-                    && order(func, args[0]) > order(func, args[1]))
+                    && out_of_order(func, args[0], args[1]))
         }
         InstData::Overflow { op, args } => {
-            crate::gvn::is_commutative_overflow(op) && order(func, args[0]) > order(func, args[1])
+            crate::gvn::is_commutative_overflow(op) && out_of_order(func, args[0], args[1])
         }
-        InstData::Icmp { args, .. } => order(func, args[0]) > order(func, args[1]),
+        InstData::Icmp { args, .. } => out_of_order(func, args[0], args[1]),
         _ => false,
     }
 }
