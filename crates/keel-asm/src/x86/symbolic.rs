@@ -3,6 +3,7 @@
 //! layout passes copy the cached encoding and fixups. A compact operand
 //! record with interned symbols rebuilds the instruction for those cases.
 use super::{Expr, SymId, Symbols, encode};
+use smallvec::SmallVec;
 use keel_asm_ir::{
     Expression,
     x86::{self, Address, Memory, Modifier, Operand, Register, RegisterClass},
@@ -74,6 +75,26 @@ impl Cache {
             && matches!(i.operands.as_slice(), [Operand::Immediate(address)]
                 if address.modifier == Modifier::None && address.expression.add.is_some()
                     && address.expression.subtract.is_none());
+        // Intern each operand's symbols once; the encoder's fixups name the
+        // same few symbols again.
+        let mut seen = SmallVec::<[(&str, SymId); 2]>::new();
+        let mut addresses = SmallVec::<[(SymId, SymId); 2]>::new();
+        let mut candidates = SmallVec::<[(SymId, SymId); 2]>::new();
+        for o in &i.operands {
+            let a = match o {
+                Operand::Immediate(a) => a,
+                Operand::Memory(m) => &m.displacement,
+                Operand::Register(_) => continue,
+            };
+            let ids = (
+                intern(&mut seen, symbols, a.expression.add.as_deref()),
+                intern(&mut seen, symbols, a.expression.subtract.as_deref()),
+            );
+            addresses.push(ids);
+            if a.modifier == Modifier::None && ids.0 != NONE {
+                candidates.push(ids);
+            }
+        }
         let mut s = Symbolic {
             bytes: 0,
             fixups: 0,
@@ -85,44 +106,36 @@ impl Cache {
             opcode: i.opcode,
             operands: NONE,
         };
-        self.fill(&mut s, i, symbols);
+        self.fill(&mut s, i, &mut |name| match seen.iter().find(|(n, _)| *n == name) {
+            Some(&(_, id)) => id,
+            None => symbols.intern(name),
+        });
         // Folding is checked against the cached fixups: that needs exactly
-        // one fixup, in order, for every operand that may fold.
-        if s.cached {
-            let candidates = i
-                .operands
+        // one fixup, in order, for every operand that may fold. Compare
+        // symbols only: the encoder adjusts PC-relative constants.
+        s.cached = s.cached
+            && self
+                .fixups(&s)
                 .iter()
-                .filter_map(|o| match o {
-                    Operand::Immediate(a) => Some(a),
-                    Operand::Memory(m) => Some(&m.displacement),
-                    Operand::Register(_) => None,
-                })
-                .filter(|a| a.modifier == Modifier::None && a.expression.add.is_some());
-            let fixups = self.fixups(&s).iter().filter(|f| f.candidate());
-            // Compare symbols only: the encoder adjusts PC-relative constants.
-            s.cached = candidates
-                .map(|a| {
-                    let e = symbols.expr(&a.expression);
-                    (e.add, e.subtract)
-                })
-                .eq(fixups.map(|f| {
-                    let e = f.expr();
-                    (e.add, e.subtract)
-                }));
-        }
-        let needed = !s.cached
-            || s.short
-            || self.fixups(&s).iter().any(CachedFix::candidate);
+                .filter(|f| f.candidate())
+                .map(|f| (f.add, f.subtract))
+                .eq(candidates.iter().copied());
+        let needed = !s.cached || s.short || !candidates.is_empty();
         if needed {
             s.operands = u32::try_from(self.operands.len()).expect("operand records exceed 4 GiB");
-            self.write_operands(&i.operands, symbols);
+            self.write_operands(&i.operands, &addresses);
         }
         let index = u32::try_from(self.entries.len()).expect("too many symbolic instructions");
         self.entries.push(s);
         index
     }
     /// Encode `i` with the entry's `short` into the cache.
-    fn fill(&mut self, s: &mut Symbolic, i: &x86::Instruction, symbols: &mut Symbols) {
+    fn fill(
+        &mut self,
+        s: &mut Symbolic,
+        i: &x86::Instruction,
+        intern: &mut impl FnMut(&str) -> SymId,
+    ) {
         s.cached = false;
         let Ok(e) = encode::encode(i, s.short) else {
             return;
@@ -137,13 +150,13 @@ impl Cache {
         s.fixups = u32::try_from(self.fixups.len()).expect("instruction cache exceeds 4 GiB");
         s.count = count;
         for f in e.fixups {
-            let expr = symbols.expr(&f.address.expression);
-            let Ok(constant) = i64::try_from(expr.constant) else {
+            let e = &f.address.expression;
+            let Ok(constant) = i64::try_from(e.constant) else {
                 return;
             };
             self.fixups.push(CachedFix {
-                add: expr.add.unwrap_or(NONE),
-                subtract: expr.subtract.unwrap_or(NONE),
+                add: e.add.as_deref().map_or(NONE, &mut *intern),
+                subtract: e.subtract.as_deref().map_or(NONE, &mut *intern),
                 constant,
                 // Within one instruction, and of the encoder's few kinds.
                 offset: f.offset as u8,
@@ -183,11 +196,13 @@ impl Cache {
         let i = self.instruction(index, symbols);
         let mut s = self.entries[index as usize];
         s.short = false;
-        self.fill(&mut s, &i, symbols);
+        self.fill(&mut s, &i, &mut |name| symbols.intern(name));
         self.entries[index as usize] = s;
     }
-    fn write_operands(&mut self, operands: &[Operand], symbols: &mut Symbols) {
+    /// Record operands, with their addresses' interned symbols in order.
+    fn write_operands(&mut self, operands: &[Operand], addresses: &[(SymId, SymId)]) {
         let out = &mut self.operands;
+        let mut addresses = addresses.iter();
         out.push(u8::try_from(operands.len()).expect("too many operands"));
         for o in operands {
             match o {
@@ -197,7 +212,7 @@ impl Cache {
                 }
                 Operand::Immediate(a) => {
                     out.push(1);
-                    address(out, a, symbols);
+                    address(out, a, *addresses.next().unwrap());
                 }
                 Operand::Memory(m) => {
                     out.push(2);
@@ -217,11 +232,27 @@ impl Cache {
                     if let Some(segment) = m.segment {
                         out.push(segment);
                     }
-                    address(out, &m.displacement, symbols);
+                    address(out, &m.displacement, *addresses.next().unwrap());
                 }
             }
         }
     }
+}
+/// `name`'s id, interning each of an instruction's names once.
+fn intern<'i>(
+    seen: &mut SmallVec<[(&'i str, SymId); 2]>,
+    symbols: &mut Symbols,
+    name: Option<&'i str>,
+) -> SymId {
+    let Some(name) = name else {
+        return NONE;
+    };
+    if let Some(&(_, id)) = seen.iter().find(|(n, _)| *n == name) {
+        return id;
+    }
+    let id = symbols.intern(name);
+    seen.push((name, id));
+    id
 }
 fn register(out: &mut Vec<u8>, r: &Register) {
     out.push(match r.class {
@@ -242,20 +273,20 @@ const MODIFIERS: [Modifier; 6] = [
     Modifier::GotTpOff,
     Modifier::DtpOff,
 ];
-fn address(out: &mut Vec<u8>, a: &Address, symbols: &mut Symbols) {
-    let e = symbols.expr(&a.expression);
+fn address(out: &mut Vec<u8>, a: &Address, (add, subtract): (SymId, SymId)) {
+    let constant = a.expression.constant;
     let modifier = MODIFIERS.iter().position(|&m| m == a.modifier).unwrap() as u8;
     out.push(
         modifier
-            | u8::from(e.add.is_some()) << 3
-            | u8::from(e.subtract.is_some()) << 4
-            | u8::from(e.constant != 0) << 5,
+            | u8::from(add != NONE) << 3
+            | u8::from(subtract != NONE) << 4
+            | u8::from(constant != 0) << 5,
     );
-    for id in e.add.into_iter().chain(e.subtract) {
+    for id in [add, subtract].into_iter().filter(|&id| id != NONE) {
         out.extend_from_slice(&id.to_le_bytes());
     }
-    if e.constant != 0 {
-        out.extend_from_slice(&e.constant.to_le_bytes());
+    if constant != 0 {
+        out.extend_from_slice(&constant.to_le_bytes());
     }
 }
 struct Reader<'a> {

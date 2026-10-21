@@ -65,22 +65,28 @@ impl Default for Sym {
 /// An interned symbol name: an index into [`Names`] and the symbol table.
 type SymId = u32;
 /// Symbol names, interned once to dense ids. The text lives in one buffer
-/// and the open-addressed index holds only ids, so layout passes compare and
-/// look up symbols as small integers rather than hashing names.
+/// and the open-addressed index holds only ids and hash fingerprints, so
+/// layout passes compare and look up symbols as small integers rather than
+/// hashing names, and a lookup rarely touches a name it does not match.
 #[derive(Default)]
 struct Names {
     text: String,
     /// Start and length of each name in `text`.
     spans: Vec<(u32, u32)>,
-    hashes: Vec<u64>,
-    /// `id + 1` at each occupied slot; the length is zero or a power of two.
-    slots: Vec<u32>,
+    /// Zero, or a name's 32-bit [`Self::hash`] above its `id + 1`. The hash
+    /// also picks the home slot. The length is zero or a power of two.
+    slots: Vec<u64>,
 }
 impl Names {
-    fn hash(name: &str) -> u64 {
+    fn hash(name: &str) -> u32 {
         let mut h = FxHasher::default();
         h.write(name.as_bytes());
-        h.finish()
+        // Fx's final multiply carries a difference in a word's high byte
+        // (the last character of an eight-byte name) only into the top
+        // bits; fold those down so slot indices see it too.
+        let h = h.finish();
+        let h = (h ^ h >> 32).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        (h >> 32) as u32
     }
     fn len(&self) -> usize {
         self.spans.len()
@@ -90,14 +96,13 @@ impl Names {
         &self.text[start as usize..(start + len) as usize]
     }
     /// The slot holding `name`, or the empty slot where it belongs.
-    fn find(&self, name: &str, hash: u64) -> usize {
+    fn find(&self, name: &str, hash: u32) -> usize {
         let mask = self.slots.len() - 1;
-        // Fx mixes its high bits best.
-        let mut i = (hash >> 32) as usize & mask;
+        let mut i = hash as usize & mask;
         loop {
-            let id = self.slots[i];
-            if id == 0
-                || (self.hashes[(id - 1) as usize] == hash && self.name(id - 1) == name)
+            let slot = self.slots[i];
+            if slot == 0
+                || ((slot >> 32) as u32 == hash && self.name(slot as u32 - 1) == name)
             {
                 return i;
             }
@@ -108,31 +113,30 @@ impl Names {
         if self.slots.is_empty() {
             return None;
         }
-        self.slots[self.find(name, Self::hash(name))].checked_sub(1)
+        (self.slots[self.find(name, Self::hash(name))] as u32).checked_sub(1)
     }
     fn intern(&mut self, name: &str) -> SymId {
         if self.spans.len() * 2 >= self.slots.len() {
             let n = (self.slots.len() * 2).max(64);
-            self.slots = vec![0; n];
-            for (id, &hash) in self.hashes.iter().enumerate() {
-                let mut i = (hash >> 32) as usize & (n - 1);
+            let old = std::mem::replace(&mut self.slots, vec![0; n]);
+            for slot in old.into_iter().filter(|&s| s != 0) {
+                let mut i = (slot >> 32) as usize & (n - 1);
                 while self.slots[i] != 0 {
                     i = (i + 1) & (n - 1);
                 }
-                self.slots[i] = id as u32 + 1;
+                self.slots[i] = slot;
             }
         }
         let hash = Self::hash(name);
         let slot = self.find(name, hash);
-        if let Some(id) = self.slots[slot].checked_sub(1) {
+        if let Some(id) = (self.slots[slot] as u32).checked_sub(1) {
             return id;
         }
         let id = self.spans.len() as SymId;
         let start = u32::try_from(self.text.len()).expect("symbol names exceed 4 GiB");
         self.text.push_str(name);
         self.spans.push((start, name.len() as u32));
-        self.hashes.push(hash);
-        self.slots[slot] = id + 1;
+        self.slots[slot] = u64::from(hash) << 32 | u64::from(id + 1);
         id
     }
 }
