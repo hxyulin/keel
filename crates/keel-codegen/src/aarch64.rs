@@ -113,8 +113,8 @@ use keel_ir::{
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
-mod constant_plan;
 mod absolute;
+mod constant_plan;
 mod native;
 mod output;
 mod packed_load;
@@ -1396,9 +1396,26 @@ impl<'a> FunctionCompiler<'a> {
             let d = self.def_reg(result);
             self.mach("cmp", [reg(source, ty).into(), Arg::imm(0)]);
             self.native(
-                if ty == Type::I64 { Opcode::CSNEG_64_condsel } else { Opcode::CSNEG_32_condsel },
-                [(FieldId::Rd, d.into()), (FieldId::Rn, source.into()), (FieldId::Rm, source.into()), (FieldId::cond, 10)],
-                |out| write!(out, "csneg\t{}, {}, {}, ge", reg(d, ty), reg(source, ty), reg(source, ty)),
+                if ty == Type::I64 {
+                    Opcode::CSNEG_64_condsel
+                } else {
+                    Opcode::CSNEG_32_condsel
+                },
+                [
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, source.into()),
+                    (FieldId::Rm, source.into()),
+                    (FieldId::cond, 10),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "csneg\t{}, {}, {}, ge",
+                        reg(d, ty),
+                        reg(source, ty),
+                        reg(source, ty)
+                    )
+                },
             );
             self.def_done(result, d);
             return;
