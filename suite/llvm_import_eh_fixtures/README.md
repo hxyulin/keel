@@ -36,14 +36,15 @@ reordered. Both scalar components of an EH pair remain together across PHIs.
 Only a direct external `i32 @__gxx_personality_v0(...)` runtime declaration is
 canonicalized to Keel's symbolic personality declaration; any other use of
 that symbol is rejected, including addresses in initializers. This does not
-provide ordinary variadic calls. RTTI must be external named global objects;
-definitions (including weak/ODR definitions) remain unsupported. The limit is
+provide ordinary variadic calls. RTTI can be external or defined data passing
+the exact layout/linkage/relocation transport contract. Hidden class/si ODR
+RTTI and Apple tagged names are validated separately. The limit is
 63 distinct caught types including catch-all per function.
 
 Indirect invokes, filters, Windows funclets, other personalities, ordinary
 aggregate SSA, cyclic EH pair PHIs, reconstructed/insertvalue pairs, and
 undef/poison pairs remain rejected. This does not import arbitrary C++ modules:
-ODR definitions, unsupported intrinsics and ABI contracts
+Unsupported intrinsics and ABI contracts
 still fail closed. No backend code is changed.
 
 The original LLVM reference objects use Clang `-O1`. On the installed Apple

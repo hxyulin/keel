@@ -21,9 +21,9 @@ data @_ZTI1B = weak_odr hidden const align 8 { ptr @_ZTVN10__cxxabiv117__class_t
 `hidden` must preserve hidden weak data visibility (Mach-O private extern).
 `rtti_name @symbol` must represent precisely `symbol + 0x8000000000000000`,
 including the high bit, without passing through the ordinary unsigned-u32
-relocation addend. These are explicit dependencies on the parallel core work;
-the baseline verifier at a367d868 rejects this syntax. The importer does not
-claim that translation-only checks establish native linker/runtime behavior.
+relocation addend. The AArch64 Mach-O core implements these contracts; ELF and
+diagnostic LLVM/Cranelift output reject them explicitly. Native mixed-TU
+validation is separate from translation-only checks.
 
 The C API linkage constants come from the official
 [llvm-c/Core.h LLVMLinkage enum](https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm-c/Core.h),
@@ -88,16 +88,17 @@ type, address-space and bounds guard. Instruction GEPs retain exact ordinary
 arithmetic without inventing alias/escape facts. LLVM itself controls which
 flag forms are legal on constants versus instructions.
 
-## Evidence and parent integration
+## Evidence and reproduction
 
-Run focused tests directly (no native work), or with a real baseline verifier:
+Run focused translation tests directly, or the full policy/native checks under
+the host lease with the current verifier:
 
 ```sh
 python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib -v
-python3 suite/fast_opt_locked.py /tmp/odr-policy-lease.jsonl python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib --keel /path/to/keel -v
+python3 suite/fast_opt_locked.py /tmp/odr-policy-lease.jsonl python3 suite/test_llvm_import_odr.py --libllvm /path/to/libLLVM.dylib --keel /path/to/keel --verify-weak-odr -v
 ```
 
-Without `--verify-weak-odr`, the CLI tests explicitly require baseline rejection
+For historical baseline testing only, without `--verify-weak-odr` the CLI tests require rejection
 of both ordinary and hidden/tagged ODR output. Strong defined RTTI is positively
 verified, and real CLI file/stdin input preservation and destination/stdout
 atomicity are checked. No mock verifier is used. After integrating core syntax:
@@ -109,7 +110,7 @@ python3 suite/fast_opt_locked.py /tmp/keel-odr-integrated-lease.jsonl python3 su
 python3 suite/frontend_validate.py --out /tmp/keel-odr-integrated-frontend --jobs 2 --require-llvm
 ```
 
-The mixed-TU validator is supplied by the separate interoperability task.
+The mixed-TU validator is `suite/llvm_import_odr_validate.py`.
 `frontend_validate.py` owns its lease: do not wrap it in fast_opt_locked.py.
 Output directories must be fresh. Parent integration must reconcile these
 existing expectations without dropping retained rejection coverage:
@@ -128,5 +129,12 @@ existing expectations without dropping retained rejection coverage:
   can become positive subject to actual native checks; ordinary hidden symbols
   remain negative. The shared README's blanket inrange rejection is obsolete.
 
-No foundational Rust, shared existing validators, harness files or shared docs
-are changed by this importer implementation.
+The combined harness now runs the core tests, 15 policy tests and 32 native
+mixed-TU runs. Policy tests also cover lifetime restarts, initialized memory,
+and select-masked dead loads flowing through signed division at all three tiers.
+LLVM 23 canonical lifetime markers are accepted only on direct fixed slots;
+the importer keeps those slots alive for the entire function and omits the
+markers without importing lifetime facts. LLVM's legacy upgrader may remove
+old non-alloca marker forms before import. The canonical-form negative tests
+exercise the importer storage guard directly. Original optimized virtual C++
+output is tested unchanged with its lifetime markers retained in the LLVM input.

@@ -43,7 +43,8 @@ class FrontendValidation(unittest.TestCase):
     def test_stage_failures_propagate_and_other_checks_continue(self):
         for name in ('harness-tests', 'c-attributes', 'c-preprocess', 'c-native',
                      'llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                     'llvm-flags', 'llvm-eh', 'cpp-coverage', 'cpp-odr'):
+                     'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
+                     'cpp-coverage', 'cpp-odr'):
             with self.subTest(stage=name):
                 code, report = self.run_harness(fail=name)
                 self.assertEqual(code, 1)
@@ -61,7 +62,8 @@ class FrontendValidation(unittest.TestCase):
         self.assertEqual(report['status'], 'passed_with_skips')
         skips = [stage['name'] for stage in report['stages'] if stage['status'] == 'skipped']
         self.assertEqual(skips, ['llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                                'llvm-flags', 'llvm-eh', 'cpp-coverage', 'cpp-odr'])
+                                'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
+                                'cpp-coverage', 'cpp-odr'])
         code, report = self.run_harness(system='Linux', machine='x86_64', extra=['--require-llvm'])
         self.assertEqual(code, 1)
         self.assertEqual(report['status'], 'failed')

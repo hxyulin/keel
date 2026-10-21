@@ -59,7 +59,7 @@ for cases whose import is rejected. Each accepted module is compiled at Keel
 selected boundary object. Checks stop on a failure within a case and continue
 to the next case. The JSON stage and command logs identify the failure.
 
-The eleven required regression-floor profiles are:
+All fourteen profiles are required regressions:
 
 - `scalar`: unsigned wrapping arithmetic, shifts and volatile scalar memory.
 - `templates`: an inlined scalar template instantiation.
@@ -72,15 +72,13 @@ The eleven required regression-floor profiles are:
 - `alloca`: unoptimized stack locals.
 - `signed_contract`: compiler no-wrap arithmetic.
 - `eh_int`: typed integer throw/catch using external runtime typeinfo.
+- `constexpr_runtime`: retained exported ODR helper definitions.
+- `virtual`: virtual dispatch through a transported vtable.
+- `eh`: user-defined typed throw/catch and defined RTTI.
 
-The probes are `constexpr_runtime`, `virtual`, and `eh` (user-defined RTTI).
-These may reject with a recognized unsupported
-feature diagnostic; acceptance automatically enables the same three-tier
-native differential tests. They are not pinned to rejection, so rerun them
-as importer support expands. The report records
-the first importer blocker; removing it may expose another. For example,
-virtual dispatch currently stops at unsupported method linkage.
-The runtime constexpr probe intentionally retains its observed linkage blocker.
+Rejection of any profile fails the run and records the first importer blocker.
+The separate ODR interoperability validator checks mixed-TU symbol identity,
+shared storage and throw/catch behavior without helper localization.
 Templates, constexpr, overloads and RAII often disappear during Clang's scalar
 lowering/inlining; successful import does not imply support for their general
 runtime machinery. `ir_indicators` are textual counts for orientation, not a
@@ -97,10 +95,10 @@ flags, directives, functions or instructions are stripped from Clang's IR.**
 
 `--localize-odr-functions` explicitly asserts no outside TU requires helper
 symbols and enables only the bounded direct-helper localization contract.
-With it, `constexpr_runtime` becomes required rather than an optional probe.
-The aggregate harness runs that fixture separately as `cpp-odr`, exporting only
-`cpp_case` to its C/Rust boundaries. Default coverage still requires strict
-linkage; this mode does not supply arbitrary library or virtual linkage support.
+The aggregate harness retains that fixture separately as `cpp-odr`, exporting
+only `cpp_case` to its C/Rust boundaries. Default coverage now transports true
+ODR definitions and preserves their identity. The legacy flag is a separate
+bounded optimization experiment, not a substitute for exported linkage.
 
 ## JSON, artifacts and failure behavior
 
@@ -193,3 +191,12 @@ ordinary global storage no longer blocks these modules. Runtime constexpr
 linkage and signed no-wrap arithmetic remain unsupported. Dedicated aggregate
 stages separately cover globals, FP and indirect calls, including a combined
 global FP callback fixture; these results do not claim general C++ runtime support.
+
+After exported ODR/RTTI integration, `target/frontend-odr-final-2/` passes
+all **14 required default profiles**, with 28 native references and **84 native
+differential executions**. The separate legacy `cpp-odr` run adds six passing
+differential executions. The dedicated mixed-TU ODR validator passes 32 native
+executables, including both link orders, shared identities, virtual dispatch,
+cleanup counts and cross-module user-defined catches. No default profile is
+accepted as an expected rejection. Support remains bounded to the documented
+Apple AArch64 contracts.

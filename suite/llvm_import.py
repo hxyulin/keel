@@ -639,6 +639,18 @@ class Importer:
                 raise Unsupported('personality may only be a symbolic EH reference')
             fty = l.GetCalledFunctionType(inst)
             ret, params = self.abi_signature(inst, fty, call=True)
+            if l.IsAFunction(callee) and l.name(callee) in ('llvm.lifetime.start.p0', 'llvm.lifetime.end.p0'):
+                # LLVM 23 canonicalizes the older size+pointer form to a single
+                # pointer. Keep fixed slots alive for the whole function: this
+                # agrees on initialized, live memory and refines poison loads
+                # outside a lifetime. No lifetime or alias facts reach Keel.
+                if (op != 45 or fty != l.GlobalGetValueType(callee)
+                        or (ret, params) != ('void', ['ptr'])
+                        or self.signatures[callee] != ('void', ['ptr'])
+                        or l.GetNumArgOperands(inst) != 1
+                        or l.GetOperand(inst, 0) not in self.slots):
+                    raise Unsupported('lifetime marker requires a direct fixed entry-block stack slot')
+                return None
             if l.IsAFunction(callee) and l.name(callee) in ('llvm.eh.typeid.for', 'llvm.eh.typeid.for.p0'):
                 if (op != 45 or l.GetNumArgOperands(inst) != 1
                         or fty != l.GlobalGetValueType(callee)

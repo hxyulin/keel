@@ -37,7 +37,9 @@ rename; unsupported input leaves an existing destination intact.
 - Functions with the ordinary C calling convention, scalar
   i8/i16/i32/i64 parameters and returns, or address-space-zero pointers.
   `signext`/`zeroext` ABI attributes are preserved. Internal/private linkage
-  remains local; other unsupported linkage and visibility are rejected.
+  remains local. ODR definitions retain exported/coalesced identity through
+  Keel `weak_odr` and Mach-O weak definitions. Unsupported non-ODR linkage and
+  visibility remain rejected.
   Definitions returning i8/i16 require `signext` or `zeroext`; no extension is
   guessed. Function COMDAT membership is rejected.
 - Wrapping integer arithmetic, division/remainder, bit operations and shifts;
@@ -72,7 +74,10 @@ rename; unsupported input leaves an existing destination intact.
   alignment. Dynamic, zero-sized, non-entry, over-aligned, special-ABI and
   unsupported-layout allocations are rejected. Stack contents remain uninitialized;
   validation only reads initialized bytes. Final native frame-size limits still apply at
-  compilation. Lifetime/stack intrinsics remain rejected.
+  compilation. Canonical lifetime start/end markers on direct fixed slots are
+  omitted, keeping slots alive for the function without importing lifetime
+  assumptions. LLVM's parser upgrades legacy marker forms. Other surviving
+  lifetime-marker targets and stack intrinsics remain rejected.
 - Global definitions and declarations with ordinary external/internal/private
   linkage, const/writable storage, integer/f32/f64/pointer fields and nested
   arrays/structs. TargetData determines layout and explicit padding; floating
@@ -93,12 +98,13 @@ rename; unsupported input leaves an existing destination intact.
   small/HFA returns and `byval` remain rejected rather than reclassified by guess.
   Ordinary and volatile scalar loads/stores retain access widths and volatility.
   `unreachable` becomes a trap. No memory, call or arithmetic effect is moved.
-- Bounded Itanium EH: direct invokes, external typed/catch-all landingpads,
+- Bounded Itanium EH: direct invokes, typed/catch-all landingpads,
   cleanup, typeid, dedicated `{ptr,i32}` pairs and acyclic pair PHIs, and
   resume/rethrow through runtime calls. Invoke edge copies preserve normal and
   unwind PHIs. Only the symbolic external `__gxx_personality_v0` personality
   is accepted; its variadic runtime declaration does not enable variadic calls.
-  Defined RTTI, indirect invokes, filters, Windows funclets, reconstructed pairs
+  Defined RTTI is transported through validated data and relocation contracts.
+  Indirect invokes, filters, Windows funclets, reconstructed pairs
   and cyclic EH pair PHIs remain rejected. See the
   [EH contract](llvm_import_eh_fixtures/README.md).
 
@@ -109,7 +115,8 @@ poison. This importer does not claim identical behavior for LLVM-undefined or
 poison-producing executions. Explicit poison/undef operands and `freeze` are
 rejected. GEP `inbounds`, `nuw` and `nusw` constraints do not become Keel facts:
 address arithmetic agrees on defined LLVM executions, with no promise for
-executions violating those constraints. GEP `inrange` is rejected. Supported
+executions violating those constraints. `inrange` constraints are likewise
+omitted without changing computed addresses or weakening relocation bounds. Supported
 integer `nsw`/`nuw`, `exact`, `or disjoint`, flagged truncation, `zext nneg` and
 integer `icmp samesign` refine to ordinary operations, without supplying Keel
 optimizer facts. Signed division guards `INT_MIN/-1` so refining a poison
@@ -126,11 +133,11 @@ security-hardening, or source-level tooling replacement for LLVM.
 
 ## Explicit rejections
 
-Global aliases/ifuncs, TLS/common/weak/linkonce/COMDAT/sections and unsupported
+Global aliases/ifuncs, TLS/common/weak-any/linkonce-any/COMDAT/sections and unsupported
 global attributes, half/bfloat/x87/FP128, vectors, `frem`,
 aggregate SSA beyond dedicated EH pairs and ABIs beyond the bounded sret contract,
 i128, i1 ABI parameters/returns, ordinary varargs, non-C calls, intrinsics other
-than EH typeid, operand bundles, inline assembly, atomics, unsupported EH forms,
+than EH typeid and bounded lifetime markers, operand bundles, inline assembly, atomics, unsupported EH forms,
 GC, special sections, explicit prefix/prologue data and
 unsupported ABI attributes are outside this first implementation. Failure is
 module-wide; it does not silently discard unsupported functions. Consequently,
@@ -213,9 +220,10 @@ under their original names as local copies. Address escapes, named-storage
 dependencies, calls outside the defined local helper closure, weak linkage and
 COMDAT remain rejected. This is not general symbol coalescing and stays disabled
 by default. See the [ODR contract](llvm_import_linkage_fixtures/README.md).
-The `llvm-linkage` aggregate stage runs 57 checks, including 34 rejections,
-mixed-TU native comparisons, identity/shared-storage controls and default-mode
-rejection. The ordinary C++ runner continues to use strict linkage mode.
+The `llvm-linkage` aggregate stage retains its local-copy restrictions and
+mixed-TU controls. Default mode now accepts true ODR definitions with exported
+identity; available-externally definitions still need the explicit local-copy
+contract. This is independent of the true ODR path.
 
 The aggregate stages `llvm-flags` and `llvm-eh` invoke the dedicated integer-flag
 and exception validators. They cover independently asserted integer matrices,
@@ -223,4 +231,13 @@ poison-masked downstream division, actual compiler output, typed/catch-all
 exceptions, destructors, resume/rethrow, edge PHIs and preservation failures at
 None/Fast/Full. The C++ runner requires signed-contract and integer-EH profiles;
 `cpp-odr` separately requires the constexpr helper fixture with an explicit
-localization assertion. Default C++ coverage remains strict about ODR linkage.
+localization assertion. Default C++ coverage uses exported ODR definitions.
+
+The `odr-core`, `llvm-odr-policy` and `llvm-odr` stages verify IR/object behavior,
+import policy and mixed-TU execution. Hidden Itanium class/si RTTI retains
+private-extern visibility, and `rtti_name @symbol` preserves Apple's tagged
+type-name relocation. Generic hidden symbols and arbitrary integer relocations
+remain rejected. The mixed-TU validator has 32 native runs covering identity,
+shared storage, virtual dispatch, cleanup and cross-module user-defined catches.
+See the [ODR/RTTI transport contract](llvm_import_odr_contract.md). All 14 default
+C++ profiles are required; no probe rejection counts as a successful profile.

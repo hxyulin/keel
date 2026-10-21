@@ -126,6 +126,12 @@ def main(argv=None):
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-flags'])
                 harness.run('llvm-eh', [sys.executable, ROOT / 'suite/llvm_import_eh_validate.py',
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-eh'])
+                harness.run('odr-core', [cargo, 'test', *cargo_flags, '-p', 'keel-ir',
+                    '-p', 'keel-opt', '-p', 'keel-codegen', '-p', 'keel-llvm', '--test', 'weak_odr'])
+                harness.run('llvm-odr-policy', [sys.executable, ROOT / 'suite/test_llvm_import_odr.py',
+                    '--libllvm', libllvm, '--keel', keel, '--verify-weak-odr', '-v'])
+                harness.run('llvm-odr', [sys.executable, ROOT / 'suite/llvm_import_odr_validate.py',
+                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-odr'])
                 harness.run('cpp-coverage', [sys.executable, ROOT / 'suite/cpp_coverage.py',
                     '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
                     '--out', out / 'cpp-coverage'])
@@ -139,7 +145,8 @@ def main(argv=None):
                 reason = ('LLVM import currently requires Apple AArch64' if not supported
                           else 'LLVM library discovery or Keel prerequisite failed')
                 for name in ('llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
-                             'llvm-flags', 'llvm-eh', 'cpp-coverage', 'cpp-odr'):
+                             'llvm-flags', 'llvm-eh', 'odr-core', 'llvm-odr-policy', 'llvm-odr',
+                             'cpp-coverage', 'cpp-odr'):
                     harness.skip(name, reason)
                 if supported or args.require_llvm:
                     harness.stages.append(dict(name='llvm-prerequisite', status='failed', reason=reason))

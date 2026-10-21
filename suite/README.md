@@ -30,19 +30,20 @@ are cached; keel builds are redone each time.
 `cargo suite test-frontends --out target/frontend-check-1` runs the C attribute
 and preprocessing regression tests, the representative C CLI compatibility
 check, the LLVM importer's native/rejection, indirect-call/ABI, scalar FP,
-global-object, integer-flag, EH and bounded ODR-linkage validation, and all
-14 C++ profiles with an independent Rust C ABI boundary. Eleven C++ profiles
-must pass at None/Fast/Full; three runtime-feature probes may report explicit
-unsupported features. A separate `cpp-odr` stage requires runtime constexpr
+global-object, integer-flag, EH and ODR-linkage validation, and all
+14 required C++ profiles with an independent Rust C ABI boundary. Every profile
+must pass at None/Fast/Full, including virtual dispatch and user-defined RTTI.
+A separate `cpp-odr` stage retains runtime constexpr
 under an explicit fixture-specific helper-localization assertion. This command
 adds no application downloads or performance runs.
 
 The output directory must be new. It contains `report.json`, per-stage command
 logs, and the child runners' detailed artifacts under `llvm-import/`, `llvm-calls/`,
 `llvm-fp/`, `llvm-globals/`, `llvm-linkage/`, `llvm-flags/`, `llvm-eh/`,
-`cpp-coverage/` and `cpp-odr/`. Any failed build, test, native comparison or required profile
-makes the command fail. Expected C++ probe rejections remain visible in
-`cpp-coverage/report.json`. Existing artifacts are never overwritten.
+`llvm-odr/`, `cpp-coverage/` and `cpp-odr/`. The `odr-core` stage also runs
+focused IR/optimizer/object/exporter tests; `llvm-odr-policy` checks importer
+contracts against the real verifier. Any failed build, test, native comparison
+or profile makes the command fail. Existing artifacts are never overwritten.
 
 Keel and targeted Rust tests build offline and locked in the output directory's
 private `target/`, using two jobs by default (`cargo suite -j 4 test-frontends ...`

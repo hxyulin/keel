@@ -302,8 +302,11 @@ untouched Clang output through this path and compares native execution at
 None/Fast/Full, including C and optional Rust ABI boundaries. These are bounded
 coverage tools; full C++ applications and general aggregate ABIs remain outside
 the importer's supported scope. The documented three-i64 struct-return ABI and
-bounded Itanium exception subset are accepted. Integer no-wrap flags refine
-to ordinary operations; helper localization requires an explicit ODR assertion.
+bounded Itanium exception subset are accepted. ODR definitions, virtual dispatch
+and class/single-inheritance RTTI retain weak-symbol identity and Apple tagged
+type-name relocations on Mach-O. ELF and diagnostic LLVM/Cranelift output reject
+these linkage features explicitly. Integer no-wrap flags refine to ordinary
+operations; optional helper localization requires an explicit ODR assertion.
 
 ## Assembler (A64 subset)
 

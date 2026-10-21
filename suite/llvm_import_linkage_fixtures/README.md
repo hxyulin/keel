@@ -9,7 +9,8 @@ commands, checks, native objects/executables, and source hashes under `--out`.
 
 ## Supported contract
 
-The importer remains strict by default. `--localize-odr-functions` (or Python
+Default mode now transports exported ODR definitions with coalesced identity.
+This document describes the separate legacy `--localize-odr-functions` mode (or Python
 `import_module(..., localize_odr=True)`) explicitly asserts that **no outside
 translation unit requires any imported `linkonce_odr` or `available_externally`
 definition's symbol**. This is a whole-module contract provided by the caller;
@@ -39,7 +40,8 @@ functions cause whole-module rejection too.
 The validator generates the actual existing `constexpr_runtime.cpp` and
 `virtual.cpp` probes at Clang `-O0 -fno-exceptions -fno-rtti`. The former's
 recursive `_Z6factorj` can be retained as a local copy. The latter requires weak
-vtable storage and observable method addresses and remains rejected.
+vtable storage and observable method addresses and remains rejected in this
+localization mode; the default exported-ODR path supports it.
 
 `left.cpp` and `right.cpp` produce duplicate ODR helper definitions. Original
 LLVM/Clang executables and None/Fast/Full Keel objects are checked against
@@ -54,10 +56,11 @@ either address-observable TU is rejected. Original two-TU static-storage
 fixtures assert shared state; their imports are rejected. The original weak
 interposition fixture asserts a strong override wins; weak linkage is rejected.
 All COMDAT selection kinds and a function/data group are rejected. Source bytes,
-existing/absent destinations, stdin/stdout, default strict mode, malformed LLVM,
+existing/absent destinations, stdin/stdout, default exported-ODR mode, malformed LLVM,
 late semantic failures, and downstream verifier failures are checked.
 
-General support still needs representable weak/coalesced symbols and storage,
+General non-ODR weak support still needs interposition contracts beyond
+the implemented ODR symbols and storage. Broader work includes
 external-reference resolution, identity preservation, interposition semantics,
 COMDAT group selection, and the associated object/linker implementation. In
 particular this option must not be enabled for arbitrary C++ libraries or used

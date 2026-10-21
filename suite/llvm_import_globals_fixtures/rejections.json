@@ -8,7 +8,6 @@
   "weak": "@g = weak global i32 1",
   "weak-extern": "@g = extern_weak global i32",
   "common": "@g = common global i32 0",
-  "linkonce": "@g = linkonce_odr global i32 1",
   "available": "@g = available_externally global i32 1",
   "section": "@g = global i32 1, section \"custom\"",
   "comdat": "$g = comdat any\n@g = global i32 1, comdat",
@@ -36,12 +35,13 @@
   "function-addend": "declare i32 @f()\n@g = global ptr getelementptr (i8, ptr @f, i64 1)",
   "integer-reloc": "@a = global i32 1\n@g = global i64 ptrtoint (ptr @a to i64)",
   "inttoptr": "@g = global ptr inttoptr (i64 8 to ptr)",
-  "inrange": "@a = global [4 x i8] zeroinitializer\n@g = global ptr getelementptr inrange(0, 4) (i8, ptr @a, i64 1)",
   "metadata": "@g = global i32 1, !type !0\n!0 = !{i64 0, !\"type\"}",
   "late-failure": "@good = global i32 7\n@bad = global ptr poison\ndefine i32 @f() { ret i32 1 }",
   "late-function": "@good = global i32 7\ndefine i32 @f() { ret i32 poison }",
   "half": "@g = global half 1.0",
   "half-zero": "@g = global half 0.0",
   "half-nested": "@g = global { i8, half } zeroinitializer",
-  "half-external": "@g = external global half"
+  "half-external": "@g = external global half",
+  "linkonce-any": "@g = linkonce global i32 1",
+  "inrange-past-end": "@a = global [4 x i8] zeroinitializer\n@g = global ptr getelementptr inrange(0, 8) (i8, ptr @a, i64 5)"
 }

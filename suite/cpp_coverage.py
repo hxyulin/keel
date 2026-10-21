@@ -24,14 +24,14 @@ CASES = [
     ('overloads', 'overload resolution and mangled scalar definitions', True, '-O2'),
     ('raii', 'inlined destructor with observable C callback and volatile store', True, '-O2'),
     ('c_abi', 'cross-object C -> C++ -> C calls', True, '-O2'),
-    ('constexpr_runtime', 'constexpr helper invoked outside a constant-expression context', False, '-O2'),
-    ('virtual', 'virtual dispatch, vtable/global/indirect-call machinery', False, '-O2'),
+    ('constexpr_runtime', 'constexpr helper invoked outside a constant-expression context', True, '-O2'),
+    ('virtual', 'virtual dispatch, vtable/global/indirect-call machinery', True, '-O2'),
     ('cfg', 'multiple blocks and conditional direct calls', True, '-O1'),
     ('gep', 'indexed volatile memory', True, '-O1'),
     ('alloca', 'unoptimized stack locals', True, '-O0'),
     ('signed_contract', 'compiler arithmetic no-wrap contracts', True, '-O1'),
     ('eh_int', 'typed integer throw and catch with external runtime typeinfo', True, '-O1'),
-    ('eh', 'throw/catch and exception runtime', False, '-O1'),
+    ('eh', 'throw/catch and exception runtime', True, '-O1'),
 ]
 SENTINEL = b'cpp-coverage destination preservation sentinel\n'
 

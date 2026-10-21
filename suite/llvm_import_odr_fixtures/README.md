@@ -97,10 +97,10 @@ multiple/virtual inheritance, dynamic_cast, virtual destructors, dynamic local
 static initialization, exception payload aggregates and indirect invokes are
 not covered. This is an executable integration contract, not broad C++ support.
 
-## Baseline and exact current blockers
+## Historical baseline and integrated validation
 
 On Apple Clang 21.0.0 (clang-2100.3.34.2), arm64 macOS, the reference baseline
-passes. The current importer at parent a367d868 rejects:
+passes. Before integration, the importer at parent a367d868 rejected:
 
 - left/right: `_Z15template_helperIiET_S0_`: unsupported linkage/visibility
   (actual `define weak_odr`).
@@ -118,5 +118,10 @@ emits tagged non-unique RTTI name pointers of the exact form
 This cannot be represented by the existing unsigned-u32 symbol-addend path;
 it requires explicit RTTI handling or a documented dependency limitation.
 The original virtual and EH shapes also emit those tagged RTTI pointers.
-Current rejection is expected until parent ODR/RTTI importer and Apple AArch64
-weak-ODR backend dependencies integrate. No full-mode pass is claimed here.
+Those importer/core dependencies are now integrated. Full mode passed all
+32 native executables at `/tmp/keel-odr-integrated-native-r1/`, and again through
+`target/frontend-odr-final-2/llvm-odr/`. The latter report sets
+`keel_correctness_validated` to true. All 14 default C++ profiles also pass
+without localization, including the original optimized virtual fixture with
+its lifetime markers. This does not extend the fixture scope to multiple
+inheritance, dynamic_cast, dynamic initialization or indirect invokes.

@@ -53,6 +53,26 @@ pad:
 }
 '''
 
+LIFETIMES = '''declare void @llvm.lifetime.start.p0(i64 immarg, ptr nocapture)
+declare void @llvm.lifetime.end.p0(i64 immarg, ptr nocapture)
+define i64 @lifetime_roundtrip(i64 %x) {
+ %p = alloca i64, align 8
+ call void @llvm.lifetime.start.p0(i64 8, ptr %p)
+ store i64 %x, ptr %p
+ call void @llvm.lifetime.end.p0(i64 8, ptr %p)
+ %dead = load i64, ptr %p
+ %quotient = sdiv i64 %dead, -1
+ %masked = select i1 false, i64 %quotient, i64 %x
+ call void @llvm.lifetime.start.p0(i64 8, ptr %p)
+ %next = add i64 %x, 1
+ store i64 %next, ptr %p
+ %live = load i64, ptr %p
+ call void @llvm.lifetime.end.p0(i64 8, ptr %p)
+ %result = xor i64 %masked, %live
+ ret i64 %result
+}
+'''
+
 
 class ODRImport(unittest.TestCase):
     @classmethod
@@ -272,6 +292,61 @@ define ptr @instruction(ptr %object) {
 @external = external global i64''', 'pointer relocation requires aligned')
         self.reject('''@g = weak_odr global [2 x ptr] zeroinitializer
 @p = global ptr getelementptr inrange(0, 8) ([2 x ptr], ptr @g, i64 0, i64 3)''', 'past defined object end')
+
+    def test_lifetime_markers_keep_fixed_slots_without_runtime_calls(self):
+        result = self.translate(LIFETIMES)
+        self.assertIn('stack_slot 8, align 8', result)
+        self.assertIn('decl @llvm.lifetime.start.p0(ptr)', result)
+        self.assertNotIn('call @llvm.lifetime.', result)
+
+    def test_lifetime_markers_reject_unproven_storage(self):
+        # Exercise LLVM 23's canonical form directly: its legacy upgrader may
+        # delete old size+pointer markers on non-alloca storage as no-ops.
+        declarations = ('declare void @llvm.lifetime.start.p0(ptr)\n'
+                        'declare void @llvm.lifetime.end.p0(ptr)\n')
+        for body in (
+            'define void @f(ptr %p) { call void @llvm.lifetime.start.p0(i64 8, ptr %p)\nret void }',
+            '@g = global i64 0\ndefine void @f() { call void @llvm.lifetime.end.p0(i64 8, ptr @g)\nret void }',
+            'define void @f() { call void @llvm.lifetime.start.p0(i64 8, ptr null)\nret void }',
+            'define void @f() { %p = alloca [2 x i64]\n%q = getelementptr i64, ptr %p, i64 1\ncall void @llvm.lifetime.start.p0(i64 8, ptr %q)\nret void }',
+        ):
+            with self.subTest(body=body):
+                self.reject(declarations + body.replace('i64 8, ', ''))
+
+    def test_lifetime_restart_and_masked_poison_native(self):
+        if not ARGS.keel:
+            self.skipTest('pass --keel for native lifetime assertions')
+        with tempfile.TemporaryDirectory(prefix='keel-lifetime-native-') as tmp:
+            root = Path(tmp)
+            source, text = root / 'lifetimes.ll', root / 'lifetimes.keel'
+            original = HEADER + LIFETIMES.encode()
+            source.write_bytes(original)
+            text.write_text(import_module(self.llvm, original))
+            driver = root / 'driver.c'
+            driver.write_text('''#include <assert.h>
+#include <stdint.h>
+extern uint64_t lifetime_roundtrip(uint64_t);
+int main(void) {
+ uint64_t values[] = {0, 1, UINT64_MAX, UINT64_C(0x8000000000000000),
+                      UINT64_C(0x7fffffffffffffff), UINT64_C(0x8000000000000001)};
+ for (unsigned i=0;i<sizeof(values)/sizeof(values[0]);i++) {
+  uint64_t x=values[i]; assert(lifetime_roundtrip(x)==(x^(x+1)));
+ }
+ for (uint64_t x=0;x<1024;x++) assert(lifetime_roundtrip(x)==(x^(x+1)));
+}
+''')
+            def run(command):
+                result = subprocess.run(list(map(str, command)), capture_output=True, timeout=90)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            for tier in ('reference', 'none', 'fast', 'full'):
+                obj, exe = root / (tier + '.o'), root / tier
+                if tier == 'reference':
+                    run(['clang', '-O0', '-c', source, '-o', obj])
+                else:
+                    run([ARGS.keel, 'compile', '--opt-tier', tier, '--emit-object', text, '-o', obj])
+                run(['clang', '-O0', driver, obj, '-o', exe])
+                run([exe])
+            self.assertEqual(source.read_bytes(), original)
 
     def test_real_cli_atomicity_and_preservation(self):
         if not ARGS.keel:

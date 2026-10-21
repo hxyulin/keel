@@ -56,11 +56,11 @@ def main():
         assert r2.returncode == 1 and not r2.stdout and not absent.exists(), name
         checks.append(dict(kind='rejection-preservation', case=name, diagnostic=r.stderr.decode()))
 
-    def accept(name, source):
+    def accept(name, source, opt=True):
         original = source.read_bytes()
         dest = out/f'{name}.keel'
         dest.write_bytes(b'replace-on-success\n')
-        r = imp(source, dest)
+        r = imp(source, dest, opt=opt)
         assert r.returncode == 0 and not r.stdout, r.stderr.decode()
         assert original == source.read_bytes()
         names = re.findall(rb'^(?:define|declare)\b[^@\n]*@([\w.$]+)\(', original, re.M)
@@ -69,7 +69,7 @@ def main():
         candidates = re.findall(rb'^define (?:linkonce_odr|available_externally)\b[^@\n]*@([\w.$]+)\(', original, re.M)
         for symbol in candidates:
             line = next(line for line in dest.read_text().splitlines() if line.startswith('func @' + symbol.decode() + '('))
-            assert line.endswith(' cc(c) local {'), line
+            assert line.endswith(' cc(c)' + (' local {' if opt else ' weak_odr {')), line
         checks.append(dict(kind='retained-all-functions-local-copies', case=name,
                            sha256=hashlib.sha256(original).hexdigest()))
         return dest
@@ -106,14 +106,14 @@ def main():
             reject(name, sources[name])
         reject('interposition', FIX/'interposition.ll')
         for name in ['left', 'right', 'constexpr']:
-            reject(name + '-default-strict', sources[name], opt=False)
+            accept(name + '-default-odr', sources[name], opt=False)
         texts = {name: accept(name, sources[name]) for name in ['left', 'right', 'constexpr']}
         texts['available'] = accept('available', FIX/'available.ll')
         reject('available-default-strict', FIX/'available.ll', opt=False)
 
         bodies = {
             'weak-any': 'define weak i64 @h(i64 %x) { ret i64 %x }',
-            'weak-odr': 'define weak_odr i64 @h(i64 %x) { ret i64 %x }',
+            'weak-odr-hidden': 'define weak_odr hidden i64 @h(i64 %x) { ret i64 %x }',
             'linkonce-any': 'define linkonce i64 @h(i64 %x) { ret i64 %x }',
             'external-weak': 'declare extern_weak i64 @h(i64)',
             'address-return': 'define linkonce_odr i64 @h(i64 %x) { ret i64 %x }\ndefine ptr @escape() { ret ptr @h }',
@@ -204,7 +204,9 @@ def main():
         assert failure.returncode == 1 and not failure.stdout and b'Keel verification failed' in failure.stderr
         assert dest.read_bytes() == b'sentinel\n' and sources['left'].read_bytes() == original
         checks.append(dict(kind='stdin-stdout-downstream-verifier-protocol'))
-        print(json.dumps(dict(checks=len(checks), rejections=len(bodies)+10, native_tiers=['none', 'fast', 'full'])))
+        print(json.dumps(dict(checks=len(checks),
+                             rejections=sum(c['kind'] == 'rejection-preservation' for c in checks),
+                             native_tiers=['none', 'fast', 'full'])))
     finally:
         (out/'commands.json').write_text(json.dumps(commands, indent=2))
         (out/'checks.json').write_text(json.dumps(checks, indent=2))

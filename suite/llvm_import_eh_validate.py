@@ -134,7 +134,7 @@ def main():
             'pair-phi-cycle': PREAMBLE + PAD.replace('resume {ptr, i32} %lp', 'br label %merge\nmerge:\n %p = phi {ptr, i32} [%lp, %pad], [%p, %merge]\n br label %merge'),
             'resume-prototype': PREAMBLE + 'declare i32 @_Unwind_Resume(ptr)\n' + PAD,
             'typeid-not-caught': PREAMBLE + '@_ZTIi = external constant ptr\ndeclare i32 @llvm.eh.typeid.for.p0(ptr)\n' + PAD.replace('resume {ptr, i32} %lp', '%t = call i32 @llvm.eh.typeid.for.p0(ptr @_ZTIi)\n resume {ptr, i32} %lp'),
-            'defined-rtti': PREAMBLE + '@_ZTIi = constant ptr null\n' + PAD.replace('cleanup\n', 'catch ptr @_ZTIi\n'),
+            'defined-rtti-undef': PREAMBLE + '@_ZTIi = constant ptr undef\n' + PAD.replace('cleanup\n', 'catch ptr @_ZTIi\n'),
             'weak-rtti': PREAMBLE + '@_ZTIi = weak constant ptr null\n' + PAD.replace('cleanup\n', 'catch ptr @_ZTIi\n'),
             'windows-funclet': '''declare i32 @__CxxFrameHandler3(...)
  define void @bad() personality ptr @__CxxFrameHandler3 {
