@@ -11,7 +11,7 @@ use crate::{
 };
 use std::fmt;
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(PartialEq, Eq, Hash, Debug)]
 pub enum InstData {
     /// Integer constant, sign-extended (or truncated) to `ty`.
     Iconst {
@@ -237,6 +237,99 @@ pub enum InstData {
     },
     /// Stops the program. A terminator, since nothing after it runs.
     Trap,
+}
+
+// Passes clone instructions to rewrite them; most formats own no heap data
+// and copy as plain bytes, without a per-format jump.
+impl Clone for InstData {
+    #[inline]
+    fn clone(&self) -> Self {
+        match self {
+            Self::Iconst { .. }
+            | Self::Fconst { .. }
+            | Self::Unary { .. }
+            | Self::Binary { .. }
+            | Self::VectorSplat { .. }
+            | Self::VectorUnary { .. }
+            | Self::VectorBinary { .. }
+            | Self::VectorExtract { .. }
+            | Self::VectorInsert { .. }
+            | Self::VectorIcmp { .. }
+            | Self::VectorFcmp { .. }
+            | Self::VectorSelect { .. }
+            | Self::Overflow { .. }
+            | Self::Fma { .. }
+            | Self::Select { .. }
+            | Self::Convert { .. }
+            | Self::Icmp { .. }
+            | Self::Fcmp { .. }
+            | Self::Load { .. }
+            | Self::Store { .. }
+            | Self::AtomicLoad { .. }
+            | Self::AtomicStore { .. }
+            | Self::AtomicRmw { .. }
+            | Self::AtomicCas { .. }
+            | Self::Fence { .. }
+            | Self::VaArg { .. }
+            | Self::StackAddr { .. }
+            | Self::SymbolAddr { .. }
+            | Self::EhTypeid { .. }
+            | Self::Trap => {
+                // SAFETY: these formats hold only `Copy` fields, so a bitwise
+                // copy is an independent, equal value.
+                unsafe { std::ptr::read(self) }
+            }
+            Self::VectorShuffle { args, lanes } => Self::VectorShuffle {
+                args: *args,
+                lanes: lanes.clone(),
+            },
+            Self::Call { func, args } => Self::Call {
+                func: *func,
+                args: args.clone(),
+            },
+            Self::CallIndirect { sig, callee, args } => Self::CallIndirect {
+                sig: *sig,
+                callee: *callee,
+                args: args.clone(),
+            },
+            Self::Intrinsic { id, args } => Self::Intrinsic {
+                id: *id,
+                args: args.clone(),
+            },
+            Self::InlineAsm { asm, args } => Self::InlineAsm {
+                asm: asm.clone(),
+                args: args.clone(),
+            },
+            Self::Jump { dest } => Self::Jump { dest: dest.clone() },
+            Self::Brif { cond, dests } => Self::Brif {
+                cond: *cond,
+                dests: dests.clone(),
+            },
+            Self::Switch { arg, dests, cases } => Self::Switch {
+                arg: *arg,
+                dests: dests.clone(),
+                cases: cases.clone(),
+            },
+            Self::Return { args } => Self::Return { args: args.clone() },
+            Self::ReturnCall { func, args } => Self::ReturnCall {
+                func: *func,
+                args: args.clone(),
+            },
+            Self::Invoke { func, args, dests } => Self::Invoke {
+                func: *func,
+                args: args.clone(),
+                dests: dests.clone(),
+            },
+            Self::LandingPad { clauses } => Self::LandingPad {
+                clauses: clauses.clone(),
+            },
+            Self::ReturnCallIndirect { sig, callee, args } => Self::ReturnCallIndirect {
+                sig: *sig,
+                callee: *callee,
+                args: args.clone(),
+            },
+        }
+    }
 }
 
 /// Formats an `fconst` operand: the shortest decimal that reads back as the
