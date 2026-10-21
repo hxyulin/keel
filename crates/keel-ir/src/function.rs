@@ -1697,22 +1697,12 @@ impl Name {
     }
 }
 
-/// `name`'s `Display` text, remembered per thread so that printing an
-/// instruction does not enter `fmt::write` for its mnemonic.
+/// `name`'s `Display` text, remembered so that printing an instruction does
+/// not enter `fmt::write` for its mnemonic.
 fn write_name<W: fmt::Write + ?Sized>(f: &mut W, name: Name) -> fmt::Result {
-    thread_local! {
-        static NAMES: std::cell::RefCell<Vec<Option<Box<str>>>> =
-            const { std::cell::RefCell::new(Vec::new()) };
-    }
-    let slot = name.slot();
-    NAMES.with(|names| {
-        let mut names = names.borrow_mut();
-        if names.len() <= slot {
-            names.resize(8 * 64, None);
-        }
-        let text = names[slot].get_or_insert_with(|| name.to_string().into_boxed_str());
-        f.write_str(text)
-    })
+    static NAMES: [std::sync::OnceLock<Box<str>>; 8 * 64] =
+        [const { std::sync::OnceLock::new() }; 8 * 64];
+    f.write_str(NAMES[name.slot()].get_or_init(|| name.to_string().into_boxed_str()))
 }
 
 /// A quoted string, as the parser reads it.
@@ -1768,8 +1758,44 @@ fn small_decimal(n: usize) -> &'static str {
     &SMALL_DECIMALS[start..start + len]
 }
 
+/// `v0` through `v999`, back to back.
+const SMALL_VALUES: &str = {
+    const BYTES: [u8; 3890] = {
+        let mut bytes = [0u8; 3890];
+        let (mut n, mut i) = (0, 0);
+        while n < 1000 {
+            bytes[i] = b'v';
+            i += 1;
+            if n >= 100 {
+                bytes[i] = b'0' + (n / 100) as u8;
+                i += 1;
+            }
+            if n >= 10 {
+                bytes[i] = b'0' + (n / 10 % 10) as u8;
+                i += 1;
+            }
+            bytes[i] = b'0' + (n % 10) as u8;
+            i += 1;
+            n += 1;
+        }
+        bytes
+    };
+    match std::str::from_utf8(&BYTES) {
+        Ok(text) => text,
+        Err(_) => panic!("ASCII digits"),
+    }
+};
+
 fn write_value<W: fmt::Write + ?Sized>(f: &mut W, value: Value) -> fmt::Result {
-    write_decimal(f, "v", false, crate::EntityRef::index(value) as u64)
+    let n = crate::EntityRef::index(value);
+    // Short names are one piece of a table rather than prefix and digits.
+    let (start, len) = match n {
+        0..10 => (2 * n, 2),
+        10..100 => (20 + 3 * (n - 10), 3),
+        100..1000 => (290 + 4 * (n - 100), 4),
+        _ => return write_decimal(f, "v", false, n as u64),
+    };
+    f.write_str(&SMALL_VALUES[start..start + len])
 }
 
 fn write_values<W: fmt::Write + ?Sized>(
