@@ -395,6 +395,13 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
 /// The operands of `data` folded into it: the stack address of a load or
 /// store, which addresses the slot as `[rbp - n]`, and a [`folded_imm`].
 fn folds(func: &Function, data: &InstData) -> Vec<Value> {
+    let mut out = Vec::new();
+    fold_into(func, data, &mut out);
+    out
+}
+
+/// [`folds`], appended to `out`.
+fn fold_into(func: &Function, data: &InstData, out: &mut Vec<Value>) {
     let wide = |v: Value| func.value_type(func.resolve(v)) == Type::I128;
     let addr = match *data {
         InstData::Load { ty, addr, .. } if ty != Type::I128 => Some(addr),
@@ -402,15 +409,14 @@ fn folds(func: &Function, data: &InstData) -> Vec<Value> {
         _ => None,
     }
     .filter(|&addr| stack_slot(func, addr).is_some());
-    addr.into_iter()
-        .chain(folded_imm(func, data).map(|(v, _)| v))
-        .chain(match *data {
-            InstData::Binary { args, .. } if reducible_divisor(func, data).is_some() => {
-                Some(func.resolve(args[1]))
-            }
-            _ => None,
-        })
-        .collect()
+    out.extend(addr);
+    out.extend(folded_imm(func, data).map(|(v, _)| v));
+    out.extend(match *data {
+        InstData::Binary { args, .. } if reducible_divisor(func, data).is_some() => {
+            Some(func.resolve(args[1]))
+        }
+        _ => None,
+    });
 }
 
 /// The stack slot whose address `addr` is, if a `stack_addr` defines it.
@@ -738,7 +744,9 @@ impl<'a> FunctionCompiler<'a> {
             alloc,
             current_inst: None,
             allocation_index: None,
-            folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
+            folded_values: fold::folded_values(func, &selection, |data, out| {
+                fold_into(func, data, out)
+            }),
             fused_compares,
             packed_low_loads,
             packed_positive_values,

@@ -530,13 +530,14 @@ fn folded_imm(func: &Function, data: &InstData) -> Option<(Value, i64)> {
     }
 }
 
-/// The operands of `data` folded into it: a stack address [`folded_offset`]
-/// addresses directly, and a [`folded_imm`].
+/// Appends the operands of `data` folded into it: a stack address
+/// [`folded_offset`] addresses directly, and a [`folded_imm`].
 fn folds(
     func: &Function,
     offsets: &crate::stack_frame::SlotOffsets,
     data: &InstData,
-) -> Vec<Value> {
+    out: &mut Vec<Value>,
+) {
     let addr = match *data {
         InstData::Load { ty, addr, .. } => Some((addr, ty)),
         InstData::Store { value, addr, .. } => Some((addr, func.value_type(func.resolve(value)))),
@@ -544,10 +545,9 @@ fn folds(
     }
     .filter(|&(addr, ty)| folded_offset(func, offsets, addr, ty).is_some())
     .map(|(addr, _)| addr);
-    addr.into_iter()
-        .chain(folded_imm(func, data).map(|(v, _)| v))
-        .chain(folded_divisor(func, data))
-        .collect()
+    out.extend(addr);
+    out.extend(folded_imm(func, data).map(|(v, _)| v));
+    out.extend(folded_divisor(func, data));
 }
 
 /// A quotient by a [`reducible_divisor`] never reads the divisor's register.
@@ -1144,8 +1144,8 @@ impl<'a> FunctionCompiler<'a> {
             backend_scope!(Folding);
             let folded_values = {
                 backend_scope!(FoldValues);
-                fold::folded_values(func, &selection, |data| {
-                    folds(func, &stack_slot_offsets, data)
+                fold::folded_values(func, &selection, |data, out| {
+                    folds(func, &stack_slot_offsets, data, out)
                 })
             };
             folded_values

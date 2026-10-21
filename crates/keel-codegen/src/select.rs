@@ -570,7 +570,7 @@ impl Selection {
     /// Remove operands encoded as immediates/addresses from the allocation
     /// graph. A value used elsewhere remains materialized for those uses.
     pub fn fold_operands(&mut self, func: &Function, folds: impl Fn(&InstData) -> Vec<Value>) {
-        let elided = crate::fold::folded_values(func, self, &folds);
+        let elided = crate::fold::folded_values(func, self, |data, out| out.extend(folds(data)));
         for (_, inst) in func.layout_insts() {
             if func
                 .inst_results(inst)

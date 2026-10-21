@@ -90,59 +90,62 @@ impl ValueSet {
 }
 
 /// The `stack_addr` and `iconst` results every use of which is folded
-/// into the instruction using it, by `folds`, which gives the operands an
+/// into the instruction using it, by `folds`, which appends the operands an
 /// instruction folds (each once per operand position).
 pub(crate) fn folded_values(
     func: &Function,
     selection: &crate::select::Selection,
-    folds: impl Fn(&InstData) -> Vec<Value>,
+    folds: impl Fn(&InstData, &mut Vec<Value>),
 ) -> ValueSet {
-    let mut values = Vec::new();
-    let mut unfolded = vec![false; func.num_values()];
+    // Only these results can be folded: start with all of them, and drop each
+    // as soon as some use needs it materialized.
+    let mut members = vec![false; func.num_values()];
+    let mut candidates = false;
     for (_, inst) in func.layout_insts() {
-        let data = func.inst_data(inst);
-        if let InstData::StackAddr { .. } | InstData::Iconst { .. } = data {
-            values.extend(func.inst_results(inst).iter().copied());
+        if let InstData::StackAddr { .. } | InstData::Iconst { .. } = func.inst_data(inst) {
+            for &v in func.inst_results(inst) {
+                members[v.index()] = true;
+                candidates = true;
+            }
         }
+    }
+    if !candidates {
+        return ValueSet { members };
+    }
+    let mut folded = Vec::new();
+    for (_, inst) in func.layout_insts() {
         if selection.covered(inst) {
             continue;
         }
-        let mut folds: Vec<Value> = if selection.matches.contains_key(&inst) {
-            vec![]
-        } else {
-            let mut folded = folds(selection.folded_data(func, inst));
-            selection.remaining_folds(func, inst, &mut folded);
-            folded
-        };
-        if folds.is_empty() {
-            // Most selected sequences have no directly encoded operands. Keep
-            // that scan independent of the mutable fold list and its searches.
-            selection.for_each_operand(func, inst, |v| {
-                unfolded[func.resolve(v).index()] = true;
-            });
-        } else {
-            selection.for_each_operand(func, inst, |v| {
-                let v = func.resolve(v);
-                // Once any use needs materialization, other occurrences cannot
-                // make this value folded. Leaving its own fold entries alone
-                // does not affect matching any distinct operand value.
-                if unfolded[v.index()] {
-                    return;
-                }
-                match folds.iter().position(|&f| f == v) {
-                    Some(i) => {
-                        folds.swap_remove(i);
-                    }
-                    None => {
-                        unfolded[v.index()] = true;
-                    }
-                }
-            });
+        // Folds only decide anything for operands that are still members.
+        // Others are either materialized already or can never be folded.
+        let mut reads_member = false;
+        selection.for_each_operand(func, inst, |v| {
+            reads_member |= members[func.resolve(v).index()];
+        });
+        if !reads_member {
+            continue;
         }
-    }
-    let mut members = vec![false; func.num_values()];
-    for v in values {
-        members[v.index()] = !unfolded[v.index()];
+        folded.clear();
+        if !selection.matches.contains_key(&inst) {
+            folds(selection.folded_data(func, inst), &mut folded);
+            selection.remaining_folds(func, inst, &mut folded);
+        }
+        selection.for_each_operand(func, inst, |v| {
+            let v = func.resolve(v);
+            // Once any use needs materialization, other occurrences cannot
+            // make this value folded. Leaving its own fold entries alone
+            // does not affect matching any distinct operand value.
+            if !members[v.index()] {
+                return;
+            }
+            match folded.iter().position(|&f| f == v) {
+                Some(i) => {
+                    folded.swap_remove(i);
+                }
+                None => members[v.index()] = false,
+            }
+        });
     }
     ValueSet { members }
 }
@@ -328,9 +331,11 @@ block0(v0: i64):
             for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                 for selection in [Selection::default(), Selection::compute(&func, target)] {
                     assert_eq!(
-                        folded_values(&func, &selection, |data| immediates(&func, data))
-                            .iter()
-                            .collect::<HashSet<_>>(),
+                        folded_values(&func, &selection, |data, out| {
+                            out.extend(immediates(&func, data))
+                        })
+                        .iter()
+                        .collect::<HashSet<_>>(),
                         reference_folded(&func, &selection)
                     );
                 }
@@ -359,9 +364,9 @@ block0:
         for _ in 0..2 {
             selection.fold_operands(&func, |data| immediates(&func, data));
             assert_eq!(selection.operands(&func, insts[1]), vec![constant]);
-            let folded = folded_values(&func, &selection, |data| match *data {
-                InstData::Load { addr, .. } => vec![addr],
-                _ => immediates(&func, data),
+            let folded = folded_values(&func, &selection, |data, out| match *data {
+                InstData::Load { addr, .. } => out.push(addr),
+                _ => out.extend(immediates(&func, data)),
             });
             assert_eq!(
                 folded.iter().collect::<HashSet<_>>(),
@@ -388,9 +393,8 @@ block0:
             })
             .unwrap();
         selection.cover(binary);
-        folded_values(&func, &selection, |data| {
+        folded_values(&func, &selection, |data, _| {
             assert!(!matches!(data, InstData::Binary { .. }));
-            vec![]
         });
     }
 
