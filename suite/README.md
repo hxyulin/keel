@@ -29,13 +29,14 @@ are cached; keel builds are redone each time.
 
 `cargo suite test-frontends --out target/frontend-check-1` runs the C attribute
 and preprocessing regression tests, the representative C CLI compatibility
-check, the LLVM importer's native/rejection validation, and all 13 C++ profiles
+check, the LLVM importer's native/rejection and indirect-call/ABI validation,
+and all 13 C++ profiles
 with an independent Rust C ABI boundary. Nine C++ profiles must pass at
 None/Fast/Full; four runtime-feature probes may report explicit unsupported
 features. This command adds no application downloads or performance runs.
 
 The output directory must be new. It contains `report.json`, per-stage command
-logs, and the child runners' detailed artifacts under `llvm-import/` and
+logs, and the child runners' detailed artifacts under `llvm-import/`, `llvm-calls/` and
 `cpp-coverage/`. Any failed build, test, native comparison or required profile
 makes the command fail. Expected C++ probe rejections remain visible in
 `cpp-coverage/report.json`. Existing artifacts are never overwritten.
@@ -50,7 +51,7 @@ Clang++, rustc and an LLVM 23 shared library. The library is discovered from
 Missing or incompatible prerequisites on that supported host are failures.
 
 LLVM import currently supports only Apple AArch64. Other hosts still run the C
-checks and report both LLVM stages as skipped (`passed_with_skips`), with reasons.
+checks and report the LLVM stages as skipped (`passed_with_skips`), with reasons.
 Use `--require-llvm` to make such an incomplete run fail. The runner acquires the
 shared suite lock itself, so invoke this command directly without nesting it
 inside `fast_opt_locked.py` or another lock wrapper.

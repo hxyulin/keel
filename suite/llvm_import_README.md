@@ -65,7 +65,15 @@ rename; unsupported input leaves an existing destination intact.
   unsupported-layout allocations are rejected. Stack contents remain uninitialized;
   validation only reads initialized bytes. Final native frame-size limits still apply at
   compilation. Lifetime/stack intrinsics remain rejected.
-- Direct C calls with matching declaration/call types and ABI attributes.
+- Direct C calls with matching declaration/call types and ABI attributes, plus
+  scalar indirect C calls using the call-site function type and explicit ABI
+  extensions. Function addresses, pointer PHIs and stack roundtrips are supported.
+  Narrow i8/i16 return calls require an explicit sign/zero extension. Unknown
+  parameter/return ABI attributes and call function contracts are rejected.
+  A bounded struct-return contract supports only a first pointer parameter with
+  `sret` of unpacked `{i64,i64,i64}`, void result, size 24, alignment 8 and offsets
+  0/8/16. This preserves Apple AArch64's x8 result transport; broader layouts,
+  small/HFA returns and `byval` remain rejected rather than reclassified by guess.
   Ordinary and volatile scalar loads/stores retain access widths and volatility.
   `unreachable` becomes a trap. No memory, call or arithmetic effect is moved.
 
@@ -88,16 +96,16 @@ security-hardening, or source-level tooling replacement for LLVM.
 ## Explicit rejections
 
 Global data/aliases/ifuncs, floating point (including FP memory layouts), vectors,
-aggregate values/ABIs, i128, i1 ABI parameters/returns, varargs,
-indirect/non-C calls, intrinsics, operand bundles, inline assembly, atomics,
+aggregate SSA values and ABIs beyond the bounded sret contract, i128,
+i1 ABI parameters/returns, varargs, non-C calls, intrinsics, operand bundles, inline assembly, atomics,
 exception handling, GC, special sections, explicit prefix/prologue data and
 unsupported ABI attributes are outside this first implementation. Failure is
 module-wide; it does not silently discard unsupported functions. Consequently,
 ordinary unoptimized Rust/C++ output and full applications usually need more
 support. Followups need explicit global storage/initializer/relocation and symbol
 contracts; FP types, constants, comparisons, conversions and fast-math handling;
-indirect-call signatures and ABI validation; and aggregate SSA lowering plus
-byval/sret ABI tests. Those features are not silently approximated here.
+broader aggregate SSA lowering and byval/sret ABI proofs. Those features are
+not silently approximated here.
 
 SME/ZA/streaming ABI attributes (`aarch64_*`) are rejected on definitions,
 declarations and call sites, as are call-site `returns_twice`, null-pointer-valid
@@ -145,3 +153,10 @@ Future comparisons must include or clearly exclude IR production and import
 cost, and state which optimizer prepared the common input. Importing optimized
 LLVM is a way to exercise Keel's backend, not a replacement for a native Rust
 or C++ frontend or an end-to-end compiler speed comparison.
+
+The aggregate runner also invokes `llvm_import_calls_validate.py`, which tests
+indirect scalar calls, narrow extensions, stack-passed arguments and the bounded
+sret contract. It replaces native objects individually and together at
+None/Fast/Full; independent C assertions cover both call directions. Its 38
+checks include 22 negative cases with source/destination preservation. The
+validation JSON records a dependency plan for deferred aggregate forms.
