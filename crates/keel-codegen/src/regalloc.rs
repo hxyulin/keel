@@ -1452,18 +1452,40 @@ fn linear_scan_with_preference<'a>(
 ) -> Vec<&'a Interval> {
     profiling::scope!("linear-scan");
     backend_scope!(Scan);
-    // Sort by (start, value, half) on packed integer keys rather than
-    // re-reading each interval's ranges for every comparison.
-    let mut keys: Vec<(u64, u64)> = intervals
-        .iter()
-        .enumerate()
-        .map(|(i, iv)| {
-            let primary = u64::from(iv.start()) << 32 | iv.value.index() as u64;
-            (primary, (iv.half as u64) << 32 | i as u64)
-        })
-        .collect();
-    keys.sort_unstable();
-    let sorted = keys.into_iter().map(|(_, i)| &intervals[i as u32 as usize]);
+    // Visit by (start, value, half). Built intervals already come in
+    // (value, half) order, so a counting sort on the start point, stable in
+    // index order, gives that directly; otherwise sort packed integer keys
+    // rather than re-reading each interval's ranges for every comparison.
+    let in_value_order = intervals
+        .windows(2)
+        .all(|w| (w[0].value, w[0].half) < (w[1].value, w[1].half));
+    let order: Vec<u32> = if in_value_order {
+        let last = intervals.iter().map(Interval::start).max().unwrap_or(0) as usize;
+        let mut start = vec![0u32; last + 2];
+        for iv in intervals {
+            start[iv.start() as usize + 1] += 1;
+        }
+        for p in 0..=last {
+            start[p + 1] += start[p];
+        }
+        let mut order = vec![0; intervals.len()];
+        for (i, iv) in intervals.iter().enumerate() {
+            let slot = &mut start[iv.start() as usize];
+            order[*slot as usize] = i as u32;
+            *slot += 1;
+        }
+        order
+    } else {
+        let mut keys: Vec<(u64, u64)> = (intervals.iter().enumerate())
+            .map(|(i, iv)| {
+                let primary = u64::from(iv.start()) << 32 | iv.value.index() as u64;
+                (primary, (iv.half as u64) << 32 | i as u64)
+            })
+            .collect();
+        keys.sort_unstable();
+        keys.into_iter().map(|(_, i)| i as u32).collect()
+    };
+    let sorted = order.into_iter().map(|i| &intervals[i as usize]);
 
     // Pool membership as masks, so a candidate test is a bit test rather
     // than a search of the pool. Indexed by class (1 for SIMD/FP).
