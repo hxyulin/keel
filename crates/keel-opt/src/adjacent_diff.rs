@@ -6,21 +6,25 @@
 //! A nonwrapping byte-range guard retains the scalar loop for wrapping inputs.
 //! This deliberately does not relax the generic multi-stream trapping rule.
 //!
-//! Invariant at the chunk check: 2 <= k <= n; previous lane 1 is a[k-1];
-//! the scalar seed contains |a[1]-a[0]|, and the wrapping vector lane sums
-//! contain exactly differences 2..k. The initial splat of a[1] establishes
-//! this without reading a[0] again. The loaded low lanes are [a[k],a[k+1]];
-//! shuffle(previous,current,[1,2]) gives [a[k-1],a[k]]. Updating k by two
-//! establishes the invariant again. The main loop groups four ordered chunks
-//! with independent sums, carries only the fourth current, and merges once
-//! into pair cleanup. With n-k<2, the optional scalar tail
-//! reads only a[k], reusing previous lane 1. n=2 never enters either body.
+//! At each SIMD check, remain is in [0,n-2], ptr=base+4*(n-remain),
+//! and previous lane 1 is a[n-remain-1]. The scalar seed is |a[1]-a[0]|;
+//! the wrapping lane sums cover differences 2..n-remain (four independent
+//! accumulators in main, one merged accumulator in pair cleanup).
+//! Prefix initializes remain=n-2 and ptr=base+8, after reading a[1], a[0].
+//! A main trip requires remain>=8, reads exact ascending eight-byte ranges
+//! ptr+[0,8), [8,16), [16,24), [24,32), then subtracts 8 and advances 32.
+//! Pair cleanup requires remain>=2, reads ptr+[0,8), subtracts 2, advances 8.
+//! Both updates preserve the invariant without oversubtraction; consecutive
+//! trips neither overlap nor skip samples. The four sums merge exactly once.
+//! At exit remain<2; remain==1 reads one signed i32 at ptr, sign-extends it,
+//! and subtracts the signed i64 history. n=2 never enters either body.
 //!
-//! The n>1 guard executes before all loads. The fast-path guard requires
-//! n <= UINT64_MAX/4 and base+4*n >= base. Thus every byte in [base,base+4*n)
-//! has a nonwrapping address; k+2<=n proves the exact eight-byte load fits.
-//! A false guard executes the original scalar loop, including wrapping
-//! address/induction behavior. All guard operations themselves are total.
+//! The original n>1 and nonwrapping guards dominate prefix and pointer setup:
+//! n<=UINT64_MAX/4 and base+4*n>=base. Every pointer update is at most
+//! base+4*n, including the one-past pointer when remain becomes zero; thus
+//! neither setup, offsets nor updates introduce wrap. Every guarded packed
+//! load ends at or before base+4*n. A false guard executes the original scalar
+//! loop, retaining its wrapping address/induction behavior. Guards are total.
 //!
 //! Only default ordinary memory loads are accepted, and the complete function
 //! has no other memory effects. Previously successful reads can be reused
@@ -326,16 +330,13 @@ fn term(f: &mut Function, b: Block, d: D, loc: Option<keel_ir::SourceLoc>) {
 fn chunk(
     f: &mut Function,
     block: Block,
-    k: Value,
+    addr: Value,
     previous: Value,
     acc: Value,
     z: Value,
-    two: Value,
     c: &Candidate,
 ) -> (Value, Value) {
     let e = |f: &mut Function, b, d| emit(f, b, d, c.math_loc);
-    let offset = e(f, block, bin(B::Shl, k, two));
-    let addr = e(f, block, ptr(c.base, offset));
     // Exactly 8 bytes, even though the arithmetic registers are 128 bits.
     let bits = emit(
         f,
@@ -516,26 +517,26 @@ fn transform(f: &mut Function, c: Candidate) {
             arg: c.zero,
         },
     );
-    let start = e(f, prefix, icon(2));
+    let eight = e(f, prefix, icon(8));
+    let start_ptr = e(f, prefix, ptr(c.base, eight));
+    let start = e(f, prefix, bin(B::Isub, c.bound, two));
     term(
         f,
         prefix,
         D::Jump {
-            dest: call(main_check, &[start, previous, z, z, z, z, sum]),
+            dest: call(main_check, &[start_ptr, start, previous, z, z, z, z, sum]),
         },
         loc,
     );
-    // Main invariant: four independent wrapping lane sums cover differences
-    // 2..k, previous lane 1 is a[k-1], and 2 <= k <= n. Only remaining>=8
-    // admits k+2/k+4/k+6 loads and k+8; no induction arithmetic is hoisted.
-    let k = f.append_block_param(main_check, Type::I64);
+    // Count and pointer are carried together; only a successful check admits
+    // subtraction or pointer advancement, including the one-past endpoint.
+    let address = f.append_block_param(main_check, Type::Ptr);
+    let remaining = f.append_block_param(main_check, Type::I64);
     let previous = f.append_block_param(main_check, WIDE);
     let accs: Vec<_> = (0..4)
         .map(|_| f.append_block_param(main_check, WIDE))
         .collect();
     let sum = f.append_block_param(main_check, Type::I64);
-    let eight = e(f, main_check, icon(8));
-    let remaining = e(f, main_check, bin(B::Isub, c.bound, k));
     let enough = e(f, main_check, cmp(IntCC::Uge, remaining, eight));
     term(
         f,
@@ -549,17 +550,19 @@ fn transform(f: &mut Function, c: Candidate) {
     let mut current = previous;
     let mut next_accs = Vec::with_capacity(4);
     for (j, acc) in accs.iter().copied().enumerate() {
-        let index = if j == 0 {
-            k
+        let addr = if j == 0 {
+            address
         } else {
-            let delta = e(f, main, icon(2 * j as i64));
-            e(f, main, bin(B::Iadd, k, delta))
+            let delta = e(f, main, icon(8 * j as i64));
+            e(f, main, ptr(address, delta))
         };
-        let (loaded, next_acc) = chunk(f, main, index, current, acc, z, two, &c);
+        let (loaded, next_acc) = chunk(f, main, addr, current, acc, z, &c);
         current = loaded;
         next_accs.push(next_acc);
     }
-    let next = e(f, main, bin(B::Iadd, k, eight));
+    let next = e(f, main, bin(B::Isub, remaining, eight));
+    let stride = e(f, main, icon(32));
+    let next_ptr = e(f, main, ptr(address, stride));
     term(
         f,
         main,
@@ -567,6 +570,7 @@ fn transform(f: &mut Function, c: Candidate) {
             dest: call(
                 main_check,
                 &[
+                    next_ptr,
                     next,
                     current,
                     next_accs[0],
@@ -596,15 +600,15 @@ fn transform(f: &mut Function, c: Candidate) {
         f,
         merge,
         D::Jump {
-            dest: call(check, &[k, previous, combined, sum]),
+            dest: call(check, &[address, remaining, previous, combined, sum]),
         },
         loc,
     );
-    let k = f.append_block_param(check, Type::I64);
+    let address = f.append_block_param(check, Type::Ptr);
+    let remaining = f.append_block_param(check, Type::I64);
     let previous = f.append_block_param(check, WIDE);
     let acc = f.append_block_param(check, WIDE);
     let sum = f.append_block_param(check, Type::I64);
-    let remaining = e(f, check, bin(B::Isub, c.bound, k));
     let enough = e(f, check, cmp(IntCC::Uge, remaining, two));
     term(
         f,
@@ -615,13 +619,14 @@ fn transform(f: &mut Function, c: Candidate) {
         },
         loc,
     );
-    let (current, next_acc) = chunk(f, vector, k, previous, acc, z, two, &c);
-    let next = e(f, vector, bin(B::Iadd, k, two));
+    let (current, next_acc) = chunk(f, vector, address, previous, acc, z, &c);
+    let next = e(f, vector, bin(B::Isub, remaining, two));
+    let next_ptr = e(f, vector, ptr(address, eight));
     term(
         f,
         vector,
         D::Jump {
-            dest: call(check, &[next, current, next_acc, sum]),
+            dest: call(check, &[next_ptr, next, current, next_acc, sum]),
         },
         loc,
     );
@@ -629,7 +634,7 @@ fn transform(f: &mut Function, c: Candidate) {
     let hi = e(f, finish, D::VectorExtract { arg: acc, lane: 1 });
     let lanes = e(f, finish, bin(B::Iadd, lo, hi));
     let total = e(f, finish, bin(B::Iadd, sum, lanes));
-    let has_tail = e(f, finish, cmp(IntCC::Ult, k, c.bound));
+    let has_tail = e(f, finish, cmp(IntCC::Eq, remaining, c.one));
     term(
         f,
         finish,
@@ -639,15 +644,13 @@ fn transform(f: &mut Function, c: Candidate) {
         },
         loc,
     );
-    let offset = e(f, tail, bin(B::Shl, k, two));
-    let addr = e(f, tail, ptr(c.base, offset));
     let x = emit(
         f,
         tail,
         D::Load {
             flags: MemoryFlags::default(),
             ty: Type::I32,
-            addr,
+            addr: address,
         },
         c.load_loc,
     );

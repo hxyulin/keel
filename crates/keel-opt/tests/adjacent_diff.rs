@@ -333,20 +333,20 @@ fn unrolled_loads_keep_cover_adjacency_and_only_the_last_history_is_carried() {
     };
     let check = dest.block;
     let params = f.block_params(check);
-    assert_eq!(dest.args[1], currents[3]);
+    assert_eq!(dest.args[2], currents[3]);
     for &i in insts {
         if let D::VectorBinary { op: V::Iadd, args } = f.inst_data(i) {
             sums.push(args[0]);
         }
     }
-    assert_eq!(sums, params[2..6]); // four independent accumulator inputs
-    let keel_ir::ValueDef::Result(next_inst, _) = f.value_def(dest.args[0]) else {
+    assert_eq!(sums, params[3..7]); // four independent accumulator inputs
+    let keel_ir::ValueDef::Result(next_inst, _) = f.value_def(dest.args[1]) else {
         panic!()
     };
-    let D::Binary { op: B::Iadd, args } = f.inst_data(next_inst) else {
+    let D::Binary { op: B::Isub, args } = f.inst_data(next_inst) else {
         panic!()
     };
-    assert_eq!(args[0], params[0]);
+    assert_eq!(args[0], params[1]);
     let keel_ir::ValueDef::Result(eight_inst, _) = f.value_def(args[1]) else {
         panic!()
     };
@@ -372,4 +372,191 @@ fn unrolled_loads_keep_cover_adjacency_and_only_the_last_history_is_carried() {
         3
     );
     keel_ir::verify_module(&m).unwrap();
+}
+
+#[test]
+fn countdown_pointer_edges_offsets_and_signed_tail_are_exact() {
+    use keel_ir::{BinaryOp as B, ConvertOp as C, InstData as D, Type, Value, ValueDef};
+    let mut m = canonical();
+    assert!(adjacent_diff::run(&mut m.functions[0]));
+    let f = &m.functions[0];
+    let data = |v: Value| match f.value_def(v) {
+        ValueDef::Result(i, _) => f.inst_data(i),
+        _ => panic!("expected instruction"),
+    };
+    let constant = |v, n| assert!(matches!(data(v), D::Iconst { imm, .. } if *imm == n));
+    for width in [8, 2] {
+        let body = f
+            .blocks()
+            .find(|&b| {
+                f.block_insts(b)
+                    .iter()
+                    .filter(|&&i| matches!(f.inst_data(i), D::Load { ty: Type::I64, .. }))
+                    .count()
+                    == width / 2
+            })
+            .unwrap();
+        let D::Jump { dest } = f.inst_data(*f.block_insts(body).last().unwrap()) else {
+            panic!()
+        };
+        let p = f.block_params(dest.block);
+        if width == 8 {
+            let entry = f
+                .layout_insts()
+                .find_map(|(b, i)| match f.inst_data(i) {
+                    D::Jump { dest: incoming } if incoming.block == dest.block && b != body => {
+                        Some(incoming)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let D::Binary {
+                op: B::Ptradd,
+                args,
+            } = data(entry.args[0])
+            else {
+                panic!()
+            };
+            constant(args[1], 8);
+            let D::Binary { op: B::Isub, args } = data(entry.args[1]) else {
+                panic!()
+            };
+            constant(args[1], 2);
+            assert_eq!(args[0], f.block_params(f.entry_block().unwrap())[3]);
+        }
+        assert_eq!(f.value_type(p[0]), Type::Ptr);
+        let D::Binary {
+            op: B::Ptradd,
+            args,
+        } = data(dest.args[0])
+        else {
+            panic!()
+        };
+        assert_eq!(args[0], p[0]);
+        constant(args[1], width as i64 * 4);
+        let D::Binary { op: B::Isub, args } = data(dest.args[1]) else {
+            panic!()
+        };
+        assert_eq!(args[0], p[1]);
+        constant(args[1], width as i64);
+        let mut offsets = vec![];
+        for &i in f.block_insts(body) {
+            assert!(!matches!(f.inst_data(i), D::Binary { op: B::Shl, .. }));
+            if let D::Load { addr, .. } = f.inst_data(i) {
+                if *addr == p[0] {
+                    offsets.push(0);
+                } else {
+                    let D::Binary {
+                        op: B::Ptradd,
+                        args,
+                    } = data(*addr)
+                    else {
+                        panic!()
+                    };
+                    assert_eq!(args[0], p[0]);
+                    let D::Iconst { imm, .. } = data(args[1]) else {
+                        panic!()
+                    };
+                    offsets.push(*imm);
+                }
+            }
+        }
+        assert_eq!(
+            offsets,
+            (0..width / 2).map(|j| j as i64 * 8).collect::<Vec<_>>()
+        );
+        // Check uses carried remain directly, without recomputing n-k.
+        assert!(!f.block_insts(dest.block).iter().any(|&i| matches!(
+            f.inst_data(i),
+            D::Binary {
+                op: B::Isub | B::Shl,
+                ..
+            }
+        )));
+    }
+    let tail = f
+        .blocks()
+        .find(|&b| {
+            f.block_insts(b)
+                .iter()
+                .any(|&i| matches!(f.inst_data(i), D::VectorExtract { lane: 1, .. }))
+                && f.block_insts(b)
+                    .iter()
+                    .any(|&i| matches!(f.inst_data(i), D::Load { ty: Type::I32, .. }))
+        })
+        .unwrap();
+    let insts = f.block_insts(tail);
+    let pos = insts
+        .iter()
+        .position(|&i| matches!(f.inst_data(i), D::Load { .. }))
+        .unwrap();
+    assert!(
+        matches!(f.inst_data(insts[pos+1]), D::Convert { op: C::Sext, ty: Type::I64, arg } if *arg == f.first_result(insts[pos]))
+    );
+    keel_ir::verify_module(&m).unwrap();
+}
+
+#[test]
+fn countdown_bounds_prove_nonwrapping_disjoint_footprints_for_every_residue() {
+    // Mathematical invariant, including valid end addresses near UINT64_MAX.
+    for n in (2u64..258).chain([u64::MAX / 4 - 7, u64::MAX / 4]) {
+        for base in [0, 1, u64::MAX - 4 * n] {
+            let mut remain = n - 2;
+            let mut ptr = u128::from(base) + 8;
+            let end = u128::from(base) + 4 * u128::from(n);
+            // Large counts sample the first and final groups, avoiding huge loops.
+            if remain > 256 {
+                let skip = (remain / 8 - 1) * 8;
+                remain -= skip;
+                ptr += 4 * u128::from(skip);
+            }
+            for width in [8, 2] {
+                while remain >= width {
+                    assert_eq!(ptr, u128::from(base) + 4 * u128::from(n - remain));
+                    let next = ptr + 4 * u128::from(width);
+                    assert!(next <= end && end <= u128::from(u64::MAX));
+                    for j in 0..width / 2 {
+                        assert!(ptr + 8 * u128::from(j) + 8 <= next);
+                    }
+                    remain -= width;
+                    ptr = next;
+                }
+            }
+            assert!(remain <= 1);
+            assert_eq!(ptr + 4 * u128::from(remain), end);
+        }
+    }
+}
+
+#[test]
+fn altered_scalar_induction_and_bounds_are_rejected_without_mutation() {
+    use keel_ir::{BinaryOp as B, InstData as D, IntCC};
+    let m = canonical();
+    let mutations: Vec<_> = m.functions[0]
+        .layout_insts()
+        .filter_map(|(_, i)| {
+            let d = match m.functions[0].inst_data(i).clone() {
+                D::Binary { op: B::Iadd, args } => D::Binary { op: B::Isub, args },
+                D::Binary { op: B::Shl, args } => D::Binary { op: B::Ushr, args },
+                D::Icmp {
+                    cond: IntCC::Ugt,
+                    args,
+                } => D::Icmp {
+                    cond: IntCC::Uge,
+                    args,
+                },
+                _ => return None,
+            };
+            Some((i, d))
+        })
+        .collect();
+    assert!(mutations.len() >= 5);
+    for (i, d) in mutations {
+        let mut changed = m.clone();
+        *changed.functions[0].inst_data_mut(i) = d;
+        keel_ir::verify_module(&changed).unwrap();
+        let before = changed.to_string();
+        assert!(!adjacent_diff::run(&mut changed.functions[0]));
+        assert_eq!(changed.to_string(), before);
+    }
 }

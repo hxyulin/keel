@@ -93,7 +93,7 @@ fn evidence() -> std::path::PathBuf {
 
 // Check the generated main block rather than counting the pair cleanup or
 // scalar fallback. Register names and edge-copy strategy remain allocator-owned.
-fn assert_arm_unrolled_load_cover(text: &str) {
+fn assert_arm_unrolled_load_cover(text: &str, selection: SelectionTier) {
     let function = text.split("Lrk_adjacent_end:").next().unwrap();
     let blocks: Vec<_> = function
         .split("Lrk_adjacent_block")
@@ -110,6 +110,30 @@ fn assert_arm_unrolled_load_cover(text: &str) {
         .lines()
         .filter(|line| line.starts_with('\t') && !line.starts_with("\t;"))
         .collect();
+    assert!(
+        !instructions.iter().any(|line| line.contains("lsl")),
+        "{text}"
+    );
+    // Full selection folds the three constant pointer offsets into LDR D.
+    if matches!(selection, SelectionTier::Full) {
+        let loads: Vec<_> = instructions
+            .iter()
+            .filter(|line| line.starts_with("\tldr\td"))
+            .collect();
+        let first = loads[0].split('[').nth(1).unwrap().trim_end_matches(']');
+        assert!(first.starts_with('x') && !first.contains(','), "{text}");
+        for (j, line) in loads.iter().enumerate().skip(1) {
+            assert!(line.ends_with(&format!("[{first}, #{}]", 8 * j)), "{text}");
+        }
+    }
+    assert_eq!(
+        instructions
+            .iter()
+            .filter(|line| line.starts_with("\tsub\tx"))
+            .count(),
+        1,
+        "{text}"
+    );
     for (i, line) in instructions.iter().enumerate() {
         if line.starts_with("\tldr\td") {
             assert!(instructions[i + 1].starts_with("\tsshll\t"), "{text}");
@@ -148,7 +172,7 @@ fn simd_objects_on_both_targets_with_both_allocators_and_selectors() {
                             Target::Aarch64AppleDarwin => {
                                 assert!(text.contains(".2d"), "{text}");
                                 if !spills {
-                                    assert_arm_unrolled_load_cover(&text);
+                                    assert_arm_unrolled_load_cover(&text, selection);
                                 }
                                 let obj =
                                     keel_asm::assemble_program_object(&program, Default::default())

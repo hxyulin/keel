@@ -109,12 +109,12 @@ int main(void) {
                 check(mem+page-4*n,n); ++unroll_values;
             }
     }
-    // Aligned cases reach each main-loop load in the first and second groups.
+    // Aligned cases reach each main-loop load in the first, second and third groups.
     // Misaligned cases also compare straddling faults; when lane=0, a preceding
     // sample may fault first (including the prefix in the first group).
     // n includes the entire group, preventing pair cleanup in the main cases.
     // Equal fault addresses check agreement, not independent proof of load order.
-    for (uint64_t group=0;group<2;group++)
+    for (uint64_t group=0;group<3;group++)
         for (uint64_t load=0;load<4;load++)
             for (uint64_t lane=0;lane<2;lane++)
                 for (unsigned misalign=0;misalign<4;misalign++) {
@@ -125,7 +125,7 @@ int main(void) {
     // Pair cleanup and scalar tail after a completed unrolled group, all
     // residues; the extra sample must fault exactly as the scalar does.
     for (uint64_t residue=0;residue<8;residue++) {
-        uint64_t valid=10+residue;
+        uint64_t valid=26+residue;
         compare_fault(mem+page-4*valid,valid+1); ++unroll_faults;
     }
     // The very first scalar read faults before a[0]; also test a[0] faulting
@@ -141,6 +141,11 @@ int main(void) {
     // Guards must retain scalar faults for index-shift and pointer-end wrap.
     compare_fault(mem+page-4,UINT64_MAX);
     compare_fault((void *)(UINTPTR_MAX-3),2);
+    // Both guard boundaries must keep the original scalar first read.
+    compare_fault(mem+page-4,UINT64_MAX/4);
+    compare_fault(mem+page-4,UINT64_MAX/4+1);
+    compare_fault((void *)(UINTPTR_MAX-31),10);
+    compare_fault((void *)(UINTPTR_MAX-7),3);
     assert(munmap(region,3*page)==0);
     printf("{\"status\":\"pass\",\"value_cases\":%u,\"first_fault_cases\":%u,\"unroll_value_cases\":%u,\"unroll_first_fault_cases\":%u,\"performance_measured\":false}\n",cases,faults,unroll_values,unroll_faults);
     return 0;
