@@ -1,0 +1,59 @@
+func @leaf(i64) -> i64 cc(fast) local {
+block0(v0: i64):
+ v1 = iconst.i64 1
+ v2 = iadd v0, v1
+ return v2
+}
+func @caller(ptr) -> i64 {
+block0(v0: ptr):
+ v1 = iconst.i64 0
+ v2 = ptradd v0, v1
+ v3 = load.i64 v2
+ v4 = iconst.i64 8
+ v5 = ptradd v0, v4
+ v6 = load.i64 v5
+ v7 = iconst.i64 16
+ v8 = ptradd v0, v7
+ v9 = load.i64 v8
+ v10 = iconst.i64 24
+ v11 = ptradd v0, v10
+ v12 = load.i64 v11
+ v13 = iconst.i64 32
+ v14 = ptradd v0, v13
+ v15 = load.i64 v14
+ v16 = iconst.i64 40
+ v17 = ptradd v0, v16
+ v18 = load.i64 v17
+ v19 = iconst.i64 48
+ v20 = ptradd v0, v19
+ v21 = load.i64 v20
+ v22 = iconst.i64 56
+ v23 = ptradd v0, v22
+ v24 = load.i64 v23
+ v25 = iconst.i64 64
+ v26 = ptradd v0, v25
+ v27 = load.i64 v26
+ v28 = iconst.i64 72
+ v29 = ptradd v0, v28
+ v30 = load.i64 v29
+ v31 = iconst.i64 80
+ v32 = ptradd v0, v31
+ v33 = load.i64 v32
+ v34 = iconst.i64 88
+ v35 = ptradd v0, v34
+ v36 = load.i64 v35
+ v37 = call @leaf(v3)
+ v38 = iadd v37, v3
+ v39 = iadd v38, v6
+ v40 = iadd v39, v9
+ v41 = iadd v40, v12
+ v42 = iadd v41, v15
+ v43 = iadd v42, v18
+ v44 = iadd v43, v21
+ v45 = iadd v44, v24
+ v46 = iadd v45, v27
+ v47 = iadd v46, v30
+ v48 = iadd v47, v33
+ v49 = iadd v48, v36
+ return v49
+}

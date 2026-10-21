@@ -119,6 +119,7 @@ mod constant_plan;
 #[cfg(feature = "experimental-dispatch")]
 mod dispatch_tail;
 mod extended_add;
+mod leaf_calls;
 mod native;
 mod output;
 mod packed_load;
@@ -240,12 +241,23 @@ fn compile_output(
             });
         }
     }
+    let (leaf_summaries, mut prepared_leaves) =
+        leaf_calls::prepare(module, pools, pipeline, structured)?;
     let mut frames = Vec::new();
-    for original in &module.functions {
+    for (index, original) in module.functions.iter().enumerate() {
+        if let Some((body, scope_marks)) = prepared_leaves.remove(&index) {
+            out.append(body);
+            frames.push(FrameDebug {
+                slots: Vec::new(),
+                scope_marks,
+            });
+            continue;
+        }
         #[cfg(feature = "backend-profile")]
         let _function_profile = crate::backend_profile::function(&original.name);
         let func = vector::lower(original);
-        let mut compiler = FunctionCompiler::new(&func, module, pools, pipeline, structured)?;
+        let mut compiler =
+            FunctionCompiler::new(&func, module, pools, pipeline, structured, &leaf_summaries)?;
         compiler.debug = debug;
         let slots = if debug {
             compiler.slot_frame_offsets()
@@ -680,6 +692,7 @@ impl<'a> FunctionCompiler<'a> {
         pools: &Pools,
         pipeline: &crate::CodegenPipeline<'_>,
         structured: bool,
+        leaf_summaries: &leaf_calls::Summaries,
     ) -> Result<Self, CodegenError> {
         let err = |message: String| CodegenError {
             func: func.name.clone(),
@@ -956,6 +969,16 @@ impl<'a> FunctionCompiler<'a> {
                 folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
             })
         };
+        for (_, inst) in func.layout_insts() {
+            if let InstData::Call { func: callee, .. } = func.inst_data(inst) {
+                let decl = func.callee(*callee);
+                if let Some((sig, preserved)) = leaf_summaries.get(&decl.name) {
+                    if &decl.sig == sig {
+                        selection.preserved_call_gprs.insert(inst, *preserved);
+                    }
+                }
+            }
+        }
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
