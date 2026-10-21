@@ -1063,6 +1063,7 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
                 self.def_done(result, d);
             }
+            InstData::VectorShuffle { args, .. } => self.vector_shuffle_window(args, result),
             InstData::VectorExtract { arg, lane } => {
                 let source = self.use_freg(arg, FS0);
                 let d = self.def_reg(result);
@@ -1079,7 +1080,6 @@ impl<'a> FunctionCompiler<'a> {
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
             InstData::VectorUnary { .. }
             | InstData::VectorInsert { .. }
-            | InstData::VectorShuffle { .. }
             | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {

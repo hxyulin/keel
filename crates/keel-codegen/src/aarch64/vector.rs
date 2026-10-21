@@ -90,6 +90,14 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
 }
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     crate::vector::lower(func, |f, data| match data {
+        InstData::VectorShuffle { args, lanes } => {
+            lanes.as_slice() == [1, 2]
+                && matches!(
+                    f.value_type(args[0]),
+                    Type::Vector(VectorType::I64x2 | VectorType::F64x2)
+                )
+                && f.value_type(args[0]) == f.value_type(args[1])
+        }
         InstData::VectorExtract { arg, .. } => {
             f.value_type(*arg) == Type::Vector(VectorType::I64x2)
         }
@@ -139,6 +147,26 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
+    // EXT reads both operands before writing, including when d aliases either
+    // input. Separate reserved spill scratches keep both captured sources live.
+    pub(super) fn vector_shuffle_window(&mut self, args: [Value; 2], result: Option<Value>) {
+        let a = self.use_freg(args[0], FS0);
+        let b = self.use_freg(args[1], FS1);
+        let d = self.def_freg(result);
+        self.native(
+            Opcode::EXT_asimdext_only,
+            [
+                (FieldId::Q, 1),
+                (FieldId::imm4, 8),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+                (FieldId::Rm, b.into()),
+            ],
+            |out| write!(out, "ext\tv{d}.16b, v{a}.16b, v{b}.16b, #8"),
+        );
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_widening_add(&mut self, add: WideningAdd, result: Option<Value>) {
         let source_shape = self.ty(add.source).vector().unwrap();
         let destination = self.ty(add.accumulator).vector().unwrap();

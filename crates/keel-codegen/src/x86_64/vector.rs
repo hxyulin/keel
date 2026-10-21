@@ -73,6 +73,14 @@ pub(super) fn packed(op: V, shape: VectorType) -> Option<Opcode> {
 }
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     crate::vector::lower(func, |func, data| match data {
+        InstData::VectorShuffle { args, lanes } => {
+            lanes.as_slice() == [1, 2]
+                && matches!(
+                    func.value_type(args[0]),
+                    Type::Vector(VectorType::I64x2 | VectorType::F64x2)
+                )
+                && func.value_type(args[0]) == func.value_type(args[1])
+        }
         InstData::VectorExtract { arg, .. } => {
             func.value_type(*arg) == Type::Vector(VectorType::I64x2)
         }
@@ -138,6 +146,19 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_shuffle_window(&mut self, args: [Value; 2], result: Option<Value>) {
+        // SHUFPD destroys its first operand. Stage both inputs before defining
+        // the destination so live inputs, either destination alias and all
+        // spill combinations retain their original bits.
+        self.vector_stage(args[0], FS0);
+        self.vector_stage(args[1], FS1);
+        self.emit(
+            Opcode::Shufpd,
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&1)],
+        );
+        self.vector_publish(result);
+    }
+
     // Always stage before defining the result: all operands may spill, alias,
     // or remain live, and a spilled result itself uses FS0.
     fn vector_stage(&mut self, value: Value, scratch: u8) {

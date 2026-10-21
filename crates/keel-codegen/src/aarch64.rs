@@ -1431,10 +1431,11 @@ impl<'a> FunctionCompiler<'a> {
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
+            InstData::VectorShuffle { args, .. } => self.vector_shuffle_window(args, result),
             InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
-            InstData::VectorInsert { .. }
-            | InstData::VectorShuffle { .. }
-            | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
+            InstData::VectorInsert { .. } | InstData::VectorFcmp { .. } => {
+                unreachable!("legalized vector operation")
+            }
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {
                     self.folded_values.contains(&r)
