@@ -326,3 +326,162 @@ fn removed_block_indices_still_spend_cfg_allocation_budget() {
     assert_eq!(before, m.to_string());
     assert_eq!(loads(&m), 2);
 }
+
+// Every layer is kept: the effect proof is independent of inlining and never
+// turns a body summary into permission to move a read before its original site.
+fn chain(depth: usize) -> String {
+    let mut src = LEAF.to_string();
+    let mut previous = "leaf".to_string();
+    for n in 0..depth {
+        src.push_str(&format!(
+            "\nfunc @chain{n}(ptr, i64) -> i64 local {{\nblock0(v0: ptr, v1: i64):\n v2 = call @{previous}(v0, v1)\n v3 = iadd v2, v1\n return v3\n}}"
+        ));
+        previous = format!("chain{n}");
+    }
+    source(&src, &format!("v4 = call @{previous}(v0, v1)"))
+}
+
+#[test]
+fn transitive_depth_budget_is_inclusive_and_order_independent() {
+    for (depth, expected) in [(1, 1), (8, 1), (9, 2)] {
+        let src = chain(depth);
+        let mut m = optimize(&src);
+        assert_eq!(loads(&m), expected, "depth {depth}");
+        for f in &m.functions {
+            if f.name != "leaf" {
+                assert_eq!(
+                    f.layout_insts()
+                        .filter(|(_, i)| matches!(f.inst_data(*i), InstData::Call { .. }))
+                        .count(),
+                    1
+                );
+            }
+        }
+        let before = m.to_string();
+        keel_opt::run_passes(&mut m, &["call-load-reuse"]).unwrap();
+        assert_eq!(before, m.to_string());
+        let mut reversed = keel_ir::parse(&src).unwrap();
+        reversed.functions.reverse();
+        keel_opt::run_passes(&mut reversed, &["call-load-reuse"]).unwrap();
+        keel_ir::verify_module(&reversed).unwrap();
+        assert_eq!(loads(&reversed), expected);
+    }
+}
+
+#[test]
+fn transitive_barriers_propagate_through_every_wrapper() {
+    for body in [
+        "store v1, v0\n return v1",
+        "v2 = load.i64 v0\n return v2",
+        "v2 = load.i64 volatile v0\n return v2",
+        "v2 = atomic_load.i64 relaxed v0\n return v2",
+        "asm \"\", \"~{memory}\"()\n return v1",
+        "v2 = call_indirect v0(v0, v1) : (ptr, i64) -> i64\n return v2",
+        "v2 = sdiv v1, v1\n return v2",
+        "intrinsic debugtrap()\n return v1",
+        "v2 = call @chain0(v0, v1)\n return v2", // mutual cycle
+    ] {
+        let src = chain(2).replace("v2 = iadd v1, v1\n return v2", body);
+        assert_eq!(loads(&optimize(&src)), 2, "{body}");
+    }
+    for old in ["local", "noninterposable"] {
+        let src = chain(2).replacen(" local", &format!(" {old}"), 1);
+        assert_eq!(loads(&optimize(&src)), 1);
+        assert_eq!(
+            loads(&optimize(&src.replacen(&format!(" {old}"), "", 1))),
+            2
+        );
+    }
+}
+
+#[test]
+fn transitive_proof_requires_unique_exact_legal_binding() {
+    let src = chain(2);
+    for mode in 0..6 {
+        let mut m = keel_ir::parse(&src).unwrap();
+        match mode {
+            0 => m.functions[0].weak_odr = true,
+            1 => {
+                let copy = m.functions[0].clone();
+                m.functions.push(copy);
+            }
+            2 => {
+                let reference = m.functions[1].callees().next().unwrap().0;
+                m.functions[1].callee_mut(reference).sig.cc = keel_ir::CallConv::Fast;
+            }
+            3 => {
+                let reference = m.functions[1].callees().next().unwrap().0;
+                m.functions[1].callee_mut(reference).attrs.noreturn = true;
+            }
+            4 => m.functions[0].sig.variadic = true,
+            5 => {
+                let file = m.add_file("nested.c");
+                let f = &mut m.functions[0];
+                let i = f.layout_insts().next().unwrap().1;
+                f.set_inst_loc(
+                    i,
+                    Some(keel_ir::SourceLoc {
+                        file,
+                        line: 1,
+                        col: 1,
+                        scope: None,
+                    }),
+                );
+            }
+            _ => unreachable!(),
+        }
+        // Some cases intentionally bypass verification to exercise defensive
+        // treatment of malformed linkage and mismatched/duplicate bindings.
+        keel_opt::find_pass("call-load-reuse")
+            .unwrap()
+            .run_module(&mut m);
+        assert_eq!(loads(&m), 2, "mode {mode}");
+    }
+    let src =
+        "func @leaf(ptr byval {i64}, i64) -> i64 local {\nblock0(v0: ptr, v1: i64):\n return v1\n}";
+    assert_eq!(loads(&optimize(&source(src, "v4 = call @leaf(v0, v1)"))), 2);
+}
+
+#[test]
+fn transitive_join_requires_both_availability_and_readability() {
+    let src = chain(2).replace(
+        " v4 = call @chain1(v0, v1)\n v3 = load.i64 v0\n return v3",
+        " brif v1, block1, block2\nblock1:\n v4 = call @chain1(v0, v1)\n jump block3\nblock2:\n jump block3\nblock3:\n v3 = load.i64 v0\n return v3",
+    );
+    assert_eq!(loads(&optimize(&src)), 1);
+    for barrier in [
+        "store v1, v0",
+        "intrinsic debugtrap()",
+        "v5 = load.i64 volatile v0",
+    ] {
+        let s = src.replace("block2:\n jump", &format!("block2:\n {barrier}\n jump"));
+        assert_eq!(
+            loads(&optimize(&s)),
+            if barrier.contains("volatile") { 3 } else { 2 }
+        );
+    }
+    // No read in one arm means the join cannot acquire successful readability.
+    let s = src
+        .replace(" v2 = load.i64 v0\n", "")
+        .replace("block1:\n", "block1:\n v2 = load.i64 v0\n");
+    assert_eq!(loads(&optimize(&s)), 2);
+}
+
+#[test]
+fn transitive_candidate_body_work_is_bounded() {
+    for (insts, expected) in [(128, 1), (129, 2)] {
+        let mut helper = LEAF.to_string();
+        helper.push_str("\nfunc @wrapper(ptr, i64) -> i64 local {\nblock0(v0: ptr, v1: i64):\n v2 = call @leaf(v0, v1)\n");
+        for n in 0..insts - 2 {
+            helper.push_str(&format!(" v{} = iadd v1, v1\n", n + 3));
+        }
+        helper.push_str(" return v2\n}");
+        assert_eq!(
+            loads(&optimize(&source(&helper, "v4 = call @wrapper(v0, v1)"))),
+            expected
+        );
+    }
+    // An SCC with a successful outgoing leaf proof must still never complete.
+    let src = chain(2).replace("v3 = iadd v2, v1", "v3 = call @chain1(v0, v2)");
+    assert_eq!(loads(&optimize(&src)), 2);
+}
