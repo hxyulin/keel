@@ -24,6 +24,30 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def compiler_configurations(include_gcc=False):
+    result = {f'keel-{tier}': ('keel', ['cc', *([] if tier == 'none' else ['-O']),
+                                       '--opt-tier', tier, '--emit-object'])
+              for tier in ('none', 'fast', 'full')}
+    result['clang-O2'] = ('clang', ['-std=c11', '-O2', '-c'])
+    if include_gcc:
+        result['gcc-O2'] = ('gcc', ['-std=c11', '-O2', '-c'])
+    return result
+
+
+def canonical_runtime(binary, output):
+    # Link then rename, never overwrite a running executable's inode. All
+    # variants have the same argv[0], while original artifacts remain intact.
+    canonical = output / 'run'
+    # POSIX rename of two names for the same inode is a no-op, leaving
+    # run.next behind. Consecutive jobs for one variant need no replacement.
+    if canonical.exists() and canonical.samefile(binary):
+        return canonical
+    pending = output / 'run.next'
+    os.link(binary, pending)
+    os.replace(pending, canonical)
+    return canonical
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--keel', required=True, type=Path)
@@ -68,12 +92,7 @@ def main():
     for path in compilers.values():
         if not path.is_file():
             ap.error(f'missing compiler: {path}')
-    configurations = {f'keel-{tier}': ('keel', ['cc', '--opt-tier', tier, '--emit-object'])
-                      for tier in ('none', 'fast', 'full')}
-    configurations['keel-full'] = ('keel', ['cc', '-O', '--emit-object'])
-    configurations['clang-O2'] = ('clang', ['-std=c11', '-O2', '-c'])
-    if args.gcc:
-        configurations['gcc-O2'] = ('gcc', ['-std=c11', '-O2', '-c'])
+    configurations = compiler_configurations(args.gcc is not None)
     report = {'schema': 1, 'corpus': 'runtime-kernels-v1', 'label': args.label,
               'host': {'uname': list(platform.uname()), 'machine': platform.machine(),
                        'affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
@@ -84,7 +103,8 @@ def main():
                             'runtime': 'CLOCK_MONOTONIC ns; loop, external call, volatile sink and unsigned checksum included; input allocation/generation and initial oracle check excluded',
                             'warmups': 'one fresh object per config before measured compile rounds; one untimed native call per timed process',
                             'reps': 'max(3, target_elements/max(length,1)), capped at 1000000; fixed across configs',
-                            'original_21_kernel_corpus': 'excluded; do not merge scores'}}
+                            'original_21_kernel_corpus': 'excluded; do not merge scores',
+                            'runtime_argv0': str(args.output / 'run')}}
     for path in (HERE / 'kernels.c', HERE / 'driver.c', HERE / 'oracle.py', Path(__file__).resolve()):
         report['sources'][path.name] = sha(path)
     settings = report['host']['settings']
@@ -122,7 +142,7 @@ def main():
             if name == 'keel' and not version.strip():
                 version = 'CLI has no --version; executable SHA-256 is authoritative'
             report['compilers'][name] = dict(path=str(path), sha256=sha(path), version=version)
-        report['checkout_commit'] = run(['git', '-C', ROOT, 'rev-parse', 'HEAD'])[0].strip()
+        report['checkout_commit'] = run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], check=False)[0].strip() or None
         if platform.system() == 'Darwin':
             settings['cpu_brand'] = run(['sysctl', '-n', 'machdep.cpu.brand_string'])[0].strip()
         elif shutil.which('lscpu'):
@@ -175,7 +195,8 @@ def main():
             rng.shuffle(jobs)
             for config, case, n in jobs:
                 reps = min(1000000, max(3, args.target_elements // max(n, 1)))
-                stdout, _ = run([binaries[config], 'time', case, n, reps, args.seed, expected[n][case]])
+                binary = canonical_runtime(binaries[config], args.output)
+                stdout, _ = run([binary, 'time', case, n, reps, args.seed, expected[n][case]])
                 row = json.loads(stdout)
                 if row['checksum'] != (expected[n][case] * reps) & MASK:
                     raise RuntimeError('timed checksum mismatch')

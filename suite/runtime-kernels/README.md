@@ -57,8 +57,9 @@ point's environment marker. Other native validation commands must use the
 shared wrapper directly. Output directories are never reused. No build cache,
 Cargo target, baseline checkout, or remote host is touched.
 
-Configurations are Keel None/Fast (`--opt-tier none|fast`, default selection and
-allocation), Keel Full (`-O`, including all selection passes), and Clang `-O2`.
+Configurations are Keel None (`--opt-tier none`, baseline selection), Fast and
+Full (`-O --opt-tier fast|full`, including all selection passes), and Clang `-O2`.
+All Keel configurations use the default Full allocator.
 `--gcc /absolute/path/to/gcc` adds GCC O2 only when explicitly supplied and
 present. The driver is compiled once with Clang O2, and each kernel object is
 linked with that same driver, without LTO. Keel executable SHA-256 is the
@@ -90,11 +91,15 @@ loop performs external kernel calls, a volatile sink write, and an unsigned
 checksum addition; it never XORs repeated answers away. The final checksum must
 match the independent expected result times the repetition count modulo 2^64.
 No LTO is used, so the driver cannot hoist a pure kernel call out of the loop.
+Every timed variant uses one canonical executable path, installed by atomic
+hard-link replacement without changing the retained executable inodes. This
+keeps argv[0] constant; it does not control physical code pages or internal layout.
 Runtime defaults to five raw rounds and `max(3, target_elements / max(n, 1))`
 repetitions, capped at one million, with `target_elements=2000000` by default.
 
 Artifacts are `correctness.json`, `results.json`, `commands.jsonl`, `lock.jsonl`,
-`report.html`, and retained sources/objects/assembly/executables. They include
+`report.html`, and retained sources/objects/assembly/executables. Git revision is optional for source archives; source and compiler hashes remain
+authoritative. They include
 raw round times, exact argv/flags, stdout/stderr, seed, length, canonical
 little-endian input hashes, source/compiler/object/executable hashes,
 architecture/host labels, process affinity where supported, load averages, and
