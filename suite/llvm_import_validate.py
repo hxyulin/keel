@@ -46,12 +46,6 @@ def main():
         spec.loader.exec_module(module)
         llvm = module.LLVM(args.libllvm)
         cases = {
-            'nsw': 'define i32 @f(i32 %a) { %v = add nsw i32 %a, 1\nret i32 %v }',
-            'nuw': 'define i32 @f(i32 %a) { %v = mul nuw i32 %a, 2\nret i32 %v }',
-            'exact': 'define i32 @f(i32 %a) { %v = udiv exact i32 %a, 2\nret i32 %v }',
-            'disjoint': 'define i32 @f(i32 %a) { %v = or disjoint i32 %a, 1\nret i32 %v }',
-            'nneg': 'define i32 @f(i8 %a) { %v = zext nneg i8 %a to i32\nret i32 %v }',
-            'samesign': 'define i32 @f(i32 %a) { %b = icmp samesign slt i32 %a, 1\n%v = zext i1 %b to i32\nret i32 %v }',
             'poison': 'define i32 @f() { ret i32 poison }',
             'undef': 'define i32 @f() { ret i32 undef }',
             'freeze': 'define i32 @f() { %v = freeze i32 poison\nret i32 %v }',

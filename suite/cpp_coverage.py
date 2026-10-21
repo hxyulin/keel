@@ -29,7 +29,8 @@ CASES = [
     ('cfg', 'multiple blocks and conditional direct calls', True, '-O1'),
     ('gep', 'indexed volatile memory', True, '-O1'),
     ('alloca', 'unoptimized stack locals', True, '-O0'),
-    ('signed_contract', 'compiler arithmetic no-wrap contracts', False, '-O1'),
+    ('signed_contract', 'compiler arithmetic no-wrap contracts', True, '-O1'),
+    ('eh_int', 'typed integer throw and catch with external runtime typeinfo', True, '-O1'),
     ('eh', 'throw/catch and exception runtime', False, '-O1'),
 ]
 SENTINEL = b'cpp-coverage destination preservation sentinel\n'
@@ -112,6 +113,8 @@ def main(argv=None):
     parser.add_argument('--abi-cc', help='also test a separately compiled C boundary with this compiler (e.g. gcc-15)')
     parser.add_argument('--abi-rustc', help='also test the independent no_std Rust C-ABI boundary (e.g. rustc)')
     parser.add_argument('--target', help='explicit Clang target; default is recorded compiler host target')
+    parser.add_argument('--localize-odr-functions', action='store_true',
+                        help='assert no outside-TU references to ODR helper symbols; enable bounded local copies')
     parser.add_argument('--case', action='append', choices=[c[0] for c in CASES], dest='cases')
     parser.add_argument('--timeout', type=float, default=90)
     args = parser.parse_args(argv)
@@ -126,6 +129,8 @@ def main(argv=None):
               'scope': 'C++ via Clang-prepared LLVM IR; no native C++ frontend or performance claim',
               'tiers': ['none', 'fast', 'full'], 'input_pairs': 4240,
               'environment': {}, 'sources': {}}
+    import_options = ['--localize-odr-functions'] if args.localize_odr_functions else []
+    report['import_options'] = import_options
     exit_code = 1
     try:
         # Preserve source snapshots as well as their identities for reruns.
@@ -189,11 +194,13 @@ def main(argv=None):
                 continue
             directory = out / name
             directory.mkdir()
+            if name == 'constexpr_runtime' and args.localize_odr_functions:
+                required = True
             case = {'name': name, 'feature': feature, 'required': required,
                     'ir_optimization': level, 'status': 'running', 'stage': 'clang_ir', 'native': [], 'differential': []}
             report['cases'].append(case)
             flags = [*target_flags, '-std=c++17', level]
-            if name != 'eh':
+            if name not in ('eh', 'eh_int'):
                 flags += ['-fno-exceptions', '-fno-rtti']
             case['flags'] = flags
             ir, dest = directory/'input.ll', directory/'imported.keel'
@@ -231,7 +238,7 @@ def main(argv=None):
                 case['stage'] = 'import'
                 dest.write_bytes(SENTINEL)
                 result = runner.run([sys.executable, IMPORTER, '--libllvm', args.libllvm,
-                                     '--keel', args.keel, ir, '-o', dest])
+                                     '--keel', args.keel, *import_options, ir, '-o', dest])
                 stdout = Path(result['stdout']).read_bytes()
                 stderr = Path(result['stderr']).read_text(errors='replace')
                 preserved = dest.exists() and dest.read_bytes() == SENTINEL

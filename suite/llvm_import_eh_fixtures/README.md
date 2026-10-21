@@ -43,7 +43,7 @@ definitions (including weak/ODR definitions) remain unsupported. The limit is
 Indirect invokes, filters, Windows funclets, other personalities, ordinary
 aggregate SSA, cyclic EH pair PHIs, reconstructed/insertvalue pairs, and
 undef/poison pairs remain rejected. This does not import arbitrary C++ modules:
-ODR definitions, unsupported intrinsics, ABI contracts and arithmetic flags
+ODR definitions, unsupported intrinsics and ABI contracts
 still fail closed. No backend code is changed.
 
 The original LLVM reference objects use Clang `-O1`. On the installed Apple

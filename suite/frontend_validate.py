@@ -82,6 +82,7 @@ def main(argv=None):
         # No child runner acquires this lock. Builds and all native execution
         # share the same lease as the existing standalone validation workflows.
         with open(LOCK, 'a+') as lock:
+            print('frontend checks: waiting for shared native-test lease', flush=True)
             fcntl.flock(lock, fcntl.LOCK_EX)
             if harness.run('revision', ['git', 'rev-parse', 'HEAD']):
                 report['revision'] = (out / 'revision.stdout').read_text().strip()
@@ -121,13 +122,24 @@ def main(argv=None):
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-globals'])
                 harness.run('llvm-linkage', [sys.executable, ROOT / 'suite/llvm_import_linkage_validate.py',
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-linkage'])
+                harness.run('llvm-flags', [sys.executable, ROOT / 'suite/llvm_import_flags_validate.py',
+                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-flags'])
+                harness.run('llvm-eh', [sys.executable, ROOT / 'suite/llvm_import_eh_validate.py',
+                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-eh'])
                 harness.run('cpp-coverage', [sys.executable, ROOT / 'suite/cpp_coverage.py',
                     '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
                     '--out', out / 'cpp-coverage'])
+                # These fixtures export only cpp_case; their ODR helper symbols
+                # are not used by the separately compiled C/Rust boundaries.
+                harness.run('cpp-odr', [sys.executable, ROOT / 'suite/cpp_coverage.py',
+                    '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
+                    '--localize-odr-functions', '--case', 'constexpr_runtime',
+                    '--out', out / 'cpp-odr'])
             else:
                 reason = ('LLVM import currently requires Apple AArch64' if not supported
                           else 'LLVM library discovery or Keel prerequisite failed')
-                for name in ('llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage', 'cpp-coverage'):
+                for name in ('llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'llvm-linkage',
+                             'llvm-flags', 'llvm-eh', 'cpp-coverage', 'cpp-odr'):
                     harness.skip(name, reason)
                 if supported or args.require_llvm:
                     harness.stages.append(dict(name='llvm-prerequisite', status='failed', reason=reason))

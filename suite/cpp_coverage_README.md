@@ -59,7 +59,7 @@ for cases whose import is rejected. Each accepted module is compiled at Keel
 selected boundary object. Checks stop on a failure within a case and continue
 to the next case. The JSON stage and command logs identify the failure.
 
-The nine required regression-floor profiles are:
+The eleven required regression-floor profiles are:
 
 - `scalar`: unsigned wrapping arithmetic, shifts and volatile scalar memory.
 - `templates`: an inlined scalar template instantiation.
@@ -70,14 +70,16 @@ The nine required regression-floor profiles are:
 - `cfg`: multiple blocks and conditional direct calls.
 - `gep`: indexed volatile memory.
 - `alloca`: unoptimized stack locals.
+- `signed_contract`: compiler no-wrap arithmetic.
+- `eh_int`: typed integer throw/catch using external runtime typeinfo.
 
-The probes are `constexpr_runtime`, `virtual`, `signed_contract`, and `eh`.
+The probes are `constexpr_runtime`, `virtual`, and `eh` (user-defined RTTI).
 These may reject with a recognized unsupported
 feature diagnostic; acceptance automatically enables the same three-tier
 native differential tests. They are not pinned to rejection, so rerun them
 as importer support expands. The report records
 the first importer blocker; removing it may expose another. For example,
-virtual dispatch currently stops at global data before reaching indirect calls.
+virtual dispatch currently stops at unsupported method linkage.
 The runtime constexpr probe intentionally retains its observed linkage blocker.
 Templates, constexpr, overloads and RAII often disappear during Clang's scalar
 lowering/inlining; successful import does not imply support for their general
@@ -86,11 +88,19 @@ complete LLVM feature parser.
 
 All fixtures use `-std=c++17`. IR production is `-O2` for the original six profiles,
 runtime constexpr and virtual dispatch; `-O1` for CFG, GEP, signed contracts and
-EH; and `-O0` for stack locals. Every case except EH explicitly uses
-`-fno-exceptions -fno-rtti`. EH retains normal C++ exception/RTTI defaults.
-The signed arithmetic probe uses bounded values to avoid source undefined
+both EH profiles; and `-O0` for stack locals. Every case except the two EH
+profiles explicitly uses `-fno-exceptions -fno-rtti`. Both EH profiles retain
+normal C++ exception/RTTI defaults.
+The signed arithmetic profile uses bounded values to avoid source undefined
 behavior while retaining real compiler `nuw`/`nsw` contracts. **No attributes,
 flags, directives, functions or instructions are stripped from Clang's IR.**
+
+`--localize-odr-functions` explicitly asserts no outside TU requires helper
+symbols and enables only the bounded direct-helper localization contract.
+With it, `constexpr_runtime` becomes required rather than an optional probe.
+The aggregate harness runs that fixture separately as `cpp-odr`, exporting only
+`cpp_case` to its C/Rust boundaries. Default coverage still requires strict
+linkage; this mode does not supply arbitrary library or virtual linkage support.
 
 ## JSON, artifacts and failure behavior
 

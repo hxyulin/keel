@@ -300,9 +300,10 @@ f32/f64 operations, globals/relocations and indirect C calls
 on Apple AArch64. The [C++ coverage runner](suite/cpp_coverage_README.md) exercises
 untouched Clang output through this path and compares native execution at
 None/Fast/Full, including C and optional Rust ABI boundaries. These are bounded
-coverage tools; full C++ applications, general aggregate ABIs and exception
-handling remain outside the importer's supported scope. Only the documented
-three-i64 struct-return ABI is currently accepted.
+coverage tools; full C++ applications and general aggregate ABIs remain outside
+the importer's supported scope. The documented three-i64 struct-return ABI and
+bounded Itanium exception subset are accepted. Integer no-wrap flags refine
+to ordinary operations; helper localization requires an explicit ODR assertion.
 
 ## Assembler (A64 subset)
 

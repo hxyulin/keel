@@ -93,6 +93,14 @@ rename; unsupported input leaves an existing destination intact.
   small/HFA returns and `byval` remain rejected rather than reclassified by guess.
   Ordinary and volatile scalar loads/stores retain access widths and volatility.
   `unreachable` becomes a trap. No memory, call or arithmetic effect is moved.
+- Bounded Itanium EH: direct invokes, external typed/catch-all landingpads,
+  cleanup, typeid, dedicated `{ptr,i32}` pairs and acyclic pair PHIs, and
+  resume/rethrow through runtime calls. Invoke edge copies preserve normal and
+  unwind PHIs. Only the symbolic external `__gxx_personality_v0` personality
+  is accepted; its variadic runtime declaration does not enable variadic calls.
+  Defined RTTI, indirect invokes, filters, Windows funclets, reconstructed pairs
+  and cyclic EH pair PHIs remain rejected. See the
+  [EH contract](llvm_import_eh_fixtures/README.md).
 
 LLVM's undefined division inputs need not retain a particular outcome; defined
 division inputs have the same result. Keel masks shift counts; LLVM's defined
@@ -101,9 +109,15 @@ poison. This importer does not claim identical behavior for LLVM-undefined or
 poison-producing executions. Explicit poison/undef operands and `freeze` are
 rejected. GEP `inbounds`, `nuw` and `nusw` constraints do not become Keel facts:
 address arithmetic agrees on defined LLVM executions, with no promise for
-executions violating those constraints. GEP `inrange` is rejected. Existing scalar
-arithmetic guards are unchanged; the importer conservatively rejects `nsw`, `nuw`,
-`exact`, `disjoint`, `nneg`, flagged truncations and `samesign` comparisons.
+executions violating those constraints. GEP `inrange` is rejected. Supported
+integer `nsw`/`nuw`, `exact`, `or disjoint`, flagged truncation, `zext nneg` and
+integer `icmp samesign` refine to ordinary operations, without supplying Keel
+optimizer facts. Signed division guards `INT_MIN/-1` so refining a poison
+dividend cannot introduce an overflow trap on a select-masked path. Zero-divisor
+traps remain. Explicit poison/undef/freeze, unsupported widths, i1 arithmetic
+and ordered i1 comparisons remain rejected. See the
+[integer flag contract](llvm_import_flags_fixtures/README.md) for defined-input
+and poison-masking test domains. FP fast-math restrictions are unchanged.
 
 Optimization and analysis contracts such as `noundef`, ranges, captures,
 read-only effects and target CPU tuning are not imported as Keel facts. Debug
@@ -114,9 +128,10 @@ security-hardening, or source-level tooling replacement for LLVM.
 
 Global aliases/ifuncs, TLS/common/weak/linkonce/COMDAT/sections and unsupported
 global attributes, half/bfloat/x87/FP128, vectors, `frem`,
-aggregate SSA values and ABIs beyond the bounded sret contract, i128,
-i1 ABI parameters/returns, varargs, non-C calls, intrinsics, operand bundles, inline assembly, atomics,
-exception handling, GC, special sections, explicit prefix/prologue data and
+aggregate SSA beyond dedicated EH pairs and ABIs beyond the bounded sret contract,
+i128, i1 ABI parameters/returns, ordinary varargs, non-C calls, intrinsics other
+than EH typeid, operand bundles, inline assembly, atomics, unsupported EH forms,
+GC, special sections, explicit prefix/prologue data and
 unsupported ABI attributes are outside this first implementation. Failure is
 module-wide; it does not silently discard unsupported functions. Consequently,
 ordinary unoptimized Rust/C++ output and full applications usually need more
@@ -158,7 +173,7 @@ stack counts, negative indices, struct padding and packed layout. Independent
 C assertions check results and memory, then compare native reference/Keel
 checksums. Actual untouched Clang `-O1` and rustc `opt-level=1` CFG/GEP modules
 also run 8,192 inputs each against a C oracle with volatile memory checks.
-There are 18 native Keel builds across None/Fast/Full. The 52 rejection cases
+There are 18 native Keel builds across None/Fast/Full. The 46 rejection cases
 check errors, empty stdout and preservation of an existing output, including
 target/layout restrictions and module-wide late failures. A separate failing
 Keel-verifier check also verifies output preservation. Commands and results are
@@ -178,7 +193,7 @@ None/Fast/Full; independent C assertions cover both call directions. Its 38
 checks include 22 negative cases with source/destination preservation. The
 validation JSON records a dependency plan for deferred aggregate forms.
 
-`llvm_import_fp_validate.py` adds 56 rejection/preservation cases and nine native
+`llvm_import_fp_validate.py` adds 53 rejection/preservation cases and nine native
 builds for handwritten LLVM and untouched Clang O0/O1 output at None/Fast/Full.
 Independent assertions cover NaNs, infinities, signed zeros, subnormals, ties,
 conversion boundaries, PHIs/selects, stack-passed FP arguments and indirect FP
@@ -201,3 +216,11 @@ by default. See the [ODR contract](llvm_import_linkage_fixtures/README.md).
 The `llvm-linkage` aggregate stage runs 57 checks, including 34 rejections,
 mixed-TU native comparisons, identity/shared-storage controls and default-mode
 rejection. The ordinary C++ runner continues to use strict linkage mode.
+
+The aggregate stages `llvm-flags` and `llvm-eh` invoke the dedicated integer-flag
+and exception validators. They cover independently asserted integer matrices,
+poison-masked downstream division, actual compiler output, typed/catch-all
+exceptions, destructors, resume/rethrow, edge PHIs and preservation failures at
+None/Fast/Full. The C++ runner requires signed-contract and integer-EH profiles;
+`cpp-odr` separately requires the constexpr helper fixture with an explicit
+localization assertion. Default C++ coverage remains strict about ODR linkage.

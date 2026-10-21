@@ -128,7 +128,7 @@ def main():
             'external-call': 'declare i64 @external(i64)\ndefine linkonce_odr i64 @h(i64 %x) { %v = call i64 @external(i64 %x)\nret i64 %v }',
             'indirect-call': 'define linkonce_odr i64 @h(ptr %p) { %v = call i64 %p()\nret i64 %v }',
             'hidden': 'define linkonce_odr hidden i64 @h(i64 %x) { ret i64 %x }',
-            'late-semantics': 'define linkonce_odr i64 @h(i64 %x) { %v = add nuw i64 %x, 1\nret i64 %v }',
+            'late-semantics': 'define linkonce_odr i64 @h(i64 %x) { %v = freeze i64 %x\nret i64 %v }',
             'malformed': 'define linkonce_odr i64 @h( {',
         }
         for selection in ['any', 'exactmatch', 'largest', 'noduplicates', 'samesize']:

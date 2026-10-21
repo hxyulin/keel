@@ -69,10 +69,7 @@ def main():
             'nofpclass-call': 'declare double @g(double)\ndefine double @f(double %x) { %v = call nofpclass(nan) double @g(double %x)\nret double %v }',
             'nofpclass-call-param': 'declare double @g(double)\ndefine double @f(double %x) { %v = call double @g(double nofpclass(nan) %x)\nret double %v }',
             'late-failure': 'define double @good() { ret double 1.0 }\ndefine double @bad() { %p = fadd fast double 1.0, 2.0\nret double %p }',
-            # Existing integer and ABI guards stay rejected.
-            'nsw': 'define i32 @f(i32 %x) { %v = add nsw i32 %x, 1\nret i32 %v }',
-            'nuw': 'define i32 @f(i32 %x) { %v = mul nuw i32 %x, 2\nret i32 %v }',
-            'exact': 'define i32 @f(i32 %x) { %v = udiv exact i32 %x, 2\nret i32 %v }',
+            # Unsupported ABI contracts stay rejected.
             'plain-i8-return': 'define i8 @f(i8 %x) { ret i8 %x }',
             'extension-mismatch': 'declare signext i8 @g(i8)\ndefine signext i8 @f(i8 %x) { %v = call i8 @g(i8 %x)\nret i8 %v }',
             'byval': 'declare double @g(ptr byval(double))',
