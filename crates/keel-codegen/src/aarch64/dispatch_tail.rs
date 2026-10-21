@@ -14,6 +14,10 @@ pub(super) fn plan(
     let mut sites = HashMap::new();
     if !enabled
         || !module.files.is_empty()
+        || func.debug_loc.is_some()
+        || func.debug_return.is_some()
+        || !func.debug_scopes.is_empty()
+        || !func.debug_vars.is_empty()
         || !selection.constraints().is_empty()
         || func.layout_insts().any(|(_, inst)| {
             func.inst_loc(inst).is_some()
