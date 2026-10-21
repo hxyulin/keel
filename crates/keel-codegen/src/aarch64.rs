@@ -1458,7 +1458,9 @@ impl<'a> FunctionCompiler<'a> {
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
-            InstData::VectorShuffle { args, .. } => self.vector_shuffle_window(args, result),
+            InstData::VectorShuffle { args, lanes } => {
+                self.vector_shuffle_window(args, &lanes, result)
+            }
             InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
             InstData::VectorInsert { .. } | InstData::VectorFcmp { .. } => {
                 unreachable!("legalized vector operation")

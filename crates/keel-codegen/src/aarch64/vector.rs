@@ -91,15 +91,17 @@ fn unary(op: UnaryOp, shape: VectorType) -> Option<Packed> {
 pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     crate::vector::lower(func, |f, data| match data {
         InstData::VectorShuffle { args, lanes } => {
-            lanes.as_slice() == [1, 2]
-                && matches!(
-                    f.value_type(args[0]),
-                    Type::Vector(VectorType::I64x2 | VectorType::F64x2)
-                )
-                && f.value_type(args[0]) == f.value_type(args[1])
+            matches!(
+                (f.value_type(args[0]), lanes.as_slice()),
+                (Type::Vector(VectorType::I64x2 | VectorType::F64x2), [1, 2])
+                    | (Type::Vector(VectorType::I32x4), [3, 4, 5, 6])
+            ) && f.value_type(args[0]) == f.value_type(args[1])
         }
         InstData::VectorExtract { arg, .. } => {
-            f.value_type(*arg) == Type::Vector(VectorType::I64x2)
+            matches!(
+                f.value_type(*arg),
+                Type::Vector(VectorType::I64x2 | VectorType::I32x4)
+            )
         }
         InstData::VectorBinary { op, args } => {
             binary(*op, f.value_type(args[0]).vector().unwrap()).is_some()
@@ -149,7 +151,17 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 impl FunctionCompiler<'_> {
     // EXT reads both operands before writing, including when d aliases either
     // input. Separate reserved spill scratches keep both captured sources live.
-    pub(super) fn vector_shuffle_window(&mut self, args: [Value; 2], result: Option<Value>) {
+    pub(super) fn vector_shuffle_window(
+        &mut self,
+        args: [Value; 2],
+        lanes: &[u8],
+        result: Option<Value>,
+    ) {
+        let offset = match (self.ty(args[0]), lanes) {
+            (Type::Vector(VectorType::I32x4), [3, 4, 5, 6]) => 12,
+            (Type::Vector(VectorType::I64x2 | VectorType::F64x2), [1, 2]) => 8,
+            _ => unreachable!("legalized exact window"),
+        };
         let a = self.use_freg(args[0], FS0);
         let b = self.use_freg(args[1], FS1);
         let d = self.def_freg(result);
@@ -157,12 +169,12 @@ impl FunctionCompiler<'_> {
             Opcode::EXT_asimdext_only,
             [
                 (FieldId::Q, 1),
-                (FieldId::imm4, 8),
+                (FieldId::imm4, offset),
                 (FieldId::Rd, d.into()),
                 (FieldId::Rn, a.into()),
                 (FieldId::Rm, b.into()),
             ],
-            |out| write!(out, "ext\tv{d}.16b, v{a}.16b, v{b}.16b, #8"),
+            |out| write!(out, "ext\tv{d}.16b, v{a}.16b, v{b}.16b, #{offset}"),
         );
         self.def_done(result, d);
     }
@@ -284,14 +296,30 @@ impl FunctionCompiler<'_> {
     pub(super) fn vector_extract(&mut self, arg: Value, lane: u8, result: Option<Value>) {
         let source = self.use_freg(arg, FS0);
         let d = self.def_reg(result);
+        let narrow = self.ty(arg) == Type::Vector(VectorType::I32x4);
+        let (opcode, imm5, gpr, element) = if narrow {
+            (
+                Opcode::UMOV_asimdins_W_w,
+                4 | (u32::from(lane) << 3),
+                "w",
+                "s",
+            )
+        } else {
+            (
+                Opcode::UMOV_asimdins_X_x,
+                8 | (u32::from(lane) << 4),
+                "x",
+                "d",
+            )
+        };
         self.native(
-            Opcode::UMOV_asimdins_X_x,
+            opcode,
             [
-                (FieldId::imm5, 8 | (u32::from(lane) << 4)),
+                (FieldId::imm5, imm5),
                 (FieldId::Rn, source.into()),
                 (FieldId::Rd, d.into()),
             ],
-            |out| write!(out, "umov\tx{d}, v{source}.d[{lane}]"),
+            |out| write!(out, "umov\t{gpr}{d}, v{source}.{element}[{lane}]"),
         );
         self.def_done(result, d);
     }

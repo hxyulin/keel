@@ -494,3 +494,188 @@ fn load_shuffle_store_debug_lines_keep_their_order() {
         }
     }
 }
+
+#[test]
+fn arm_narrow_window_all_lanes_aliases_spills_and_boundary_edits() {
+    for controlled in [false, true] {
+        let (ir, c) = fixture(controlled);
+        // Keep the i64 fixtures above unchanged, and reinterpret their arbitrary
+        // bytes here as four integer lanes. Check all 16 result bytes.
+        let ir = ir.replace("f64x2", "i64x2");
+        let ir = ir
+            .split("func @window_i64x2_")
+            .skip(1)
+            .take(if controlled { 9 } else { 1 })
+            .map(|part| format!("func @window_i64x2_{part}"))
+            .collect::<String>()
+            .replace("i64x2", "i32x4")
+            .replace("[1,2]", "[3,4,5,6]");
+        let c = c
+            .replace("V_i64x2", "V_i32x4")
+            .replace("window_i64x2", "window_i32x4")
+            .replace("typedef u64 V_i32x4", "typedef unsigned V_i32x4");
+        // Drop the unused f64 cases/declarations by regenerating a single shape fixture.
+        let c = c
+            .lines()
+            .filter(|line| !line.contains("window_f64x2"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .replace(
+                "memcpy(expected,x+8,8);memcpy(expected+8,c->same?x:y,8);",
+                "memcpy(expected,x+12,4);memcpy(expected+4,c->same?x:y,12);",
+            );
+        for sel in [SelectionTier::Baseline, SelectionTier::Full] {
+            for spill in [false, true] {
+                if controlled && spill {
+                    continue;
+                }
+                for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+                    let allocator: &dyn RegisterAllocator =
+                        if controlled { &Controlled } else { &alloc };
+                    let (text, obj) = compile(true, &ir, sel, allocator, spill);
+                    assert_eq!(
+                        text.matches("#12").count(),
+                        if controlled { 9 } else { 1 },
+                        "{text}"
+                    );
+                    oracle(
+                        true,
+                        &format!("narrow-{controlled}-{sel:?}-{alloc:?}-{spill}"),
+                        &ir,
+                        &c,
+                        &text,
+                        &obj,
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn arm_narrow_custom_boundary_edits() {
+    use keel_codegen::{
+        InstructionSelector,
+        regalloc::{Constraint, OperandKind, ValuePart},
+        select::{Selection, Target},
+    };
+    use keel_ir::{EntityRef, Function, InstData, Value};
+    struct Constrained(bool);
+    impl InstructionSelector for Constrained {
+        fn name(&self) -> &'static str {
+            "window-fixed-reuse"
+        }
+        fn select(
+            &self,
+            f: &Function,
+            t: Target,
+            folds: &dyn Fn(&InstData) -> Vec<Value>,
+        ) -> Selection {
+            let mut s = SelectionTier::Baseline.select(f, t, folds);
+            let pools = match t {
+                Target::Aarch64 => keel_codegen::aarch64::REGISTERS,
+                Target::X86 => keel_codegen::x86_64::REGISTERS,
+            };
+            let inst = f.layout_insts().next().unwrap().1;
+            s.set_constraint(
+                inst,
+                ValuePart::low(Value::new(0)),
+                OperandKind::Use,
+                Constraint::Fixed(if self.0 {
+                    Loc::FReg(pools.float_caller_saved[0])
+                } else {
+                    Loc::Stack(0)
+                }),
+            );
+            s.set_constraint(
+                inst,
+                ValuePart::low(Value::new(1)),
+                OperandKind::Use,
+                if self.0 {
+                    Constraint::Register
+                } else {
+                    Constraint::Any
+                },
+            );
+            s.set_constraint(
+                inst,
+                ValuePart::low(Value::new(2)),
+                OperandKind::Def,
+                Constraint::Reuse(ValuePart::low(Value::new(1))),
+            );
+            s
+        }
+    }
+    struct Edited(bool);
+    impl RegisterAllocator for Edited {
+        fn name(&self) -> &'static str {
+            "window-boundary-edits"
+        }
+        fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+            let mut a = AllocationTier::Full.allocate(input);
+            if self.0 {
+                for (i, r) in [0, 1, 1].into_iter().enumerate() {
+                    a.locs[0][i] = Some(Loc::FReg(input.pools.float_caller_saved[r]));
+                }
+                return a;
+            }
+            a.spill_slots = 6;
+            for i in 0..3 {
+                a.locs[0][i] = Some(Loc::Stack(i as u32 * 2));
+            }
+            let inst = input.func.layout_insts().next().unwrap().1;
+            let x = Loc::Stack(0);
+            let y = Loc::Stack(2);
+            let edit = a.edits.instruction_mut(inst);
+            edit.uses = vec![
+                (ValuePart::low(Value::new(0)), x),
+                (ValuePart::low(Value::new(1)), y),
+            ];
+            edit.defs = vec![(ValuePart::low(Value::new(2)), y)];
+            edit.after = vec![(Loc::Stack(4), y)];
+            a
+        }
+    }
+    let (source, c) = fixture_layouts(true, &["distinct"]);
+    let source = source
+        .split("func @window_f64x2")
+        .next()
+        .unwrap()
+        .replace("i64x2", "i32x4")
+        .replace("[1,2]", "[3,4,5,6]");
+    let c = c
+        .lines()
+        .filter(|line| !line.contains("window_f64x2"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("V_i64x2", "V_i32x4")
+        .replace("window_i64x2", "window_i32x4")
+        .replace("typedef u64 V_i32x4", "typedef unsigned V_i32x4")
+        .replace(
+            "memcpy(expected,x+8,8);memcpy(expected+8,c->same?x:y,8);",
+            "memcpy(expected,x+12,4);memcpy(expected+4,c->same?x:y,12);",
+        );
+    let m = keel_ir::parse(&source).unwrap();
+    for arm in [true] {
+        for registers in [false, true] {
+            let (text, obj) =
+                compile_module(arm, &m, &Constrained(registers), &Edited(registers), false);
+            assert_eq!(
+                text.matches(if arm { "ext\t" } else { "shufpd\t" }).count(),
+                1
+            );
+            oracle(
+                arm,
+                if registers {
+                    "narrow-fixed-register-reuse"
+                } else {
+                    "narrow-fixed-stack-reuse"
+                },
+                &source,
+                &c,
+                &text,
+                &obj,
+            );
+        }
+    }
+}
