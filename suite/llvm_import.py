@@ -52,6 +52,11 @@ class LLVM:
             'IsFunctionVarArg': (C.c_int, [P]), 'GetFunctionCallConv': (U, [P]),
             'GetInstructionCallConv': (U, [P]), 'GetLinkage': (U, [P]),
             'GetVisibility': (U, [P]), 'HasPersonalityFn': (C.c_int, [P]),
+            'GetPersonalityFn': (P, [P]),
+            'GetFirstUse': (P, [P]), 'GetNextUse': (P, [P]), 'GetUser': (P, [P]),
+            'GetNumClauses': (U, [P]), 'GetClause': (P, [P, U]),
+            'IsCleanup': (C.c_int, [P]),
+            'GetNumIndices': (U, [P]), 'GetIndices': (C.POINTER(U), [P]),
             'GetGC': (C.c_char_p, [P]), 'GetSection': (C.c_char_p, [P]),
             'GetComdat': (P, [P]),
             'HasPrefixData': (C.c_int, [P]), 'HasPrologueData': (C.c_int, [P]),
@@ -143,7 +148,7 @@ class LLVM:
         call_allowed = ('nounwind', 'willreturn', 'nofree', 'nosync', 'nocallback',
                         'noinline', 'alwaysinline', 'inlinehint', 'cold', 'hot',
                         'memory', 'allocsize', 'allockind', 'speculatable',
-                        'mustprogress', 'norecurse', 'nobuiltin', 'builtin')
+                        'mustprogress', 'norecurse', 'nobuiltin', 'builtin', 'noreturn')
         call_kinds = {self.GetEnumAttributeKindForName(n.encode(), len(n)) for n in call_allowed}
         for attribute in attributes:
             if call and (self.IsStringAttribute(attribute)
@@ -214,18 +219,28 @@ class Importer:
         if l.GetFunctionCallConv(fn) != 0:
             raise Unsupported(f'{self.symbol(fn)}: non-C calling convention')
         fty = l.GlobalGetValueType(fn)
-        if l.IsFunctionVarArg(fty):
+        if fn in self.personalities:
+            # The Itanium personality is a symbolic runtime reference, never a
+            # Keel call. Its int (...) declaration describes no ordinary ABI.
+            if (l.name(fn) != '__gxx_personality_v0' or l.GetFirstBasicBlock(fn)
+                    or not l.IsFunctionVarArg(fty) or l.CountParamTypes(fty)
+                    or self.type(l.GetReturnType(fty)) != 'i32'
+                    or l.GetLinkage(fn) != 0 or l.GetVisibility(fn) != 0):
+                raise Unsupported('unsupported personality declaration')
+        elif l.IsFunctionVarArg(fty):
             raise Unsupported(f'{self.symbol(fn)}: variadic signature')
         if ((l.GetLinkage(fn) not in (0, 8, 9) and fn not in self.local_copies)
                 or l.GetVisibility(fn) != 0):
             raise Unsupported(f'{self.symbol(fn)}: unsupported linkage/visibility')
-        if l.HasPersonalityFn(fn) or l.GetAlignment(fn) > 4:
-            raise Unsupported(f'{self.symbol(fn)}: personality or explicit function alignment')
+        if l.GetAlignment(fn) > 4:
+            raise Unsupported(f'{self.symbol(fn)}: explicit function alignment')
         if l.GetComdat(fn):
             raise Unsupported(f'{self.symbol(fn)}: COMDAT membership')
         if l.GetGC(fn) or l.GetSection(fn) or l.HasPrefixData(fn) or l.HasPrologueData(fn) or l.GetDLLStorageClass(fn):
             raise Unsupported(f'{self.symbol(fn)}: GC, section, prefix/prologue data or DLL storage')
         l.check_function_attributes(fn)
+        if fn in self.personalities:
+            return 'void', []
         return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)))
 
     def abi_signature(self, value, fty, call=False, definition=False):
@@ -310,6 +325,8 @@ class Importer:
             ty = self.type(l.TypeOf(value))
             n = l.ConstIntGetZExtValue(value) if self.width(value) == 1 else l.ConstIntGetSExtValue(value)
             return self.emit(f'iconst.{ty} {n}')
+        if value in self.personalities:
+            raise Unsupported('personality may only be a symbolic EH reference')
         if l.IsAFunction(value):
             return self.emit(f'symbol_addr {self.symbol(value)}')
         if l.IsAConstantPointerNull(value):
@@ -343,8 +360,46 @@ class Importer:
             # LLVM verifies one equal incoming value per duplicate predecessor edge.
             if not incoming or any(v != incoming[0] for v in incoming):
                 raise Unsupported('inconsistent PHI incoming values for predecessor')
-            args.append(self.value(incoming[0]))
+            if phi in self.pairs:
+                if incoming[0] not in self.pairs:
+                    raise Unsupported('landingpad PHI requires only landingpad pairs')
+                args.extend(self.pairs[incoming[0]])
+            else:
+                args.append(self.value(incoming[0]))
         return self.blocks[target] + ('(' + ', '.join(args) + ')' if args else '')
+
+    def landing_pair_type(self, ty):
+        l = self.l
+        return (l.GetTypeKind(ty) == 10 and not l.IsOpaqueStruct(ty)
+                and not l.IsPackedStruct(ty) and l.CountStructElementTypes(ty) == 2
+                and self.type(l.StructGetTypeAtIndex(ty, 0)) == 'ptr'
+                and self.type(l.StructGetTypeAtIndex(ty, 1)) == 'i32')
+
+    def fresh_pair(self):
+        pair = (f'v{self.next_value}', f'v{self.next_value + 1}')
+        self.next_value += 2
+        return pair
+
+    def clauses(self, inst):
+        l = self.l
+        clauses = []
+        for n in range(l.GetNumClauses(inst)):
+            clause = l.GetClause(inst, n)
+            if l.GetTypeKind(l.TypeOf(clause)) != 12:
+                raise Unsupported('landingpad filters are unsupported')
+            if l.IsAConstantPointerNull(clause):
+                clauses.append('catch null')
+            elif clause in self.globals.objects:
+                if l.GetInitializer(clause):
+                    raise Unsupported('defined RTTI is unsupported; catch requires external typeinfo')
+                clauses.append('catch ' + self.symbol(clause))
+            else:
+                raise Unsupported('catch requires a named global typeinfo or null')
+        if l.IsCleanup(inst):
+            clauses.append('cleanup')
+        if not clauses:
+            raise Unsupported('empty landingpad')
+        return ', '.join(clauses)
 
     def instruction(self, inst):
         l = self.l
@@ -531,17 +586,48 @@ class Importer:
             a, addr = map(self.value, operands())
             self.lines.append(f'    store{flags} {a}, {addr}')
             return None
-        if op == 45:
+        if op == 59:  # landingpad: a dedicated pair, never general aggregate SSA.
+            if self.block not in self.split_pads:
+                self.lines.append('    ' + ', '.join(self.pairs[inst]) + ' = landingpad ' + self.clauses(inst))
+            return None
+        if op == 53:  # extractvalue
+            source = l.GetOperand(inst, 0)
+            if source not in self.pairs or l.GetNumIndices(inst) != 1:
+                raise Unsupported('extractvalue requires a landingpad pair or acyclic pair PHI')
+            index = l.GetIndices(inst)[0]
+            if index > 1:
+                raise Unsupported('landingpad pair index')
+            return self.pairs[source][index]
+        if op == 58:  # resume
+            pair = self.pairs.get(l.GetOperand(inst, 0))
+            if pair is None:
+                raise Unsupported('resume requires a landingpad pair or acyclic pair PHI')
+            self.needs_resume = True
+            self.lines += [f'    call @_Unwind_Resume({pair[0]})', '    trap']
+            return None
+        if op in (45, 5):  # call / direct invoke
             l.check_function_attributes(inst, call=True)
             callee = l.GetCalledValue(inst)
             if l.GetInstructionCallConv(inst) != 0:
                 raise Unsupported('non-C call')
             if l.GetNumOperandBundles(inst):
                 raise Unsupported('call operand bundles')
-            if l.GetTailCallKind(inst) == 2:  # LLVMTailCallKindMustTail
+            if op == 45 and l.GetTailCallKind(inst) == 2:  # LLVMTailCallKindMustTail
                 raise Unsupported('musttail call')
+            if callee in self.personalities:
+                raise Unsupported('personality may only be a symbolic EH reference')
             fty = l.GetCalledFunctionType(inst)
             ret, params = self.abi_signature(inst, fty, call=True)
+            if l.IsAFunction(callee) and l.name(callee) in ('llvm.eh.typeid.for', 'llvm.eh.typeid.for.p0'):
+                if (op != 45 or l.GetNumArgOperands(inst) != 1
+                        or fty != l.GlobalGetValueType(callee)
+                        or (ret, params) != ('i32', ['ptr'])
+                        or self.signatures[callee] != ('i32', ['ptr'])):
+                    raise Unsupported('unsupported eh.typeid intrinsic signature')
+                typeinfo = l.GetOperand(inst, 0)
+                if typeinfo not in self.globals.objects:
+                    raise Unsupported('eh.typeid requires a named caught typeinfo')
+                return self.emit('eh_typeid ' + self.symbol(typeinfo))
             if l.GetNumArgOperands(inst) != len(params):
                 raise Unsupported('call argument count differs from signature')
             direct = bool(l.IsAFunction(callee))
@@ -552,9 +638,21 @@ class Importer:
                     raise Unsupported('LLVM intrinsic ' + l.name(callee))
                 if (ret, params) != self.signatures[callee]:
                     raise Unsupported('call-site ABI differs from declaration')
+            if op == 5 and not direct:
+                raise Unsupported('indirect invoke is unsupported')
             args = ', '.join(self.value(l.GetOperand(inst, i)) for i in range(len(params)))
             if direct:
                 expr = f'call {self.symbol(callee)}({args})'
+                if op == 5:
+                    normal, unwind = (l.GetSuccessor(inst, i) for i in range(2))
+                    bridge = f'block{len(self.blocks) + len(self.invoke_edges)}'
+                    self.invoke_edges.append((bridge, self.block, normal, None))
+                    if unwind in self.split_pads:
+                        pad_bridge = f'block{len(self.blocks) + len(self.invoke_edges)}'
+                        self.invoke_edges.append((pad_bridge, self.block, unwind, self.pad_insts[unwind]))
+                    else:
+                        pad_bridge = self.blocks[unwind]
+                    expr = f'invoke {self.symbol(callee)}({args}), {bridge}, {pad_bridge}'
             else:
                 pointer = self.value(callee)
                 signature = '(' + ', '.join(params) + ')'
@@ -607,10 +705,24 @@ class Importer:
         if l.GetNamedMetadata(module, b'llvm.linker.options', len(b'llvm.linker.options')):
             raise Unsupported('module autolink requests (llvm.linker.options)')
         functions = list(sequence(l.GetFirstFunction, l.GetNextFunction, module))
+        self.personalities = set()
+        for fn in functions:
+            if l.HasPersonalityFn(fn):
+                personality = l.GetPersonalityFn(fn)
+                if not l.IsAFunction(personality):
+                    raise Unsupported('personality must be a direct runtime symbol')
+                self.personalities.add(personality)
         if self.localize_odr:
             self.local_copies = local_copies(self, module, functions, Unsupported)
         self.signatures = {fn: self.signature(fn) for fn in functions}
+        self.needs_resume = False
         self.globals = Globals(self, module, functions, Unsupported)
+        for personality in self.personalities:
+            for use in sequence(l.GetFirstUse, l.GetNextUse, personality):
+                user = l.GetUser(use)
+                if not (l.IsAFunction(user) and l.HasPersonalityFn(user)
+                        and l.GetPersonalityFn(user) == personality):
+                    raise Unsupported('personality may only be a symbolic EH reference')
         output = self.globals.definitions()
         for fn in functions:
             ret, params = self.signatures[fn]
@@ -623,7 +735,9 @@ class Importer:
                 output.append('decl ' + signature + ' cc(c)')
                 continue
             local = ' local' if l.GetLinkage(fn) in (8, 9) or fn in self.local_copies else ''
-            self.lines = ['func ' + signature + ' cc(c)' + local + ' {']
+            personality = (' personality ' + self.symbol(l.GetPersonalityFn(fn))
+                           if l.HasPersonalityFn(fn) else '')
+            self.lines = ['func ' + signature + ' cc(c)' + local + personality + ' {']
             self.values = {l.GetParam(fn, i): f'v{i}' for i in range(l.CountParams(fn))}
             self.next_value = len(params)
             self.blocks = {block: f'block{i}' for i, block in enumerate(blocks)}
@@ -631,13 +745,37 @@ class Importer:
                             for block in blocks}
             self.phis = {block: [v for v in instructions[block] if l.GetInstructionOpcode(v) == 44]
                          for block in blocks}
+            self.pairs = {}
+            self.invoke_edges = []
+            self.pad_insts = {block: inst for block in blocks for inst in instructions[block]
+                              if l.GetInstructionOpcode(inst) == 59}
+            caught = {l.GetClause(pad, n) for pad in self.pad_insts.values()
+                      for n in range(l.GetNumClauses(pad))}
+            if len(caught) > 63:
+                raise Unsupported('more than 63 caught types in one function')
+            self.split_pads = {block for block in self.pad_insts if self.phis[block]}
             # Reserve names for all results before translating any edge or instruction.
             for block in blocks:
                 for inst in instructions[block]:
+                    if (l.GetInstructionOpcode(inst) == 59
+                            or (l.GetInstructionOpcode(inst) == 44 and l.GetTypeKind(l.TypeOf(inst)) == 10)):
+                        if not self.landing_pair_type(l.TypeOf(inst)):
+                            raise Unsupported('landingpad result must be unpacked {ptr, i32}')
+                        self.pairs[inst] = self.fresh_pair()
+                        continue
                     if l.GetTypeKind(l.TypeOf(inst)) != 0:
                         self.type(l.TypeOf(inst))
                         self.values[inst] = f'v{self.next_value}'
                         self.next_value += 1
+            grounded = set(self.pad_insts.values())
+            pending = {v for v in self.pairs if v not in grounded}
+            while pending:
+                ready = {v for v in pending if all(l.GetIncomingValue(v, n) in grounded
+                         for n in range(l.CountIncoming(v)))}
+                if not ready:
+                    raise Unsupported('landingpad PHIs must be acyclic merges of landingpad pairs')
+                grounded.update(ready)
+                pending -= ready
             self.slots = {}
             for block in blocks:
                 for inst in instructions[block]:
@@ -664,7 +802,15 @@ class Importer:
                 parameters = []
                 if block == blocks[0]:
                     parameters += [f'v{i}: {self.type(l.TypeOf(l.GetParam(fn, i)))}' for i in range(len(params))]
-                parameters += [f'{self.values[v]}: {self.type(l.TypeOf(v))}' for v in self.phis[block]]
+                if block in self.split_pads:
+                    a, b = self.pairs[self.pad_insts[block]]
+                    parameters += [f'{a}: ptr', f'{b}: i32']
+                for phi in self.phis[block]:
+                    if phi in self.pairs:
+                        a, b = self.pairs[phi]
+                        parameters += [f'{a}: ptr', f'{b}: i32']
+                    else:
+                        parameters += [f'{self.values[phi]}: {self.type(l.TypeOf(phi))}']
                 self.lines.append(self.blocks[block] + ('(' + ', '.join(parameters) + ')' if parameters else '') + ':')
                 for inst in instructions[block]:
                     if l.GetInstructionOpcode(inst) == 44:
@@ -675,6 +821,20 @@ class Importer:
                             aliases[self.values[inst]] = value
                     except Unsupported as e:
                         raise Unsupported(f'{name}: {e}') from e
+            # Invoke edge copies execute only after the call (and after a
+            # cloned landingpad on unwind). Preserve each LLVM PHI incoming.
+            for bridge, predecessor, target, pad in self.invoke_edges:
+                self.block = predecessor
+                self.lines.append(bridge + ':')
+                if pad is not None:
+                    pair = self.fresh_pair()
+                    self.lines.append('    ' + ', '.join(pair) + ' = landingpad ' + self.clauses(pad))
+                    edge = self.edge(target)
+                    # split pads necessarily have PHIs, so edge has parentheses.
+                    edge = edge.replace('(', '(' + ', '.join(pair) + ', ', 1)
+                else:
+                    edge = self.edge(target)
+                self.lines.append('    jump ' + edge)
             # Resolve aliases after every block: LLVM block order need not be dominance order.
             def resolve(match):
                 value, path = match.group(), []
@@ -687,6 +847,13 @@ class Importer:
             self.lines = [re.sub(r'(?<![A-Za-z0-9_.$@])v[0-9]+\b', resolve, line) for line in self.lines]
             self.lines.append('}')
             output.append('\n'.join(self.lines))
+        if self.needs_resume:
+            existing = [fn for fn in functions if l.name(fn) == '_Unwind_Resume']
+            if existing:
+                if self.signatures[existing[0]] != ('void', ['ptr']) or l.GetFirstBasicBlock(existing[0]):
+                    raise Unsupported('incompatible _Unwind_Resume runtime declaration')
+            else:
+                output.insert(0, 'decl @_Unwind_Resume(ptr) cc(c)')
         return '\n\n'.join(output) + '\n'
 
 
