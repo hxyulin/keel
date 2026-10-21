@@ -1,4 +1,4 @@
-//! Standalone probe; deliberately does not register or schedule the prototype.
+//! Evidence probe calling the opt-in implementation directly to count copies.
 #[path = "../../keel-opt/src/aggregate_return.rs"]
 mod aggregate_return;
 use keel_ir::{Function, Inst, InstData, StackSlot, ValueDef};

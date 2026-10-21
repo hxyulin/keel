@@ -1,6 +1,5 @@
 //! Opt-in, body-proven leaf-constructor result-home forwarding.
 //!
-//! Intentionally standalone: the parent owns pass registration and scheduling.
 //! No ABI-derived nocapture assumption: only a local, straight-line, write-only
 //! constructor with a fully initialized result can qualify. Both homes remain
 //! fixed, distinct, non-debug stack objects. Destination calls are permitted

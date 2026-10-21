@@ -16,6 +16,7 @@ use std::fmt;
 
 mod adjacent_abs;
 mod adjacent_diff;
+mod aggregate_return;
 mod branch_ranges;
 mod call_contracts;
 mod canonicalize;
@@ -86,6 +87,22 @@ pub trait Pass: Sync {
     /// Only return true if every instruction is canonical on exit.
     fn produces_canonical_form(&self) -> bool {
         false
+    }
+}
+
+struct AggregateReturn;
+impl Pass for AggregateReturn {
+    fn name(&self) -> &'static str {
+        "aggregate-return"
+    }
+    fn description(&self) -> &'static str {
+        "forward body-proven leaf constructor results into independent stack homes (opt-in)"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(aggregate_return::run(module) != 0)
     }
 }
 
@@ -269,6 +286,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[18],
     &BUILTINS[19],
     &BUILTINS[20],
+    &AggregateReturn,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
