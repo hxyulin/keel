@@ -10,7 +10,6 @@
 //!    that predecessor: its parameters become the jump's arguments.
 
 use crate::const_fold::constant;
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{Block, BlockCall, EntityRef, Function, InstData, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
@@ -97,15 +96,31 @@ fn forwarding_target(func: &Function, incoming: &BlockCall) -> Option<BlockCall>
 pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
     // Removing a forwarding block's parameters is only legal when all
     // their uses are in that block's jump. Resolve aliases before checking.
+    // Only a jump-only block can forward, and one without parameters has
+    // nothing to escape, so the use scan is skipped when no block has both.
     let mut escaping = vec![false; func.num_blocks()];
-    for (block, inst) in func.layout_insts() {
-        func.inst_data(inst).for_each_operand(|value| {
-            if let ValueDef::Param(def, _) = func.value_def(func.resolve(value))
-                && def != block
-            {
-                escaping[def.index()] = true;
-            }
-        });
+    let mut forwarding = vec![false; func.num_blocks()];
+    let mut any = false;
+    for block in func.blocks() {
+        if let [only] = func.block_insts(block)
+            && matches!(func.inst_data(*only), InstData::Jump { .. })
+            && !func.block_params(block).is_empty()
+        {
+            forwarding[block.index()] = true;
+            any = true;
+        }
+    }
+    if any {
+        for (block, inst) in func.layout_insts() {
+            func.inst_data(inst).for_each_operand(|value| {
+                if let ValueDef::Param(def, _) = func.value_def(func.resolve(value))
+                    && def != block
+                    && forwarding[def.index()]
+                {
+                    escaping[def.index()] = true;
+                }
+            });
+        }
     }
     let mut changed = false;
     let blocks: Vec<Block> = func.blocks().collect();
@@ -134,11 +149,25 @@ pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
 }
 
 fn remove_unreachable(func: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(func);
-    let domtree = DominatorTree::compute(func, &cfg);
+    // Only reachability is needed: walk the terminators' edges from the entry.
+    let Some(entry) = func.entry_block() else {
+        return false;
+    };
+    let mut reachable = vec![false; func.num_blocks()];
+    reachable[entry.index()] = true;
+    let mut stack = vec![entry];
+    while let Some(block) = stack.pop() {
+        if let Some(&term) = func.block_insts(block).last() {
+            for dest in func.inst_data(term).branch_dests() {
+                if !std::mem::replace(&mut reachable[dest.block.index()], true) {
+                    stack.push(dest.block);
+                }
+            }
+        }
+    }
     let dead: Vec<Block> = func
         .blocks()
-        .filter(|&b| !domtree.is_reachable(b))
+        .filter(|&b| !reachable[b.index()])
         .collect();
     for &block in &dead {
         func.remove_block(block);
@@ -157,9 +186,11 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
     // destinations must still prevent a merge. Block indices remain stable
     // when blocks leave the layout, so this census lasts for this invocation.
     let mut edges = vec![0u32; func.num_blocks()];
-    for (_, inst) in func.layout_insts() {
-        for dest in func.inst_data(inst).branch_dests() {
-            edges[dest.block.index()] += 1;
+    for block in func.blocks() {
+        if let Some(&term) = func.block_insts(block).last() {
+            for dest in func.inst_data(term).branch_dests() {
+                edges[dest.block.index()] += 1;
+            }
         }
     }
     let mut changed = false;
