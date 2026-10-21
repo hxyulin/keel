@@ -66,9 +66,7 @@ impl Output {
     }
     pub(super) fn symbolic(&mut self, s: keel_asm_ir::SymbolicInstruction) {
         match self {
-            Self::Text(out) => {
-                writeln!(out, "\t{s}").unwrap();
-            }
+            Self::Text(out) => write_symbolic(out, &s),
             Self::Structured(out) => out.items.push(Item::Symbolic(s)),
         }
     }
@@ -176,6 +174,84 @@ impl Output {
         instructions >= super::COND_BRANCH_RANGE / 4
     }
 }
+/// Exactly the `Display` text of `s` and a newline, without `fmt::write`.
+fn write_symbolic(out: &mut String, s: &keel_asm_ir::SymbolicInstruction) {
+    use keel_asm_ir::{PageKind, SymbolicInstruction as S};
+    let suffix = |kind: PageKind, offset| match (kind, offset) {
+        (PageKind::Direct, false) => "@PAGE",
+        (PageKind::Direct, true) => "@PAGEOFF",
+        (PageKind::Got, false) => "@GOTPAGE",
+        (PageKind::Got, true) => "@GOTPAGEOFF",
+        (PageKind::ThreadLocal, false) => "@TLVPPAGE",
+        (PageKind::ThreadLocal, true) => "@TLVPPAGEOFF",
+    };
+    let x = |out: &mut String, register: u8| {
+        crate::text::write_decimal(out, "x", register.into()).unwrap();
+    };
+    out.push('\t');
+    match s {
+        S::Conditional { condition, target } => {
+            out.push_str("b.");
+            out.push_str(
+                [
+                    "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc", "hi", "ls", "ge", "lt", "gt",
+                    "le", "al", "nv",
+                ][*condition as usize],
+            );
+            out.push('\t');
+            out.push_str(target);
+        }
+        S::Compare {
+            register,
+            is64,
+            nonzero,
+            target,
+        } => {
+            out.push_str(if *nonzero { "cbnz\t" } else { "cbz\t" });
+            out.push(if *is64 { 'x' } else { 'w' });
+            crate::text::write_decimal(out, "", (*register).into()).unwrap();
+            out.push_str(", ");
+            out.push_str(target);
+        }
+        S::Address { register, target } => {
+            out.push_str("adr\t");
+            x(out, *register);
+            out.push_str(", ");
+            out.push_str(target);
+        }
+        S::PageAddress {
+            register,
+            kind,
+            target,
+        } => {
+            out.push_str("adrp\t");
+            x(out, *register);
+            out.push_str(", ");
+            out.push_str(target);
+            out.push_str(suffix(*kind, false));
+        }
+        S::PageOffset {
+            register,
+            base,
+            load,
+            kind,
+            target,
+        } => {
+            out.push_str(if *load { "ldr\t" } else { "add\t" });
+            x(out, *register);
+            out.push_str(if *load { ", [" } else { ", " });
+            x(out, *base);
+            out.push_str(", ");
+            out.push_str(target);
+            out.push_str(suffix(*kind, true));
+            if *load {
+                out.push(']');
+            }
+        }
+    }
+    out.push('\n');
+}
+
 impl Write for Output {
     fn write_str(&mut self, text: &str) -> fmt::Result {
         match self {
