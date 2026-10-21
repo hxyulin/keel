@@ -11,7 +11,7 @@ pub(super) fn plan(
     selection: &crate::select::Selection,
     enabled: bool,
 ) -> HashMap<Inst, Inst> {
-    let mut sites = HashMap::new();
+    let mut sites = HashMap::default();
     if !enabled
         || !module.files.is_empty()
         || func.debug_loc.is_some()

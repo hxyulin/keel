@@ -83,12 +83,12 @@ use crate::{CodegenError, Format, data, loc_reg, pieces};
 use keel_asm_ir::x86::{
     Address, Memory, Modifier, Opcode, Operand as AsmOperand, Register, RegisterClass,
 };
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, BlockCall, CallConv, ConvertOp, DebugScope, EntityRef,
     FloatCC, Function, Inst, InstData, IntCC, Intrinsic, Layout, Module, Ordering, OverflowOp,
     Purpose, RmwOp, SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
-use std::collections::HashSet;
 use std::fmt::Write;
 mod output;
 mod packed_load;
@@ -431,10 +431,10 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
-    packed_absolute_values: std::collections::HashMap<Inst, Value>,
-    packed_low_loads: std::collections::HashMap<Inst, Value>,
-    packed_sign_values: std::collections::HashMap<Inst, packed_sign::Plan>,
-    packed_positive_values: std::collections::HashMap<Inst, Value>,
+    packed_absolute_values: HashMap<Inst, Value>,
+    packed_low_loads: HashMap<Inst, Value>,
+    packed_sign_values: HashMap<Inst, packed_sign::Plan>,
+    packed_positive_values: HashMap<Inst, Value>,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` and `iconst` results folded into every use, which
@@ -646,7 +646,7 @@ impl<'a> FunctionCompiler<'a> {
         let mut alloc = pipeline.allocator.allocate(&input);
         alloc.finish(&input);
         alloc.validate(&input).map_err(err)?;
-        let mut vector_spills = HashSet::new();
+        let mut vector_spills = HashSet::default();
         let has_vectors = (0..func.num_values()).any(|i| {
             func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
         });

@@ -4,8 +4,8 @@
 //! a constant as an immediate); a value folded into every one of its uses
 //! needs no code of its own.
 
+use keel_ir::fxhash::FxHashSet as HashSet;
 use keel_ir::{EntityRef, Function, InstData, Type, Value, ValueDef};
-use std::collections::HashSet;
 
 /// The value of `v` if an `iconst` defines it.
 pub(crate) fn iconst(func: &Function, v: Value) -> Option<i64> {
@@ -218,7 +218,7 @@ fn compare_pairs(func: &Function, aarch64: bool) -> Vec<(Value, keel_ir::Inst, k
 mod tests {
     use super::*;
     use crate::select::Selection;
-    use std::collections::HashMap;
+    use keel_ir::fxhash::FxHashMap as HashMap;
 
     fn function(source: &str) -> Function {
         let module = keel_ir::parse(source).unwrap();
@@ -236,8 +236,8 @@ mod tests {
     // Former hash-based analysis, before optional allocation operand filtering
     // (where it had a double-subtraction bug).
     fn reference_folded(func: &Function, selection: &Selection) -> HashSet<Value> {
-        let mut values = HashSet::new();
-        let mut unfolded = HashSet::new();
+        let mut values = HashSet::default();
+        let mut unfolded = HashSet::default();
         for (_, inst) in func.layout_insts() {
             let data = func.inst_data(inst);
             if matches!(data, InstData::StackAddr { .. } | InstData::Iconst { .. }) {
@@ -324,7 +324,7 @@ block0:
                 InstData::Load { addr, .. } => vec![addr],
                 _ => immediates(&func, data),
             });
-            assert_eq!(folded, HashSet::from([address]));
+            assert_eq!(folded, HashSet::from_iter([address]));
         }
     }
 
@@ -353,8 +353,8 @@ block0:
     }
 
     fn reference_compares(func: &Function) -> HashSet<Value> {
-        let mut uses = HashMap::<Value, usize>::new();
-        let mut candidates = HashSet::new();
+        let mut uses = HashMap::<Value, usize>::default();
+        let mut candidates = HashSet::default();
         for block in func.blocks() {
             let insts = func.block_insts(block);
             for (i, &inst) in insts.iter().enumerate() {
@@ -433,7 +433,7 @@ block2:
                     .then(|| func.inst_results(inst)[0])
             })
             .collect();
-        assert_eq!(fused_compares(&func), HashSet::from([compares[1]]));
+        assert_eq!(fused_compares(&func), HashSet::from_iter([compares[1]]));
         // The branch condition and its edge argument now resolve to the same
         // adjacent comparison: two reads, so materialize the comparison.
         func.replace_all_uses(compares[0], compares[1]);
@@ -466,7 +466,7 @@ block2:
         let mut selection = Selection::default();
         assert_eq!(
             selection.fuse_aarch64_compares(&func, |_| vec![]),
-            HashSet::from([cond])
+            HashSet::from_iter([cond])
         );
         assert!(selection.covered(compare));
         // One edge argument plus both comparison operand occurrences. The

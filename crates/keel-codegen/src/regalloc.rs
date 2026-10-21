@@ -1276,7 +1276,7 @@ fn linear_scan<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &std::collections::HashMap<Value, Vec<Value>>,
+    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
 ) -> Vec<&'a Interval> {
     linear_scan_with_priority(intervals, pools, locs, hints, |a, b| b.end().cmp(&a.end()))
 }
@@ -1287,7 +1287,7 @@ fn linear_scan_with_priority<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &std::collections::HashMap<Value, Vec<Value>>,
+    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<&'a Interval> {
     // The ordinary tiers build no incoming-edge table or extra scan state.
@@ -1298,7 +1298,7 @@ fn linear_scan_with_preference<'a>(
     intervals: &'a [Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &std::collections::HashMap<Value, Vec<Value>>,
+    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
     preference: impl Fn(&Interval, &[Vec<Option<Loc>>; 2]) -> Option<Loc>,
     priority: impl Fn(&Interval, &Interval) -> std::cmp::Ordering,
 ) -> Vec<&'a Interval> {

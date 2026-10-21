@@ -64,7 +64,7 @@ fn reference_linear_scan(
     intervals: &[Interval],
     pools: &Pools,
     locs: &mut [Vec<Option<Loc>>; 2],
-    hints: &std::collections::HashMap<Value, Vec<Value>>,
+    hints: &keel_ir::fxhash::FxHashMap<Value, Vec<Value>>,
     affinity_func: Option<&Function>,
 ) -> Vec<Interval> {
     let mut sorted: Vec<&Interval> = intervals.iter().collect();

@@ -1,6 +1,6 @@
 //! A local preference for clean spill reads, not another scan or range splitter.
 use super::*;
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap as HashMap;
 
 #[derive(Clone, Copy)]
 struct NextUse {
@@ -81,8 +81,8 @@ impl Preference {
         // A nonempty HashMap::clear touches retained capacity. Fresh tables
         // charge each old allocation's drop once, to the block that grew it;
         // many tiny later blocks must not repeatedly reset a wide block's table.
-        self.windows = HashMap::new();
-        self.next = HashMap::new();
+        self.windows = HashMap::default();
+        self.next = HashMap::default();
         if self.candidates.is_empty() {
             return;
         }

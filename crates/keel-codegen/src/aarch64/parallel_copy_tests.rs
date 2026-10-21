@@ -98,7 +98,7 @@ fn compiler(module: &Module, structured: bool) -> FunctionCompiler<'_> {
         &REGISTERS,
         &pipeline,
         structured,
-        &leaf_calls::Summaries::new(),
+        &leaf_calls::Summaries::default(),
     )
     .unwrap();
     assert!(

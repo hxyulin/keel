@@ -23,7 +23,7 @@ pub(super) fn select(
     f: &Function,
     plan: &mut crate::select::Selection,
 ) -> HashMap<Inst, ExtendedAdd> {
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
     if f.layout_insts()
         .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
     {

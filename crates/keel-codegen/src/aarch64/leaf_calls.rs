@@ -5,7 +5,7 @@
 //! scratch use reserved x0-x8/x16/x17. Nested calls additionally clobber the
 //! bank and require finalized proofs; helpers are excluded. FP is unchanged.
 use super::*;
-use std::collections::{HashMap, HashSet};
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 pub(super) type Summaries = HashMap<String, (Signature, u64)>;
 pub(super) type Prepared = HashMap<usize, (Output, Vec<(String, Option<DebugScope>)>)>;
@@ -50,8 +50,8 @@ fn prepare_with_chain_output_limits(
     mut chain_output_bytes: usize,
     mut chain_output_items: usize,
 ) -> Result<(Summaries, Prepared), CodegenError> {
-    let mut summaries = Summaries::new();
-    let mut prepared = Prepared::new();
+    let mut summaries = Summaries::default();
+    let mut prepared = Prepared::default();
     if !module.files.is_empty()
         || !module
             .functions

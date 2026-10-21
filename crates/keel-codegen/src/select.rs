@@ -3,10 +3,10 @@
 //! additionally preserve the original access position and exact access width.
 //! Shared DAG nodes remain materialized; selected leaves are live at the root.
 use crate::regalloc::{Constraint, OperandKind, ValuePart};
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, Inst, InstData, IntCC, Type, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -437,7 +437,7 @@ impl Selection {
         folds: impl Fn(&InstData) -> Vec<Value>,
         pairs: Vec<(Value, Inst, Inst)>,
     ) -> HashSet<Value> {
-        let mut fused = HashSet::new();
+        let mut fused = HashSet::default();
         for (cond, compare, branch) in pairs {
             let mut args = self.operands(func, branch);
             let Some(i) = args.iter().position(|&v| v == cond) else {

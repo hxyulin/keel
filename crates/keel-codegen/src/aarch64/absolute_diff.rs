@@ -48,7 +48,7 @@ pub(super) fn select(
     f: &Function,
     plan: &mut crate::select::Selection,
 ) -> HashMap<Inst, ExactSabal> {
-    let mut selected = HashMap::new();
+    let mut selected = HashMap::default();
     // Every chain starts with a low I32x4 -> I64x2 widening; without one (or
     // with inline assembly) there is nothing to build use lists for.
     let mut candidate = false;

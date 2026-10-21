@@ -62,7 +62,7 @@ fn zero(f: &Function, v: Value) -> bool {
 }
 
 pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, MinMax> {
-    let mut selected = HashMap::new();
+    let mut selected = HashMap::default();
     // Every cover starts at a vector compare; skip the use lists without one.
     let mut candidate = false;
     for (_, i) in f.layout_insts() {

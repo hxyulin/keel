@@ -6,13 +6,13 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
     let mut candidate = false;
     for (_, i) in func.layout_insts() {
         match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::InlineAsm { .. } => return HashMap::default(),
             InstData::Select { .. } => candidate = true,
             _ => {}
         }
     }
     if !candidate {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, i) in func.layout_insts() {
@@ -21,7 +21,7 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             *n = n.saturating_add(1);
         });
     }
-    let mut result = HashMap::new();
+    let mut result = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(3) {
             let [first, second, select] = [chain[0], chain[1], chain[2]];

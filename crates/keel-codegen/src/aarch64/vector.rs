@@ -653,7 +653,7 @@ pub(super) fn select_widening_adds(
             }
         )
     }) {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
@@ -662,7 +662,7 @@ pub(super) fn select_widening_adds(
             *count = count.saturating_add(1);
         });
     }
-    let mut selected = HashMap::new();
+    let mut selected = HashMap::default();
     let mut previous = None;
     for (block, inst) in func.layout_insts() {
         if let Some((producer_block, producer)) = previous
@@ -727,7 +727,7 @@ pub(super) fn select_replicate_loads(
         .layout_insts()
         .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
     {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
@@ -736,7 +736,7 @@ pub(super) fn select_replicate_loads(
             *count = count.saturating_add(1);
         });
     }
-    let mut selected = HashMap::new();
+    let mut selected = HashMap::default();
     let mut previous = None;
     for (block, inst) in func.layout_insts() {
         if let Some((load_block, load)) = previous

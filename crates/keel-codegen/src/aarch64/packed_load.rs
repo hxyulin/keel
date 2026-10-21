@@ -10,7 +10,7 @@ pub(super) fn select(
         .layout_insts()
         .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
     {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
@@ -19,7 +19,7 @@ pub(super) fn select(
             *count = count.saturating_add(1);
         });
     }
-    let mut selected = HashMap::new();
+    let mut selected = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(4) {
             let [load, splat, cast, widen] = [chain[0], chain[1], chain[2], chain[3]];

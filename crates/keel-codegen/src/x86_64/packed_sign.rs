@@ -1,7 +1,7 @@
 //! Closed i64x2 clamps and sign selects. Covered masks are never published.
 use super::*;
+use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{VectorBinaryOp, VectorType};
-use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Plan {
@@ -14,13 +14,13 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
     let mut candidate = false;
     for (_, i) in func.layout_insts() {
         match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::InlineAsm { .. } => return HashMap::default(),
             InstData::VectorIcmp { .. } => candidate = true,
             _ => {}
         }
     }
     if !candidate {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, i) in func.layout_insts() {
@@ -29,7 +29,7 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             *count = count.saturating_add(1);
         });
     }
-    let mut result = HashMap::new();
+    let mut result = HashMap::default();
     for block in func.blocks() {
         for pair in func.block_insts(block).windows(2) {
             let compare = pair[0];

@@ -1,7 +1,7 @@
 //! Closed positive-i32 low-half DAG. Only the low two dwords are observed.
 use super::*;
+use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{VectorBinaryOp, VectorType};
-use std::collections::HashMap;
 
 pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
     // Inline assembly can carry target-specific register and memory contracts.
@@ -9,13 +9,13 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
     let mut candidate = false;
     for (_, i) in func.layout_insts() {
         match func.inst_data(i) {
-            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::InlineAsm { .. } => return HashMap::default(),
             InstData::VectorSplat { .. } => candidate = true,
             _ => {}
         }
     }
     if !candidate {
-        return HashMap::new();
+        return HashMap::default();
     }
     let mut uses = vec![0u8; func.num_values()];
     for (_, i) in func.layout_insts() {
@@ -24,7 +24,7 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             *n = n.saturating_add(1);
         });
     }
-    let mut result = HashMap::new();
+    let mut result = HashMap::default();
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(6) {
             let [load, splat, cast, compare, and, widen] =

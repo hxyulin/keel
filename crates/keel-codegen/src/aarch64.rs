@@ -105,13 +105,13 @@ use crate::metadata::{Cfi, Directive, Expression, SectionKind, Sink};
 use crate::parallel_copy::sequentialize;
 use crate::regalloc::{self, Allocation, Loc, Pools, RematRecipe};
 use crate::{CodegenError, Format, loc_reg, pieces};
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use keel_ir::{
     AbiParam, ArgExt, AsmClobber, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause,
     ConvertOp, DataRef, DebugScope, EntityRef, FloatCC, Function, InlineAsm, Inst, InstData, IntCC,
     Intrinsic, Layout, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
-use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
@@ -631,7 +631,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
-    packed_absolute_values: std::collections::HashMap<Inst, Value>,
+    packed_absolute_values: HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
     packed_minmax: HashMap<Inst, packed_minmax::MinMax>,
     extended_adds: HashMap<Inst, extended_add::ExtendedAdd>,
@@ -1023,7 +1023,7 @@ impl<'a> FunctionCompiler<'a> {
             used.sort_unstable();
             used.dedup();
         }
-        let mut vector_spills = HashSet::new();
+        let mut vector_spills = HashSet::default();
         let has_vectors = (0..func.num_values()).any(|i| {
             func.value_type(Value::new(i)).is_vector() && alloc.loc(Value::new(i)).is_some()
         });

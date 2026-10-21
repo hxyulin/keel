@@ -8,8 +8,8 @@
 //! been exposed as separate allocation instructions.
 use super::{Allocation, Loc, Pools};
 use crate::select::Selection;
+use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Type, Value};
-use std::collections::HashMap;
 
 /// The independently allocated half of an SSA value (high only for i128).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
