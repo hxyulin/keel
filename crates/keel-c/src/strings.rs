@@ -68,6 +68,10 @@ impl<'a> Strings<'a> {
         }
     }
 
+    pub fn arena(&self) -> &'a Bump {
+        self.arena
+    }
+
     pub fn intern(&mut self, text: &str) -> &'a str {
         self.intern_utf8(text.as_bytes())
     }

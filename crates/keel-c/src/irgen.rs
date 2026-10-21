@@ -22,13 +22,13 @@ use crate::parse::Parser;
 use crate::types::*;
 use crate::{Error, Loc};
 use keel_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
+use keel_ir::fxhash::FxHashMap as HashMap;
 use keel_ir::{
     AbiParam, ArgExt, BinaryOp, Block, ConvertOp, DataInit, DataItem, DataObject, DebugGlobal,
     DebugScope, DebugType, DebugVar, EntityRef, FloatCC, FuncDecl, Function, InstData, IntCC,
     Intrinsic, Language, MemoryFlags, Module, Ordering, OverflowOp, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
 };
-use keel_ir::fxhash::FxHashMap as HashMap;
 
 type R<T> = Result<T, Error>;
 
@@ -95,7 +95,7 @@ impl<'p> Gen<'p> {
     fn object_volatile(&self, ty: &Ty, sugar: &Sugar) -> bool {
         sugar.is_volatile(&self.p.typedefs)
             || match ty {
-                Ty::Array(elem, _) => self.object_volatile(elem, &sugar.pointee(&self.p.typedefs)),
+                Ty::Array(a) => self.object_volatile(&a.elem, &sugar.pointee(&self.p.typedefs)),
                 Ty::Struct(id) => {
                     if let Some(volatile) = self.volatile_members[*id].get() {
                         return volatile;
@@ -180,7 +180,8 @@ impl<'p> Gen<'p> {
 
     fn symbol_alignment(&mut self, name: &str) -> u32 {
         let globals = self.global_alignments.get_or_insert_with(|| {
-            let mut alignments = HashMap::with_capacity_and_hasher(self.p.globals.len(), Default::default());
+            let mut alignments =
+                HashMap::with_capacity_and_hasher(self.p.globals.len(), Default::default());
             for global in &self.p.globals {
                 alignments
                     .entry(global.symbol)
@@ -436,7 +437,7 @@ impl<'p> Gen<'p> {
         // Declarations and ABI signatures deliberately carry none.
         for (index, &id) in def.params.iter().enumerate() {
             let local = &def.locals[id];
-            if matches!(&local.ty, Ty::Ptr(t) if !matches!(t.as_ref(), Ty::Func(_) | Ty::Void))
+            if matches!(&local.ty, Ty::Ptr(t) if !matches!(t, Ty::Func(_) | Ty::Void))
                 && local.sugar.is_restrict(&self.p.typedefs)
             {
                 func.restrict_params
@@ -512,7 +513,7 @@ impl<'p> Gen<'p> {
         if fg.g.debug {
             fg.b.function_mut().debug_loc = fg.g.srcloc(def.loc);
             let ret = match &fg.g.p.globals[def.global].sugar {
-                Sugar::Func(ret) => ret.as_ref().clone(),
+                Sugar::Func(ret) => **ret,
                 _ => Sugar::Plain,
             };
             fg.b.function_mut().debug_return = fg.g.debug_type(&def.ty.ret, &ret);
@@ -1088,17 +1089,21 @@ impl DispatchTable {
         {
             return None;
         }
-        let Ty::Array(element, Some(len)) = &object.ty else {
+        let Ty::Array(&ArrayTy {
+            elem: element,
+            len: Some(len),
+        }) = object.ty
+        else {
             return None;
         };
-        if !matches!(element.as_ref(), Ty::Ptr(_))
-            || *len == 0
-            || *len > 4096
-            || *len > 2 * def.label_addrs.len() as u64
+        if !matches!(element, Ty::Ptr(_))
+            || len == 0
+            || len > 4096
+            || len > 2 * def.label_addrs.len() as u64
         {
             return None;
         }
-        let mut labels = vec![0; *len as usize];
+        let mut labels = vec![0; len as usize];
         for item in &object.init.as_ref()?.items {
             let InitItem::Expr {
                 offset,
@@ -1108,7 +1113,7 @@ impl DispatchTable {
             else {
                 return None;
             };
-            if offset % 8 != 0 || offset / 8 >= *len || !matches!(expr.ty, Ty::Ptr(_)) {
+            if offset % 8 != 0 || offset / 8 >= len || !matches!(expr.ty, Ty::Ptr(_)) {
                 return None;
             }
             let Const::Int(label) = eval(expr)? else {
@@ -1573,7 +1578,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                     Some(e) => {
                         if let Some(sret) = self.sret {
                             let src = self.val(e)?;
-                            let ty = e.ty.clone();
+                            let ty = e.ty;
                             self.copy(sret, src, &ty);
                             self.b.ins().return_(&[]);
                         } else {
@@ -2556,7 +2561,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     fn call(&mut self, f: &Expr<'p>, args: &[Expr<'p>], e: &Expr<'p>) -> R<Option<Value>> {
-        let fty = f.ty.pointee().and_then(Ty::func).unwrap().clone();
+        let fty = f.ty.pointee().and_then(Ty::func).unwrap();
         self.set_loc(e.loc);
         let mut vals = Vec::new();
         let ret_slot = if fty.ret.is_struct() {
@@ -2609,7 +2614,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let extra: Vec<Ty> = if fty.prototyped {
             Vec::new()
         } else {
-            args.iter().map(|a| a.ty.clone()).collect()
+            args.iter().map(|a| a.ty).collect()
         };
         self.set_loc(e.loc);
         let direct = match &f.kind {
@@ -2807,7 +2812,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             Intrinsic::Memset => "__memset_chk",
             _ => unreachable!(),
         };
-        let params: Vec<_> = args.iter().map(|arg| arg.ty.clone()).collect();
+        let params: Vec<_> = args.iter().map(|arg| arg.ty).collect();
         let mut declared = None;
         // Inspect the completed translation unit, including declarations
         // after the builtin's source position. Never use an incompatible
@@ -3161,7 +3166,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
 
     /// Runs a local's initializer.
     fn init_local(&mut self, id: LocalId, init: &Init<'p>) -> R<()> {
-        let ty = self.def.locals[id].ty.clone();
+        let ty = self.def.locals[id].ty;
         let flags = self.object_flags(&ty, &self.def.locals[id].sugar);
         if let Storage::Var(var) = self.locals[id] {
             let v = match init.items.first() {

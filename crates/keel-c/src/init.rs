@@ -15,9 +15,9 @@ use crate::parse::{Parser, R};
 use crate::types::*;
 
 /// Where a sub-object is.
-#[derive(Clone)]
-struct Slot {
-    ty: Ty,
+#[derive(Copy, Clone)]
+struct Slot<'a> {
+    ty: Ty<'a>,
     offset: u64,
     bits: Option<BitField>,
 }
@@ -25,24 +25,24 @@ struct Slot {
 impl<'a> Parser<'a> {
     /// The initializer after `=` for an object of type `ty`. Returns the
     /// items and the type, completed if it was an array of unknown length.
-    pub(crate) fn initializer(&mut self, ty: &Ty) -> R<(Init<'a>, Ty)> {
+    pub(crate) fn initializer(&mut self, ty: &Ty<'a>) -> R<(Init<'a>, Ty<'a>)> {
         let mut items = Vec::new();
         let slot = Slot {
-            ty: ty.unatomic().clone(),
+            ty: *ty.unatomic(),
             offset: 0,
             bits: None,
         };
         let count = self.init_braced_or_expr(&slot, &mut items)?;
         let ty = match ty {
-            Ty::Array(elem, None) => Ty::Array(elem.clone(), Some(count)),
-            _ => ty.clone(),
+            Ty::Array(ArrayTy { elem, len: None }) => self.array_type(*elem, Some(count)),
+            _ => *ty,
         };
         Ok((Init { items }, ty))
     }
 
     /// One initializer for `slot`: a braced list, a string for a character
     /// array, or an expression. Returns how many array elements it gave.
-    fn init_braced_or_expr(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<u64> {
+    fn init_braced_or_expr(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<u64> {
         if let Some(n) = self.init_string(slot, items)? {
             return Ok(n);
         }
@@ -61,11 +61,11 @@ impl<'a> Parser<'a> {
 
     /// A string literal initializing a character array, if that is what
     /// comes next. Returns the number of characters with the terminator.
-    fn init_string(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<Option<u64>> {
-        let Ty::Array(elem, len) = &slot.ty else {
+    fn init_string(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<Option<u64>> {
+        let Ty::Array(&ArrayTy { elem, len }) = slot.ty else {
             return Ok(None);
         };
-        let elem_size = match **elem {
+        let elem_size = match elem {
             Ty::Int(k) if k.size() == 1 => 1,
             Ty::Int(k) if k.size() == 4 => 4,
             _ => return Ok(None),
@@ -84,7 +84,7 @@ impl<'a> Parser<'a> {
         }
         let count = (bytes.len() / unit) as u64;
         if let Some(n) = len {
-            bytes = &bytes[..bytes.len().min((*n * elem_size as u64) as usize)];
+            bytes = &bytes[..bytes.len().min((n * elem_size as u64) as usize)];
         }
         items.push(InitItem::Bytes {
             offset: slot.offset,
@@ -96,7 +96,7 @@ impl<'a> Parser<'a> {
     /// An expression initializing `slot`: the whole of it if it is a
     /// scalar or the expression has its struct type, else its first scalar
     /// with the rest taken from the enclosing list.
-    fn init_with(&mut self, slot: &Slot, e: Expr<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
+    fn init_with(&mut self, slot: &Slot<'a>, e: Expr<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
         if slot.ty.is_scalar() || (slot.ty.is_struct() && e.ty == slot.ty) {
             let expr = self.convert_for_assign(e, &slot.ty)?;
             items.push(InitItem::Expr {
@@ -113,26 +113,26 @@ impl<'a> Parser<'a> {
     }
 
     /// The sub-objects of an aggregate, in initialization order.
-    fn sub_slots(&self, slot: &Slot) -> Vec<Slot> {
-        match &slot.ty {
-            Ty::Array(elem, Some(n)) => {
-                let size = self.size_of(elem);
-                (0..*n)
+    fn sub_slots(&self, slot: &Slot<'a>) -> Vec<Slot<'a>> {
+        match slot.ty {
+            Ty::Array(&ArrayTy { elem, len: Some(n) }) => {
+                let size = self.size_of(&elem);
+                (0..n)
                     .map(|i| Slot {
-                        ty: elem.unatomic().clone(),
+                        ty: *elem.unatomic(),
                         offset: slot.offset + i * size,
                         bits: None,
                     })
                     .collect()
             }
             Ty::Struct(id) => {
-                let def = &self.structs[*id];
+                let def = &self.structs[id];
                 let named = def
                     .members
                     .iter()
                     .filter(|m| m.name.is_some() || m.bits.is_none())
                     .map(|m| Slot {
-                        ty: m.ty.unatomic().clone(),
+                        ty: *m.ty.unatomic(),
                         offset: slot.offset + m.offset,
                         bits: m.bits,
                     });
@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
     /// already parsed.
     fn init_elided(
         &mut self,
-        slot: &Slot,
+        slot: &Slot<'a>,
         first: Option<Expr<'a>>,
         items: &mut Vec<InitItem<'a>>,
     ) -> R<()> {
@@ -176,7 +176,7 @@ impl<'a> Parser<'a> {
     /// An undesignated item of a list for `slot`.
     fn init_item(
         &mut self,
-        slot: &Slot,
+        slot: &Slot<'a>,
         pre: Option<Expr<'a>>,
         items: &mut Vec<InitItem<'a>>,
     ) -> R<()> {
@@ -196,7 +196,7 @@ impl<'a> Parser<'a> {
 
     /// A braced list for `slot`, after the `{`. Returns the number of
     /// array elements initialized.
-    fn init_list(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<u64> {
+    fn init_list(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<u64> {
         if slot.ty.is_scalar() {
             if !self.eat("}") {
                 self.init_braced_or_expr(slot, items)?;
@@ -205,7 +205,7 @@ impl<'a> Parser<'a> {
             }
             return Ok(1);
         }
-        let unbounded = matches!(slot.ty, Ty::Array(_, None));
+        let unbounded = matches!(slot.ty, Ty::Array(ArrayTy { len: None, .. }));
         let subs = if unbounded {
             Vec::new()
         } else {
@@ -223,17 +223,17 @@ impl<'a> Parser<'a> {
                 range = (n, self.size_of(&sub.ty));
                 sub
             } else if unbounded {
-                let Ty::Array(elem, _) = &slot.ty else {
+                let Ty::Array(&ArrayTy { elem, .. }) = slot.ty else {
                     unreachable!()
                 };
                 Slot {
-                    ty: elem.unatomic().clone(),
-                    offset: slot.offset + next as u64 * self.size_of(elem),
+                    ty: *elem.unatomic(),
+                    offset: slot.offset + next as u64 * self.size_of(&elem),
                     bits: None,
                 }
             } else {
                 match subs.get(next) {
-                    Some(s) => s.clone(),
+                    Some(s) => *s,
                     None => return Err(Error::new(loc, "too many initializers")),
                 }
             };
@@ -276,7 +276,7 @@ impl<'a> Parser<'a> {
     /// The first designator of an item: which sub-object of `slot`, its
     /// index in initialization order, and how many elements from it a
     /// range designator (`[2 ... 5]`) covers.
-    fn designation(&mut self, slot: &Slot) -> R<(usize, Slot, usize)> {
+    fn designation(&mut self, slot: &Slot<'a>) -> R<(usize, Slot<'a>, usize)> {
         let loc = self.loc();
         if self.eat("[") {
             let i = self.const_int()?;
@@ -286,15 +286,15 @@ impl<'a> Parser<'a> {
                 i
             };
             self.expect("]")?;
-            let Ty::Array(elem, len) = &slot.ty else {
+            let Ty::Array(&ArrayTy { elem, len }) = slot.ty else {
                 return Err(Error::new(loc, "`[]` designator for a non-array"));
             };
             if i < 0 || last < i || len.is_some_and(|n| last as u64 >= n) {
                 return Err(Error::new(loc, "array designator out of range"));
             }
             let sub = Slot {
-                ty: elem.unatomic().clone(),
-                offset: slot.offset + i as u64 * self.size_of(elem),
+                ty: *elem.unatomic(),
+                offset: slot.offset + i as u64 * self.size_of(&elem),
                 bits: None,
             };
             return Ok((i as usize, sub, (last - i + 1) as usize));
@@ -315,7 +315,7 @@ impl<'a> Parser<'a> {
         for (i, m) in named.iter().enumerate() {
             if m.name.as_deref() == Some(name) {
                 let sub = Slot {
-                    ty: m.ty.unatomic().clone(),
+                    ty: *m.ty.unatomic(),
                     offset: slot.offset + m.offset,
                     bits: m.bits,
                 };
@@ -324,10 +324,10 @@ impl<'a> Parser<'a> {
             if m.name.is_none()
                 && let Ty::Struct(inner) = m.ty
                 && let Some((off, found)) =
-                    self.structs[inner].find(&name, &self.structs, &self.typedefs)
+                    self.structs[inner].find(&name, &self.structs, &self.typedefs, self.arena)
             {
                 let sub = Slot {
-                    ty: found.ty.unatomic().clone(),
+                    ty: *found.ty.unatomic(),
                     offset: slot.offset + m.offset + off,
                     bits: found.bits,
                 };
@@ -338,7 +338,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Further designators, then `=` and the initializer.
-    fn designated_rest(&mut self, slot: &Slot, items: &mut Vec<InitItem<'a>>) -> R<()> {
+    fn designated_rest(&mut self, slot: &Slot<'a>, items: &mut Vec<InitItem<'a>>) -> R<()> {
         if self.is("[") || self.is(".") {
             let loc = self.loc();
             let (_, sub, n) = self.designation(slot)?;

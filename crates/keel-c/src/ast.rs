@@ -7,7 +7,6 @@
 use crate::Loc;
 use crate::types::{BitField, FuncTy, Sugar, Ty};
 use keel_ir::{Intrinsic, OverflowOp, RmwOp};
-use std::rc::Rc;
 
 pub type LocalId = usize;
 
@@ -15,13 +14,13 @@ pub type LocalId = usize;
 pub struct Expr<'a> {
     pub kind: ExprKind<'a>,
     /// Qualifier/type shape retained through lvalues and pointer values.
-    pub sugar: Sugar,
-    pub ty: Ty,
+    pub sugar: Sugar<'a>,
+    pub ty: Ty<'a>,
     pub loc: Loc,
 }
 
 impl<'a> Expr<'a> {
-    pub fn with_sugar(mut self, sugar: Sugar) -> Self {
+    pub fn with_sugar(mut self, sugar: Sugar<'a>) -> Self {
         self.sugar = sugar;
         self
     }
@@ -265,8 +264,8 @@ pub struct Local<'a> {
     /// The source name; made-up ones, which are not identifiers, have a
     /// `.` (`compound literal.3`).
     pub name: &'a str,
-    pub ty: Ty,
-    pub sugar: Sugar,
+    pub ty: Ty<'a>,
+    pub sugar: Sugar<'a>,
     pub align: u64,
     /// The block scope it is declared in, `None` for the function's
     /// outermost one.
@@ -280,7 +279,7 @@ pub struct Local<'a> {
 pub struct FuncDef<'a> {
     /// Index in the global table.
     pub global: usize,
-    pub ty: Rc<FuncTy>,
+    pub ty: &'a FuncTy<'a>,
     pub params: Vec<LocalId>,
     pub locals: Vec<Local<'a>>,
     /// The parent of each block scope; `None` for the outermost.
@@ -298,9 +297,9 @@ pub struct Global<'a> {
     pub name: &'a str,
     /// The linker name (`__asm("_" "realpath" "$DARWIN_EXTSN")` renames).
     pub symbol: &'a str,
-    pub ty: Ty,
+    pub ty: Ty<'a>,
     /// From the last declaration.
-    pub sugar: Sugar,
+    pub sugar: Sugar<'a>,
     pub align: u64,
     /// `static`, or a C99 `inline` definition without `extern`.
     pub internal: bool,

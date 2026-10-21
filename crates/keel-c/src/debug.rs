@@ -3,8 +3,8 @@
 
 use crate::parse::Parser;
 use crate::types::*;
-use keel_ir::{DebugMember, DebugType, DebugTypeData, Encoding, EntityRef, MemberLocation, Module};
 use keel_ir::fxhash::FxHashMap as HashMap;
+use keel_ir::{DebugMember, DebugType, DebugTypeData, Encoding, EntityRef, MemberLocation, Module};
 
 /// Adds C types to a module's debug type table, each once.
 #[derive(Default)]
@@ -87,9 +87,9 @@ impl DebugTypes {
                 let pointee = self.get(module, p, pointee, inner);
                 Some(self.pointer(module, pointee))
             }
-            (Sugar::Array(inner), Ty::Array(elem, count)) => {
-                let elem = self.get(module, p, elem, inner)?;
-                Some(self.array(module, elem, *count))
+            (Sugar::Array(inner), Ty::Array(a)) => {
+                let elem = self.get(module, p, &a.elem, inner)?;
+                Some(self.array(module, elem, a.len))
             }
             _ => self.plain(module, p, ty),
         }
@@ -130,22 +130,22 @@ impl DebugTypes {
                 let pointee = self.plain(module, p, pointee);
                 self.pointer(module, pointee)
             }
-            Ty::Array(elem, count) => {
-                let elem = self.plain(module, p, elem)?;
-                self.array(module, elem, *count)
+            Ty::Array(a) => {
+                let elem = self.plain(module, p, &a.elem)?;
+                self.array(module, elem, a.len)
             }
             Ty::Func(_) => *self
                 .function
                 .get_or_insert_with(|| push(module, DebugTypeData::Function)),
             Ty::Atomic(t) => return self.plain(module, p, t),
             // Shown as a float of its size.
-            Ty::Opaque { name, size } => *self.bases.entry(name).or_insert_with(|| {
+            Ty::Opaque(o) => *self.bases.entry(o.name).or_insert_with(|| {
                 push(
                     module,
                     DebugTypeData::Base {
-                        name: name.to_string(),
+                        name: o.name.to_string(),
                         encoding: Encoding::Float,
-                        size: *size as u32,
+                        size: o.size as u32,
                     },
                 )
             }),

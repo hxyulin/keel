@@ -1,8 +1,8 @@
 //! C types, with the sizes and alignments of Apple arm64 (LP64, signed
 //! `char`, `long double` the same as `double`).
 
+use bumpalo::Bump;
 use keel_ir::{Layout, Type};
-use std::rc::Rc;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum IntKind {
@@ -73,8 +73,10 @@ impl IntKind {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum Ty {
+/// A C type. Composite types refer to nodes in the compilation's arena, so
+/// a type is two words and copies freely.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum Ty<'a> {
     Void,
     Int(IntKind),
     Float,
@@ -85,26 +87,35 @@ pub enum Ty {
     /// A type keel only knows the size of, so headers declaring functions
     /// and typedefs with it parse: `__float128`, `_Complex double`, and
     /// `long double` on x86-64. Its values cannot be used.
-    Opaque {
-        name: &'static str,
-        size: u64,
-    },
-    Ptr(Rc<Ty>),
-    /// Element type and length; no length for `int a[]`.
-    Array(Rc<Ty>, Option<u64>),
-    Func(Rc<FuncTy>),
+    Opaque(&'a OpaqueTy),
+    Ptr(&'a Ty<'a>),
+    Array(&'a ArrayTy<'a>),
+    Func(&'a FuncTy<'a>),
     /// A struct or union, by its index in the struct table.
     Struct(usize),
     /// `_Atomic(T)`, of an integer or pointer: reading the object is an
     /// atomic load, assigning it an atomic store, `+=` and `++` atomic
     /// read-modify-writes, all seq_cst. A value of it has type `T`.
-    Atomic(Rc<Ty>),
+    Atomic(&'a Ty<'a>),
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct FuncTy {
-    pub ret: Ty,
-    pub params: Vec<Ty>,
+#[derive(PartialEq, Debug)]
+pub struct OpaqueTy {
+    pub name: &'static str,
+    pub size: u64,
+}
+
+/// Element type and length; no length for `int a[]`.
+#[derive(PartialEq, Debug)]
+pub struct ArrayTy<'a> {
+    pub elem: Ty<'a>,
+    pub len: Option<u64>,
+}
+
+#[derive(PartialEq, Debug)]
+pub struct FuncTy<'a> {
+    pub ret: Ty<'a>,
+    pub params: &'a [Ty<'a>],
     pub variadic: bool,
     /// False for `int f()`, which says nothing about the parameters.
     pub prototyped: bool,
@@ -114,27 +125,30 @@ pub struct FuncTy {
 /// debuggers and access semantics: typedef names, enums and qualifiers. It has the shape of
 /// the `Ty` it goes with, down to where it stops saying more (`Plain`).
 /// Type checking only looks at the `Ty`.
-#[derive(Clone, PartialEq, Debug, Default)]
-pub enum Sugar {
+#[derive(Copy, Clone, PartialEq, Debug, Default)]
+pub enum Sugar<'a> {
     #[default]
     Plain,
     /// The typedef by its index in the typedef table.
     Typedef(usize),
     /// The enum by its index in the enum table.
     Enum(usize),
-    Const(Rc<Sugar>),
-    Volatile(Rc<Sugar>),
+    Const(&'a Sugar<'a>),
+    Volatile(&'a Sugar<'a>),
     /// C restrict qualification on this type layer.
-    Restrict(Rc<Sugar>),
+    Restrict(&'a Sugar<'a>),
     /// A pointer, an array, or a function (its return type).
-    Ptr(Rc<Sugar>),
-    Array(Rc<Sugar>),
-    Func(Rc<Sugar>),
+    Ptr(&'a Sugar<'a>),
+    Array(&'a Sugar<'a>),
+    Func(&'a Sugar<'a>),
 }
 
-impl Sugar {
+/// The shared `Plain` node that sugar wrapping nothing refers to.
+pub static PLAIN_SUGAR: Sugar<'static> = Sugar::Plain;
+
+impl<'a> Sugar<'a> {
     /// The outer type constructor, resolving typedefs and qualifiers.
-    pub fn unqualified<'a>(&'a self, defs: &'a [TypedefDef<'_>]) -> &'a Sugar {
+    pub fn unqualified<'s>(&'s self, defs: &'s [TypedefDef<'a>]) -> &'s Sugar<'a> {
         match self {
             Self::Typedef(i) => defs[*i].sugar.unqualified(defs),
             Self::Const(inner) | Self::Volatile(inner) | Self::Restrict(inner) => {
@@ -175,46 +189,46 @@ impl Sugar {
         }
     }
 
-    pub fn pointee(&self, defs: &[TypedefDef<'_>]) -> Sugar {
-        match self.unqualified(defs) {
-            Self::Ptr(inner) => inner.as_ref().clone(),
-            Self::Array(inner) if self.is_volatile(defs) => Self::Volatile(inner.clone()),
-            Self::Array(inner) => inner.as_ref().clone(),
+    pub fn pointee(&self, defs: &[TypedefDef<'a>]) -> Sugar<'a> {
+        match *self.unqualified(defs) {
+            Self::Ptr(inner) => *inner,
+            Self::Array(inner) if self.is_volatile(defs) => Self::Volatile(inner),
+            Self::Array(inner) => *inner,
             _ => Self::Plain,
         }
     }
 
-    pub fn function_return(&self, defs: &[TypedefDef<'_>]) -> Sugar {
+    pub fn function_return(&self, defs: &[TypedefDef<'a>]) -> Sugar<'a> {
         let target = self.pointee(defs);
-        match target.unqualified(defs) {
-            Self::Func(ret) => ret.as_ref().clone(),
+        match *target.unqualified(defs) {
+            Self::Func(ret) => *ret,
             _ => Self::Plain,
         }
     }
 
     /// Conditional pointers carry qualifiers from both operands. Expand
     /// aliases here so nested pointer/array qualifications merge by depth.
-    pub fn merge(&self, other: &Sugar, defs: &[TypedefDef<'_>]) -> Sugar {
+    pub fn merge(&self, other: &Sugar<'a>, defs: &[TypedefDef<'a>], arena: &'a Bump) -> Sugar<'a> {
         let volatile = self.is_volatile(defs) || other.is_volatile(defs);
         let merged = match (self.unqualified(defs), other.unqualified(defs)) {
-            (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(Rc::new(a.merge(b, defs))),
-            (Self::Array(a), Self::Array(b)) => Self::Array(Rc::new(a.merge(b, defs))),
-            (Self::Func(a), Self::Func(b)) => Self::Func(Rc::new(a.merge(b, defs))),
-            (Self::Plain, b) => b.clone(),
-            (a, _) => a.clone(),
+            (Self::Ptr(a), Self::Ptr(b)) => Self::Ptr(arena.alloc(a.merge(b, defs, arena))),
+            (Self::Array(a), Self::Array(b)) => Self::Array(arena.alloc(a.merge(b, defs, arena))),
+            (Self::Func(a), Self::Func(b)) => Self::Func(arena.alloc(a.merge(b, defs, arena))),
+            (Self::Plain, b) => *b,
+            (a, _) => *a,
         };
         if volatile {
-            Self::Volatile(Rc::new(merged))
+            Self::Volatile(arena.alloc(merged))
         } else {
             merged
         }
     }
 
     /// `Plain` when nothing is known, else `wrap` of `self`.
-    pub fn wrap(self, wrap: fn(Rc<Sugar>) -> Sugar) -> Sugar {
+    pub fn wrap(self, wrap: fn(&'a Sugar<'a>) -> Sugar<'a>, arena: &'a Bump) -> Sugar<'a> {
         match self {
             Sugar::Plain => Sugar::Plain,
-            s => wrap(Rc::new(s)),
+            s => wrap(arena.alloc(s)),
         }
     }
 }
@@ -222,8 +236,8 @@ impl Sugar {
 #[derive(Clone, Debug)]
 pub struct TypedefDef<'a> {
     pub name: &'a str,
-    pub ty: Ty,
-    pub sugar: Sugar,
+    pub ty: Ty<'a>,
+    pub sugar: Sugar<'a>,
     /// GNU typedef alignment does not change size or type compatibility.
     pub align: Option<u64>,
 }
@@ -232,7 +246,7 @@ pub struct TypedefDef<'a> {
 pub struct EnumDef<'a> {
     pub tag: Option<&'a str>,
     /// The type of its values.
-    pub ty: Ty,
+    pub ty: Ty<'a>,
     pub values: Vec<(&'a str, i64)>,
 }
 
@@ -246,13 +260,13 @@ pub struct StructDef<'a> {
     pub complete: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Member<'a> {
     /// `None` for an anonymous struct or union, whose members are found
     /// as if they were this struct's, and for unnamed bit-fields.
     pub name: Option<&'a str>,
-    pub ty: Ty,
-    pub sugar: Sugar,
+    pub ty: Ty<'a>,
+    pub sugar: Sugar<'a>,
     pub offset: u64,
     pub align: u64,
     pub bits: Option<BitField>,
@@ -266,44 +280,72 @@ pub struct BitField {
     pub width: u32,
 }
 
-pub const INT: Ty = Ty::Int(IntKind::Int);
-pub const UINT: Ty = Ty::Int(IntKind::UInt);
-pub const LONG: Ty = Ty::Int(IntKind::Long);
-pub const ULONG: Ty = Ty::Int(IntKind::ULong);
-pub const CHAR: Ty = Ty::Int(IntKind::Char);
+pub const INT: Ty<'static> = Ty::Int(IntKind::Int);
+pub const UINT: Ty<'static> = Ty::Int(IntKind::UInt);
+pub const LONG: Ty<'static> = Ty::Int(IntKind::Long);
+pub const ULONG: Ty<'static> = Ty::Int(IntKind::ULong);
+pub const CHAR: Ty<'static> = Ty::Int(IntKind::Char);
 
-/// Immutable leaf nodes reused within one compilation. Composite and function
-/// types retain their own ownership; struct nodes identify the mutable table by
-/// index, so sharing does not freeze an incomplete tag's eventual definition.
-#[derive(Default)]
-pub(crate) struct TypeNodes {
-    scalar: [Option<Rc<Ty>>; IntKind::UInt128 as usize + 5],
-    structs: Vec<Option<Rc<Ty>>>,
+/// Scalar nodes, shared by every compilation.
+static SCALAR_NODES: [Ty<'static>; IntKind::UInt128 as usize + 5] = [
+    Ty::Void,
+    Ty::Int(IntKind::Bool),
+    Ty::Int(IntKind::Char),
+    Ty::Int(IntKind::SChar),
+    Ty::Int(IntKind::UChar),
+    Ty::Int(IntKind::Short),
+    Ty::Int(IntKind::UShort),
+    Ty::Int(IntKind::Int),
+    Ty::Int(IntKind::UInt),
+    Ty::Int(IntKind::Long),
+    Ty::Int(IntKind::ULong),
+    Ty::Int(IntKind::LLong),
+    Ty::Int(IntKind::ULLong),
+    Ty::Int(IntKind::Int128),
+    Ty::Int(IntKind::UInt128),
+    Ty::Float,
+    Ty::Double,
+    Ty::Half,
+];
+
+/// Type nodes, in the compilation's arena. Leaf nodes are shared; struct
+/// nodes identify the mutable table by index, so sharing does not freeze
+/// an incomplete tag's eventual definition.
+pub(crate) struct TypeNodes<'a> {
+    arena: &'a Bump,
+    structs: Vec<Option<&'a Ty<'a>>>,
 }
 
-impl TypeNodes {
-    pub fn node(&mut self, ty: Ty) -> Rc<Ty> {
-        let slot = match ty {
-            Ty::Void => &mut self.scalar[0],
-            Ty::Int(kind) => &mut self.scalar[1 + kind as usize],
-            Ty::Float => &mut self.scalar[IntKind::UInt128 as usize + 2],
-            Ty::Double => &mut self.scalar[IntKind::UInt128 as usize + 3],
-            Ty::Half => &mut self.scalar[IntKind::UInt128 as usize + 4],
+impl<'a> TypeNodes<'a> {
+    pub fn new(arena: &'a Bump) -> Self {
+        Self {
+            arena,
+            structs: Vec::new(),
+        }
+    }
+
+    pub fn node(&mut self, ty: Ty<'a>) -> &'a Ty<'a> {
+        match ty {
+            Ty::Void => &SCALAR_NODES[0],
+            Ty::Int(kind) => &SCALAR_NODES[1 + kind as usize],
+            Ty::Float => &SCALAR_NODES[IntKind::UInt128 as usize + 2],
+            Ty::Double => &SCALAR_NODES[IntKind::UInt128 as usize + 3],
+            Ty::Half => &SCALAR_NODES[IntKind::UInt128 as usize + 4],
             Ty::Struct(id) => {
                 if self.structs.len() <= id {
-                    self.structs.resize_with(id + 1, || None);
+                    self.structs.resize(id + 1, None);
                 }
-                &mut self.structs[id]
+                let arena = self.arena;
+                self.structs[id].get_or_insert_with(|| arena.alloc(ty))
             }
-            other => return Rc::new(other),
-        };
-        slot.get_or_insert_with(|| Rc::new(ty)).clone()
+            other => self.arena.alloc(other),
+        }
     }
 }
 
-impl Ty {
+impl<'a> Ty<'a> {
     /// The type without `_Atomic`.
-    pub fn unatomic(&self) -> &Ty {
+    pub fn unatomic(&self) -> &Ty<'a> {
         match self {
             Ty::Atomic(t) => t,
             t => t,
@@ -346,15 +388,16 @@ impl Ty {
     }
 
     /// What a pointer or array points to.
-    pub fn pointee(&self) -> Option<&Ty> {
-        match self {
-            Ty::Ptr(t) | Ty::Array(t, _) => Some(t),
+    pub fn pointee(&self) -> Option<&'a Ty<'a>> {
+        match *self {
+            Ty::Ptr(t) => Some(t),
+            Ty::Array(a) => Some(&a.elem),
             _ => None,
         }
     }
 
-    pub fn func(&self) -> Option<&Rc<FuncTy>> {
-        match self {
+    pub fn func(&self) -> Option<&'a FuncTy<'a>> {
+        match *self {
             Ty::Func(f) => Some(f),
             _ => None,
         }
@@ -366,7 +409,7 @@ impl Ty {
     pub fn unusable(&self) -> Option<&'static str> {
         match self {
             Ty::Half => Some("_Float16"),
-            Ty::Opaque { name, .. } => Some(name),
+            Ty::Opaque(o) => Some(o.name),
             _ => None,
         }
     }
@@ -395,17 +438,18 @@ impl<'a> StructDef<'a> {
         &self,
         name: &str,
         structs: &[StructDef<'a>],
-        defs: &[TypedefDef<'_>],
+        defs: &[TypedefDef<'a>],
+        arena: &'a Bump,
     ) -> Option<(u64, Member<'a>)> {
         for m in &self.members {
             match &m.name {
-                Some(n) if *n == name => return Some((m.offset, m.clone())),
+                Some(n) if *n == name => return Some((m.offset, *m)),
                 None if m.bits.is_none() => {
                     if let Ty::Struct(id) = m.ty
-                        && let Some((off, mut found)) = structs[id].find(name, structs, defs)
+                        && let Some((off, mut found)) = structs[id].find(name, structs, defs, arena)
                     {
                         if m.sugar.is_volatile(defs) {
-                            found.sugar = Sugar::Volatile(Rc::new(found.sugar));
+                            found.sugar = Sugar::Volatile(arena.alloc(found.sugar));
                         }
                         return Some((m.offset + off, found));
                     }
@@ -428,8 +472,8 @@ impl Types<'_> {
             Ty::Float => 4,
             Ty::Double | Ty::Ptr(_) => 8,
             Ty::Half => 2,
-            Ty::Opaque { size, .. } => *size,
-            Ty::Array(elem, n) => self.size(elem) * n.unwrap_or(0),
+            Ty::Opaque(o) => o.size,
+            Ty::Array(a) => self.size(&a.elem) * a.len.unwrap_or(0),
             Ty::Func(_) => 1,
             Ty::Struct(id) => self.0[*id].size,
             Ty::Atomic(t) => self.size(t),
@@ -438,7 +482,7 @@ impl Types<'_> {
 
     pub fn align(&self, ty: &Ty) -> u64 {
         match ty {
-            Ty::Array(elem, _) => self.align(elem),
+            Ty::Array(a) => self.align(&a.elem),
             Ty::Struct(id) => self.0[*id].align,
             Ty::Atomic(t) => self.align(t),
             Ty::Void | Ty::Func(_) => 1,
@@ -477,7 +521,7 @@ impl Types<'_> {
                 .members
                 .iter()
                 .any(|m| m.bits.is_none() && self.has_unaligned_fields(&m.ty, base + m.offset)),
-            Ty::Array(elem, _) => self.has_unaligned_fields(elem, base),
+            Ty::Array(a) => self.has_unaligned_fields(&a.elem, base),
             _ => !base.is_multiple_of(self.align(ty)),
         }
     }
@@ -489,7 +533,7 @@ impl Types<'_> {
                 .members
                 .iter()
                 .any(|m| self.contains_atomic(&m.ty)),
-            Ty::Array(elem, _) => self.contains_atomic(elem),
+            Ty::Array(a) => self.contains_atomic(&a.elem),
             _ => false,
         }
     }
@@ -499,7 +543,7 @@ impl Types<'_> {
         match ty {
             Ty::Float => Some((Type::F32, 1)),
             Ty::Double => Some((Type::F64, 1)),
-            Ty::Array(elem, Some(n)) => self.hfa(elem).map(|(t, k)| (t, k * n)),
+            Ty::Array(ArrayTy { elem, len: Some(n) }) => self.hfa(elem).map(|(t, k)| (t, k * n)),
             Ty::Struct(id) => {
                 let def = &self.0[*id];
                 if def.is_union {
@@ -527,7 +571,14 @@ impl Types<'_> {
     }
 }
 
-pub type StructField<'a> = (Option<&'a str>, Ty, Sugar, Option<u32>, Option<u64>, bool);
+pub type StructField<'a> = (
+    Option<&'a str>,
+    Ty<'a>,
+    Sugar<'a>,
+    Option<u32>,
+    Option<u64>,
+    bool,
+);
 
 /// Lays out a struct or union's members, including alignment and packing,
 /// returning the members with their offsets, the size and the alignment.
@@ -537,7 +588,7 @@ pub type StructField<'a> = (Option<&'a str>, Ty, Sugar, Option<u32>, Option<u64>
 /// aligns the next to its type.
 pub fn layout_struct<'a>(
     types: &Types,
-    typedefs: &[TypedefDef<'_>],
+    typedefs: &[TypedefDef<'a>],
     is_union: bool,
     fields: Vec<StructField<'a>>,
     max_align: Option<u64>,
@@ -634,7 +685,8 @@ mod node_tests {
 
     #[test]
     fn common_nodes_share_storage_without_conflating_types() {
-        let mut nodes = TypeNodes::default();
+        let arena = Bump::new();
+        let mut nodes = TypeNodes::new(&arena);
         let types = [
             Ty::Void,
             Ty::Int(IntKind::Bool),
@@ -658,15 +710,18 @@ mod node_tests {
             Ty::Struct(100),
         ];
         for ty in &types {
-            let a = nodes.node(ty.clone());
-            let b = nodes.node(ty.clone());
-            assert!(Rc::ptr_eq(&a, &b));
-            assert_eq!(&*a, ty);
+            let a = nodes.node(*ty);
+            let b = nodes.node(*ty);
+            assert!(std::ptr::eq(a, b));
+            assert_eq!(a, ty);
         }
         for ty in &types {
-            assert_eq!(&*nodes.node(ty.clone()), ty);
+            assert_eq!(nodes.node(*ty), ty);
         }
-        let composite = Ty::Array(nodes.node(INT), Some(7));
-        assert_eq!(*nodes.node(composite.clone()), composite);
+        let composite = Ty::Array(arena.alloc(ArrayTy {
+            elem: *nodes.node(INT),
+            len: Some(7),
+        }));
+        assert_eq!(*nodes.node(composite), composite);
     }
 }

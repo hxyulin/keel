@@ -17,9 +17,8 @@ use crate::strings::Strings;
 use crate::types::*;
 use crate::{Error, Loc};
 use keel_ir::Target;
-use smallvec::SmallVec;
 use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use std::rc::Rc;
+use smallvec::SmallVec;
 
 pub type R<T> = Result<T, Error>;
 
@@ -58,9 +57,9 @@ enum Storage {
     Static,
 }
 
-struct DeclSpec {
-    ty: Ty,
-    sugar: Sugar,
+struct DeclSpec<'a> {
+    ty: Ty<'a>,
+    sugar: Sugar<'a>,
     infer: bool,
     storage: Storage,
     is_const: bool,
@@ -104,16 +103,16 @@ impl Attrs {
 /// A parsed declarator: the name (if not abstract) and the full type.
 pub struct Declarator<'a> {
     pub name: Option<(&'a str, Loc)>,
-    pub ty: Ty,
-    pub sugar: Sugar,
+    pub ty: Ty<'a>,
+    pub sugar: Sugar<'a>,
     /// `const` or `volatile` on the declared object itself.
     pub is_const: bool,
     pub is_volatile: bool,
     pub attrs: Attrs,
 }
 
-pub(crate) struct SwitchCtx {
-    pub ty: Ty,
+pub(crate) struct SwitchCtx<'a> {
+    pub ty: Ty<'a>,
     pub cases: Vec<(i64, usize)>,
     pub default: Option<usize>,
     pub labels: usize,
@@ -126,9 +125,9 @@ pub(crate) struct FuncState<'a> {
     pub scopes: Vec<Option<usize>>,
     pub scope: Option<usize>,
     pub label_addrs: Vec<&'a str>,
-    pub ret: Ty,
+    pub ret: Ty<'a>,
     pub name: &'a str,
-    pub switches: Vec<SwitchCtx>,
+    pub switches: Vec<SwitchCtx<'a>>,
 }
 
 pub struct Parser<'a> {
@@ -150,8 +149,8 @@ pub struct Parser<'a> {
     /// stack also supports file-scope declarations introduced inside blocks.
     /// Names are interned, so they are keyed by address (see `name_key`).
     names: HashMap<usize, SmallVec<[(usize, Sym); 2]>>,
-    type_nodes: TypeNodes,
-    plain_sugar: Rc<Sugar>,
+    pub(crate) arena: &'a bumpalo::Bump,
+    type_nodes: TypeNodes<'a>,
     pub structs: Vec<StructDef<'a>>,
     pub typedefs: Vec<TypedefDef<'a>>,
     pub enums: Vec<EnumDef<'a>>,
@@ -166,7 +165,7 @@ pub struct Parser<'a> {
     external_def: HashSet<usize>,
     /// Parameters of the last parameter list parsed: those of a function
     /// definition's declarator, when its body follows.
-    last_params: Vec<(Option<&'a str>, Ty, Sugar, Loc)>,
+    last_params: Vec<(Option<&'a str>, Ty<'a>, Sugar<'a>, Loc)>,
     /// Counts names made up for static locals and compound literals.
     unique: usize,
     pub(crate) target: Target,
@@ -373,6 +372,7 @@ const IGNORED_QUALIFIERS: &[&str] = &[
 impl<'a> Parser<'a> {
     pub fn new(src: &'a str, path: &str, target: Target, mut text: Strings<'a>) -> Self {
         let lexer = Lexer::new(src, path, &mut text);
+        let arena = text.arena();
         let mut p = Self {
             lexer,
             toks: Vec::new(),
@@ -383,8 +383,8 @@ impl<'a> Parser<'a> {
             pos: 0,
             scopes: vec![Scope::default()],
             names: HashMap::default(),
-            type_nodes: TypeNodes::default(),
-            plain_sugar: Rc::new(Sugar::Plain),
+            arena,
+            type_nodes: TypeNodes::new(arena),
             structs: Vec::new(),
             typedefs: Vec::new(),
             enums: Vec::new(),
@@ -413,12 +413,12 @@ impl<'a> Parser<'a> {
     /// general and vector register in the callee's register save area,
     /// the next stack argument, and the save area. Being an array, it
     /// decays to a pointer when passed, and a `va_list` parameter is one.
-    fn va_list(&mut self) -> Ty {
+    fn va_list(&mut self) -> Ty<'a> {
         if self.target == Target::Aarch64AppleDarwin {
             return self.ptr_type(crate::types::CHAR);
         }
         let id = *self.va_list_tag.get_or_insert_with(|| {
-            let member = |name: &'static str, ty: Ty, offset| Member {
+            let member = |name: &'static str, ty: Ty<'a>, offset| Member {
                 align: Types(&self.structs).align(&ty),
                 name: Some(name.into()),
                 ty,
@@ -426,14 +426,14 @@ impl<'a> Parser<'a> {
                 offset,
                 bits: None,
             };
-            let void_ptr = Ty::Ptr(Rc::new(Ty::Void));
+            let void_ptr = Ty::Ptr(&Ty::Void);
             self.structs.push(StructDef {
                 tag: Some("__va_list_tag".into()),
                 is_union: false,
                 members: vec![
                     member("gp_offset", crate::types::UINT, 0),
                     member("fp_offset", crate::types::UINT, 4),
-                    member("overflow_arg_area", void_ptr.clone(), 8),
+                    member("overflow_arg_area", void_ptr, 8),
                     member("reg_save_area", void_ptr, 16),
                 ],
                 size: 24,
@@ -442,7 +442,8 @@ impl<'a> Parser<'a> {
             });
             self.structs.len() - 1
         });
-        Ty::Array(self.type_ref(Ty::Struct(id)), Some(1))
+        let elem = Ty::Struct(id);
+        self.array_type(elem, Some(1))
     }
 
     // ---- tokens ----
@@ -668,40 +669,53 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn type_ref(&mut self, ty: Ty) -> Rc<Ty> {
+    pub(crate) fn type_ref(&mut self, ty: Ty<'a>) -> &'a Ty<'a> {
         self.type_nodes.node(ty)
     }
 
-    pub(crate) fn ptr_type(&mut self, ty: Ty) -> Ty {
+    pub(crate) fn ptr_type(&mut self, ty: Ty<'a>) -> Ty<'a> {
         Ty::Ptr(self.type_ref(ty))
     }
 
-    pub(crate) fn sugar_ref(&self, sugar: Sugar) -> Rc<Sugar> {
+    pub(crate) fn array_type(&self, elem: Ty<'a>, len: Option<u64>) -> Ty<'a> {
+        Ty::Array(self.arena.alloc(ArrayTy { elem, len }))
+    }
+
+    pub(crate) fn sugar_ref(&self, sugar: Sugar<'a>) -> &'a Sugar<'a> {
         match sugar {
-            Sugar::Plain => self.plain_sugar.clone(),
-            other => Rc::new(other),
+            Sugar::Plain => &PLAIN_SUGAR,
+            other => self.arena.alloc(other),
         }
+    }
+
+    /// `Plain` when nothing is known, else `wrap` of `sugar`.
+    pub(crate) fn wrap_sugar(
+        &self,
+        sugar: Sugar<'a>,
+        wrap: fn(&'a Sugar<'a>) -> Sugar<'a>,
+    ) -> Sugar<'a> {
+        sugar.wrap(wrap, self.arena)
     }
 
     pub(crate) fn types(&self) -> Types<'_> {
         Types(&self.structs)
     }
 
-    pub(crate) fn size_of(&self, ty: &Ty) -> u64 {
+    pub(crate) fn size_of(&self, ty: &Ty<'a>) -> u64 {
         self.types().size(ty)
     }
 
-    pub(crate) fn align_of(&self, ty: &Ty) -> u64 {
+    pub(crate) fn align_of(&self, ty: &Ty<'a>) -> u64 {
         self.types().align(ty)
     }
 
-    pub(crate) fn type_alignment(&self, ty: &Ty, sugar: &Sugar) -> u64 {
+    pub(crate) fn type_alignment(&self, ty: &Ty<'a>, sugar: &Sugar<'a>) -> u64 {
         sugar
             .alignment(&self.typedefs)
             .unwrap_or_else(|| self.align_of(ty))
     }
 
-    fn object_alignment(&self, ty: &Ty, sugar: &Sugar, attrs: Attrs, loc: Loc) -> R<u64> {
+    fn object_alignment(&self, ty: &Ty<'a>, sugar: &Sugar<'a>, attrs: Attrs, loc: Loc) -> R<u64> {
         let natural = self.type_alignment(ty, sugar);
         if let Some(a) = attrs.alignas
             && a != 0
@@ -742,18 +756,18 @@ impl<'a> Parser<'a> {
     pub(crate) fn lookup_value(&mut self, name: &str, loc: Loc) -> R<Expr<'a>> {
         match self.lookup(name).cloned() {
             Some(Sym::Local(id)) => {
-                let ty = self.fs.as_ref().unwrap().locals[id].ty.clone();
+                let ty = self.fs.as_ref().unwrap().locals[id].ty;
                 Ok(Expr {
                     kind: ExprKind::Local(id),
-                    sugar: self.fs.as_ref().unwrap().locals[id].sugar.clone(),
+                    sugar: self.fs.as_ref().unwrap().locals[id].sugar,
                     ty,
                     loc,
                 })
             }
             Some(Sym::Global(g)) => Ok(Expr {
                 kind: ExprKind::Global(g),
-                sugar: self.globals[g].sugar.clone(),
-                ty: self.globals[g].ty.clone(),
+                sugar: self.globals[g].sugar,
+                ty: self.globals[g].ty,
                 loc,
             }),
             Some(Sym::Enum(v)) => Ok(Expr {
@@ -774,8 +788,8 @@ impl<'a> Parser<'a> {
     pub(crate) fn new_local(
         &mut self,
         name: &'a str,
-        ty: Ty,
-        sugar: Sugar,
+        ty: Ty<'a>,
+        sugar: Sugar<'a>,
         volatile: bool,
     ) -> LocalId {
         let in_memory = volatile || sugar.is_volatile(&self.typedefs) || !ty.is_scalar();
@@ -805,7 +819,7 @@ impl<'a> Parser<'a> {
     pub(crate) fn add_static(
         &mut self,
         name: &'a str,
-        ty: Ty,
+        ty: Ty<'a>,
         init: Init<'a>,
         is_const: bool,
     ) -> usize {
@@ -907,20 +921,20 @@ impl<'a> Parser<'a> {
                 let name = self.ident()?;
                 Declarator {
                     name: Some((name, loc)),
-                    ty: spec.ty.clone(),
-                    sugar: spec.sugar.clone(),
+                    ty: spec.ty,
+                    sugar: spec.sugar,
                     is_const: false,
                     is_volatile: false,
                     attrs: Attrs::default(),
                 }
             } else {
-                self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?
+                self.declarator_sugar(spec.ty, spec.sugar)?
             };
             let mut attrs = spec.attrs;
             attrs.merge(d.attrs);
             let label = self.asm_label_and_attrs(&mut attrs)?;
             d.attrs = attrs;
-            let Some((name, name_loc)) = d.name.clone() else {
+            let Some((name, name_loc)) = d.name else {
                 return Err(Error::new(loc, "declaration needs a name"));
             };
             let inferred_init = if spec.infer {
@@ -947,13 +961,13 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 d.ty = if matches!(spec.ty, Ty::Atomic(_)) {
-                    self.atomic_type(expr.ty.clone(), name_loc)?
+                    self.atomic_type(expr.ty, name_loc)?
                 } else {
-                    expr.ty.clone()
+                    expr.ty
                 };
                 // Inference drops top-level object qualifiers but retains
                 // qualified pointees. Explicit qualifiers remain outermost.
-                let inferred = expr.sugar.unqualified(&self.typedefs).clone();
+                let inferred = *expr.sugar.unqualified(&self.typedefs);
                 d.sugar = if spec.is_volatile {
                     Sugar::Volatile(self.sugar_ref(inferred))
                 } else {
@@ -976,8 +990,8 @@ impl<'a> Parser<'a> {
             // declarator adds nothing but arrays: `const char *a[2]` is an
             // array of mutable pointers.
             let mut elem = &d.ty;
-            while let Ty::Array(inner, _) = elem {
-                elem = inner;
+            while let Ty::Array(inner) = elem {
+                elem = &inner.elem;
             }
             let base = spec.infer || *elem == spec.ty;
             if let Some(what) = elem.unusable()
@@ -1001,7 +1015,7 @@ impl<'a> Parser<'a> {
                     align: attrs.aligned,
                 });
                 self.bind(name, Sym::Typedef(self.typedefs.len() - 1));
-            } else if let Ty::Func(fty) = &d.ty {
+            } else if let Ty::Func(fty) = d.ty {
                 if attrs.alignment().is_some() || attrs.alignas.is_some() {
                     return Err(Error::new(
                         name_loc,
@@ -1009,17 +1023,17 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 let g = self
-                    .declare_function(&name, label, fty.clone(), &spec, attrs, file_scope)
+                    .declare_function(&name, label, fty, &spec, attrs, file_scope)
                     .map_err(|message| Error::new(name_loc, message))?;
-                self.globals[g].sugar = d.sugar.clone();
+                self.globals[g].sugar = d.sugar;
                 if file_scope && self.is("{") {
-                    self.function_body(g, fty.clone(), name_loc)?;
+                    self.function_body(g, fty, name_loc)?;
                     return Ok(out);
                 }
             } else if !file_scope && spec.storage == Storage::None {
                 // In scope from the end of its declarator: `T *p =
                 // malloc(sizeof *p)` refers to itself.
-                let id = self.new_local(name, d.ty.clone(), d.sugar.clone(), is_volatile);
+                let id = self.new_local(name, d.ty, d.sugar, is_volatile);
                 let align = self.object_alignment(&d.ty, &d.sugar, attrs, name_loc)?;
                 self.fs.as_mut().unwrap().locals[id].align = align;
                 let mut ty = d.ty;
@@ -1030,7 +1044,7 @@ impl<'a> Parser<'a> {
                     init = Some(i);
                 }
                 let incomplete = match &ty {
-                    Ty::Array(_, None) | Ty::Void => true,
+                    Ty::Array(ArrayTy { len: None, .. }) | Ty::Void => true,
                     Ty::Struct(id) => !self.structs[*id].complete,
                     _ => false,
                 };
@@ -1085,7 +1099,7 @@ impl<'a> Parser<'a> {
     /// A file-scope object, a block-scope `extern`, or a `static` local.
     fn object_declaration(
         &mut self,
-        spec: &DeclSpec,
+        spec: &DeclSpec<'a>,
         d: Declarator<'a>,
         label: Option<&'a str>,
         is_const: bool,
@@ -1106,8 +1120,8 @@ impl<'a> Parser<'a> {
             self.globals.push(Global {
                 name: name,
                 symbol,
-                ty: d.ty.clone(),
-                sugar: d.sugar.clone(),
+                ty: d.ty,
+                sugar: d.sugar,
                 align,
                 internal: true,
                 defined: true,
@@ -1123,10 +1137,10 @@ impl<'a> Parser<'a> {
             g
         } else {
             let g = self
-                .global(&name, label, d.ty.clone())
+                .global(&name, label, d.ty)
                 .map_err(|message| Error::new(d.name.as_ref().unwrap().1, message))?;
             let global = &mut self.globals[g];
-            global.sugar = d.sugar.clone();
+            global.sugar = d.sugar;
             if spec.storage == Storage::Static {
                 global.internal = true;
             }
@@ -1147,7 +1161,7 @@ impl<'a> Parser<'a> {
                     "a block-scope `extern` cannot be initialized",
                 ));
             }
-            let ty = self.globals[g].ty.clone();
+            let ty = self.globals[g].ty;
             let (init, ty) = match inferred_init {
                 Some(init) => (init, ty),
                 None => self.initializer(&ty)?,
@@ -1166,7 +1180,7 @@ impl<'a> Parser<'a> {
         &mut self,
         name: &str,
         label: Option<&'a str>,
-        ty: Ty,
+        ty: Ty<'a>,
     ) -> Result<usize, &'static str> {
         let existing = self
             .names
@@ -1190,7 +1204,10 @@ impl<'a> Parser<'a> {
             Some(g) => {
                 let global = &mut self.globals[g];
                 let more_complete = match (&global.ty, &ty) {
-                    (Ty::Array(_, None), Ty::Array(_, Some(_))) => true,
+                    (
+                        Ty::Array(ArrayTy { len: None, .. }),
+                        Ty::Array(ArrayTy { len: Some(_), .. }),
+                    ) => true,
                     (Ty::Func(old), Ty::Func(new)) => !old.prototyped && new.prototyped,
                     _ => false,
                 };
@@ -1236,8 +1253,8 @@ impl<'a> Parser<'a> {
         &mut self,
         name: &str,
         label: Option<&'a str>,
-        fty: Rc<FuncTy>,
-        spec: &DeclSpec,
+        fty: &'a FuncTy<'a>,
+        spec: &DeclSpec<'a>,
         attrs: Attrs,
         file_scope: bool,
     ) -> Result<usize, &'static str> {
@@ -1264,7 +1281,7 @@ impl<'a> Parser<'a> {
         Ok(g)
     }
 
-    fn function_body(&mut self, g: usize, fty: Rc<FuncTy>, loc: Loc) -> R<()> {
+    fn function_body(&mut self, g: usize, fty: &'a FuncTy<'a>, loc: Loc) -> R<()> {
         if self.globals[g].func.is_some() {
             return Err(Error::new(
                 loc,
@@ -1278,7 +1295,7 @@ impl<'a> Parser<'a> {
             scopes: Vec::new(),
             scope: None,
             label_addrs: Vec::new(),
-            ret: fty.ret.clone(),
+            ret: fty.ret,
             name,
             switches: Vec::new(),
         });
@@ -1456,7 +1473,7 @@ impl<'a> Parser<'a> {
         Ok(n as u64)
     }
 
-    fn decl_spec(&mut self) -> R<DeclSpec> {
+    fn decl_spec(&mut self) -> R<DeclSpec<'a>> {
         const VOID: u32 = 1;
         const BOOL: u32 = 1 << 2;
         const CHAR: u32 = 1 << 4;
@@ -1485,7 +1502,7 @@ impl<'a> Parser<'a> {
             attrs: Attrs::default(),
         };
         let mut counter = 0u32;
-        let mut other: Option<Ty> = None;
+        let mut other: Option<Ty<'a>> = None;
         let mut is_atomic = false;
         let mut is_restrict = false;
         let mut is_complex = false;
@@ -1573,10 +1590,10 @@ impl<'a> Parser<'a> {
                         }
                         "__float128" => {
                             self.advance();
-                            Some(Ty::Opaque {
+                            Some(Ty::Opaque(&OpaqueTy {
                                 name: "__float128",
                                 size: 16,
-                            })
+                            }))
                         }
                         "__int128_t" => {
                             self.advance();
@@ -1591,7 +1608,7 @@ impl<'a> Parser<'a> {
                                 let i = *i;
                                 self.advance();
                                 spec.sugar = Sugar::Typedef(i);
-                                Some(self.typedefs[i].ty.clone())
+                                Some(self.typedefs[i].ty)
                             } else {
                                 None
                             }
@@ -1678,10 +1695,10 @@ impl<'a> Parser<'a> {
             // not have: its values are refused rather than miscompiled.
             c if c == LONG + DOUBLE => match self.target {
                 Target::Aarch64AppleDarwin => Ty::Double,
-                Target::X86_64LinuxGnu => Ty::Opaque {
+                Target::X86_64LinuxGnu => Ty::Opaque(&OpaqueTy {
                     name: "long double",
                     size: 16,
-                },
+                }),
             },
             HALF => Ty::Half,
             _ => return Err(Error::new(loc, "invalid combination of type specifiers")),
@@ -1694,10 +1711,10 @@ impl<'a> Parser<'a> {
                 ));
             }
             let size = 2 * Types(&self.structs).size(&spec.ty);
-            spec.ty = Ty::Opaque {
+            spec.ty = Ty::Opaque(self.arena.alloc(OpaqueTy {
                 name: "_Complex",
                 size,
-            };
+            }));
         }
         if is_atomic {
             spec.ty = self.atomic_type(spec.ty, loc)?;
@@ -1716,11 +1733,11 @@ impl<'a> Parser<'a> {
 
     /// A type name, as in casts and `sizeof`: specifiers and an abstract
     /// declarator.
-    pub(crate) fn type_name(&mut self) -> R<Ty> {
+    pub(crate) fn type_name(&mut self) -> R<Ty<'a>> {
         Ok(self.type_name_sugar()?.0)
     }
 
-    pub(crate) fn type_name_sugar(&mut self) -> R<(Ty, Sugar)> {
+    pub(crate) fn type_name_sugar(&mut self) -> R<(Ty<'a>, Sugar<'a>)> {
         let spec = self.decl_spec()?;
         if spec.infer {
             return Err(Error::new(
@@ -1743,7 +1760,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `_Atomic(ty)`, which keel supports for integers and pointers.
-    fn atomic_type(&mut self, ty: Ty, loc: Loc) -> R<Ty> {
+    fn atomic_type(&mut self, ty: Ty<'a>, loc: Loc) -> R<Ty<'a>> {
         match ty {
             Ty::Atomic(_) => Ok(ty),
             ty if ty.is_integer() || ty.is_ptr() => Ok(Ty::Atomic(self.type_ref(ty))),
@@ -1777,7 +1794,7 @@ impl<'a> Parser<'a> {
     }
 
     /// A declarator applied to the specifiers' type and its sugar.
-    fn declarator_sugar(&mut self, ty: Ty, sugar: Sugar) -> R<Declarator<'a>> {
+    fn declarator_sugar(&mut self, ty: Ty<'a>, sugar: Sugar<'a>) -> R<Declarator<'a>> {
         let mut d = self.declarator_layer(ty, sugar, None)?;
         // Declaration attributes belong to the final named function, regardless
         // of the intervening pointer/array/function layers. Do not decide this
@@ -1792,9 +1809,9 @@ impl<'a> Parser<'a> {
 
     fn declarator_layer(
         &mut self,
-        mut ty: Ty,
-        mut sugar: Sugar,
-        inherited_owner: Option<Rc<FuncTy>>,
+        mut ty: Ty<'a>,
+        mut sugar: Sugar<'a>,
+        inherited_owner: Option<&'a FuncTy<'a>>,
     ) -> R<Declarator<'a>> {
         // Only functions constructed by enclosing declarator layers supply
         // inherited ownership. A typedef's hidden function is not that layer.
@@ -1808,7 +1825,7 @@ impl<'a> Parser<'a> {
         while self.eat("*") || self.eat("^") {
             let loc = self.loc();
             ty = self.ptr_type(ty);
-            sugar = sugar.wrap(Sugar::Ptr);
+            sugar = self.wrap_sugar(sugar, Sugar::Ptr);
             let (is_atomic, is_restrict);
             (is_const, is_volatile, is_atomic, is_restrict) = self.qualifiers(&mut attrs)?;
             if is_atomic {
@@ -1846,17 +1863,15 @@ impl<'a> Parser<'a> {
             // The current layer's attributes retain their incoming owner.
             // A newly constructed suffix becomes the incoming owner for the
             // nested layer, which may carry separate named-function promises.
-            let nested_owner = Self::named_contract_owner(&ty)
-                .cloned()
-                .or_else(|| inherited_owner.clone());
-            let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty).cloned());
+            let nested_owner = Self::named_contract_owner(&ty).or(inherited_owner);
+            let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty));
             let end = self.pos;
             self.pos = start;
             let mut d = self.declarator_layer(ty, sugar, nested_owner)?;
             // A purely grouping layer constructs no function of its own;
             // its attributes follow the nested declarator's owner instead.
-            let owner = owner.or_else(|| Self::named_contract_owner(&d.ty).cloned());
-            Self::merge_declarator_attrs(&mut d.attrs, attrs, owner.as_ref(), &d.ty);
+            let owner = owner.or_else(|| Self::named_contract_owner(&d.ty));
+            Self::merge_declarator_attrs(&mut d.attrs, attrs, owner, &d.ty);
             self.expect(")")?;
             self.pos = end;
             self.pinned -= 1;
@@ -1872,9 +1887,9 @@ impl<'a> Parser<'a> {
             _ => None,
         };
         let (ty, sugar) = self.type_suffix(ty, sugar, &mut attrs)?;
-        let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty).cloned());
+        let owner = inherited_owner.or_else(|| Self::named_contract_owner(&ty));
         let mut named_attrs = Attrs::default();
-        Self::merge_declarator_attrs(&mut named_attrs, attrs, owner.as_ref(), &ty);
+        Self::merge_declarator_attrs(&mut named_attrs, attrs, owner, &ty);
         if !matches!(ty.unatomic(), Ty::Ptr(_)) {
             // Qualifiers apply to the pointer only when it is the object.
             is_const = false;
@@ -1896,19 +1911,20 @@ impl<'a> Parser<'a> {
     /// declarator when this is a purely grouping layer). Parentheses apply
     /// that suffix before parsing the nested layer. Thus `* attr h(void)` owns
     /// h when returning a scalar pointer, but owns the returned function in
-    /// `(* attr h(void))(void)`. Rc identity (not ABI equality) distinguishes
+    /// `(* attr h(void))(void)`. Node identity (not ABI equality) distinguishes
     /// those functions through arbitrary parenthesized composition.
-    fn named_contract_owner(ty: &Ty) -> Option<&Rc<FuncTy>> {
-        match ty {
+    fn named_contract_owner(ty: &Ty<'a>) -> Option<&'a FuncTy<'a>> {
+        match *ty {
             Ty::Func(f) => Some(f),
             _ => None,
         }
     }
 
-    fn contract_owner(ty: &Ty) -> Option<&Rc<FuncTy>> {
-        match ty {
+    fn contract_owner(ty: &Ty<'a>) -> Option<&'a FuncTy<'a>> {
+        match *ty {
             Ty::Func(f) => Some(f),
-            Ty::Ptr(t) | Ty::Array(t, _) | Ty::Atomic(t) => Self::contract_owner(t),
+            Ty::Ptr(t) | Ty::Atomic(t) => Self::contract_owner(t),
+            Ty::Array(a) => Self::contract_owner(&a.elem),
             _ => None,
         }
     }
@@ -1916,8 +1932,8 @@ impl<'a> Parser<'a> {
     fn merge_declarator_attrs(
         named: &mut Attrs,
         mut layer: Attrs,
-        owner: Option<&Rc<FuncTy>>,
-        declared: &Ty,
+        owner: Option<&'a FuncTy<'a>>,
+        declared: &Ty<'a>,
     ) {
         // GNU noreturn can qualify a function type, including the returned
         // function of a factory. Only that promise uses function-node identity.
@@ -1925,7 +1941,7 @@ impl<'a> Parser<'a> {
         // keep them until the complete declarator identifies the named subject.
         // Layout attributes merge independently of either contract category.
         let is_named =
-            matches!((owner, declared), (Some(owner), Ty::Func(f)) if Rc::ptr_eq(owner, f));
+            matches!((owner, declared), (Some(owner), Ty::Func(f)) if std::ptr::eq(owner, *f));
         if !is_named {
             layer.noreturn = false;
         }
@@ -1936,17 +1952,21 @@ impl<'a> Parser<'a> {
     fn nested_declarator_follows(&self) -> bool {
         match self.peek_at(1) {
             Tok::Punct("*") | Tok::Punct("(") | Tok::Punct("[") | Tok::Punct("^") => true,
-            Tok::Ident(s) => {
-                !is_type_keyword(s) && !self.is_typedef(s) || s == "__attribute__"
-            }
+            Tok::Ident(s) => !is_type_keyword(s) && !self.is_typedef(s) || s == "__attribute__",
             _ => false,
         }
     }
 
-    fn type_suffix(&mut self, ty: Ty, sugar: Sugar, attrs: &mut Attrs) -> R<(Ty, Sugar)> {
+    fn type_suffix(
+        &mut self,
+        ty: Ty<'a>,
+        sugar: Sugar<'a>,
+        attrs: &mut Attrs,
+    ) -> R<(Ty<'a>, Sugar<'a>)> {
         if self.eat("(") {
             let fty = self.params(ty)?;
-            return Ok((Ty::Func(Rc::new(fty)), sugar.wrap(Sugar::Func)));
+            let fty = Ty::Func(self.arena.alloc(fty));
+            return Ok((fty, self.wrap_sugar(sugar, Sugar::Func)));
         }
         if self.eat("[") {
             let mut array_attrs = Attrs::default();
@@ -1994,22 +2014,23 @@ impl<'a> Parser<'a> {
                 ));
             }
             return Ok((
-                Ty::Array(self.type_ref(elem), len),
-                sugar.wrap(Sugar::Array),
+                self.array_type(elem, len),
+                self.wrap_sugar(sugar, Sugar::Array),
             ));
         }
         Ok((ty, sugar))
     }
 
     /// A parameter list, after the `(`.
-    fn params(&mut self, ret: Ty) -> R<FuncTy> {
+    fn params(&mut self, ret: Ty<'a>) -> R<FuncTy<'a>> {
         let mut fty = FuncTy {
             ret,
-            params: Vec::new(),
+            params: &[],
             variadic: false,
             prototyped: true,
         };
         let mut names = Vec::new();
+        let mut params = Vec::new();
         if self.eat(")") {
             fty.prototyped = false;
             self.last_params = names;
@@ -2049,16 +2070,16 @@ impl<'a> Parser<'a> {
             }
             // Arrays and functions are passed as pointers.
             let sugar = match (&d.ty, d.sugar) {
-                (Ty::Func(_), s) => s.wrap(Sugar::Ptr),
-                (Ty::Array(_, _), s) => Sugar::Ptr(self.sugar_ref(s.pointee(&self.typedefs))),
+                (Ty::Func(_), s) => self.wrap_sugar(s, Sugar::Ptr),
+                (Ty::Array(_), s) => Sugar::Ptr(self.sugar_ref(s.pointee(&self.typedefs))),
                 (_, s) => s,
             };
             let ty = match d.ty {
-                Ty::Array(elem, _) => Ty::Ptr(elem),
+                Ty::Array(a) => Ty::Ptr(&a.elem),
                 Ty::Func(_) => self.ptr_type(d.ty),
                 ty => ty,
             };
-            fty.params.push(ty.clone());
+            params.push(ty);
             names.push((d.name.map(|(n, _)| n), ty, sugar, loc));
             if !self.eat(",") {
                 break;
@@ -2066,10 +2087,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(")")?;
         self.last_params = names;
+        fty.params = self.arena.alloc_slice_copy(&params);
         Ok(fty)
     }
 
-    fn struct_spec(&mut self, is_union: bool) -> R<Ty> {
+    fn struct_spec(&mut self, is_union: bool) -> R<Ty<'a>> {
         let mut attrs = Attrs::default();
         self.attributes(&mut attrs)?;
         let loc = self.loc();
@@ -2150,9 +2172,9 @@ impl<'a> Parser<'a> {
             loop {
                 let mut member_attrs = spec.attrs;
                 let (name, ty, sugar) = if self.is(":") {
-                    (None, spec.ty.clone(), spec.sugar.clone())
+                    (None, spec.ty, spec.sugar)
                 } else {
-                    let d = self.declarator_sugar(spec.ty.clone(), spec.sugar.clone())?;
+                    let d = self.declarator_sugar(spec.ty, spec.sugar)?;
                     member_attrs.merge(d.attrs);
                     (d.name.map(|(n, _)| n), d.ty, d.sugar)
                 };
@@ -2207,7 +2229,7 @@ impl<'a> Parser<'a> {
     }
 
     /// An enum specifier: its values' type, and the enum for debug info.
-    fn enum_spec(&mut self) -> R<(Ty, Sugar)> {
+    fn enum_spec(&mut self) -> R<(Ty<'a>, Sugar<'a>)> {
         self.attributes(&mut Attrs::default())?;
         let mut tag = None;
         if let Tok::Ident(s) = self.peek()
@@ -2249,8 +2271,8 @@ impl<'a> Parser<'a> {
         }
         self.attributes(&mut Attrs::default())?;
         self.enums.push(EnumDef {
-            tag: tag.clone(),
-            ty: ty.clone(),
+            tag: tag,
+            ty: ty,
             values,
         });
         let i = self.enums.len() - 1;
@@ -2372,7 +2394,7 @@ impl<'a> Parser<'a> {
                     let cond = self.promote(cond);
                     self.expect(")")?;
                     self.fs.as_mut().unwrap().switches.push(SwitchCtx {
-                        ty: cond.ty.clone(),
+                        ty: cond.ty,
                         cases: Vec::new(),
                         default: None,
                         labels: 0,
@@ -2446,7 +2468,7 @@ impl<'a> Parser<'a> {
                     }
                     let e = self.expr()?;
                     self.expect(";")?;
-                    let ret = self.fs.as_ref().unwrap().ret.clone();
+                    let ret = self.fs.as_ref().unwrap().ret;
                     if ret == Ty::Void {
                         // `return f();` in a void function, f returning void.
                         return Ok(Stmt::Block(vec![Stmt::Expr(e), Stmt::Return(None, loc)]));
@@ -2525,11 +2547,11 @@ impl<'a> Parser<'a> {
     /// A type a member cannot have. A struct or union of size 0 is
     /// complete (GNU allows empty ones, and zero-length arrays); an array
     /// with no length is a flexible array member if its element is.
-    fn incomplete(&self, ty: &Ty) -> bool {
+    fn incomplete(&self, ty: &Ty<'a>) -> bool {
         match ty {
             Ty::Void | Ty::Func(_) => true,
             Ty::Struct(id) => !self.structs[*id].complete,
-            Ty::Array(elem, _) => self.incomplete(elem),
+            Ty::Array(a) => self.incomplete(&a.elem),
             _ => false,
         }
     }
@@ -2677,9 +2699,9 @@ mod tests {
             p.pop_scope();
         }
         assert_eq!(p.lookup(object), Some(&Sym::Global(global)));
-        assert!(Rc::ptr_eq(
-            &p.sugar_ref(Sugar::Plain),
-            &p.sugar_ref(Sugar::Plain)
+        assert!(std::ptr::eq(
+            p.sugar_ref(Sugar::Plain),
+            p.sugar_ref(Sugar::Plain)
         ));
     }
 }
