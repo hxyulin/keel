@@ -116,6 +116,7 @@ use std::fmt::Write;
 mod constant_plan;
 mod native;
 mod output;
+mod packed_load;
 mod vector;
 use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
@@ -580,6 +581,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
+    packed_low_loads: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
@@ -869,6 +871,7 @@ impl<'a> FunctionCompiler<'a> {
                         .collect()
                 })
         };
+        let packed_low_loads = packed_load::select(func, &mut selection);
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let widening_adds = vector::select_widening_adds(func, &mut selection);
         let fused_compares = {
@@ -954,6 +957,7 @@ impl<'a> FunctionCompiler<'a> {
             has_inline_asm,
             selection,
             replicate_loads,
+            packed_low_loads,
             widening_adds,
             stack_slot_offsets,
             copy_base,
@@ -1380,6 +1384,13 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&addr) = self.packed_low_loads.get(&inst) {
+            let at = self.mem(addr, S0, Type::F64);
+            let d = self.def_freg(result);
+            self.mach("ldr", [Reg::d(d).into(), at.into()]);
+            self.def_done(result, d);
             return;
         }
         if let Some(&addr) = self.replicate_loads.get(&inst) {
