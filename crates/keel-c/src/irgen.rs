@@ -34,6 +34,8 @@ type R<T> = Result<T, Error>;
 
 pub struct Gen<'p> {
     p: &'p Parser<'p>,
+    /// The parser's function definitions, each dropped once emitted.
+    funcs: Vec<Option<FuncDef<'p>>>,
     files: &'p [&'p str],
     module: Module,
     debug: bool,
@@ -62,9 +64,15 @@ pub struct Gen<'p> {
 }
 
 impl<'p> Gen<'p> {
-    pub fn new(p: &'p Parser<'p>, files: &'p [&'p str], debug: bool) -> Self {
+    pub fn new(
+        p: &'p Parser<'p>,
+        funcs: Vec<FuncDef<'p>>,
+        files: &'p [&'p str],
+        debug: bool,
+    ) -> Self {
         Self {
             p,
+            funcs: funcs.into_iter().map(Some).collect(),
             files,
             module: Module::default(),
             debug,
@@ -115,7 +123,9 @@ impl<'p> Gen<'p> {
             let global = &self.p.globals[g];
             match (&global.ty, global.func) {
                 (Ty::Func(_), Some(f)) => {
-                    let func = self.function(&self.p.funcs[f])?;
+                    // Each is emitted once; its tree is not needed after.
+                    let def = self.funcs[f].take().expect("a function emitted twice");
+                    let func = self.function(&def)?;
                     self.module.functions.push(func);
                 }
                 (Ty::Func(fty), None) => {
@@ -417,7 +427,7 @@ impl<'p> Gen<'p> {
         }
     }
 
-    fn function(&mut self, def: &'p FuncDef<'p>) -> R<Function> {
+    fn function(&mut self, def: &FuncDef<'p>) -> R<Function> {
         let global = &self.p.globals[def.global];
         let sig = self.signature(&def.ty, def.global, &[])?;
         let mut func = Function::new(global.symbol.to_owned(), sig.clone());
@@ -1239,7 +1249,7 @@ fn visit_goto_expr(e: &Expr<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) ->
 struct FnGen<'g, 'p, 'f> {
     g: &'g mut Gen<'p>,
     b: FunctionBuilder<'f>,
-    def: &'p FuncDef<'p>,
+    def: &'f FuncDef<'p>,
     locals: Vec<Storage>,
     /// Facts attached to distinct SSA definitions, never to a mutable C variable.
     alignments: HashMap<Value, u32>,
@@ -3266,7 +3276,7 @@ mod alignment_tests {
     fn symbol_index_preserves_first_matches_and_late_generated_data() {
         let arena = bumpalo::Bump::new();
         let p = parser(&arena);
-        let mut g = Gen::new(&p, &[], false);
+        let mut g = Gen::new(&p, Vec::new(), &[], false);
         assert!(g.global_alignments.is_none());
         assert_eq!(g.symbol_alignment("unknown"), 1);
         assert_eq!(g.symbol_alignment("shared"), 8);
@@ -3302,7 +3312,7 @@ mod alignment_tests {
     fn dense_tables_keep_alignment_and_conservative_offsets() {
         let arena = bumpalo::Bump::new();
         let p = parser(&arena);
-        let mut g = Gen::new(&p, &[], false);
+        let mut g = Gen::new(&p, Vec::new(), &[], false);
         let init = g.anon_data(b"bytes");
         let mut f = Function::new("f", Signature::new(&[], &[Type::I8]));
         let entry = f.create_block();
@@ -3425,7 +3435,7 @@ mod alignment_tests {
         use keel_ir::InsertPoint::End;
         let arena = bumpalo::Bump::new();
         let p = parser(&arena);
-        let mut g = Gen::new(&p, &[], false);
+        let mut g = Gen::new(&p, Vec::new(), &[], false);
         let mut f = Function::new("f", Signature::new(&[Type::Ptr], &[]));
         let entry = f.create_block();
         let param = f.append_block_param(entry, Type::Ptr);

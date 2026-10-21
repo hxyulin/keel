@@ -50,9 +50,10 @@ pub fn compile(
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;
+    let funcs = std::mem::take(&mut parser.funcs);
     let parse_ms = start.elapsed().as_secs_f64() * 1000.;
     let start = Instant::now();
-    let module = irgen::Gen::new(&parser, &files, opts.debug_info)
+    let module = irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .run()
         .map_err(|e| diagnostic(&files, e))?;
     let irgen_ms = start.elapsed().as_secs_f64() * 1000.;

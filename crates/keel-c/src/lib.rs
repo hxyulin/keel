@@ -119,7 +119,8 @@ pub fn compile(src: &str, path: &str, opts: Options) -> Result<keel_ir::Module, 
     let parsed = parser.translation_unit();
     let files = parser.take_files();
     parsed.map_err(|e| diagnostic(&files, e))?;
-    irgen::Gen::new(&parser, &files, opts.debug_info)
+    let funcs = std::mem::take(&mut parser.funcs);
+    irgen::Gen::new(&parser, funcs, &files, opts.debug_info)
         .run()
         .map_err(|e| diagnostic(&files, e))
 }
