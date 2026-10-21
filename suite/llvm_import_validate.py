@@ -61,7 +61,7 @@ def main():
             'large-alloca': 'define void @f() { %p = alloca i64, i64 536870912\nret void }',
             'aligned-alloca': 'define void @f() { %p = alloca i32, align 32\nret void }',
             'opaque-alloca': '%S = type opaque\ndefine void @f() { %p = alloca %S\nret void }',
-            'float-alloca': 'define void @f() { %p = alloca double\nret void }',
+            'half-alloca': 'define void @f() { %p = alloca half\nret void }',
             'address-space': 'define ptr addrspace(1) @f(ptr addrspace(1) %p) { ret ptr addrspace(1) %p }',
             'gep-wide-index': 'define ptr @f(ptr %p, i128 %i) { %q = getelementptr i64, ptr %p, i128 %i\nret ptr %q }',
             'gep-i1': 'define ptr @f(ptr %p) { %q = getelementptr i8, ptr %p, i1 true\nret ptr %q }',

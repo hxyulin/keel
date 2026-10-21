@@ -44,6 +44,14 @@ rename; unsupported input leaves an existing destination intact.
   integer comparisons and selects; truncation, sign/zero extension and
   pointer/integer conversions. Internal i1 values become normalized Keel i8
   booleans, including truncation, pointer low-bit extraction and sign extension.
+- Scalar f32/f64 parameters, returns, memory, exact raw-bit constants, arithmetic
+  and negation, all ordered/unordered comparisons, bitcasts, integer-to-FP and
+  FP width conversions. FP-to-integer supports i32/i64 destinations and agrees
+  on LLVM-defined inputs; Keel saturation on LLVM poison inputs is not a shared
+  source-level saturation guarantee. Default IEEE environment/rounding only:
+  fast-math flags, strict/constrained operations, denormal/rounding attributes
+  and `nofpclass` promises are rejected. Constants, bitcasts and negation retain
+  NaN payload bits; unspecified arithmetic NaNs are compared by classification.
 - Arbitrary verified scalar CFGs using unconditional/conditional branches and
   integer switches. PHIs become typed Keel block parameters; every edge supplies
   incoming values in PHI order. Parallel PHIs, loop backedges, irreducible loops,
@@ -95,7 +103,7 @@ security-hardening, or source-level tooling replacement for LLVM.
 
 ## Explicit rejections
 
-Global data/aliases/ifuncs, floating point (including FP memory layouts), vectors,
+Global data/aliases/ifuncs, half/bfloat/x87/FP128, vectors, `frem`,
 aggregate SSA values and ABIs beyond the bounded sret contract, i128,
 i1 ABI parameters/returns, varargs, non-C calls, intrinsics, operand bundles, inline assembly, atomics,
 exception handling, GC, special sections, explicit prefix/prologue data and
@@ -103,8 +111,7 @@ unsupported ABI attributes are outside this first implementation. Failure is
 module-wide; it does not silently discard unsupported functions. Consequently,
 ordinary unoptimized Rust/C++ output and full applications usually need more
 support. Followups need explicit global storage/initializer/relocation and symbol
-contracts; FP types, constants, comparisons, conversions and fast-math handling;
-broader aggregate SSA lowering and byval/sret ABI proofs. Those features are
+contracts; broader aggregate SSA lowering and byval/sret ABI proofs. Those features are
 not silently approximated here.
 
 SME/ZA/streaming ABI attributes (`aarch64_*`) are rejected on definitions,
@@ -160,3 +167,9 @@ sret contract. It replaces native objects individually and together at
 None/Fast/Full; independent C assertions cover both call directions. Its 38
 checks include 22 negative cases with source/destination preservation. The
 validation JSON records a dependency plan for deferred aggregate forms.
+
+`llvm_import_fp_validate.py` adds 56 rejection/preservation cases and nine native
+builds for handwritten LLVM and untouched Clang O0/O1 output at None/Fast/Full.
+Independent assertions cover NaNs, infinities, signed zeros, subnormals, ties,
+conversion boundaries, PHIs/selects, stack-passed FP arguments and indirect FP
+calls. The aggregate runner invokes it as `llvm-fp` under the same host lease.

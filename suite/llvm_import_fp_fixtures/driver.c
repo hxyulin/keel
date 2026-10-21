@@ -138,7 +138,13 @@ extern int8_t smallcall(int8_t);
 double external_fp(double a, float b) { return a - b; }
 extern double outside(double), foldneg(void);
 extern uint32_t foldbits(void);
+extern double indirect_fp(double (*)(double,float),double,float);
+extern float indirect_fp32(float (*)(float),float);
+static float fp32_identity(float x) { return x; }
 int main(void) {
+ eq64(indirect_fp(external_fp,2.0,0.5f),1.5);
+ assert(b32(indirect_fp32(fp32_identity,-0.0f))==0x80000000);
+ assert(b32(indirect_fp32(fp32_identity,d32(0x7f800001)))==0x7f800001);
  assert(outside(2.0)==1.5);
  assert(b64(foldneg())==0xfff0000000000001ULL && foldbits()==0x7f800001);
 

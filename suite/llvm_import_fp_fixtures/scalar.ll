@@ -370,3 +370,12 @@ define i32 @foldbits() {
  %v = bitcast float 0x7FF0000020000000 to i32
  ret i32 %v
 }
+
+define double @indirect_fp(ptr %fn, double %a, float %b) {
+ %r = call double %fn(double %a, float %b)
+ ret double %r
+}
+define float @indirect_fp32(ptr %fn, float %a) {
+ %r = call float %fn(float %a)
+ ret float %r
+}

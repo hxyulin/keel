@@ -62,7 +62,7 @@ def main():
             'poison': 'define double @f() { ret double poison }',
             'undef': 'define float @f() { ret float undef }',
             'freeze': 'define double @f(double %x) { %v = freeze double %x\nret double %v }',
-            'indirect': 'define double @f(ptr %p, double %x) { %v = call double %p(double %x)\nret double %v }',
+            'indirect-nofpclass': 'define double @f(ptr %p, double %x) { %v = call nofpclass(nan) double %p(double %x)\nret double %v }',
             'global': '@g = global double 1.0\ndefine double @f() { ret double 1.0 }',
             'nofpclass-return': 'define nofpclass(nan) double @f(double %x) { ret double %x }',
             'nofpclass-param': 'declare double @f(double nofpclass(inf))',

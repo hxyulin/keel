@@ -115,13 +115,15 @@ def main(argv=None):
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-import'])
                 harness.run('llvm-calls', [sys.executable, ROOT / 'suite/llvm_import_calls_validate.py',
                     '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-calls'])
+                harness.run('llvm-fp', [sys.executable, ROOT / 'suite/llvm_import_fp_validate.py',
+                    '--libllvm', libllvm, '--keel', keel, '--out', out / 'llvm-fp'])
                 harness.run('cpp-coverage', [sys.executable, ROOT / 'suite/cpp_coverage.py',
                     '--libllvm', libllvm, '--keel', keel, '--abi-rustc', 'rustc',
                     '--out', out / 'cpp-coverage'])
             else:
                 reason = ('LLVM import currently requires Apple AArch64' if not supported
                           else 'LLVM library discovery or Keel prerequisite failed')
-                for name in ('llvm-import', 'llvm-calls', 'cpp-coverage'):
+                for name in ('llvm-import', 'llvm-calls', 'llvm-fp', 'cpp-coverage'):
                     harness.skip(name, reason)
                 if supported or args.require_llvm:
                     harness.stages.append(dict(name='llvm-prerequisite', status='failed', reason=reason))
