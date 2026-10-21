@@ -156,11 +156,10 @@ impl<'a> Parser<'a> {
                 comp
             }
         };
-        let rhs = self.cast(rhs, comp.clone());
+        let rhs = self.cast(rhs, comp);
         Ok(mk(
             ExprKind::OpAssign {
                 op,
-                ty: comp,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
             },

@@ -2254,13 +2254,13 @@ impl<'a> Parser<'a> {
                     let cond = if self.is(";") {
                         None
                     } else {
-                        Some(self.condition()?)
+                        Some(Box::new(self.condition()?))
                     };
                     self.expect(";")?;
                     let step = if self.is(")") {
                         None
                     } else {
-                        Some(self.expr()?)
+                        Some(Box::new(self.expr()?))
                     };
                     self.expect(")")?;
                     let body = self.statement()?;
@@ -2292,7 +2292,7 @@ impl<'a> Parser<'a> {
                     let body = self.statement()?;
                     let sw = self.fs.as_mut().unwrap().switches.pop().unwrap();
                     return Ok(Stmt::Switch {
-                        cond,
+                        cond: Box::new(cond),
                         body: Box::new(body),
                         cases: sw.cases,
                         default: sw.default,

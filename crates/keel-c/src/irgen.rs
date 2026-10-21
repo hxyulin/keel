@@ -317,6 +317,7 @@ impl<'p> Gen<'p> {
     /// leading `sret` parameter. `g` is the function, if known by name.
     fn signature(&self, fty: &FuncTy, g: usize, extra: &[Ty]) -> R<Signature> {
         let mut sig = Signature::new(&[], &[]);
+        sig.params.reserve(fty.params.len() + extra.len() + 1);
         if let Ty::Struct(_) = fty.ret {
             sig.params.push(AbiParam {
                 ty: Type::Ptr,
@@ -458,7 +459,7 @@ impl<'p> Gen<'p> {
             g: self,
             b,
             def,
-            locals: Vec::new(),
+            locals: Vec::with_capacity(def.locals.len()),
             alignments: HashMap::default(),
             sret: None,
             breaks: Vec::new(),
@@ -1148,8 +1149,12 @@ fn visit_gotos(stmt: &Stmt<'_>, f: &mut impl FnMut(&Expr<'_>) -> Option<()>) -> 
                 visit_gotos(no, f)?;
             }
         }
-        Stmt::While(e, body) | Stmt::DoWhile(body, e) | Stmt::Switch { cond: e, body, .. } => {
+        Stmt::While(e, body) | Stmt::DoWhile(body, e) => {
             visit_goto_expr(e, f)?;
+            visit_gotos(body, f)?;
+        }
+        Stmt::Switch { cond, body, .. } => {
+            visit_goto_expr(cond, f)?;
             visit_gotos(body, f)?;
         }
         Stmt::For {
@@ -1914,7 +1919,8 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 // (or perform an extra read of volatile destination storage).
                 v
             }
-            ExprKind::OpAssign { op, ty, lhs, rhs } => {
+            ExprKind::OpAssign { op, lhs, rhs } => {
+                let ty = &rhs.ty;
                 let place = self.place(lhs)?.unwrap();
                 let old = self.load_place(&place);
                 let old = self.convert(old, &lhs.ty, ty, e.loc)?;

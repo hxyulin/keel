@@ -53,11 +53,10 @@ pub enum ExprKind<'a> {
     LogOr(Box<Expr<'a>>, Box<Expr<'a>>),
     /// The right side is already converted to the left's type.
     Assign(Box<Expr<'a>>, Box<Expr<'a>>),
-    /// `lhs op= rhs`: the left is converted to `ty`, combined with the right
-    /// (already of `ty`), and converted back.
+    /// `lhs op= rhs`: the left is converted to the right's type, combined
+    /// with the right, and converted back.
     OpAssign {
         op: BinOp,
-        ty: Ty,
         lhs: Box<Expr<'a>>,
         rhs: Box<Expr<'a>>,
     },
@@ -233,16 +232,18 @@ pub enum Stmt<'a> {
     If(Expr<'a>, Box<Stmt<'a>>, Option<Box<Stmt<'a>>>),
     While(Expr<'a>, Box<Stmt<'a>>),
     DoWhile(Box<Stmt<'a>>, Expr<'a>),
+    /// The expressions are boxed, as are a switch's, to keep statements
+    /// (which blocks hold by value) small.
     For {
         init: Option<Box<Stmt<'a>>>,
-        cond: Option<Expr<'a>>,
-        step: Option<Expr<'a>>,
+        cond: Option<Box<Expr<'a>>>,
+        step: Option<Box<Expr<'a>>>,
         body: Box<Stmt<'a>>,
     },
     /// The cases are the values of the `Case` labels in the body, by their
     /// index, and which one is `default`.
     Switch {
-        cond: Expr<'a>,
+        cond: Box<Expr<'a>>,
         body: Box<Stmt<'a>>,
         cases: Vec<(i64, usize)>,
         default: Option<usize>,
