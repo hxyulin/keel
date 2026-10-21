@@ -1444,7 +1444,7 @@ impl Parser {
                     InstData::Invoke {
                         func,
                         args,
-                        dests: [normal, unwind],
+                        dests: Box::new([normal, unwind]),
                     }
                 }
                 "landingpad" => {

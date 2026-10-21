@@ -216,7 +216,7 @@ pub enum InstData {
     Invoke {
         func: FuncRef,
         args: Vec<Value>,
-        dests: [BlockCall; 2],
+        dests: Box<[BlockCall; 2]>,
     },
     /// The first instruction of a block an `invoke` unwinds to: gives the
     /// exception object (`ptr`) and the selector (`i32`), which says which
@@ -685,7 +685,7 @@ impl InstData {
             InstData::Jump { dest } => std::slice::from_ref(dest),
             InstData::Brif { dests, .. } => dests,
             InstData::Switch { dests, .. } => dests,
-            InstData::Invoke { dests, .. } => dests,
+            InstData::Invoke { dests, .. } => &dests[..],
             _ => &[],
         }
     }
@@ -695,7 +695,7 @@ impl InstData {
             InstData::Jump { dest } => std::slice::from_mut(dest),
             InstData::Brif { dests, .. } => dests,
             InstData::Switch { dests, .. } => dests,
-            InstData::Invoke { dests, .. } => dests,
+            InstData::Invoke { dests, .. } => &mut dests[..],
             _ => &mut [],
         }
     }
