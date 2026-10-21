@@ -428,7 +428,7 @@ impl<'a> Parser<'a> {
                     let eof = Token {
                         tok: Tok::Eof,
                         loc: e.loc,
-                        pack: None,
+                        pack: 0,
                     };
                     self.lex_error = Some(e);
                     eof
@@ -2018,7 +2018,7 @@ impl<'a> Parser<'a> {
             self.scopes.last_mut().unwrap().tags.insert(tag, Some(id));
             return Ok(Ty::Struct(id));
         }
-        let pack = self.toks[self.pos].pack;
+        let pack = self.lexer.pack_limit(self.toks[self.pos].pack);
         self.advance();
         let id = match &tag {
             Some(t) => match self.scopes.last().unwrap().tags.get(t) {

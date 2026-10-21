@@ -49,8 +49,9 @@ pub enum Tok<'a> {
 pub struct Token<'a> {
     pub tok: Tok<'a>,
     pub loc: Loc,
-    /// The `#pragma pack` alignment limit in force, if any.
-    pub pack: Option<u64>,
+    /// The `#pragma pack` alignment limit in force, by index for
+    /// [`Lexer::pack_limit`].
+    pub pack: u32,
 }
 
 #[cfg(test)]
@@ -140,6 +141,17 @@ const IDENT: [bool; 256] = {
     table
 };
 
+/// Bytes that may start whitespace, a comment or a directive.
+const SPACE: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        table[i] = matches!(i as u8, b' ' | b'\t' | b'\r' | b'\x0c' | b'\x0b' | b'\n' | b'\\' | b'/' | b'#');
+        i += 1;
+    }
+    table
+};
+
 /// Splits all of `src` into tokens. `files` receives the file names line
 /// markers mention; a token's `Loc::file` indexes it. The parser instead
 /// pulls tokens from a [`Lexer`] as it goes.
@@ -175,6 +187,10 @@ pub struct Lexer<'a> {
     file_ids: HashMap<&'a str, u32>,
     /// `#pragma pack` limits: the last is in force, `None` for none.
     pack: Vec<Option<u64>>,
+    /// Each limit put in force, the first none; tokens index it.
+    pack_limits: Vec<Option<u64>>,
+    /// A string literal's bytes, as they are decoded.
+    scratch: Vec<u8>,
 }
 
 impl<'a> Lexer<'a> {
@@ -192,7 +208,14 @@ impl<'a> Lexer<'a> {
             files: vec![path],
             file_ids,
             pack: Vec::new(),
+            pack_limits: vec![None],
+            scratch: Vec::new(),
         }
+    }
+
+    /// The `#pragma pack` limit of a token's `pack`.
+    pub fn pack_limit(&self, pack: u32) -> Option<u64> {
+        self.pack_limits[pack as usize]
     }
 
     /// The next token. After `Eof`, `Eof` again.
@@ -231,7 +254,22 @@ impl<'a> Lexer<'a> {
 
     /// Skips whitespace, comments (in case the preprocessor kept them) and
     /// `#` lines, applying line markers.
+    #[inline]
     fn skip_space(&mut self, text: &mut Strings<'a>) -> Result<(), Error> {
+        // Most tokens follow the last directly or after one blank.
+        let mut pos = self.pos;
+        if self.src.get(pos) == Some(&b' ') {
+            pos += 1;
+        }
+        if !self.src.get(pos).is_some_and(|&c| SPACE[c as usize]) {
+            self.pos = pos;
+            return Ok(());
+        }
+        self.skip_space_slow(text)
+    }
+
+    #[inline(never)]
+    fn skip_space_slow(&mut self, text: &mut Strings<'a>) -> Result<(), Error> {
         loop {
             match self.peek(0) {
                 b'\n' => self.newline(),
@@ -334,6 +372,10 @@ impl<'a> Lexer<'a> {
             }
             _ => {}
         }
+        let limit = self.pack.last().copied().flatten();
+        if self.pack_limits.last() != Some(&limit) {
+            self.pack_limits.push(limit);
+        }
     }
 
     fn next(&mut self, text: &mut Strings<'a>) -> Result<Token<'a>, Error> {
@@ -351,11 +393,12 @@ impl<'a> Lexer<'a> {
             self.quoted(false, text)?
         } else if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
             let start = self.pos;
-            while IDENT[self.peek(0) as usize] {
-                self.pos += 1;
-            }
-            // ASCII bounds: slicing the source needs no UTF-8 validation.
-            Tok::Ident(text.intern(&self.source[start..self.pos]))
+            let rest = &self.src[start..];
+            self.pos += rest
+                .iter()
+                .position(|&c| !IDENT[c as usize])
+                .unwrap_or(rest.len());
+            Tok::Ident(text.intern_utf8(&self.src[start..self.pos]))
         } else if c.is_ascii_digit() || (c == b'.' && self.peek(1).is_ascii_digit()) {
             self.number(text)?
         } else if c == b'"' || c == b'\'' {
@@ -368,7 +411,7 @@ impl<'a> Lexer<'a> {
             self.pos += p.len();
             Tok::Punct(p)
         };
-        let pack = self.pack.last().copied().flatten();
+        let pack = self.pack_limits.len() as u32 - 1;
         Ok(Token { tok, loc, pack })
     }
 
@@ -386,6 +429,21 @@ impl<'a> Lexer<'a> {
             }
         }
         let text = &self.source[start..self.pos];
+        // Most constants are short plain decimals, which cannot overflow.
+        if text.len() < 20
+            && (text.len() == 1 || !text.starts_with('0'))
+            && text.bytes().all(|b| b.is_ascii_digit())
+        {
+            let value = text
+                .bytes()
+                .fold(0, |v: u64, b| v * 10 + u64::from(b - b'0'));
+            return Ok(Tok::Int {
+                value,
+                decimal: true,
+                unsigned: false,
+                longs: 0,
+            });
+        }
         Ok(parse_number(text).unwrap_or_else(|| Tok::BadNumber(strings.intern(text))))
     }
 
@@ -394,7 +452,8 @@ impl<'a> Lexer<'a> {
         let quote = self.peek(0);
         self.pos += 1;
         let string = quote == b'"';
-        let mut bytes = Vec::new();
+        let mut bytes = std::mem::take(&mut self.scratch);
+        bytes.clear();
         let (mut count, mut first, mut packed) = (0usize, 0u32, 0u32);
         loop {
             let c = self.peek(0);
@@ -453,8 +512,10 @@ impl<'a> Lexer<'a> {
             }
         }
         if string {
+            let bytes_ref = text.bytes(&bytes);
+            self.scratch = bytes;
             return Ok(Tok::Str {
-                bytes: text.bytes(&bytes),
+                bytes: bytes_ref,
                 wide,
             });
         }
@@ -732,6 +793,19 @@ mod tests {
             unsigned,
             longs,
         })
+    }
+
+    #[test]
+    fn plain_decimal_tokens_match_the_general_decoder() {
+        let text = "0 7 123 1234567890123456789 18446744073709551615 99999999999999999999 0123 00";
+        let arena = bumpalo::Bump::new();
+        let mut pool = Strings::new(&arena);
+        let mut files = Vec::new();
+        let tokens = tokenize(text, "numbers.c", &mut files, &mut pool).unwrap();
+        for (spelling, token) in text.split(' ').zip(&tokens) {
+            let expected = parse_number(spelling).unwrap_or(Tok::BadNumber(spelling));
+            assert_eq!(token.tok, expected, "{spelling}");
+        }
     }
 
     #[test]
