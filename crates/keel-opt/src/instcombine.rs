@@ -64,17 +64,61 @@ fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
 #[derive(Clone, Copy)]
 enum Uses<'a> {
     /// The worklist's user lists. Also enables reciprocal division expansion.
-    Users(&'a Users),
+    Users(&'a LazyUsers),
     /// Fast keeps no use information: every value may be shared.
     Unknown,
 }
 
 impl Uses<'_> {
-    fn single(self, value: Value) -> bool {
+    fn single(self, func: &Function, value: Value) -> bool {
         match self {
-            Uses::Users(users) => users.len.get(value.index()).is_some_and(|&n| n == 1),
+            Uses::Users(users) => users
+                .get(func)
+                .len
+                .get(value.index())
+                .is_some_and(|&n| n == 1),
             Uses::Unknown => false,
         }
+    }
+}
+
+/// The worklist's user lists, built on first need. Until the worklist first
+/// changes the function, only new instructions can appear, so building from
+/// the instructions present at entry gives the lists an eager build would.
+/// Most functions never fold, nor ask for a single use.
+struct LazyUsers {
+    users: std::cell::OnceCell<Users>,
+    insts: usize,
+    values: usize,
+}
+
+impl LazyUsers {
+    fn new(func: &Function) -> Self {
+        Self {
+            users: std::cell::OnceCell::new(),
+            insts: func.num_insts(),
+            values: func.num_values(),
+        }
+    }
+
+    fn get(&self, func: &Function) -> &Users {
+        self.users.get_or_init(|| {
+            let mut users = Users::default();
+            users.resize(self.values);
+            for (_, inst) in func.layout_insts() {
+                if inst.index() < self.insts {
+                    func.inst_data(inst)
+                        .for_each_operand(|v| users.push(func.resolve(v), inst));
+                }
+            }
+            users
+        })
+    }
+
+    /// Call before the worklist changes the function.
+    fn get_mut(&mut self, func: &Function) -> &mut Users {
+        self.get(func);
+        self.users.get_mut().expect("built")
     }
 }
 
@@ -519,10 +563,11 @@ fn algebra(
     }
     // Reassociation must remove the inner operation, rather than duplicate a
     // shared computation or merely move constants between live expressions.
-    if uses.single(a)
-        && let Some((inner_op, args)) = binary(func, a)
+    // The use count is consulted last, once the shape matches.
+    if let Some((inner_op, args)) = binary(func, a)
         && inner_op == op
         && let (Some(c1), Some(c2)) = (bits(func, args[1]), bits(func, b))
+        && uses.single(func, a)
     {
         let combined = match op {
             BinaryOp::Imul => c1.wrapping_mul(c2),
@@ -557,16 +602,18 @@ fn offsets(
         _ => None,
     };
     let outer = offset(op, bits(func, b)?)?;
-    if !uses.single(a) {
-        return None;
-    }
+    // The use count is consulted last, once the shape matches.
     let (inner_op, [x, k]) = binary(func, a)?;
     if (inner_op == BinaryOp::Ptradd) != (op == BinaryOp::Ptradd) {
         return None;
     }
+    let inner = offset(inner_op, bits(func, k)?)?;
+    if !uses.single(func, a) {
+        return None;
+    }
     let ty = func.value_type(b);
     let m = mask(ty);
-    let total = offset(inner_op, bits(func, k)?)?.wrapping_add(outer) & m;
+    let total = inner.wrapping_add(outer) & m;
     if total == 0 {
         return Some(Fold::Value(x));
     }
@@ -1094,14 +1141,8 @@ pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Qu
 
 pub fn run(func: &mut Function) -> bool {
     let reused_quotients = reuse_quotients(func);
-    let mut users = Users::default();
-    users.resize(func.num_values());
+    let mut lazy = LazyUsers::new(func);
     let mut work: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
-    users.nodes.reserve(2 * work.len());
-    for &inst in &work {
-        func.inst_data(inst)
-            .for_each_operand(|v| users.push(func.resolve(v), inst));
-    }
     // Start with definitions first within the usual layout; dependency
     // notifications make the final result independent of layout order.
     work.reverse();
@@ -1115,6 +1156,7 @@ pub fn run(func: &mut Function) -> bool {
         }
         if func.inst_results(inst).is_empty() {
             if let Some(data) = simplify_branch(func, inst) {
+                let users = lazy.get_mut(func);
                 // A terminator has no result users to notify, but its new
                 // condition must notify it if that producer changes later.
                 func.inst_data(inst)
@@ -1126,9 +1168,10 @@ pub fn run(func: &mut Function) -> bool {
             }
             continue;
         }
-        let Some(fold) = simplify(func, inst, Uses::Users(&users)) else {
+        let Some(fold) = simplify(func, inst, Uses::Users(&lazy)) else {
             continue;
         };
+        let users = lazy.get_mut(func);
         let result = func.first_result(inst);
         waiting.clear();
         for &result in func.inst_results(inst) {
