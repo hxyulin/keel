@@ -75,9 +75,13 @@ impl Hasher for FxHasher {
         self.add(i as u64);
     }
 
+    /// Rotated as in rustc-hash 2: the multiply mixes into the high bits,
+    /// while hash tables pick buckets with the low ones. Unrotated, keys
+    /// differing only above their low bits (aligned addresses, short
+    /// strings) crowd the same buckets.
     #[inline]
     fn finish(&self) -> u64 {
-        self.hash
+        self.hash.rotate_left(26)
     }
 }
 

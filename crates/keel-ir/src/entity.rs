@@ -180,13 +180,13 @@ impl KeyIndex {
     /// Arena size from which lookups go through an index.
     pub(crate) const FROM: usize = 16;
 
-    /// The top half of a 64-bit hash, the best mixed by Fx's multiply.
+    /// The low half of an Fx hash, where it puts its best mixed bits.
     #[inline]
     pub(crate) fn hash_of<T: std::hash::Hash + ?Sized>(key: &T) -> u32 {
         use std::hash::Hasher;
         let mut hasher = crate::fxhash::FxHasher::default();
         key.hash(&mut hasher);
-        (hasher.finish() >> 32) as u32
+        hasher.finish() as u32
     }
 
     /// Number of entries indexed.
@@ -276,7 +276,7 @@ impl KeyIndex {
 impl KeyTable {
     #[inline]
     fn home(&self, hash: u32) -> usize {
-        (hash >> (32 - self.slots.len().trailing_zeros())) as usize
+        hash as usize & (self.slots.len() - 1)
     }
 
     fn push(&mut self, hash: u32) {
