@@ -128,6 +128,12 @@ impl<K: EntityRef, V> Arena<K, V> {
         debug_assert!(key.index() < self.items.len());
         unsafe { self.items.get_unchecked(key.index()) }
     }
+
+    /// Every entry, mutably, in key order.
+    #[inline]
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
+        self.items.iter_mut()
+    }
 }
 
 impl<K, V: Clone> Clone for Arena<K, V> {
@@ -321,9 +327,9 @@ impl KeyTable {
 ///
 /// A list owns a [`ListRange`] of the buffer with room to grow. The list
 /// at the end of the buffer grows in place; another one that outgrows its
-/// room moves to the end with twice the room, leaving its old space unused.
-/// Like arena entries, unused space is only reclaimed with the whole pool;
-/// it is bounded by the room the lists have had.
+/// room moves to the end with twice the room, abandoning its old room.
+/// Once most of the buffer holds no list's items, the owner of the lists
+/// [compacts](ListPool::compact) it.
 #[derive(Clone)]
 pub(crate) struct ListPool<T> {
     items: Vec<T>,
@@ -331,8 +337,8 @@ pub(crate) struct ListPool<T> {
 
 /// A list in a [`ListPool`] of `T`s: `len` items at `start`, with room for
 /// `cap`. Only the pool makes room, so `start + cap` is within its buffer,
-/// which never shrinks; typed, so a range cannot be used with another kind
-/// of pool.
+/// which only shrinks by compaction, which moves every list; typed, so a
+/// range cannot be used with another kind of pool.
 pub(crate) struct ListRange<T> {
     start: u32,
     len: u32,
@@ -366,12 +372,6 @@ impl<T> ListRange<T> {
     pub(crate) fn len(self) -> usize {
         self.len as usize
     }
-
-    /// Empties the list, keeping its room.
-    #[inline]
-    pub(crate) fn clear(&mut self) {
-        self.len = 0;
-    }
 }
 
 impl<T> Default for ListPool<T> {
@@ -388,9 +388,10 @@ impl<T: EntityRef> ListPool<T> {
         let start = list.start as usize;
         let end = start + list.len as usize;
         debug_assert!(end <= self.items.len(), "list from another pool");
-        // SAFETY: `len <= cap`, and `grow` gave the list `start + cap`
-        // within `items`, which only ever grows. Block lists are hot enough
-        // in the optimizer that the bounds check shows up (~0.4% of -O).
+        // SAFETY: `len <= cap`, and `grow` or `compact` gave the list
+        // `start + cap` within `items`, which only `compact` shrinks. Block
+        // lists are hot enough in the optimizer that the bounds check shows
+        // up (~0.4% of -O).
         unsafe { self.items.get_unchecked(start..end) }
     }
 
@@ -452,6 +453,43 @@ impl<T: EntityRef> ListPool<T> {
         list.start = start as u32;
         list.cap += extra as u32;
     }
+
+    /// Abandons the room of a list no longer needed, emptying it.
+    pub(crate) fn free(&mut self, list: &mut ListRange<T>) {
+        *list = ListRange::default();
+    }
+
+    /// The length of the buffer: items, spare room and abandoned rooms.
+    #[inline]
+    pub(crate) fn buffer_len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Moves `lists` into a new buffer, in order, each with room for just
+    /// its items, leaving abandoned rooms and spare room behind. `len` is
+    /// their total length, if known.
+    ///
+    /// # Safety
+    ///
+    /// `lists` must be every list of this pool: one left out would point
+    /// outside the new buffer.
+    pub(crate) unsafe fn compact<'a>(
+        &mut self,
+        len: usize,
+        lists: impl Iterator<Item = &'a mut ListRange<T>>,
+    ) where
+        T: 'a,
+    {
+        let mut items = Vec::with_capacity(len);
+        for list in lists {
+            let start = list.start as usize;
+            let old = &self.items[start..start + list.len as usize];
+            list.start = items.len() as u32;
+            list.cap = list.len;
+            items.extend_from_slice(old);
+        }
+        self.items = items;
+    }
 }
 
 #[cfg(test)]
@@ -502,10 +540,22 @@ mod tests {
                 assert_eq!(pool.get(*list), &expected[..]);
             }
         }
-        lists[1].clear();
+        pool.free(&mut lists[1]);
         assert!(pool.get(lists[1]).is_empty());
         pool.push(&mut lists[1], Thing::new(7));
-        assert_eq!(pool.get(lists[1]), &[Thing::new(7)]);
-        assert_eq!(pool.get(lists[0]), &expected[0][..]);
+        expected[1] = vec![Thing::new(7)];
+        // Compaction keeps every list and drops abandoned rooms.
+        let before = pool.items.len();
+        unsafe { pool.compact(0, lists.iter_mut()) };
+        assert!(pool.items.len() < before);
+        assert_eq!(
+            pool.items.len(),
+            expected.iter().map(Vec::len).sum::<usize>()
+        );
+        for (list, expected) in lists.iter_mut().zip(&expected) {
+            assert_eq!(pool.get(*list), &expected[..]);
+            pool.push(list, Thing::new(9));
+            assert_eq!(pool.get(*list).last(), Some(&Thing::new(9)));
+        }
     }
 }

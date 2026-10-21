@@ -792,6 +792,7 @@ impl Function {
                 self.block_insts.push(&mut data.insts, inst);
                 self.layout_len += usize::from(data.in_layout);
                 self.insts[inst].block = block.index() as u32;
+                self.compact_insts_if_wasteful();
                 return;
             }
             InsertPoint::Before(before) => {
@@ -803,6 +804,22 @@ impl Function {
         self.block_insts.insert(&mut data.insts, index, inst);
         self.layout_len += usize::from(data.in_layout);
         self.insts[inst].block = block.index() as u32;
+        self.compact_insts_if_wasteful();
+    }
+
+    /// Passes that insert and remove many instructions leave rooms in the
+    /// pool that no block uses; drop them once they are most of it.
+    #[inline]
+    fn compact_insts_if_wasteful(&mut self) {
+        if self.block_insts.buffer_len() > 2 * self.layout_len + 256 {
+            // SAFETY: block data holds every instruction list.
+            unsafe {
+                self.block_insts.compact(
+                    self.layout_len,
+                    self.blocks.values_mut().map(|b| &mut b.insts),
+                )
+            };
+        }
     }
 
     /// Index of `inst` within its block.
@@ -891,7 +908,7 @@ impl Function {
             self.insts[inst].block = NO_BLOCK;
         }
         let removed = data.insts.len();
-        data.insts.clear();
+        self.block_insts.free(&mut data.insts);
         if std::mem::replace(&mut data.in_layout, false) {
             self.layout_len -= removed;
             // A block is in the layout once; the blocks after it move up
