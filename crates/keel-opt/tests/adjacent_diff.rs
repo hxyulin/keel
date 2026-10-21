@@ -4,6 +4,16 @@ mod adjacent_abs;
 mod adjacent_diff;
 mod support;
 
+fn either_variant_accepts(f: &mut keel_ir::Function) -> bool {
+    let before = f.to_string();
+    let mut narrow = f.clone();
+    let narrow_changed = adjacent_diff::run_narrow(&mut narrow);
+    if !narrow_changed {
+        assert_eq!(before, narrow.to_string());
+    }
+    adjacent_diff::run(f) || narrow_changed
+}
+
 fn canonical() -> keel_ir::Module {
     let mut m = keel_ir::parse(include_str!("adjacent_abs/adjacent.keel")).unwrap();
     assert!(adjacent_abs::run(&mut m.functions[0]));
@@ -16,7 +26,7 @@ fn accepts_the_merged_rotated_loop_emitted_by_the_real_frontend() {
     keel_ir::verify_module(&m).unwrap();
     assert!(adjacent_diff::run(&mut m.functions[0]));
     keel_ir::verify_module(&m).unwrap();
-    assert!(!adjacent_diff::run(&mut m.functions[0]));
+    assert!(!either_variant_accepts(&mut m.functions[0]));
 }
 
 #[test]
@@ -47,7 +57,7 @@ fn exact_shape_verifies_and_is_idempotent() {
     assert!(adjacent_diff::run(&mut m.functions[0]));
     keel_ir::verify_module(&m).unwrap();
     keel_ir::verify_module(&keel_ir::parse(&m.to_string()).unwrap()).unwrap();
-    assert!(!adjacent_diff::run(&mut m.functions[0]));
+    assert!(!either_variant_accepts(&mut m.functions[0]));
     if let Some(dir) = std::env::var_os("KEEL_ADJACENT_DIFF_EVIDENCE_DIR") {
         std::fs::write(
             std::path::PathBuf::from(dir).join("adjacent-diff-after.keel"),
@@ -60,7 +70,7 @@ fn exact_shape_verifies_and_is_idempotent() {
 #[test]
 fn raw_triangle_and_memory_contract_changes_are_rejected() {
     let mut raw = keel_ir::parse(include_str!("adjacent_abs/adjacent.keel")).unwrap();
-    assert!(!adjacent_diff::run(&mut raw.functions[0]));
+    assert!(!either_variant_accepts(&mut raw.functions[0]));
     let source = canonical().to_string();
     for source in [
         source.replace("load.i32 ", "load.i32 volatile "),
@@ -74,7 +84,7 @@ fn raw_triangle_and_memory_contract_changes_are_rejected() {
         let mut m = keel_ir::parse(&source).unwrap();
         keel_ir::verify_module(&m).unwrap();
         let before = m.to_string();
-        assert!(!adjacent_diff::run(&mut m.functions[0]), "{source}");
+        assert!(!either_variant_accepts(&mut m.functions[0]), "{source}");
         assert_eq!(before, m.to_string());
     }
 }
@@ -98,7 +108,7 @@ fn rejects_extra_load_write_atomic_call_and_custom_operations() {
         assert!(adjacent_abs::run(&mut m.functions[0]));
         keel_ir::verify_module(&m).unwrap();
         let before = m.to_string();
-        assert!(!adjacent_diff::run(&mut m.functions[0]));
+        assert!(!either_variant_accepts(&mut m.functions[0]));
         assert_eq!(before, m.to_string());
     }
 }
@@ -182,105 +192,107 @@ fn aliased_definitions_are_rejected_without_mutation() {
         .unwrap();
     f.replace_all_uses(f.inst_results(i)[0], x);
     let before = f.to_string();
-    assert!(!adjacent_diff::run(f));
+    assert!(!either_variant_accepts(f));
     assert_eq!(before, f.to_string());
 }
 
 #[test]
 fn emitted_range_guard_matches_exact_u128_arithmetic_at_wrap_boundaries() {
-    use keel_ir::{ConvertOp, InstData as D};
-    use std::collections::HashMap;
-    let mut m = canonical();
-    assert!(adjacent_diff::run(&mut m.functions[0]));
-    let f = &m.functions[0];
-    let guard = f
-        .blocks()
-        .find(|&b| {
-            f.block_insts(b)
-                .iter()
-                .any(|&i| matches!(f.inst_data(i),D::Iconst {imm,..} if *imm==(u64::MAX/4) as i64))
-        })
+    for run in [adjacent_diff::run, adjacent_diff::run_narrow] {
+        use keel_ir::{ConvertOp, InstData as D};
+        use std::collections::HashMap;
+        let mut m = canonical();
+        assert!(run(&mut m.functions[0]));
+        let f = &m.functions[0];
+        let guard = f
+            .blocks()
+            .find(|&b| {
+                f.block_insts(b).iter().any(
+                    |&i| matches!(f.inst_data(i),D::Iconst {imm,..} if *imm==(u64::MAX/4) as i64),
+                )
+            })
+            .unwrap();
+        // Interpret the actual emitted guard with the shared scalar interpreter.
+        // Its pointer-to-bits input is supplied as i64 to avoid host pointer rules.
+        let mut scalar = keel_ir::parse(
+            "func @guard(i64,i64) -> i8 {\nblock0(v0:i64,v1:i64):\n v2=iconst.i8 0\n return v2\n}",
+        )
         .unwrap();
-    // Interpret the actual emitted guard with the shared scalar interpreter.
-    // Its pointer-to-bits input is supplied as i64 to avoid host pointer rules.
-    let mut scalar = keel_ir::parse(
-        "func @guard(i64,i64) -> i8 {\nblock0(v0:i64,v1:i64):\n v2=iconst.i8 0\n return v2\n}",
-    )
-    .unwrap();
-    let g = &mut scalar.functions[0];
-    let entry = g.entry_block().unwrap();
-    for i in g.block_insts(entry).to_vec() {
-        g.remove_inst(i);
-    }
-    let input = f.block_params(f.entry_block().unwrap());
-    let mut values = HashMap::from([
-        (input[0], g.block_params(entry)[0]),
-        (input[3], g.block_params(entry)[1]),
-    ]);
-    for &i in f.block_insts(guard) {
-        let mut data = f.inst_data(i).clone();
-        if let D::Brif { cond, .. } = data {
-            g.append_inst(
-                entry,
-                D::Return {
-                    args: vec![values[&cond]],
-                },
+        let g = &mut scalar.functions[0];
+        let entry = g.entry_block().unwrap();
+        for i in g.block_insts(entry).to_vec() {
+            g.remove_inst(i);
+        }
+        let input = f.block_params(f.entry_block().unwrap());
+        let mut values = HashMap::from([
+            (input[0], g.block_params(entry)[0]),
+            (input[3], g.block_params(entry)[1]),
+        ]);
+        for &i in f.block_insts(guard) {
+            let mut data = f.inst_data(i).clone();
+            if let D::Brif { cond, .. } = data {
+                g.append_inst(
+                    entry,
+                    D::Return {
+                        args: vec![values[&cond]],
+                    },
+                );
+                break;
+            }
+            if let D::Convert {
+                op: ConvertOp::PtrToInt,
+                arg,
+                ..
+            } = data
+            {
+                values.insert(f.inst_results(i)[0], values[&arg]);
+                continue;
+            }
+            data.for_each_operand_mut(|v| *v = values[&f.resolve(*v)]);
+            let j = g.append_inst(entry, data);
+            values.insert(f.inst_results(i)[0], g.inst_results(j)[0]);
+        }
+        keel_ir::verify_module(&scalar).unwrap();
+        let edges = [
+            0,
+            1,
+            2,
+            3,
+            4,
+            7,
+            8,
+            u64::MAX / 4 - 1,
+            u64::MAX / 4,
+            u64::MAX / 4 + 1,
+            u64::MAX - 8,
+            u64::MAX - 7,
+            u64::MAX - 4,
+            u64::MAX - 3,
+            u64::MAX - 1,
+            u64::MAX,
+        ];
+        let check = |base, n| {
+            let bytes = u128::from(n) * 4;
+            let exact =
+                bytes <= u128::from(u64::MAX) && u128::from(base) + bytes <= u128::from(u64::MAX);
+            assert_eq!(
+                support::execute(&scalar.functions[0], &[base, n]),
+                u64::from(exact),
+                "base={base} n={n}"
             );
-            break;
+        };
+        for base in edges {
+            for n in edges {
+                check(base, n);
+            }
         }
-        if let D::Convert {
-            op: ConvertOp::PtrToInt,
-            arg,
-            ..
-        } = data
-        {
-            values.insert(f.inst_results(i)[0], values[&arg]);
-            continue;
+        let mut random = 0xf1a2937b5839a84du64;
+        for _ in 0..10000 {
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let base = random;
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            check(base, random);
         }
-        data.for_each_operand_mut(|v| *v = values[&f.resolve(*v)]);
-        let j = g.append_inst(entry, data);
-        values.insert(f.inst_results(i)[0], g.inst_results(j)[0]);
-    }
-    keel_ir::verify_module(&scalar).unwrap();
-    let edges = [
-        0,
-        1,
-        2,
-        3,
-        4,
-        7,
-        8,
-        u64::MAX / 4 - 1,
-        u64::MAX / 4,
-        u64::MAX / 4 + 1,
-        u64::MAX - 8,
-        u64::MAX - 7,
-        u64::MAX - 4,
-        u64::MAX - 3,
-        u64::MAX - 1,
-        u64::MAX,
-    ];
-    let check = |base, n| {
-        let bytes = u128::from(n) * 4;
-        let exact =
-            bytes <= u128::from(u64::MAX) && u128::from(base) + bytes <= u128::from(u64::MAX);
-        assert_eq!(
-            support::execute(&scalar.functions[0], &[base, n]),
-            u64::from(exact),
-            "base={base} n={n}"
-        );
-    };
-    for base in edges {
-        for n in edges {
-            check(base, n);
-        }
-    }
-    let mut random = 0xf1a2937b5839a84du64;
-    for _ in 0..10000 {
-        random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let base = random;
-        random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
-        check(base, random);
     }
 }
 
@@ -556,7 +568,7 @@ fn altered_scalar_induction_and_bounds_are_rejected_without_mutation() {
         *changed.functions[0].inst_data_mut(i) = d;
         keel_ir::verify_module(&changed).unwrap();
         let before = changed.to_string();
-        assert!(!adjacent_diff::run(&mut changed.functions[0]));
+        assert!(!either_variant_accepts(&mut changed.functions[0]));
         assert_eq!(changed.to_string(), before);
     }
 }
@@ -566,9 +578,34 @@ fn rejects_unmatched_fifth_block_before_mutation() {
     let mut m = keel_ir::parse(include_str!("adjacent_diff/rotated.keel")).unwrap();
     let f = &mut m.functions[0];
     let extra = f.create_block();
-    f.append_inst(extra, keel_ir::InstData::Return { args: vec![] });
+    let base = f.block_params(f.entry_block().unwrap())[0];
+    let i = f.append_inst(
+        extra,
+        keel_ir::InstData::Iconst {
+            ty: keel_ir::Type::I32,
+            imm: 7,
+        },
+    );
+    let value = f.first_result(i);
+    f.append_inst(
+        extra,
+        keel_ir::InstData::Store {
+            flags: keel_ir::MemoryFlags::default(),
+            value,
+            addr: base,
+        },
+    );
+    let i = f.append_inst(
+        extra,
+        keel_ir::InstData::Iconst {
+            ty: keel_ir::Type::I64,
+            imm: 0,
+        },
+    );
+    let value = f.first_result(i);
+    f.append_inst(extra, keel_ir::InstData::Return { args: vec![value] });
     let before = f.to_string();
-    assert!(!adjacent_diff::run(f));
+    assert!(!either_variant_accepts(f));
     assert_eq!(before, f.to_string());
 }
 
@@ -591,7 +628,134 @@ fn every_producer_and_parameter_alias_is_rejected_before_mutation() {
         let replacement = f.append_block_param(entry, f.value_type(old));
         f.replace_all_uses(old, replacement);
         let before = f.to_string();
-        assert!(!adjacent_diff::run(f), "aliased {old:?}");
+        assert!(!either_variant_accepts(f), "aliased {old:?}");
         assert_eq!(before, f.to_string());
+    }
+}
+
+#[test]
+fn wide_ir_stays_byte_identical_and_registration_only_appends() {
+    let mut m = canonical();
+    assert!(adjacent_diff::run(&mut m.functions[0]));
+    assert_eq!(m.to_string(), include_str!("adjacent_diff/wide.keel"));
+    let names: Vec<_> = keel_opt::PASSES.iter().map(|p| p.name()).collect();
+    assert_eq!(
+        &names[names.len() - 4..],
+        &[
+            "adjacent-abs",
+            "adjacent-diff",
+            "run-balance-predicate",
+            "adjacent-diff-narrow"
+        ]
+    );
+    let mut m = canonical();
+    assert!(
+        keel_opt::find_pass("adjacent-diff-narrow")
+            .unwrap()
+            .run(&mut m.functions[0])
+    );
+    assert!(!adjacent_diff::run_narrow(&mut m.functions[0]));
+    assert!(!either_variant_accepts(&mut m.functions[0]));
+}
+
+#[test]
+fn narrow_history_seed_chunk_edges_and_signed_tail_are_exact() {
+    use keel_ir::{ConvertOp as C, InstData as D, Type, ValueDef, VectorBinaryOp as V, VectorType};
+    for mut m in [
+        canonical(),
+        keel_ir::parse(include_str!("adjacent_diff/rotated.keel")).unwrap(),
+    ] {
+        assert!(adjacent_diff::run_narrow(&mut m.functions[0]));
+        keel_ir::verify_module(&m).unwrap();
+        keel_ir::verify_module(&keel_ir::parse(&m.to_string()).unwrap()).unwrap();
+        let f = &m.functions[0];
+        let narrow = Type::Vector(VectorType::I32x4);
+        let wide = Type::Vector(VectorType::I64x2);
+        let histories: Vec<_> = f
+            .blocks()
+            .flat_map(|b| f.block_params(b).iter().copied())
+            .filter(|&v| f.value_type(v) == narrow)
+            .collect();
+        assert_eq!(histories.len(), 2);
+        let mut chunks = 0;
+        for b in f.blocks() {
+            let insts = f.block_insts(b);
+            let mut last = None;
+            for (pos, &i) in insts.iter().enumerate() {
+                if let D::VectorSplat { ty, arg } = f.inst_data(i) {
+                    if *ty == narrow {
+                        assert_eq!(f.value_type(*arg), Type::I32);
+                    }
+                }
+                if !matches!(f.inst_data(i), D::Load { ty: Type::I64, .. }) {
+                    continue;
+                }
+                chunks += 1;
+                assert!(
+                    matches!(f.inst_data(insts[pos+1]), D::VectorSplat { ty, arg } if *ty == wide && *arg == f.first_result(i))
+                );
+                assert!(
+                    matches!(f.inst_data(insts[pos+2]), D::Convert { op: C::Bitcast, ty, arg } if *ty == narrow && *arg == f.first_result(insts[pos+1]))
+                );
+                let current = f.first_result(insts[pos + 2]);
+                let D::VectorShuffle { args, lanes } = f.inst_data(insts[pos + 3]) else {
+                    panic!()
+                };
+                assert_eq!(lanes, &[3, 4, 5, 6]);
+                assert_eq!(args[1], current);
+                if let Some(prev) = last {
+                    assert_eq!(args[0], prev);
+                }
+                for (delta, leaf) in [(4, current), (5, f.first_result(insts[pos + 3]))] {
+                    assert!(
+                        matches!(f.inst_data(insts[pos+delta]), D::Convert { op: C::SwidenLow, ty, arg } if *ty == wide && *arg == leaf)
+                    );
+                }
+                assert!(matches!(
+                    f.inst_data(insts[pos + 6]),
+                    D::VectorBinary { op: V::Isub, .. }
+                ));
+                assert!(matches!(
+                    f.inst_data(insts[pos + 7]),
+                    D::VectorIcmp {
+                        cond: keel_ir::IntCC::Slt,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    f.inst_data(insts[pos + 8]),
+                    D::VectorUnary {
+                        op: keel_ir::UnaryOp::Ineg,
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    f.inst_data(insts[pos + 9]),
+                    D::VectorSelect { .. }
+                ));
+                assert!(matches!(
+                    f.inst_data(insts[pos + 10]),
+                    D::VectorBinary { op: V::Iadd, .. }
+                ));
+                last = Some(current);
+            }
+            if let Some(last) = last {
+                let D::Jump { dest } = f.inst_data(*insts.last().unwrap()) else {
+                    panic!()
+                };
+                assert_eq!(dest.args[2], last);
+            }
+        }
+        assert_eq!(chunks, 5);
+        let (_, extract) = f
+            .layout_insts()
+            .find(|(_, i)| matches!(f.inst_data(*i), D::VectorExtract { lane: 3, .. }))
+            .unwrap();
+        let extracted = f.first_result(extract);
+        assert_eq!(f.value_type(extracted), Type::I32);
+        let sign = f.layout_insts().find_map(|(_,i)| matches!(f.inst_data(i), D::Convert { op: C::Sext, ty: Type::I64, arg } if *arg == extracted).then(|| f.first_result(i))).unwrap();
+        assert!(f.layout_insts().any(|(_,i)| matches!(f.inst_data(i), D::Binary { op: keel_ir::BinaryOp::Isub, args } if args[1] == sign)));
+        assert!(matches!(f.value_def(extracted), ValueDef::Result(_, 0)));
+        assert!(!adjacent_diff::run_narrow(&mut m.functions[0]));
     }
 }

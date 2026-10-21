@@ -7,7 +7,7 @@
 //! This deliberately does not relax the generic multi-stream trapping rule.
 //!
 //! At each SIMD check, remain is in [0,n-2], ptr=base+4*(n-remain),
-//! and previous lane 1 is a[n-remain-1]. The scalar seed is |a[1]-a[0]|;
+//! and previous lane 1 (Wide) or lane 3 (Narrow) is a[n-remain-1]. The scalar seed is |a[1]-a[0]|;
 //! the wrapping lane sums cover differences 2..n-remain (four independent
 //! accumulators in main, one merged accumulator in pair cleanup).
 //! Prefix initializes remain=n-2 and ptr=base+8, after reading a[1], a[0].
@@ -45,12 +45,37 @@ use keel_ir::{
     MemoryFlags, Type, UnaryOp, Value, ValueDef, VectorBinaryOp as V, VectorType,
 };
 
+const NARROW: Type = Type::Vector(VectorType::I32x4);
+
+#[derive(Clone, Copy)]
+enum History {
+    Wide,
+    Narrow,
+}
+impl History {
+    fn ty(self) -> Type {
+        match self {
+            Self::Wide => WIDE,
+            Self::Narrow => NARROW,
+        }
+    }
+}
+
 const WIDE: Type = Type::Vector(VectorType::I64x2);
 
 /// Root-owned registration can use `run` directly; no pipeline is changed here.
 pub fn run(f: &mut Function) -> bool {
+    run_history(f, History::Wide)
+}
+
+/// Opt-in exact narrow history; arithmetic and accumulators remain signed i64.
+pub fn run_narrow(f: &mut Function) -> bool {
+    run_history(f, History::Narrow)
+}
+
+fn run_history(f: &mut Function, history: History) -> bool {
     let Some(c) = recognize(f) else { return false };
-    transform(f, c);
+    transform(f, c, history);
     true
 }
 
@@ -364,6 +389,7 @@ fn chunk(
     acc: Value,
     z: Value,
     c: &Candidate,
+    history: History,
 ) -> (Value, Value) {
     let e = |f: &mut Function, b, d| emit(f, b, d, c.math_loc);
     // Exactly 8 bytes, even though the arithmetic registers are 128 bits.
@@ -394,23 +420,58 @@ fn chunk(
             arg: packed,
         },
     );
-    let current = e(
-        f,
-        block,
-        D::Convert {
-            op: C::SwidenLow,
-            ty: WIDE,
-            arg: packed,
-        },
-    );
-    let prior = e(
-        f,
-        block,
-        D::VectorShuffle {
-            args: [previous, current],
-            lanes: vec![1, 2],
-        },
-    );
+    let (current, prior, carried) = match history {
+        History::Wide => {
+            let current = e(
+                f,
+                block,
+                D::Convert {
+                    op: C::SwidenLow,
+                    ty: WIDE,
+                    arg: packed,
+                },
+            );
+            let prior = e(
+                f,
+                block,
+                D::VectorShuffle {
+                    args: [previous, current],
+                    lanes: vec![1, 2],
+                },
+            );
+            (current, prior, current)
+        }
+        History::Narrow => {
+            let window = e(
+                f,
+                block,
+                D::VectorShuffle {
+                    args: [previous, packed],
+                    lanes: vec![3, 4, 5, 6],
+                },
+            );
+            // Keep these two widens and the five arithmetic nodes contiguous.
+            let current = e(
+                f,
+                block,
+                D::Convert {
+                    op: C::SwidenLow,
+                    ty: WIDE,
+                    arg: packed,
+                },
+            );
+            let prior = e(
+                f,
+                block,
+                D::Convert {
+                    op: C::SwidenLow,
+                    ty: WIDE,
+                    arg: window,
+                },
+            );
+            (current, prior, packed)
+        }
+    };
     let diff = e(
         f,
         block,
@@ -450,10 +511,10 @@ fn chunk(
             args: [acc, abs],
         },
     );
-    (current, next_acc)
+    (carried, next_acc)
 }
 
-fn transform(f: &mut Function, c: Candidate) {
+fn transform(f: &mut Function, c: Candidate, history: History) {
     let main_check = f.create_block();
     let main = f.create_block();
     let merge = f.create_block();
@@ -507,6 +568,7 @@ fn transform(f: &mut Function, c: Candidate) {
         },
         c.load_loc,
     );
+    let x32 = x;
     let x = e(f, prefix, sext(x));
     let y = emit(
         f,
@@ -536,8 +598,18 @@ fn transform(f: &mut Function, c: Candidate) {
             args: [mask, neg, diff],
         },
     );
-    // Splat(a[1]) seeds lane 1; lane 0 is never used by [1,2].
-    let previous = e(f, prefix, D::VectorSplat { ty: WIDE, arg: x });
+    // Seed every history lane with a[1], using its raw i32 for Narrow.
+    let previous = e(
+        f,
+        prefix,
+        D::VectorSplat {
+            ty: history.ty(),
+            arg: match history {
+                History::Wide => x,
+                History::Narrow => x32,
+            },
+        },
+    );
     let z = e(
         f,
         prefix,
@@ -561,7 +633,7 @@ fn transform(f: &mut Function, c: Candidate) {
     // subtraction or pointer advancement, including the one-past endpoint.
     let address = f.append_block_param(main_check, Type::Ptr);
     let remaining = f.append_block_param(main_check, Type::I64);
-    let previous = f.append_block_param(main_check, WIDE);
+    let previous = f.append_block_param(main_check, history.ty());
     let accs: Vec<_> = (0..4)
         .map(|_| f.append_block_param(main_check, WIDE))
         .collect();
@@ -585,7 +657,7 @@ fn transform(f: &mut Function, c: Candidate) {
             let delta = e(f, main, icon(8 * j as i64));
             e(f, main, ptr(address, delta))
         };
-        let (loaded, next_acc) = chunk(f, main, addr, current, acc, z, &c);
+        let (loaded, next_acc) = chunk(f, main, addr, current, acc, z, &c, history);
         current = loaded;
         next_accs.push(next_acc);
     }
@@ -635,7 +707,7 @@ fn transform(f: &mut Function, c: Candidate) {
     );
     let address = f.append_block_param(check, Type::Ptr);
     let remaining = f.append_block_param(check, Type::I64);
-    let previous = f.append_block_param(check, WIDE);
+    let previous = f.append_block_param(check, history.ty());
     let acc = f.append_block_param(check, WIDE);
     let sum = f.append_block_param(check, Type::I64);
     let enough = e(f, check, cmp(IntCC::Uge, remaining, two));
@@ -648,7 +720,7 @@ fn transform(f: &mut Function, c: Candidate) {
         },
         loc,
     );
-    let (current, next_acc) = chunk(f, vector, address, previous, acc, z, &c);
+    let (current, next_acc) = chunk(f, vector, address, previous, acc, z, &c, history);
     let next = e(f, vector, bin(B::Isub, remaining, two));
     let next_ptr = e(f, vector, ptr(address, eight));
     term(
@@ -689,9 +761,16 @@ fn transform(f: &mut Function, c: Candidate) {
         tail,
         D::VectorExtract {
             arg: previous,
-            lane: 1,
+            lane: match history {
+                History::Wide => 1,
+                History::Narrow => 3,
+            },
         },
     );
+    let y = match history {
+        History::Wide => y,
+        History::Narrow => e(f, tail, sext(y)),
+    };
     let diff = e(f, tail, bin(B::Isub, x, y));
     let mask = e(f, tail, cmp(IntCC::Slt, diff, c.zero));
     let neg = e(

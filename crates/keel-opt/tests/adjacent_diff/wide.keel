@@ -1,0 +1,155 @@
+func @rk_adjacent(ptr, ptr, ptr, i64) -> i64 cc(c) {
+block0(v0: ptr, v1: ptr, v2: ptr, v3: i64):
+    v4 = iconst.i64 0
+    v5 = iconst.i64 1
+    jump block1
+block1:
+    v6 = icmp.ugt v3, v5
+    brif v6, block9, block3(v4)
+block2(v7: i64, v8: i64):
+    v9 = iconst.i64 2
+    v10 = shl v7, v9
+    v11 = ptradd v0, v10
+    v12 = load.i32 v11
+    v13 = sext.i64 v12
+    v14 = iconst.i64 1
+    v15 = isub v7, v14
+    v16 = shl v15, v9
+    v17 = ptradd v0, v16
+    v18 = load.i32 v17
+    v19 = sext.i64 v18
+    v20 = isub v13, v19
+    v21 = iconst.i64 0
+    v22 = icmp.slt v20, v21
+    v24 = ineg v20
+    v30 = select v22, v24, v20
+    jump block5(v30)
+block3(v23: i64):
+    return v23
+block5(v25: i64):
+    v26 = iadd v8, v25
+    v27 = iconst.i64 1
+    v28 = iadd v7, v27
+    v29 = icmp.ugt v3, v28
+    brif v29, block2(v28, v26), block3(v26)
+block6(v54: ptr, v55: i64, v56: i64x2, v57: i64x2, v58: i64x2, v59: i64x2, v60: i64x2, v61: i64):
+    v62 = icmp.uge v55, v51
+    brif v62, block7, block8
+block7:
+    v63 = load.i64 v54
+    v64 = vsplat.i64x2 v63
+    v65 = bitcast.i32x4 v64
+    v66 = swiden_low.i64x2 v65
+    v67 = vshuffle v56, v66, [1, 2]
+    v68 = visub v66, v67
+    v69 = vicmp.slt v68, v50
+    v70 = vineg v68
+    v71 = vselect v69, v70, v68
+    v72 = viadd v57, v71
+    v73 = iconst.i64 8
+    v74 = ptradd v54, v73
+    v75 = load.i64 v74
+    v76 = vsplat.i64x2 v75
+    v77 = bitcast.i32x4 v76
+    v78 = swiden_low.i64x2 v77
+    v79 = vshuffle v66, v78, [1, 2]
+    v80 = visub v78, v79
+    v81 = vicmp.slt v80, v50
+    v82 = vineg v80
+    v83 = vselect v81, v82, v80
+    v84 = viadd v58, v83
+    v85 = iconst.i64 16
+    v86 = ptradd v54, v85
+    v87 = load.i64 v86
+    v88 = vsplat.i64x2 v87
+    v89 = bitcast.i32x4 v88
+    v90 = swiden_low.i64x2 v89
+    v91 = vshuffle v78, v90, [1, 2]
+    v92 = visub v90, v91
+    v93 = vicmp.slt v92, v50
+    v94 = vineg v92
+    v95 = vselect v93, v94, v92
+    v96 = viadd v59, v95
+    v97 = iconst.i64 24
+    v98 = ptradd v54, v97
+    v99 = load.i64 v98
+    v100 = vsplat.i64x2 v99
+    v101 = bitcast.i32x4 v100
+    v102 = swiden_low.i64x2 v101
+    v103 = vshuffle v90, v102, [1, 2]
+    v104 = visub v102, v103
+    v105 = vicmp.slt v104, v50
+    v106 = vineg v104
+    v107 = vselect v105, v106, v104
+    v108 = viadd v60, v107
+    v109 = isub v55, v51
+    v110 = iconst.i64 32
+    v111 = ptradd v54, v110
+    jump block6(v111, v109, v102, v72, v84, v96, v108, v61)
+block8:
+    v112 = viadd v57, v58
+    v113 = viadd v112, v59
+    v114 = viadd v113, v60
+    jump block11(v54, v55, v56, v114, v61)
+block9:
+    v31 = iconst.i64 4611686018427387903
+    v32 = icmp.ule v3, v31
+    v33 = iconst.i64 2
+    v34 = shl v3, v33
+    v35 = ptrtoint.i64 v0
+    v36 = iadd v35, v34
+    v37 = icmp.uge v36, v35
+    v38 = and v32, v37
+    brif v38, block10, block2(v5, v4)
+block10:
+    v39 = iconst.i64 4
+    v40 = ptradd v0, v39
+    v41 = load.i32 v40
+    v42 = sext.i64 v41
+    v43 = load.i32 v0
+    v44 = sext.i64 v43
+    v45 = isub v42, v44
+    v46 = ineg v45
+    v47 = icmp.slt v45, v4
+    v48 = select v47, v46, v45
+    v49 = vsplat.i64x2 v42
+    v50 = vsplat.i64x2 v4
+    v51 = iconst.i64 8
+    v52 = ptradd v0, v51
+    v53 = isub v3, v33
+    jump block6(v52, v53, v49, v50, v50, v50, v50, v48)
+block11(v115: ptr, v116: i64, v117: i64x2, v118: i64x2, v119: i64):
+    v120 = icmp.uge v116, v33
+    brif v120, block12, block13
+block12:
+    v121 = load.i64 v115
+    v122 = vsplat.i64x2 v121
+    v123 = bitcast.i32x4 v122
+    v124 = swiden_low.i64x2 v123
+    v125 = vshuffle v117, v124, [1, 2]
+    v126 = visub v124, v125
+    v127 = vicmp.slt v126, v50
+    v128 = vineg v126
+    v129 = vselect v127, v128, v126
+    v130 = viadd v118, v129
+    v131 = isub v116, v33
+    v132 = ptradd v115, v51
+    jump block11(v132, v131, v124, v130, v119)
+block13:
+    v133 = vextract v118, 0
+    v134 = vextract v118, 1
+    v135 = iadd v133, v134
+    v136 = iadd v119, v135
+    v137 = icmp.eq v116, v5
+    brif v137, block14, block3(v136)
+block14:
+    v138 = load.i32 v115
+    v139 = sext.i64 v138
+    v140 = vextract v117, 1
+    v141 = isub v139, v140
+    v142 = icmp.slt v141, v4
+    v143 = ineg v141
+    v144 = select v142, v143, v141
+    v145 = iadd v136, v144
+    jump block3(v145)
+}

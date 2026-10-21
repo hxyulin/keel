@@ -202,6 +202,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "predicate a bounded wrapping running-state recurrence (opt-in)",
         run: run_balance_predicate::run,
     },
+    BuiltinPass {
+        name: "adjacent-diff-narrow",
+        description: "ordered adjacent i32 reduction with narrow history (opt-in)",
+        run: adjacent_diff::run_narrow,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -263,6 +268,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[17],
     &BUILTINS[18],
     &BUILTINS[19],
+    &BUILTINS[20],
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
