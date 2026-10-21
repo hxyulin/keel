@@ -304,6 +304,129 @@ fn forced_home_retains_one_value_across_call_without_a_store_save_or_edge_change
 }
 
 #[test]
+fn proven_caller_register_keeps_a_clean_spill_across_the_exact_call() {
+    let module = keel_ir::parse(SOURCE).unwrap();
+    let f = &module.functions[0];
+    let c = case(f);
+    let mut selection = Selection::default();
+    selection.preserved_call_gprs.insert(c.call, 1 << 9);
+    let input = test_input(f, &selection);
+    let (baseline, intervals) = forced_baseline(&input);
+    let homes = baseline.locs.clone();
+    let slots = baseline.spill_slots;
+    let saves = baseline.callee_saved_used.clone();
+    let mut result = cache_spills(&input, baseline, &intervals, true);
+    result.finish(&input);
+    result.validate(&input).unwrap();
+    for seed in 0..16 {
+        super::super::transfer_tests::check(&input, &result, seed);
+    }
+    assert_eq!(use_loc(&result, c.first, c.base), Loc::Reg(9));
+    assert_eq!(use_loc(&result, c.second, c.base), Loc::Reg(9));
+    assert_eq!(
+        transfers(&result, f)
+            .iter()
+            .filter(|&&(_, source)| source == Loc::Stack(0))
+            .count(),
+        1
+    );
+    assert_eq!(result.locs, homes);
+    assert_eq!(result.spill_slots, slots);
+    assert_eq!(result.callee_saved_used, saves);
+}
+
+#[test]
+fn caller_preference_needs_the_exact_call_mask_and_a_free_entire_window() {
+    let module = keel_ir::parse(SOURCE).unwrap();
+    let f = &module.functions[0];
+    let c = case(f);
+    for variant in 0..6 {
+        let mut selection = Selection::default();
+        match variant {
+            0 => {} // Unknown call.
+            1 => {
+                selection.preserved_call_gprs.insert(c.first, 1 << 9);
+            }
+            2 => {
+                selection.preserved_call_gprs.insert(c.call, 1 << 63);
+            }
+            _ => {
+                selection.preserved_call_gprs.insert(c.call, 1 << 9);
+            }
+        }
+        let input = test_input(f, &selection);
+        let (mut cache, mut events) = forced_cache(&input);
+        let p = points(f, &cache.alloc.order);
+        if variant == 3 {
+            // A global owner returns from a hole at the next read.
+            events.push((p[&c.second], true, Loc::Reg(9)));
+            events.sort_unstable_by_key(|&(point, enter, _)| (point, enter));
+        }
+        let mut preference = call::Preference::new(&cache, &events, true);
+        let (_, read) = prepare(&mut preference, &cache);
+        let mut bits = unavailable(&cache, &events, read);
+        if variant == 4 {
+            bitset(&mut bits, Loc::Reg(9), true);
+        }
+        if variant == 5 {
+            let reg = cache
+                .registers
+                .iter_mut()
+                .find(|r| r.loc == Loc::Reg(9))
+                .unwrap();
+            reg.pinned = true;
+        }
+        let chosen = preference
+            .acquire(&mut cache, ValuePart::low(c.base), c.first, read, &bits)
+            .unwrap();
+        assert_eq!(
+            cache.registers[chosen].loc,
+            Loc::Reg(12),
+            "variant {variant}"
+        );
+    }
+}
+
+#[test]
+fn a_proof_on_a_later_call_does_not_leak_into_an_earlier_window() {
+    let source = SOURCE.replace(
+        "    return v11",
+        "    v1234 = call @touch(v7, v400)\n    return v11",
+    );
+    let module = keel_ir::parse(&source).unwrap();
+    let f = &module.functions[0];
+    let c = case(f);
+    let last_call = f
+        .layout_insts()
+        .filter(|&(_, i)| is_call(f.inst_data(i)))
+        .last()
+        .unwrap()
+        .1;
+    assert_ne!(c.call, last_call);
+    for first_preserves in [false, true] {
+        let mut selection = Selection::default();
+        selection
+            .preserved_call_gprs
+            .insert(c.call, if first_preserves { 1 << 9 } else { 0 });
+        selection
+            .preserved_call_gprs
+            .insert(last_call, if first_preserves { 0 } else { 1 << 9 });
+        let input = test_input(f, &selection);
+        let (mut cache, events) = forced_cache(&input);
+        let mut preference = call::Preference::new(&cache, &events, true);
+        let (_, read) = prepare(&mut preference, &cache);
+        let bits = unavailable(&cache, &events, read);
+        let chosen = preference
+            .acquire(&mut cache, ValuePart::low(c.base), c.first, read, &bits)
+            .unwrap();
+        assert_eq!(
+            cache.registers[chosen].loc,
+            Loc::Reg(if first_preserves { 9 } else { 12 })
+        );
+    }
+}
+
+#[test]
 fn different_value_later_fixed_context_keeps_all_old_cache_choices() {
     // R2-F1: base is Any, but preferring it can displace context at the call.
     // The later Fixed context use lies outside base's first/next-use window.

@@ -12,9 +12,17 @@ struct NextUse {
 
 struct Candidate {
     cache_index: usize,
+    // Caller-saved candidates require an exact proof at the intervening call.
+    needs_proof: bool,
     // Sorted enter points, including inactive global owners returning from holes.
     starts: Vec<u32>,
     cursor: usize,
+}
+
+#[derive(Clone, Copy)]
+struct Window {
+    until: u32,
+    preserved: u64,
 }
 
 #[derive(Default)]
@@ -22,7 +30,7 @@ pub(super) struct Preference {
     candidates: Vec<Candidate>,
     next: HashMap<Value, NextUse>,
     // Only repeated, eligible selected uses with a proved single-call window.
-    windows: HashMap<(Inst, Value), u32>,
+    windows: HashMap<(Inst, Value), Window>,
 }
 
 impl Preference {
@@ -33,16 +41,20 @@ impl Preference {
         }
         let mut indices = [usize::MAX; 256];
         // The cache uses target-pool order. Never add a save to enable a window.
+        // A finalized call proof can also preserve a caller-saved temporary.
         for (cache_index, register) in cache.registers.iter().enumerate() {
             let Loc::Reg(r) = register.loc else { continue };
-            if cache.input.pools.callee_saved.contains(&r)
-                && !cache.input.pools.caller_saved.contains(&r)
-                && cache.alloc.callee_saved_used.contains(&r)
+            let caller = cache.input.pools.caller_saved.contains(&r);
+            let saved = cache.input.pools.callee_saved.contains(&r)
+                && !caller
+                && cache.alloc.callee_saved_used.contains(&r);
+            if (saved || caller && !cache.input.selection.preserved_call_gprs.is_empty())
                 && cache.input.permits(register.loc)
             {
                 indices[r as usize] = result.candidates.len();
                 result.candidates.push(Candidate {
                     cache_index,
+                    needs_proof: caller,
                     starts: Vec::new(),
                     cursor: 0,
                 });
@@ -89,6 +101,7 @@ impl Preference {
         }
         let mut calls = 0;
         let mut barriers = 0;
+        let mut next_call_preserved = 0;
         for (offset, &inst) in func.block_insts(block).iter().enumerate().rev() {
             let read = 2 * (first_slot + offset as u32);
             let data = func.inst_data(inst);
@@ -122,6 +135,15 @@ impl Preference {
                     && matches!(data, InstData::Call { .. } | InstData::CallIndirect { .. }));
             let later_calls = calls;
             let later_barriers = barriers;
+            let later_preserved = next_call_preserved;
+            if ordinary {
+                next_call_preserved = input
+                    .selection
+                    .preserved_call_gprs
+                    .get(&inst)
+                    .copied()
+                    .unwrap_or(0);
+            }
             calls += usize::from(ordinary);
             barriers += usize::from(barrier);
             // A definition must not let a future use become a preceding use's
@@ -151,7 +173,13 @@ impl Preference {
                         && later_calls == next.calls + 1
                         && later_barriers == next.barriers
                     {
-                        self.windows.insert((inst, value), next.read + 1);
+                        self.windows.insert(
+                            (inst, value),
+                            Window {
+                                until: next.read + 1,
+                                preserved: later_preserved,
+                            },
+                        );
                     }
                 }
                 self.next.insert(
@@ -183,8 +211,17 @@ impl Preference {
         if part.high || cache.resident[key(part)] != u32::MAX {
             return None;
         }
-        let &until = self.windows.get(&(inst, part.value))?;
+        let &Window { until, preserved } = self.windows.get(&(inst, part.value))?;
         for candidate in &mut self.candidates {
+            let register = cache.registers[candidate.cache_index];
+            if candidate.needs_proof {
+                let Loc::Reg(r) = register.loc else {
+                    unreachable!()
+                };
+                if preserved & 1u64.checked_shl(r.into()).unwrap_or(0) == 0 {
+                    continue;
+                }
+            }
             // Every cursor is monotone across the RPO walk. Total advancement
             // is O(global enter events), not a forward scan for each spill use.
             while candidate.cursor < candidate.starts.len()
@@ -192,7 +229,6 @@ impl Preference {
             {
                 candidate.cursor += 1;
             }
-            let register = cache.registers[candidate.cache_index];
             if register.part.is_none()
                 && !register.dirty
                 && !register.pinned
