@@ -1,0 +1,24 @@
+description = "LZ4 1.10.0, unmodified upstream lib/lz4.c with a deterministic public-API driver"
+
+[[fetch]]
+url = "https://codeload.github.com/lz4/lz4/tar.gz/refs/tags/v1.10.0"
+sha256 = "537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b"
+
+[build]
+dir = "lz4-1.10.0/lib"
+std = "c99"
+sources = ["lz4.c", "{suite}/driver.c"]
+includes = ["."]
+binary = "lz4-workload"
+
+[test]
+run = ["{bin} test"]
+compare = "clang-O2"
+
+[[bench]]
+name = "compress"
+run = "{bin} compress"
+
+[[bench]]
+name = "decompress"
+run = "{bin} decompress"
