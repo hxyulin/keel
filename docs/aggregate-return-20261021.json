@@ -1,7 +1,7 @@
 {
   "title": "Bounded aggregate result-home forwarding prototype, 2026-10-21",
   "base": "8d756b0a",
-  "status": "Registered as the explicit aggregate-return module pass. It is not included in optimization tiers. The retained pre-priority QuickJS inputs have 6/4 qualifying copies and unchanged JS_CallInternal; these counts are diagnostic, not a current runtime claim.",
+  "status": "Retired from the shipping optimizer registry and production library on 2026-10-21 after zero changed inputs across all 44 current Lua, QuickJS and SQLite translation units. The standalone implementation, proof tests, native integration test and probe remain for research. Historical pre-priority counts below are not current activation evidence. See experiment-reconciliation-20261021.html.",
   "implementation": "crates/keel-opt/src/aggregate_return.rs: run(&mut Module) -> usize (eliminated complete copies). The aggregate-return pass wraps this entry point; the standalone probe reports copy counts for retained IR evidence.",
   "transform": "Change only the selected direct call sret argument to a newly materialized StackAddr for the existing independent destination. Remove the exact copy loads and stores. Preserve the callee, its signature, all other call arguments and evaluation order. DCE can remove now-unused address computations; this prototype does not change frame layout or allocation.",
   "proof": [

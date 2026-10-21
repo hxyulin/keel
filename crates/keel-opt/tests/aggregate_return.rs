@@ -1,6 +1,11 @@
 #[path = "../src/aggregate_return.rs"]
 mod aggregate_return;
 
+#[test]
+fn archived_prototype_is_not_a_shipping_pass() {
+    assert!(keel_opt::find_pass("aggregate-return").is_none());
+}
+
 const CONSTRUCTOR: &str = "func @make(ptr sret {i64, i64}, i64) local {
 block0(v0: ptr, v1: i64):
  v2 = iconst.i64 8
