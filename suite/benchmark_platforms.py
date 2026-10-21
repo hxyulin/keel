@@ -27,7 +27,27 @@ try:
 except ImportError:
     from pip._vendor import tomli as tomllib
 
-APPS = ['lua', 'quickjs', 'sqlite']
+DEFAULT_APPS = ['lua', 'quickjs', 'sqlite']
+
+
+def discover_apps(root):
+    return sorted(p.parent.name for p in (root / 'suite').glob('*/suite.toml'))
+
+
+def prepare_argv(template, expand, defines, libs, clang):
+    # Expand list placeholders as argv, preserving quotes inside -D values.
+    # This is deliberately not a shell command interpreter.
+    result = []
+    for token in shlex.split(template):
+        if token == '{defines}':
+            result.extend(defines)
+        elif token == '{libs}':
+            result.extend(libs)
+        else:
+            result.append(expand(token))
+    if result and result[0] == 'clang':
+        result[0] = clang
+    return result
 
 
 def common_float_aliases(text):
@@ -76,8 +96,12 @@ def main():
     p.add_argument('--keel', type=Path)
     p.add_argument('--clang', default='clang')
     p.add_argument('--gcc')
-    p.add_argument('--apps', nargs='+', choices=APPS)
+    p.add_argument('--apps', nargs='+', help='manifest names under suite/ (default: lua quickjs sqlite)')
     p.add_argument('--configs', nargs='+', help='selected named configurations; must include clang-O2')
+    p.add_argument('--candidate-configs', type=Path,
+                   help='additional named Keel compilers/flags as JSON; existing configurations cannot be replaced')
+    p.add_argument('--checks-only', action='store_true',
+                   help='build and run correctness checks, without compile/runtime timing rounds')
     p.add_argument('--gcc-native-preprocess', action='store_true',
                    help='supplementary GCC source-level comparison using its native headers/builtins')
     p.add_argument('--cpu', type=int)
@@ -88,8 +112,15 @@ def main():
     p.add_argument('--compile-rounds', type=int, default=5)
     p.add_argument('--runtime-rounds', type=int, default=7)
     args = p.parse_args()
-    chosen_apps = args.apps or APPS
+    chosen_apps = args.apps or DEFAULT_APPS
     root, work = args.root.resolve(), args.work.resolve()
+    unknown = set(chosen_apps) - set(discover_apps(root))
+    if unknown:
+        p.error('unknown application manifests: ' + ', '.join(sorted(unknown)))
+    if len(set(chosen_apps)) != len(chosen_apps):
+        p.error('--apps must not repeat an application')
+    if not args.checks_only and (args.compile_rounds < 1 or args.runtime_rounds < 1):
+        p.error('timing rounds must be positive; use --checks-only for validation')
     work.mkdir(parents=True, exist_ok=False)
     clang = str(Path(shutil.which(args.clang) or args.clang).resolve())
     gcc = str(Path(shutil.which(args.gcc) or args.gcc).resolve()) if args.gcc else None
@@ -99,7 +130,8 @@ def main():
               'runner_sha256': sha(__file__), 'method': __doc__, 'started_utc': time.strftime('%FT%TZ', time.gmtime()),
               'apps': {}, 'errors': [], 'noise_before': noise(args.cpu), 'compiler_versions': {},
               'compile_rounds': args.compile_rounds, 'runtime_rounds': args.runtime_rounds,
-              'compile_warmups': 1, 'runtime_warmups': 2}
+              'compile_warmups': 1, 'runtime_warmups': 2, 'route': 'native-c',
+              'checks_only': args.checks_only}
     log = gzip.open(work / 'commands.jsonl.gz', 'wt')
 
     def save():
@@ -128,6 +160,8 @@ def main():
             raise
 
     def expand(text, app, binary=None, gen=None):
+        if gen is None:
+            gen = root / 'target/suite' / app / 'gen'
         return text.replace('{suite}', str(root / 'suite' / app)).replace('{work}', str(root / 'target/suite' / app)).replace('{bin}', str(binary)).replace('{gen}', str(gen))
 
     def spec(app):
@@ -155,14 +189,16 @@ def main():
         else:
             report['cpu'] = run(['sysctl', '-n', 'machdep.cpu.brand_string'], 'host', pinned=False)[0].stdout.decode().strip()
         all_sources = {}
-        for app in APPS:
+        for app in chosen_apps:
             m, b = spec(app)
+            if '++' in b['std']:
+                raise RuntimeError(app + ': C++ requires the LLVM-import pilot route, not native C')
             prepared = root / 'target/suite' / app
             prepared.mkdir(parents=True, exist_ok=True)
             marker = prepared / 'benchmark-prepared.json'
             if not args.reuse_prepared:
                 fetches = {}
-                for f in m['fetch']:
+                for f in m.get('fetch', []):
                     archive = prepared / f['url'].split('/')[-1]
                     if not archive.exists():
                         run(['curl', '-fsSL', f['url'], '-o', archive], 'fetch', pinned=False)
@@ -178,10 +214,9 @@ def main():
                 defines = ['-D' + s for s in b.get('defines', [])]
                 includes = ['-I' + s for s in b.get('includes', [])]
                 libs = ['-l' + s for s in b.get('libs', [])]
-                if app == 'quickjs':
-                    run([clang, '-w', '-O2', *defines, 'qjsc.c', 'quickjs.c', 'libregexp.c', 'libunicode.c', 'cutils.c', 'quickjs-libc.c', 'libbf.c', '-o', gen / 'qjsc', *libs], 'prepare-qjsc', cwd=directory)
-                    run([gen / 'qjsc', '-c', '-o', gen / 'repl.c', '-m', 'repl.js'], 'prepare-repl', cwd=directory)
-                    run([gen / 'qjsc', '-fbignum', '-c', '-o', gen / 'qjscalc.c', 'qjscalc.js'], 'prepare-calculator', cwd=directory)
+                for command in b.get('prepare', []):
+                    run(prepare_argv(command, lambda s: expand(s, app, gen=gen),
+                                     defines, libs, clang), 'prepare', cwd=directory)
                 files = []
                 for pattern in b['sources']:
                     pattern = expand(pattern, app, gen=gen)
@@ -189,6 +224,7 @@ def main():
                     files.extend(f for f in matches if f.name not in b.get('exclude', []))
                 pre = prepared / 'pre'
                 pre.mkdir(exist_ok=True)
+                assert files and len({f.stem for f in files}) == len(files), (app, 'empty or colliding source names')
                 for file in files:
                     run([clang, '-E', '-std=' + b['std'], *defines, *includes, file, '-o', pre / (file.stem + '.i')], 'preprocess', cwd=directory)
                 marker.write_text(json.dumps({'os': platform.system(), 'arch': platform.machine(), 'clang': report['compiler_versions']['clang'], 'fetches': fetches, 'sources': {p.name: sha(p) for p in sorted(pre.glob('*.i'))}}, indent=2) + '\n')
@@ -213,7 +249,7 @@ def main():
                 marker.write_text(json.dumps(prep, indent=2) + '\n')
             all_sources[app] = sources
             report['apps'][app] = {'manifest_sha256': sha(root / 'suite' / app / 'suite.toml'), 'preparation': prep, 'sources': {p.name: sha(p) for p in sources}, 'builds': {}, 'checks': {}, 'compile': {}, 'runtime': {}}
-        assert [len(all_sources[a]) for a in APPS] == [33, 9, 2]
+        assert all(all_sources[a] for a in chosen_apps), 'application has no prepared sources'
         if args.prepare_only:
             report['complete'] = True
             report['phase'] = 'prepared'
@@ -228,6 +264,10 @@ def main():
                    'clang-O0': ('cc', clang, ['-O0']), 'clang-O2': ('cc', clang, ['-O2'])}
         if gcc:
             configs.update({'gcc-O0': ('cc', gcc, ['-O0']), 'gcc-O2': ('cc', gcc, ['-O2'])})
+        if args.candidate_configs:
+            for name, candidate in json.loads(args.candidate_configs.read_text()).items():
+                assert name not in configs and isinstance(candidate['flags'], list)
+                configs[name] = ('keel', str(Path(candidate['compiler']).resolve()), candidate['flags'])
         if args.configs:
             assert 'clang-O2' in args.configs and set(args.configs) <= configs.keys()
             configs = {n: c for n, c in configs.items() if n in args.configs}
@@ -291,7 +331,7 @@ def main():
 
         def invocation(app, bench, binary):
             m, _ = spec(app)
-            definition = next(b for b in m['bench'] if b['name'] == bench)
+            definition = next(b for b in m.get('bench', []) if b['name'] == bench)
             argv = shlex.split(expand(definition['run'], app, binary))
             stdin = Path(expand(definition['stdin'], app)).read_bytes() if definition.get('stdin') else None
             return argv, stdin
@@ -323,13 +363,19 @@ def main():
                             proc, _ = run(argv, 'suite-test', cwd=cwd)
                             outputs.append(proc.stdout)
                     else:
-                        proc, _ = run([binary, ':memory:'], 'suite-test', stdin=(root / 'suite/sqlite/queries.sql').read_bytes())
-                        outputs = [proc.stdout]
+                        test = m.get('test', {})
+                        test_cwd = root / 'target/suite' / app / test['dir'] if test.get('dir') else cwd
+                        stdin = Path(expand(test['stdin'], app)).read_bytes() if test.get('stdin') else None
+                        outputs = [run(shlex.split(expand(command, app, binary)),
+                                       'suite-test', cwd=test_cwd, stdin=stdin)[0].stdout
+                                   for command in test.get('run', [])]
                         if reference_tests is None:
                             reference_tests = outputs
-                        assert outputs == reference_tests, 'SQLite query output differs'
+                        if test.get('compare'):
+                            assert test['compare'] == 'clang-O2', 'test reference must be clang-O2'
+                            assert outputs == reference_tests, app + ' test output differs'
                     detail['checks'][name] = {'suite_test_passed': True, 'commands': len(outputs)}
-                    for bench in m['bench']:
+                    for bench in m.get('bench', []):
                         argv, stdin = invocation(app, bench['name'], binary)
                         proc, _ = run(argv, 'benchmark-preflight', stdin=stdin)
                         ref_argv, ref_stdin = invocation(app, bench['name'], Path(reference['binary']))
@@ -341,8 +387,22 @@ def main():
                     build['status'] = 'incorrect'
                     detail['checks'][name] = {'passed': False, 'error': str(e)}
                     report['errors'].append({'app': app, 'config': name, 'phase': 'correctness', 'error': str(e)})
+                    if name == 'clang-O2':
+                        save()
+                        raise RuntimeError('Clang O2 correctness reference failed for ' + app) from e
                 print('check', app, name, build['status'], flush=True)
                 save()
+        if args.checks_only:
+            assert all(sha(path) == digest for path, digest in report['compiler_sha256'].items())
+            assert all({p.name: sha(p) for p in all_sources[app]} == report['apps'][app]['sources']
+                       for app in chosen_apps)
+            report['phase'] = 'complete'
+            report['complete'] = True
+            report['scope'] = 'Correctness only; no compile or native runtime measurement rounds.'
+            save()
+            if report['errors']:
+                raise SystemExit(1)
+            return
         report['phase'] = 'compile'
         rng = random.Random(24517000)
         for app in chosen_apps:
@@ -371,7 +431,7 @@ def main():
             control = Path(detail['builds']['clang-O2']['binary']).with_name('baseline-copy')
             shutil.copy2(detail['builds']['clang-O2']['binary'], control)
             assert sha(control) == detail['builds']['clang-O2']['sha256']
-            for bench in m['bench']:
+            for bench in m.get('bench', []):
                 rows = []
                 detail['runtime'][bench['name']] = rows
                 for block in range(-2, args.runtime_rounds):
@@ -408,6 +468,8 @@ def main():
         report['complete'] = True
         save()
         print('COMPLETE', 'errors', len(report['errors']), flush=True)
+        if report['errors']:
+            raise SystemExit(1)
     except Exception as e:
         report['fatal_error'] = str(e)
         save()
