@@ -1491,20 +1491,23 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         backend_scope!(AllocationAnnotations);
-        let mut line = String::from("\t; regalloc:");
+        // Write straight into the output, set aside while the locations are
+        // read, rather than building the line in its own string.
+        let mut out = std::mem::replace(&mut self.out, Output::Text(String::new()));
+        out.push_str("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
-                crate::text::write_decimal(&mut line, " v", value.index() as i128).unwrap();
-                line.push('=');
-                self.write_loc_name(&mut line, loc);
+                crate::text::write_decimal(&mut out, " v", value.index() as i128).unwrap();
+                out.write_char('=').unwrap();
+                self.write_loc_name(&mut out, loc);
             }
             if let Some(hi) = self.alloc.hi_loc(value) {
-                line.push(':');
-                self.write_loc_name(&mut line, hi);
+                out.write_char(':').unwrap();
+                self.write_loc_name(&mut out, hi);
             }
         }
-        line.push('\n');
-        self.out.push_str(&line);
+        out.push_str("\n");
+        self.out = out;
     }
 
     fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
@@ -4926,7 +4929,7 @@ impl<'a> FunctionCompiler<'a> {
         Address::offset(self.base, self.spill_base + 8 * index as usize)
     }
 
-    fn write_loc_name(&self, out: &mut String, loc: Loc) {
+    fn write_loc_name<W: Write + ?Sized>(&self, out: &mut W, loc: Loc) {
         match loc {
             Loc::Reg(r) => crate::text::write_class(out, 'x', r.into()),
             Loc::FReg(r) => crate::text::write_class(out, 'd', r.into()),
