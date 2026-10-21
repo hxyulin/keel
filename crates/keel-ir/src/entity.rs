@@ -154,6 +154,155 @@ impl<K: EntityRef + fmt::Debug, V: fmt::Debug> fmt::Debug for Arena<K, V> {
     }
 }
 
+/// Finds arena entries by key without storing the keys twice: a slot holds
+/// an entry's index and 32 bits of its key's hash, and a lookup compares the
+/// key itself through the arena. Arenas below [`KeyIndex::FROM`] entries are
+/// scanned instead, so most functions never build one, and an unbuilt index
+/// is a single null pointer.
+///
+/// Entries are only ever added, and an equal key added later probes past an
+/// earlier one, so a lookup finds the first entry with a key, like a scan.
+#[derive(Clone, Default)]
+pub(crate) struct KeyIndex(Option<Box<KeyTable>>);
+
+#[derive(Clone)]
+struct KeyTable {
+    /// Open addressing with linear probing, a power of two long: `(hash,
+    /// index + 1)`, with index 0 marking a free slot.
+    slots: Vec<(u32, u32)>,
+    /// Each indexed entry's hash, by index.
+    hashes: Vec<u32>,
+    /// Entries whose keys may have changed since they were indexed.
+    touched: Vec<u32>,
+}
+
+impl KeyIndex {
+    /// Arena size from which lookups go through an index.
+    pub(crate) const FROM: usize = 16;
+
+    /// The top half of a 64-bit hash, the best mixed by Fx's multiply.
+    #[inline]
+    pub(crate) fn hash_of<T: std::hash::Hash + ?Sized>(key: &T) -> u32 {
+        use std::hash::Hasher;
+        let mut hasher = crate::fxhash::FxHasher::default();
+        key.hash(&mut hasher);
+        (hasher.finish() >> 32) as u32
+    }
+
+    /// Number of entries indexed.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.0.as_ref().map_or(0, |t| t.hashes.len())
+    }
+
+    /// Indexes the hashes of `len` entries' keys, in order, replacing
+    /// everything.
+    pub(crate) fn rebuild(&mut self, len: usize, hashes: impl Iterator<Item = u32>) {
+        let mut table = KeyTable {
+            slots: vec![(0, 0); (len * 2).next_power_of_two().max(64)],
+            hashes: Vec::with_capacity(len),
+            touched: Vec::new(),
+        };
+        for hash in hashes {
+            table.push(hash);
+        }
+        self.0 = Some(Box::new(table));
+    }
+
+    /// The first entry with hash `hash` that `is` accepts. The index must be
+    /// built.
+    #[inline]
+    pub(crate) fn find(&self, hash: u32, mut is: impl FnMut(usize) -> bool) -> Option<usize> {
+        let table = self.0.as_ref().expect("index is built");
+        let mask = table.slots.len() - 1;
+        let mut i = table.home(hash);
+        loop {
+            let (h, entry) = table.slots[i];
+            if entry == 0 {
+                return None;
+            }
+            if h == hash && is(entry as usize - 1) {
+                return Some(entry as usize - 1);
+            }
+            i = (i + 1) & mask;
+        }
+    }
+
+    /// Indexes the entry just added, whose key hashes to `hash`, if the
+    /// index is built.
+    #[inline]
+    pub(crate) fn push(&mut self, hash: u32) {
+        if let Some(table) = &mut self.0 {
+            table.push(hash);
+        }
+    }
+
+    /// Notes that entry `index`'s key may change, if the index is built.
+    /// After `limit` such notes, drops the index instead: rebuilding it
+    /// costs no more than checking them all.
+    #[inline]
+    pub(crate) fn touch(&mut self, index: usize, limit: usize) {
+        if let Some(table) = &mut self.0 {
+            if table.touched.len() >= limit {
+                self.0 = None;
+            } else {
+                table.touched.push(index as u32);
+            }
+        }
+    }
+
+    /// Drops the index if a touched entry's key no longer hashes as it was
+    /// indexed; `hash_at` hashes an entry's current key.
+    #[inline]
+    pub(crate) fn check_touched(&mut self, hash_at: impl Fn(usize) -> u32) {
+        let Some(table) = &mut self.0 else {
+            return;
+        };
+        if table.touched.is_empty() {
+            return;
+        }
+        if table
+            .touched
+            .iter()
+            .any(|&i| hash_at(i as usize) != table.hashes[i as usize])
+        {
+            self.0 = None;
+        } else {
+            table.touched.clear();
+        }
+    }
+}
+
+impl KeyTable {
+    #[inline]
+    fn home(&self, hash: u32) -> usize {
+        (hash >> (32 - self.slots.len().trailing_zeros())) as usize
+    }
+
+    fn push(&mut self, hash: u32) {
+        if (self.hashes.len() + 1) * 2 > self.slots.len() {
+            let len = self.slots.len() * 2;
+            self.slots.clear();
+            self.slots.resize(len, (0, 0));
+            for index in 0..self.hashes.len() {
+                self.place(self.hashes[index], index);
+            }
+        }
+        self.place(hash, self.hashes.len());
+        self.hashes.push(hash);
+    }
+
+    fn place(&mut self, hash: u32, index: usize) {
+        let mask = self.slots.len() - 1;
+        let mut i = self.home(hash);
+        while self.slots[i].1 != 0 {
+            i = (i + 1) & mask;
+        }
+        let entry = u32::try_from(index + 1).expect("entity index overflow");
+        self.slots[i] = (hash, entry);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

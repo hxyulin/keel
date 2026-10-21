@@ -10,6 +10,7 @@
 //! the middle of a block is linear in its size; fine for now, and the
 //! methods hide the representation if it needs to change.
 
+use crate::entity::KeyIndex;
 use crate::inst::{BlockCall, Clause, InstData, Symbol};
 use crate::layout::Layout;
 use crate::{
@@ -40,7 +41,7 @@ pub enum ArgExt {
 /// What a `ptr` parameter stands for, when it is a C struct passed or
 /// returned by value. The IR only ever handles the struct's address; the
 /// calling convention copies the bytes.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Purpose {
     /// An ordinary value.
     Normal,
@@ -57,7 +58,7 @@ pub enum Purpose {
 
 /// A parameter or return value of a signature: its type and how the ABI
 /// treats it.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct AbiParam {
     pub ty: Type,
     /// Only for `i8` and `i16`.
@@ -101,7 +102,7 @@ impl fmt::Display for AbiParam {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Signature {
     pub params: Vec<AbiParam>,
     pub returns: Vec<AbiParam>,
@@ -369,6 +370,11 @@ pub struct Function {
     data_symbols: Arena<DataRef, String>,
     /// Signatures of indirect calls, without duplicates.
     signatures: Arena<SigRef, Signature>,
+    /// Lookups for the `import_*` methods, so that a function referring to
+    /// many symbols does not scan its tables once per reference.
+    callee_index: KeyIndex,
+    data_index: KeyIndex,
+    sig_index: KeyIndex,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
     /// Whether each block is in `layout`.
@@ -459,6 +465,9 @@ impl Function {
             callees: Arena::new(),
             data_symbols: Arena::new(),
             signatures: Arena::new(),
+            callee_index: KeyIndex::default(),
+            data_index: KeyIndex::default(),
+            sig_index: KeyIndex::default(),
             layout: Vec::new(),
             in_layout: Vec::new(),
             personality: None,
@@ -487,18 +496,29 @@ impl Function {
 
     /// Returns a reference for calling `name`, reusing an existing one.
     pub fn import_function(&mut self, name: &str, sig: Signature) -> FuncRef {
-        if let Some((func_ref, _)) = self.callees.iter().find(|(_, d)| d.name == name) {
-            return func_ref;
-        }
-        self.callees.push(FuncDecl {
+        // A callee renamed through `callee_mut` would be in the wrong slot.
+        let callees = &self.callees;
+        self.callee_index
+            .check_touched(|i| KeyIndex::hash_of(callees[FuncRef::new(i)].name.as_str()));
+        let hash = match find_entry(&self.callees, &mut self.callee_index, name, |d| {
+            d.name.as_str()
+        }) {
+            Ok(func_ref) => return func_ref,
+            Err(hash) => hash,
+        };
+        let func_ref = self.callees.push(FuncDecl {
             attrs: FunctionAttrs::default(),
             name: name.to_string(),
             sig,
-        })
+        });
+        self.callee_index.push(hash);
+        func_ref
     }
 
     #[inline]
     pub fn callee_mut(&mut self, func_ref: FuncRef) -> &mut FuncDecl {
+        self.callee_index
+            .touch(func_ref.index(), self.callees.len());
         &mut self.callees[func_ref]
     }
 
@@ -514,10 +534,15 @@ impl Function {
 
     /// Returns a reference to data object `name`, reusing an existing one.
     pub fn import_data(&mut self, name: &str) -> DataRef {
-        if let Some((data_ref, _)) = self.data_symbols.iter().find(|(_, n)| *n == name) {
-            return data_ref;
-        }
-        self.data_symbols.push(name.to_string())
+        let hash = match find_entry(&self.data_symbols, &mut self.data_index, name, |n| {
+            n.as_str()
+        }) {
+            Ok(data_ref) => return data_ref,
+            Err(hash) => hash,
+        };
+        let data_ref = self.data_symbols.push(name.to_string());
+        self.data_index.push(hash);
+        data_ref
     }
 
     #[inline]
@@ -528,10 +553,13 @@ impl Function {
     /// Returns a reference to `sig` for indirect calls, reusing an existing
     /// one.
     pub fn import_signature(&mut self, sig: Signature) -> SigRef {
-        if let Some((sig_ref, _)) = self.signatures.iter().find(|(_, s)| **s == sig) {
-            return sig_ref;
-        }
-        self.signatures.push(sig)
+        let hash = match find_entry(&self.signatures, &mut self.sig_index, &sig, |s| s) {
+            Ok(sig_ref) => return sig_ref,
+            Err(hash) => hash,
+        };
+        let sig_ref = self.signatures.push(sig);
+        self.sig_index.push(hash);
+        sig_ref
     }
 
     #[inline]
@@ -950,6 +978,35 @@ impl Function {
     #[inline]
     pub fn value_def(&self, value: Value) -> ValueDef {
         self.values[value].def
+    }
+}
+
+/// The first entry of `arena` whose key is `key`, or else the hash to index
+/// a new entry under (0 while the arena is scanned). Builds `index` once the
+/// arena is big enough.
+#[inline]
+fn find_entry<K: EntityRef, V, Q: std::hash::Hash + PartialEq + ?Sized>(
+    arena: &Arena<K, V>,
+    index: &mut KeyIndex,
+    key: &Q,
+    key_of: impl Fn(&V) -> &Q,
+) -> Result<K, u32> {
+    if arena.len() < KeyIndex::FROM {
+        return match arena.iter().find(|(_, v)| key_of(v) == key) {
+            Some((k, _)) => Ok(k),
+            None => Err(0),
+        };
+    }
+    if index.len() != arena.len() {
+        index.rebuild(
+            arena.len(),
+            arena.iter().map(|(_, v)| KeyIndex::hash_of(key_of(v))),
+        );
+    }
+    let hash = KeyIndex::hash_of(key);
+    match index.find(hash, |i| key_of(&arena[K::new(i)]) == key) {
+        Some(i) => Ok(K::new(i)),
+        None => Err(hash),
     }
 }
 
