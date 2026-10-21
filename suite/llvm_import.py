@@ -41,6 +41,10 @@ class LLVM:
             'GetNamedMetadata': (P, [P, C.c_char_p, C.c_size_t]),
             'PrintValueToString': (P, [P]), 'GlobalGetValueType': (P, [P]),
             'TypeOf': (P, [P]), 'GetTypeKind': (U, [P]), 'GetIntTypeWidth': (U, [P]),
+            'GetTypeContext': (P, [P]), 'IntTypeInContext': (P, [P, U]),
+            'IsAConstantFP': (P, [P]), 'ConstBitCast': (P, [P, P]),
+            'GetFCmpPredicate': (U, [P]), 'GetFastMathFlags': (U, [P]),
+            'CanValueUseFastMathFlags': (C.c_int, [P]),
             'GetPointerAddressSpace': (U, [P]), 'GetReturnType': (P, [P]),
             'IsFunctionVarArg': (C.c_int, [P]), 'GetFunctionCallConv': (U, [P]),
             'GetInstructionCallConv': (U, [P]), 'GetLinkage': (U, [P]),
@@ -98,7 +102,7 @@ class LLVM:
         if self.version[0] != 23:
             raise Unsupported(f'validated LLVM major is 23; loaded {self.version}')
         self.attribute_kinds = {}
-        for name in ABI_UNSUPPORTED + ('signext', 'zeroext', 'naked', 'returns_twice', 'null_pointer_is_valid'):
+        for name in ABI_UNSUPPORTED + ('signext', 'zeroext', 'naked', 'returns_twice', 'null_pointer_is_valid', 'strictfp', 'nofpclass'):
             b = name.encode()
             kind = self.GetEnumAttributeKindForName(b, len(b))
             if not kind:
@@ -124,7 +128,7 @@ class LLVM:
 
     def check_function_attributes(self, value, call=False):
         index = 0xffffffff
-        for name in ('naked', 'returns_twice', 'alignstack', 'null_pointer_is_valid'):
+        for name in ('naked', 'returns_twice', 'alignstack', 'null_pointer_is_valid', 'strictfp'):
             if self.attribute(value, index, name, call=call):
                 raise Unsupported(f'unsupported function/call attribute {name}')
         count = self.GetCallSiteAttributeCount if call else self.GetAttributeCountAtIndex
@@ -146,6 +150,13 @@ class LLVM:
                 length = U()
                 key = self.GetStringAttributeKind(attribute, C.byref(length))
                 name = C.string_at(key, length.value).decode()
+                # These may alter FP results or the execution environment. Even
+                # apparently benign settings are outside this default-IEEE bridge.
+                if name.startswith(('denormal-fp-math', 'rounding-mode')) or name in (
+                    'unsafe-fp-math', 'no-infs-fp-math', 'no-nans-fp-math',
+                    'no-signed-zeros-fp-math', 'approx-func-fp-math',
+                ):
+                    raise Unsupported(f'unsupported floating-point attribute {name}')
                 if name.startswith(('aarch64_', 'instrument-function-', 'patchable-')):
                     raise Unsupported(f'unsupported function/call string attribute {name}')
 
@@ -162,6 +173,7 @@ class Importer:
     BINARY = {8: 'iadd', 10: 'isub', 12: 'imul', 14: 'udiv', 15: 'sdiv',
               17: 'urem', 18: 'srem', 20: 'shl', 21: 'ushr', 22: 'sshr',
               23: 'and', 24: 'or', 25: 'xor'}
+    FP_BINARY = {9: 'fadd', 11: 'fsub', 13: 'fmul', 16: 'fdiv'}
     CMP = {32: 'eq', 33: 'ne', 34: 'ugt', 35: 'uge', 36: 'ult',
            37: 'ule', 38: 'sgt', 39: 'sge', 40: 'slt', 41: 'sle'}
 
@@ -178,13 +190,15 @@ class Importer:
         kind = self.l.GetTypeKind(ty)
         if kind == 0:
             return 'void'
+        if kind in (2, 3):
+            return {2: 'f32', 3: 'f64'}[kind]
         if kind == 8:
             width = self.l.GetIntTypeWidth(ty)
             if width in (8, 16, 32, 64) or (width == 1 and not abi):
                 return 'i8' if width == 1 else f'i{width}'
         if kind == 12 and self.l.GetPointerAddressSpace(ty) == 0:
             return 'ptr'
-        raise Unsupported('supported types are scalar i8/i16/i32/i64 and address-space-zero pointers; i1 is internal only')
+        raise Unsupported('supported types are scalar i8/i16/i32/i64/f32/f64 and address-space-zero pointers; i1 is internal only')
 
     def width(self, value):
         ty = self.l.TypeOf(value)
@@ -228,6 +242,8 @@ class Importer:
         get = l.GetCallSiteAttributes if call else l.GetAttributesAtIndex
         result = []
         for index, ty in enumerate(types):
+            if l.attribute(value, index, 'nofpclass', call=call):
+                raise Unsupported('unsupported nofpclass promise')
             attrs = (P * count(value, index))()
             get(value, index, attrs)
             for attr in attrs:
@@ -275,6 +291,15 @@ class Importer:
         if value in self.values:
             return self.values[value]
         l = self.l
+        if l.IsAConstantFP(value):
+            ty = l.TypeOf(value)
+            text = self.type(ty)
+            width = {'f32': 32, 'f64': 64}[text]
+            # Bitcast inside LLVM, rather than round-tripping through a host
+            # double (which can quiet sNaNs and lose f32 NaN payload bits).
+            integer = l.IntTypeInContext(l.GetTypeContext(ty), width)
+            bits = l.ConstIntGetZExtValue(l.ConstBitCast(value, integer))
+            return self.emit(f'fconst.{text} 0x{bits:0{width // 4}x}')
         if l.IsAConstantInt(value):
             ty = self.type(l.TypeOf(value))
             n = l.ConstIntGetZExtValue(value) if self.width(value) == 1 else l.ConstIntGetSExtValue(value)
@@ -290,7 +315,7 @@ class Importer:
         """Validate before asking LLVM for a size (unsized types can abort LLVM)."""
         l = self.l
         kind = l.GetTypeKind(ty)
-        if kind in (8, 12):
+        if kind in (2, 3, 8, 12):
             self.type(ty)
         elif kind == 11:
             self.layout_type(l.GetElementType(ty))
@@ -316,6 +341,48 @@ class Importer:
         l = self.l
         op = l.GetInstructionOpcode(inst)
         operands = lambda: [l.GetOperand(inst, i) for i in range(l.GetNumOperands(inst))]
+        if l.CanValueUseFastMathFlags(inst) and l.GetFastMathFlags(inst):
+            raise Unsupported('floating-point fast-math flags')
+        if op in self.FP_BINARY:
+            a, b = map(self.value, operands())
+            return self.emit(f'{self.FP_BINARY[op]} {a}, {b}')
+        if op == 66:  # fneg is an exact sign-bit operation, including NaNs.
+            return self.emit('fneg ' + self.value(l.GetOperand(inst, 0)))
+        if op == 43:
+            a, b = map(self.value, operands())
+            predicate = l.GetFCmpPredicate(inst)
+            if predicate in (0, 15):
+                return self.emit(f'iconst.i8 {int(predicate == 15)}')
+            direct = {1: 'eq', 2: 'gt', 3: 'ge', 4: 'lt', 5: 'le',
+                      7: 'ord', 8: 'uno', 14: 'ne'}
+            if predicate in direct:
+                return self.emit(f'fcmp.{direct[predicate]} {a}, {b}')
+            if predicate == 6:  # one = ordered AND unequal
+                ne = self.emit(f'fcmp.ne {a}, {b}')
+                ordered = self.emit(f'fcmp.ord {a}, {b}')
+                return self.emit(f'and {ne}, {ordered}')
+            cc = {9: 'eq', 10: 'gt', 11: 'ge', 12: 'lt', 13: 'le'}[predicate]
+            comparison = self.emit(f'fcmp.{cc} {a}, {b}')
+            unordered = self.emit(f'fcmp.uno {a}, {b}')
+            return self.emit(f'or {comparison}, {unordered}')
+        if op in (33, 34, 35, 36, 37, 38):
+            arg = l.GetOperand(inst, 0)
+            ty = self.type(l.TypeOf(inst))
+            if re.search(r'\b(?:nneg|round\.[a-z]+)\b', l.printed(inst)):
+                raise Unsupported('unsupported floating-point conversion flags/rounding')
+            if op in (33, 34) and ty not in ('i32', 'i64'):
+                raise Unsupported('FP-to-integer destinations must be i32/i64')
+            # LLVM defines FP->int only when truncation toward zero fits the
+            # destination. Keel saturation agrees on that domain; its results
+            # for LLVM poison inputs are a refinement, not a saturation promise
+            # to LLVM callers. Do not differential-test those inputs.
+            value = self.value(arg)
+            if op in (35, 36) and self.width(arg) == 1:
+                if op == 36:
+                    value = self.emit(f'ineg {value}')
+            name = {33: 'fptoui', 34: 'fptosi', 35: 'uitofp',
+                    36: 'sitofp', 37: 'fptrunc', 38: 'fpext'}[op]
+            return self.emit(f'{name}.{ty} {value}')
         if op in (70, 71):  # LLVM 23 split unconditional/conditional branches.
             if l.GetNumSuccessors(inst) == 1:
                 text = 'jump ' + self.edge(l.GetSuccessor(inst, 0))
@@ -384,9 +451,13 @@ class Importer:
             if re.search(r'\b(?:zext nneg|trunc (?:nuw|nsw))\b', l.printed(inst)):
                 raise Unsupported('poison-sensitive conversion flags')
             if op == 41:
-                if self.type(l.TypeOf(arg)) != ty:
-                    raise Unsupported('non-identity bitcast')
-                return value
+                source_ty = self.type(l.TypeOf(arg))
+                if source_ty == ty:
+                    return value
+                if (source_ty, ty) in (('f32', 'i32'), ('i32', 'f32'),
+                                       ('f64', 'i64'), ('i64', 'f64')):
+                    return self.emit(f'bitcast.{ty} {value}')
+                raise Unsupported('unsupported scalar bitcast')
             if op == 30 and self.width(inst) == 1:
                 if self.width(arg) > 8:
                     value = self.emit(f'trunc.i8 {value}')
