@@ -1,4 +1,4 @@
-//! Opt-in, bounded private two-word byval transport. No pipeline registration.
+//! Opt-in, bounded private two-word byval transport. No default pipeline change.
 //!
 //! Each call snapshots both words immediately before the call. Each byval
 //! parameter gets its own fresh, naturally aligned callee home: arbitrary
@@ -11,7 +11,7 @@ use keel_ir::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Explicit custom-pipeline entry point; deliberately absent from PASSES.
+/// Explicit named/custom-pipeline entry point; absent from default pipelines.
 pub struct PrivateAggregate;
 impl crate::Pass for PrivateAggregate {
     fn name(&self) -> &'static str {

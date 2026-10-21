@@ -128,12 +128,25 @@ block2:
     assert_eq!(m.functions[0].sig.params.len(), 4);
 }
 #[test]
-fn no_registration_or_default_schedule_change() {
-    assert!(keel_opt::find_pass("private-aggregate").is_none());
+fn named_registration_is_appended_and_does_not_change_default_schedules() {
+    assert_eq!(keel_opt::PASSES.last().unwrap().name(), "private-aggregate");
+    for tier in [
+        keel_opt::OptimizationTier::None,
+        keel_opt::OptimizationTier::Fast,
+        keel_opt::OptimizationTier::Basic,
+        keel_opt::OptimizationTier::Full,
+    ] {
+        assert!(!tier.pipeline().contains(&"private-aggregate"));
+    }
+    let mut m = parse(SOURCE).unwrap();
+    keel_opt::run_passes(&mut m, &["private-aggregate"]).unwrap();
+    verify_module(&m).unwrap();
     assert!(
-        !keel_opt::OptimizationTier::Fast
-            .pipeline()
-            .contains(&"private-aggregate")
+        m.functions[0]
+            .sig
+            .params
+            .iter()
+            .all(|p| p.purpose == Purpose::Normal)
     );
 }
 
