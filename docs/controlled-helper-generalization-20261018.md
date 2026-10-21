@@ -62,14 +62,15 @@ eight sites are profitable. Initial source/activation receipts remain retained.
 
 ## Using the opt-in pass
 
-Replace the first `inline` in the full pipeline, keeping a single inlining
-invocation:
+The following is the historical single-round research pipeline:
 
 ```sh
 keel cc -p inline-aggregate-reserve,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,loop-vectorize input.c -o output.s
 ```
 
-The default `-O` pipeline still uses ordinary `inline`.
+Current default `-O` uses three `inline-noninterposable` rounds. The aggregate
+reserve remains a separate explicit experiment; the measurements below belong
+to the historical pipeline, not current Full.
 
 ## Reviewed evidence and integration scope
 

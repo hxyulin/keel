@@ -783,10 +783,10 @@ families, concrete phase-order examples, and early/late/repeated cleanup sweeps.
 
 The default pipeline (`-O`) runs three bounded rounds of `inline-noninterposable, simplify-cfg, canonicalize, instcombine,
 call-contracts, simplify-cfg, gvn, small-memory, stack-forward, canonicalize, instcombine, dce, gcm,
-loop-vectorize, loop-reduce`. Cleanup between inliner invocations exposes smaller
+adjacent-abs, loop-vectorize, loop-reduce`. Cleanup between inliner invocations exposes smaller
 helpers for the next round. The inliner keeps its existing growth budgets;
 public definitions require an explicit `noninterposable` producer promise.
-The 45 round entries retain code motion and loop optimization between rounds,
+The 48 round entries retain code motion and loop optimization between rounds,
 followed by this 14-entry epilogue:
 `load-reuse, stack-promote, phi-simplify, dce, simplify-cfg,
 loop-strength-reduce, canonicalize, instcombine, dce, loop-unroll,
@@ -797,9 +797,9 @@ same-lane cast support, so those passes are not scheduled separately.
 If-conversion and an additional final GCM remain opt-in after Lua screening
 found a large fib regression in broader candidates. The selected schedule
 passed the kernel and Lua correctness checks; noisy identical-binary timing
-controls prevent a placement-independent speedup claim. This fixed 59-entry
+controls prevent a placement-independent speedup claim. This fixed 62-entry
 schedule is not an unbounded fixed-point loop.
-The earlier paired suite comparison on ARM and two x86 hosts measured 8.5–15.6% less
+An earlier 59-entry schedule's paired suite comparison on ARM and two x86 hosts measured 8.5–15.6% less
 runtime than one round at 50–53% greater preprocessed-C-to-object compilation
 time, with increased code size and uneven workload benefits. The
 [suite comparison protocol](../suite/README.md#native-platform-comparisons)
