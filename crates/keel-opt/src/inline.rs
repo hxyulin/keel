@@ -92,6 +92,11 @@ const RESERVE_SITE_GROWTH: usize = 32;
 const RESERVE_CALLER_SITES: usize = 8;
 const RESERVE_MODULE_SITES: usize = 8;
 
+// Contracting a recursive wrapper still adds branches, stack snapshots and
+// live values to its caller. Keep that exception out of very large functions;
+// ordinary profitable inlining and read-only leaf admission remain available.
+const MAX_SCC_CALLER_INSTRUCTIONS: usize = 8192;
+
 // A bounded structural domain, not a profitability or hotness prediction.
 // All ordinary eligibility/signature/recursion checks run first.
 fn aggregate_leaf(f: &Function, cost: usize, stack_cost: u64) -> bool {
@@ -594,6 +599,8 @@ fn run_observed_policy(
     let mut module_growth = 0;
     let mut module_reserve_sites = 0;
     for caller in &mut module.functions {
+        let large_scc_caller =
+            !wrappers.is_empty() && caller.layout_insts().count() > MAX_SCC_CALLER_INSTRUCTIONS;
         let calls: Vec<_> = caller
             .layout_insts()
             .filter_map(|(_, i)| {
@@ -638,6 +645,11 @@ fn run_observed_policy(
                 Some(("noinline policy", "noinline"))
             } else if recursive_bodies.contains(&caller.name) {
                 Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
+            } else if large_scc_caller && wrappers.contains(&decl.name) {
+                Some((
+                    "recursive wrapper caller size",
+                    "recursive_wrapper_caller_size",
+                ))
             } else if let Some(callee) = templates.get(&decl.name) {
                 if decl.sig != callee.sig {
                     Some(("ABI signature mismatch", "abi_signature_mismatch"))

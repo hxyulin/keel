@@ -219,6 +219,31 @@ fn recursive_wrapper_sites_still_consume_ordinary_growth_budget() {
 }
 
 #[test]
+fn recursive_wrapper_admission_bounds_initial_caller_size() {
+    for (padding, expected) in [(8190, "inlined"), (8191, "recursive_wrapper_caller_size")] {
+        let mut source = QUICKJS.to_owned();
+        source.push_str("\nfunc @large(ptr) {\nblock0(v0: ptr):\n");
+        for i in 1..=padding {
+            source.push_str(&format!(" v{i} = iconst.i64 0\n"));
+        }
+        source.push_str(" v9001 = call @js_poll_interrupts(v0)\n return\n}\n");
+        assert_eq!(
+            outcome(
+                &source,
+                "inline-noninterposable",
+                "large",
+                "js_poll_interrupts"
+            ),
+            expected
+        );
+        assert_eq!(
+            outcome(&source, "inline", "large", "js_poll_interrupts"),
+            "recursive_callee"
+        );
+    }
+}
+
+#[test]
 fn wrapper_cycles_and_wrapper_to_wrapper_edges_stay_out_of_line() {
     let source = "func @a(i64) -> i64 inlinehint local {\nblock0(v0: i64):\n v1 = call @b(v0)\n return v1\n}\nfunc @b(i64) -> i64 inlinehint local {\nblock0(v0: i64):\n v1 = call @a(v0)\n return v1\n}\nfunc @outer(i64) -> i64 {\nblock0(v0: i64):\n v1 = call @a(v0)\n return v1\n}";
     let mut m = keel_ir::parse(source).unwrap();
