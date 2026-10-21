@@ -287,10 +287,20 @@ and separates frontend, verification, optimization, codegen and object costs.
   uses the existing opt-in `--target-features avx` for 128-bit `f32x4`/`f64x2`;
   AVX2, AVX-512 and wider vectors remain outside this feature.
 - Attribute parsing is broader than attribute semantics: many attributes
-  are ignored. Keel does not claim full GCC or Clang compatibility.
+  are ignored. Selected unsupported linkage/lifetime attributes and non-default
+  visibility are diagnosed; see the [C compatibility audit](docs/c-frontend-coverage.md).
+  Keel does not claim full GCC or Clang compatibility.
 
 See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
+
+The diagnostic [LLVM → Keel importer](suite/llvm_import_README.md) accepts a
+scalar subset with CFG/PHIs, layout-aware GEP and fixed entry-block stack slots
+on Apple AArch64. The [C++ coverage runner](suite/cpp_coverage_README.md) exercises
+untouched Clang output through this path and compares native execution at
+None/Fast/Full, including C and optional Rust ABI boundaries. These are bounded
+coverage tools; full C++ applications, aggregate ABIs and exception handling
+remain outside the importer's supported scope.
 
 ## Assembler (A64 subset)
 

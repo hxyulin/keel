@@ -1295,9 +1295,10 @@ Some accepted extensions have deliberately limited behavior:
   [Attribute ownership, merging and emission](function-attributes.md) distinguish
   named declarations from returned-function types and indirect calls.
   GNU function-pointer `noreturn` attributes are not represented.
-  Other attributes are ignored, including `cleanup`, `weak`, `alias`,
-  `visibility`, `constructor` and `vector_size`; their runtime, linkage or
-  type behavior is not supported.
+  Selected unsupported linkage and lifetime attributes, including `cleanup`,
+  `weak`, `alias` and `constructor`, are diagnosed. Only default visibility
+  is accepted. Other attributes, including `vector_size`, remain ignored;
+  see the [C compatibility audit](c-frontend-coverage.md) for the exact boundary.
 - `inline` affects emission and supplies `inlinehint` to the bounded
   private-only [inliner](#bounded-function-inlining). Block-pointer declarators (`^`) are
   parsed as pointers; block literals and the Blocks runtime are not

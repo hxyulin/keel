@@ -59,7 +59,7 @@ for cases whose import is rejected. Each accepted module is compiled at Keel
 selected boundary object. Checks stop on a failure within a case and continue
 to the next case. The JSON stage and command logs identify the failure.
 
-The six required regression-floor profiles are:
+The nine required regression-floor profiles are:
 
 - `scalar`: unsigned wrapping arithmetic, shifts and volatile scalar memory.
 - `templates`: an inlined scalar template instantiation.
@@ -67,12 +67,15 @@ The six required regression-floor profiles are:
 - `overloads`: overload resolution plus emitted mangled scalar definitions.
 - `raii`: an inlined destructor with an observable C callback and volatile store.
 - `c_abi`: explicit cross-object C callbacks.
+- `cfg`: multiple blocks and conditional direct calls.
+- `gep`: indexed volatile memory.
+- `alloca`: unoptimized stack locals.
 
-The probes are `constexpr_runtime`, `virtual`, `cfg`, `gep`, `alloca`,
-`signed_contract`, and `eh`. These may reject with a recognized unsupported
+The probes are `constexpr_runtime`, `virtual`, `signed_contract`, and `eh`.
+These may reject with a recognized unsupported
 feature diagnostic; acceptance automatically enables the same three-tier
 native differential tests. They are not pinned to rejection, so rerun them
-after the CFG and GEP/alloca importer tracks are integrated. The report records
+as importer support expands. The report records
 the first importer blocker; removing it may expose another. For example,
 virtual dispatch currently stops at global data before reaching indirect calls.
 The runtime constexpr probe intentionally retains its observed linkage blocker.
@@ -81,7 +84,7 @@ lowering/inlining; successful import does not imply support for their general
 runtime machinery. `ir_indicators` are textual counts for orientation, not a
 complete LLVM feature parser.
 
-All fixtures use `-std=c++17`. IR production is `-O2` for the required profiles,
+All fixtures use `-std=c++17`. IR production is `-O2` for the original six profiles,
 runtime constexpr and virtual dispatch; `-O1` for CFG, GEP, signed contracts and
 EH; and `-O0` for stack locals. Every case except EH explicitly uses
 `-fno-exceptions -fno-rtti`. EH retains normal C++ exception/RTTI defaults.
@@ -152,3 +155,20 @@ The full native invocation was the reproduction command above with
 passed. No GCC boundary was validated on this host; `--abi-cc` remains an
 optional path. CFG/GEP integration has not been validated in this checkout.
 No importer, optimizer, backend, or native Rust frontend source was changed.
+
+### Combined importer integration
+
+After integrating CFG/PHI, GEP and fixed entry-block allocation support at
+revision `ee6f3284`, the full runner with `--abi-rustc rustc` passed **9 profiles**
+with **4 expected rejections**. All 26 native references and 54 differential
+executions passed, each checking 4,240 input pairs. CFG, GEP and alloca are now
+required regression-floor cases. The remaining first blockers are unchanged
+for runtime constexpr linkage, virtual/global data, signed no-wrap arithmetic,
+and EH/global data. This still does not establish full C++ application support.
+
+Artifacts: `/private/tmp/keel-frontend-integrated-cpp-r1/report.json`.
+The run used the reproduction command above, private Keel target directory
+`/tmp/keel-llvm-cfg-0dd17ef4/target`, and shared lock log
+`/tmp/keel-frontend-integrated-lock.jsonl`. A subsequent run after promoting
+the three cases to required is retained at
+`/private/tmp/keel-frontend-integrated-cpp-r2/report.json`.

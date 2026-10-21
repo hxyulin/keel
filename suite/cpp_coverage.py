@@ -26,9 +26,9 @@ CASES = [
     ('c_abi', 'cross-object C -> C++ -> C calls', True, '-O2'),
     ('constexpr_runtime', 'constexpr helper invoked outside a constant-expression context', False, '-O2'),
     ('virtual', 'virtual dispatch, vtable/global/indirect-call machinery', False, '-O2'),
-    ('cfg', 'multiple blocks and conditional direct calls', False, '-O1'),
-    ('gep', 'indexed volatile memory', False, '-O1'),
-    ('alloca', 'unoptimized stack locals', False, '-O0'),
+    ('cfg', 'multiple blocks and conditional direct calls', True, '-O1'),
+    ('gep', 'indexed volatile memory', True, '-O1'),
+    ('alloca', 'unoptimized stack locals', True, '-O0'),
     ('signed_contract', 'compiler arithmetic no-wrap contracts', False, '-O1'),
     ('eh', 'throw/catch and exception runtime', False, '-O1'),
 ]
