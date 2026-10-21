@@ -173,64 +173,133 @@ pub struct Parser<'a> {
     va_list_tag: Option<usize>,
 }
 
+/// A keyword that starts a type name or declaration.
+const TYPE_WORD: u8 = 1;
+/// A word that cannot be an identifier.
+const RESERVED: u8 = 2;
+
+/// Keywords and what they are. The few type keywords that are typedef-like
+/// names (`__builtin_va_list`, `__int128_t`, `__uint128_t`) are not
+/// reserved.
+const KEYWORDS: [(&str, u8); 74] = [
+    ("void", TYPE_WORD | RESERVED),
+    ("_Bool", TYPE_WORD | RESERVED),
+    ("char", TYPE_WORD | RESERVED),
+    ("short", TYPE_WORD | RESERVED),
+    ("int", TYPE_WORD | RESERVED),
+    ("long", TYPE_WORD | RESERVED),
+    ("float", TYPE_WORD | RESERVED),
+    ("double", TYPE_WORD | RESERVED),
+    ("signed", TYPE_WORD | RESERVED),
+    ("unsigned", TYPE_WORD | RESERVED),
+    ("__signed", TYPE_WORD | RESERVED),
+    ("__signed__", TYPE_WORD | RESERVED),
+    ("struct", TYPE_WORD | RESERVED),
+    ("union", TYPE_WORD | RESERVED),
+    ("enum", TYPE_WORD | RESERVED),
+    ("typedef", TYPE_WORD | RESERVED),
+    ("extern", TYPE_WORD | RESERVED),
+    ("static", TYPE_WORD | RESERVED),
+    ("auto", TYPE_WORD | RESERVED),
+    ("register", TYPE_WORD | RESERVED),
+    ("const", TYPE_WORD | RESERVED),
+    ("volatile", TYPE_WORD | RESERVED),
+    ("restrict", TYPE_WORD | RESERVED),
+    ("__restrict", TYPE_WORD | RESERVED),
+    ("__restrict__", TYPE_WORD | RESERVED),
+    ("__const", TYPE_WORD | RESERVED),
+    ("__volatile", TYPE_WORD | RESERVED),
+    ("__volatile__", TYPE_WORD | RESERVED),
+    ("inline", TYPE_WORD | RESERVED),
+    ("__inline", TYPE_WORD | RESERVED),
+    ("__inline__", TYPE_WORD | RESERVED),
+    ("_Noreturn", TYPE_WORD | RESERVED),
+    ("_Thread_local", TYPE_WORD | RESERVED),
+    ("__thread", TYPE_WORD | RESERVED),
+    ("_Alignas", TYPE_WORD | RESERVED),
+    ("__attribute__", TYPE_WORD | RESERVED),
+    ("__attribute", TYPE_WORD | RESERVED),
+    ("_Nullable", TYPE_WORD | RESERVED),
+    ("_Nonnull", TYPE_WORD | RESERVED),
+    ("_Null_unspecified", TYPE_WORD | RESERVED),
+    ("__nullable", TYPE_WORD | RESERVED),
+    ("__nonnull", TYPE_WORD | RESERVED),
+    ("__int128", TYPE_WORD | RESERVED),
+    ("__int128_t", TYPE_WORD),
+    ("__uint128_t", TYPE_WORD),
+    ("_Float16", TYPE_WORD | RESERVED),
+    ("__float128", TYPE_WORD | RESERVED),
+    ("__builtin_va_list", TYPE_WORD),
+    ("typeof", TYPE_WORD | RESERVED),
+    ("__typeof__", TYPE_WORD | RESERVED),
+    ("__typeof", TYPE_WORD | RESERVED),
+    ("__auto_type", TYPE_WORD | RESERVED),
+    ("_Complex", TYPE_WORD | RESERVED),
+    ("_Atomic", TYPE_WORD | RESERVED),
+    ("if", RESERVED),
+    ("else", RESERVED),
+    ("while", RESERVED),
+    ("do", RESERVED),
+    ("for", RESERVED),
+    ("switch", RESERVED),
+    ("case", RESERVED),
+    ("default", RESERVED),
+    ("break", RESERVED),
+    ("continue", RESERVED),
+    ("return", RESERVED),
+    ("goto", RESERVED),
+    ("sizeof", RESERVED),
+    ("_Alignof", RESERVED),
+    ("__alignof__", RESERVED),
+    ("_Static_assert", RESERVED),
+    ("_Generic", RESERVED),
+    ("asm", RESERVED),
+    ("__asm", RESERVED),
+    ("__asm__", RESERVED),
+];
+
+/// Where a word's keyword search starts: its length and three of its bytes.
+const fn keyword_slot(word: &[u8]) -> usize {
+    let n = word.len();
+    (n * 61 + word[0] as usize * 7 + word[n - 1] as usize * 13 + word[n / 2] as usize * 3) & 255
+}
+
+/// `KEYWORDS` by open addressing: an index plus one, 0 for none.
+const KEYWORD_SLOTS: [u8; 256] = {
+    let mut slots = [0u8; 256];
+    let mut k = 0;
+    while k < KEYWORDS.len() {
+        let mut i = keyword_slot(KEYWORDS[k].0.as_bytes());
+        while slots[i] != 0 {
+            i = (i + 1) & 255;
+        }
+        slots[i] = k as u8 + 1;
+        k += 1;
+    }
+    slots
+};
+
+/// What `s` is as a keyword: `TYPE_WORD` and `RESERVED` bits.
+#[inline]
+fn keyword_class(s: &str) -> u8 {
+    if s.is_empty() {
+        return 0;
+    }
+    let mut i = keyword_slot(s.as_bytes());
+    loop {
+        let (word, class) = match KEYWORD_SLOTS[i] {
+            0 => return 0,
+            k => KEYWORDS[k as usize - 1],
+        };
+        if word == s {
+            return class;
+        }
+        i = (i + 1) & 255;
+    }
+}
+
 fn is_type_keyword(s: &str) -> bool {
-    matches!(
-        s,
-        "void"
-            | "_Bool"
-            | "char"
-            | "short"
-            | "int"
-            | "long"
-            | "float"
-            | "double"
-            | "signed"
-            | "unsigned"
-            | "__signed"
-            | "__signed__"
-            | "struct"
-            | "union"
-            | "enum"
-            | "typedef"
-            | "extern"
-            | "static"
-            | "auto"
-            | "register"
-            | "const"
-            | "volatile"
-            | "restrict"
-            | "__restrict"
-            | "__restrict__"
-            | "__const"
-            | "__volatile"
-            | "__volatile__"
-            | "inline"
-            | "__inline"
-            | "__inline__"
-            | "_Noreturn"
-            | "_Thread_local"
-            | "__thread"
-            | "_Alignas"
-            | "__attribute__"
-            | "__attribute"
-            | "_Nullable"
-            | "_Nonnull"
-            | "_Null_unspecified"
-            | "__nullable"
-            | "__nonnull"
-            | "__int128"
-            | "__int128_t"
-            | "__uint128_t"
-            | "_Float16"
-            | "__float128"
-            | "__builtin_va_list"
-            | "typeof"
-            | "__typeof__"
-            | "__typeof"
-            | "__auto_type"
-            | "_Complex"
-            | "_Atomic"
-    )
+    keyword_class(s) & TYPE_WORD != 0
 }
 
 #[cfg(test)]
@@ -456,6 +525,9 @@ impl<'a> Parser<'a> {
         self.pos = pos;
     }
 
+    // Inlined, so each comparison is with a known spelling and needs no
+    // general string comparison.
+    #[inline]
     pub(crate) fn is(&self, p: &str) -> bool {
         match self.peek() {
             Tok::Punct(q) => q == p,
@@ -464,6 +536,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     pub(crate) fn eat(&mut self, p: &str) -> bool {
         if self.is(p) {
             self.bump();
@@ -473,12 +546,18 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[inline]
     pub(crate) fn expect(&mut self, p: &str) -> R<()> {
         if self.eat(p) {
             Ok(())
         } else {
-            Err(self.unexpected(&format!("`{p}`")))
+            Err(self.expected(p))
         }
+    }
+
+    #[cold]
+    fn expected(&self, p: &str) -> Error {
+        self.unexpected(&format!("`{p}`"))
     }
 
     pub(crate) fn unexpected(&self, wanted: &str) -> Error {
@@ -635,17 +714,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub(crate) fn typedef_type(&self, name: &str) -> Option<Ty> {
-        match self.lookup(name) {
-            Some(Sym::Typedef(i)) => Some(self.typedefs[*i].ty.clone()),
-            _ => None,
-        }
+    pub(crate) fn is_typedef(&self, name: &str) -> bool {
+        matches!(self.lookup(name), Some(Sym::Typedef(_)))
     }
 
     /// Whether the next token starts a type name or declaration.
     pub(crate) fn is_typename(&self) -> bool {
         match self.peek() {
-            Tok::Ident(s) => is_type_keyword(s) || self.typedef_type(s).is_some(),
+            Tok::Ident(s) => is_type_keyword(s) || self.is_typedef(s),
             _ => false,
         }
     }
@@ -1849,7 +1925,7 @@ impl<'a> Parser<'a> {
         match self.peek_at(1) {
             Tok::Punct("*") | Tok::Punct("(") | Tok::Punct("[") | Tok::Punct("^") => true,
             Tok::Ident(s) => {
-                !is_type_keyword(s) && self.typedef_type(s).is_none() || s == "__attribute__"
+                !is_type_keyword(s) && !self.is_typedef(s) || s == "__attribute__"
             }
             _ => false,
         }
@@ -2449,29 +2525,7 @@ impl<'a> Parser<'a> {
 
 /// Words that cannot be identifiers.
 pub(crate) fn is_keyword(s: &str) -> bool {
-    (is_type_keyword(s) && !s.starts_with("__builtin") && !s.ends_with("_t"))
-        || matches!(
-            s,
-            "if" | "else"
-                | "while"
-                | "do"
-                | "for"
-                | "switch"
-                | "case"
-                | "default"
-                | "break"
-                | "continue"
-                | "return"
-                | "goto"
-                | "sizeof"
-                | "_Alignof"
-                | "__alignof__"
-                | "_Static_assert"
-                | "_Generic"
-                | "asm"
-                | "__asm"
-                | "__asm__"
-        )
+    keyword_class(s) & RESERVED != 0
 }
 
 #[cfg(test)]
