@@ -1142,7 +1142,9 @@ pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Qu
 pub fn run(func: &mut Function) -> bool {
     let reused_quotients = reuse_quotients(func);
     let mut lazy = LazyUsers::new(func);
-    let mut work: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
+    let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
+    let mut work: Vec<Inst> = Vec::with_capacity(layout);
+    work.extend(func.layout_insts().map(|(_, i)| i));
     // Start with definitions first within the usual layout; dependency
     // notifications make the final result independent of layout order.
     work.reverse();

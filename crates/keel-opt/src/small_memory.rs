@@ -7,7 +7,12 @@ use keel_ir::{
 const MAX_BYTES: i64 = 32;
 
 pub fn run(f: &mut Function) -> bool {
-    let work: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+    // Expansion only replaces the intrinsic it visits.
+    let work: Vec<_> = f
+        .layout_insts()
+        .filter(|&(_, i)| matches!(f.inst_data(i), InstData::Intrinsic { .. }))
+        .map(|(_, i)| i)
+        .collect();
     let mut changed = false;
     for at in work {
         let InstData::Intrinsic { id, args } = f.inst_data(at) else {

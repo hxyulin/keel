@@ -95,7 +95,10 @@ fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for block in cfg.reverse_postorder(func) {
         let (depth, mut facts) = incoming(func, &cfg, block, &exits);
-        for inst in func.block_insts(block).to_vec() {
+        // Only the visited load is removed; the next one moves into its place.
+        let mut i = 0;
+        while let Some(&inst) = func.block_insts(block).get(i) {
+            i += 1;
             match *func.inst_data(inst) {
                 InstData::Load { ty, addr, flags } if !flags.volatile => {
                     let key = (aliases.address(func, addr), ty);
@@ -112,6 +115,7 @@ fn run(func: &mut Function) -> bool {
                     {
                         func.replace_all_uses(result, func.resolve(fact.value));
                         func.remove_inst(inst);
+                        i -= 1;
                         changed = true;
                     } else {
                         // Clearing at the cap is deterministic and keeps both

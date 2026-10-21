@@ -54,10 +54,11 @@ pub fn run(func: &mut Function) -> bool {
         dom_depth[block.index()] = dom_depth[idom.index()] + 1;
     }
 
-    let mut floating: Vec<Inst> = Vec::new();
+    let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
+    let mut floating: Vec<Inst> = Vec::with_capacity(layout);
     // Who uses each value, among reachable instructions: (value, user) pairs
     // in layout order, then packed by value with `user_start`.
-    let mut uses: Vec<(u32, Inst)> = Vec::new();
+    let mut uses: Vec<(u32, Inst)> = Vec::with_capacity(2 * layout);
     let mut last_user = vec![None; func.num_values()];
     let mut user_start = vec![0u32; func.num_values() + 1];
     for &block in domtree.rpo() {
