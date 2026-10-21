@@ -745,23 +745,27 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
     }
     // Other opcodes have no rules here; at most canonicalization changes them.
     let data = func.inst_data(inst);
-    if !matches!(
-        data,
-        InstData::Binary { .. }
-            | InstData::Unary { .. }
-            | InstData::Convert { .. }
-            | InstData::Icmp { .. }
-            | InstData::Fcmp { .. }
-            | InstData::Fma { .. }
-            | InstData::Select { .. }
-            | InstData::Overflow { .. }
-    ) && !crate::canonicalize::needs_normalize(func, data)
+    let normalize = crate::canonicalize::needs_normalize(func, data);
+    if !normalize
+        && !matches!(
+            data,
+            InstData::Binary { .. }
+                | InstData::Unary { .. }
+                | InstData::Convert { .. }
+                | InstData::Icmp { .. }
+                | InstData::Fcmp { .. }
+                | InstData::Fma { .. }
+                | InstData::Select { .. }
+                | InstData::Overflow { .. }
+        )
     {
         return None;
     }
     let mut data = data.clone();
-    crate::canonicalize::normalize(func, &mut data);
-    let canonicalized = data != *func.inst_data(inst);
+    let canonicalized = normalize && {
+        crate::canonicalize::normalize(func, &mut data);
+        data != *func.inst_data(inst)
+    };
 
     if let Some(constants) = const_fold::fold_overflow(&data, |v| constant(func, v)) {
         return Some(Fold::Multi(constants));
