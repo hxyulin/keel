@@ -967,6 +967,7 @@ impl<'a> Parser<'a> {
                 if !self.is("(") {
                     // Library builtins also denote their ordinary library
                     // function when used as an address or parenthesized callee.
+                    let base = self.text.intern(base);
                     let function = self.lookup_value(base, loc)?;
                     if !matches!(function.ty, Ty::Func(_)) {
                         return Err(Error::new(loc, "memory builtin needs a library function"));
@@ -1224,6 +1225,7 @@ impl<'a> Parser<'a> {
             "debugtrap" => self.builtin_call(Builtin::Debugtrap, &[], Ty::Void, loc),
             _ => {
                 // Other builtins with declared library equivalents.
+                let base = self.text.intern(base);
                 if let Ok(e) = self.lookup_value(base, loc)
                     && matches!(e.ty, Ty::Func(_))
                 {
@@ -1234,6 +1236,7 @@ impl<'a> Parser<'a> {
                 // retain their bound. This fallback remains a compatibility
                 // limitation for unrelated _chk builtins.
                 if let Some(plain) = base.strip_prefix("__").and_then(|b| b.strip_suffix("_chk"))
+                    && let plain = self.text.intern(plain)
                     && let Ok(f) = self.lookup_value(plain, loc)
                     && matches!(f.ty, Ty::Func(_))
                 {

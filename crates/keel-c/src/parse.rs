@@ -148,7 +148,8 @@ pub struct Parser<'a> {
     scopes: Vec<Scope<'a>>,
     /// One spelling lookup, followed by its innermost binding. The short
     /// stack also supports file-scope declarations introduced inside blocks.
-    names: HashMap<&'a str, SmallVec<[(usize, Sym); 2]>>,
+    /// Names are interned, so they are keyed by address (see `name_key`).
+    names: HashMap<usize, SmallVec<[(usize, Sym); 2]>>,
     type_nodes: TypeNodes,
     plain_sugar: Rc<Sugar>,
     pub structs: Vec<StructDef<'a>>,
@@ -609,11 +610,12 @@ impl<'a> Parser<'a> {
     pub(crate) fn pop_scope(&mut self) {
         let depth = self.scopes.len() - 1;
         for name in self.scopes.pop().unwrap().names.into_iter().rev() {
-            let bindings = self.names.get_mut(name).unwrap();
+            let key = self.name_key(name);
+            let bindings = self.names.get_mut(&key).unwrap();
             debug_assert_eq!(bindings.last().unwrap().0, depth);
             bindings.pop();
             if bindings.is_empty() {
-                self.names.remove(name);
+                self.names.remove(&key);
             }
         }
     }
@@ -634,9 +636,19 @@ impl<'a> Parser<'a> {
         fs.scope = fs.scopes[fs.scope.unwrap()];
     }
 
+    /// The scope tables' key for interned `name`: interning gives each
+    /// spelling one address.
+    fn name_key(&self, name: &str) -> usize {
+        debug_assert!(
+            self.text.get(name).is_some_and(|n| std::ptr::eq(n, name)),
+            "`{name}` is not interned"
+        );
+        name.as_ptr() as usize
+    }
+
     fn lookup(&self, name: &str) -> Option<&Sym> {
         self.names
-            .get(name)
+            .get(&self.name_key(name))
             .and_then(|bindings| bindings.last())
             .map(|(_, sym)| sym)
     }
@@ -646,7 +658,7 @@ impl<'a> Parser<'a> {
     }
 
     fn bind_at(&mut self, depth: usize, name: &'a str, sym: Sym) {
-        let bindings = self.names.entry(name).or_default();
+        let bindings = self.names.entry(self.name_key(name)).or_default();
         match bindings.binary_search_by_key(&depth, |&(depth, _)| depth) {
             Ok(i) => bindings[i].1 = sym,
             Err(i) => {
@@ -1158,7 +1170,7 @@ impl<'a> Parser<'a> {
     ) -> Result<usize, &'static str> {
         let existing = self
             .names
-            .get(name)
+            .get(&self.name_key(name))
             .and_then(|bindings| bindings.first())
             .and_then(|(depth, s)| match s {
                 Sym::Global(g) if *depth == 0 => Some(*g),
@@ -2593,7 +2605,7 @@ mod tests {
             crate::Options::default().target,
             Strings::new(&arena),
         );
-        let words = ["a", "b", "c", "d", "e", "f", "g"];
+        let words = ["a", "b", "c", "d", "e", "f", "g"].map(|w| p.text.intern(w));
         let mut model = vec![HashMap::default()];
         let mut state = 7u32;
         for step in 0..3_000 {
@@ -2644,26 +2656,27 @@ mod tests {
             crate::Options::default().target,
             Strings::new(&arena),
         );
+        let object = p.text.intern("object");
         p.push_scope();
-        p.bind("object", Sym::Local(3));
+        p.bind(object, Sym::Local(3));
         p.push_scope();
-        let global = p.global("object", None, INT).unwrap();
-        assert_eq!(p.lookup("object"), Some(&Sym::Global(global)));
+        let global = p.global(object, None, INT).unwrap();
+        assert_eq!(p.lookup(object), Some(&Sym::Global(global)));
         p.pop_scope();
-        assert_eq!(p.lookup("object"), Some(&Sym::Local(3)));
+        assert_eq!(p.lookup(object), Some(&Sym::Local(3)));
         p.pop_scope();
-        assert_eq!(p.lookup("object"), Some(&Sym::Global(global)));
-        assert_eq!(p.global("object", None, INT).unwrap(), global);
+        assert_eq!(p.lookup(object), Some(&Sym::Global(global)));
+        assert_eq!(p.global(object, None, INT).unwrap(), global);
         assert_eq!(p.globals.len(), 1);
         for depth in 0..6 {
             p.push_scope();
-            p.bind("object", Sym::Enum(depth));
+            p.bind(object, Sym::Enum(depth));
         }
         for depth in (0..6).rev() {
-            assert_eq!(p.lookup("object"), Some(&Sym::Enum(depth)));
+            assert_eq!(p.lookup(object), Some(&Sym::Enum(depth)));
             p.pop_scope();
         }
-        assert_eq!(p.lookup("object"), Some(&Sym::Global(global)));
+        assert_eq!(p.lookup(object), Some(&Sym::Global(global)));
         assert!(Rc::ptr_eq(
             &p.sugar_ref(Sugar::Plain),
             &p.sugar_ref(Sugar::Plain)

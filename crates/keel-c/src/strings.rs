@@ -104,6 +104,23 @@ impl<'a> Strings<'a> {
         name
     }
 
+    /// The interned `text`, if it is.
+    pub fn get(&self, text: &str) -> Option<&'a str> {
+        let key = key(text.as_bytes());
+        let mask = self.names.len() - 1;
+        let mut i = slot(key.hash, self.names.len());
+        loop {
+            match self.names[i] {
+                Slot {
+                    key: stored,
+                    name: Some(name),
+                } if stored == key && name == text => return Some(name),
+                Slot { name: None, .. } => return None,
+                _ => i = (i + 1) & mask,
+            }
+        }
+    }
+
     fn grow(&mut self) {
         let size = self.names.len() * 2;
         let old = std::mem::replace(&mut self.names, vec![Slot::default(); size]);
