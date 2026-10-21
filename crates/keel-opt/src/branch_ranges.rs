@@ -1,5 +1,6 @@
 //! Integer intervals from dominating conditional edges. Facts are scoped to
 //! dominator subtrees and never transported through memory or block arguments.
+//! Exact equality facts also cover pointers; they establish no dereferenceability.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{EntityRef, Function, InstData, IntCC, Type, Value, ValueDef};
 use std::collections::HashMap;
@@ -10,6 +11,21 @@ struct Range {
     hi: u128,
 }
 type Key = (Value, bool);
+type Equality = (Value, Value);
+
+fn equality(func: &Function, data: &InstData) -> Option<(Equality, bool)> {
+    let InstData::Icmp { cond, args } = *data else {
+        return None;
+    };
+    let equal = match cond {
+        IntCC::Eq => true,
+        IntCC::Ne => false,
+        _ => return None,
+    };
+    let mut args = args.map(|v| func.resolve(v));
+    args.sort_unstable();
+    Some(((args[0], args[1]), equal))
+}
 
 fn comparison(func: &Function, data: &InstData) -> Option<(IntCC, Value, u128, u32)> {
     if !matches!(data, InstData::Icmp { .. }) {
@@ -102,9 +118,11 @@ pub fn run(func: &mut Function) -> bool {
     let children = dom.children();
     let mut facts: HashMap<Key, Range> = HashMap::new();
     let mut undo: Vec<(Key, Option<Range>)> = Vec::new();
-    let mut stack = vec![(entry, 0, false)];
+    let mut equalities: HashMap<Equality, bool> = HashMap::new();
+    let mut equality_undo = Vec::new();
+    let mut stack = vec![(entry, 0, 0, false)];
     let mut changed = false;
-    while let Some((block, scope, visited)) = stack.pop() {
+    while let Some((block, scope, equality_scope, visited)) = stack.pop() {
         if visited {
             for (key, old) in undo.drain(scope..).rev() {
                 if let Some(old) = old {
@@ -113,9 +131,32 @@ pub fn run(func: &mut Function) -> bool {
                     facts.remove(&key);
                 }
             }
+            for (key, old) in equality_undo.drain(equality_scope..).rev() {
+                if let Some(old) = old {
+                    equalities.insert(key, old);
+                } else {
+                    equalities.remove(&key);
+                }
+            }
             continue;
         }
         let scope = undo.len();
+        let equality_scope = equality_undo.len();
+        if block != entry
+            && let [pred] = cfg.preds(block)
+            && let Some(&term) = func.block_insts(*pred).last()
+            && let InstData::Brif { cond, dests } = func.inst_data(term)
+            && dests[0].block != dests[1].block
+            && let ValueDef::Result(inst, 0) = func.value_def(func.resolve(*cond))
+            && let Some((key, equal)) = equality(func, func.inst_data(inst))
+        {
+            let truth = if dests[0].block == block {
+                equal
+            } else {
+                !equal
+            };
+            equality_undo.push((key, equalities.insert(key, truth)));
+        }
         // CFG predecessors deduplicate parallel edges, so explicitly reject a
         // conditional whose two arms enter the same block.
         if block != entry
@@ -156,8 +197,18 @@ pub fn run(func: &mut Function) -> bool {
                 }
             }
         }
-        stack.push((block, scope, true));
+        stack.push((block, scope, equality_scope, true));
         for inst in func.block_insts(block).to_vec() {
+            if let Some((key, equal)) = equality(func, func.inst_data(inst))
+                && let Some(&truth) = equalities.get(&key)
+            {
+                *func.inst_data_mut(inst) = InstData::Iconst {
+                    ty: Type::I8,
+                    imm: i64::from(truth == equal),
+                };
+                changed = true;
+                continue;
+            }
             if let Some((cond, value, c, width)) = comparison(func, func.inst_data(inst)) {
                 let is_signed = signed(cond);
                 let c = if is_signed {
@@ -177,7 +228,7 @@ pub fn run(func: &mut Function) -> bool {
             }
         }
         for &child in children[block.index()].iter().rev() {
-            stack.push((child, 0, false));
+            stack.push((child, 0, 0, false));
         }
     }
     changed

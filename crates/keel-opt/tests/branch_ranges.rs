@@ -155,3 +155,78 @@ fn path_facts_do_not_cross_a_distinct_memory_read_or_signedness_domain() {
         );
     }
 }
+
+#[test]
+fn pointer_equalities_fold_both_polarities_and_reversed_operands() {
+    for predicate in ["eq", "ne"] {
+        let source = format!(
+            "func @f(ptr, ptr) -> i8 {{
+block0(v0: ptr, v1: ptr):
+ v2 = icmp.{predicate} v0, v1
+ brif v2, block1, block2
+block1:
+ v3 = icmp.eq v1, v0
+ return v3
+block2:
+ v4 = icmp.ne v0, v1
+ return v4
+}}"
+        );
+        let (original, module) = apply(&source);
+        assert_eq!(module.to_string().matches(" = icmp").count(), 1, "{module}");
+        // The small interpreter models integers only. Pointer equality uses
+        // the same raw-bit equality; native pointer cases run in codegen gates.
+        let original = keel_ir::parse(&original.to_string().replace("ptr", "i64")).unwrap();
+        let module = keel_ir::parse(&module.to_string().replace("ptr", "i64")).unwrap();
+        for a in [0, 1, 2, 255, u64::MAX, 1 << 63] {
+            for b in [0, 1, 2, 255, u64::MAX, 1 << 63] {
+                assert_eq!(
+                    support::execute(&original.functions[0], &[a, b]),
+                    support::execute(&module.functions[0], &[a, b]),
+                    "{module}\na={a}, b={b}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn pointer_facts_do_not_escape_siblings_or_parallel_edges() {
+    for destinations in ["block1, block2", "block1, block1"] {
+        let source = format!(
+            "func @f(ptr, ptr) -> i8 {{
+block0(v0: ptr, v1: ptr):
+ v2 = icmp.ne v0, v1
+ brif v2, {destinations}
+block1:
+ jump block3
+block2:
+ jump block3
+block3:
+ v3 = icmp.eq v0, v1
+ return v3
+}}"
+        );
+        let (_, module) = apply(&source);
+        assert_eq!(module.to_string().matches(" = icmp").count(), 2, "{module}");
+    }
+}
+
+#[test]
+fn pointer_identity_fact_does_not_fold_distinct_loads_or_parameters() {
+    let source = "func @f(ptr, ptr) -> i8 {
+block0(v0: ptr, v1: ptr):
+ v2 = load.ptr v0
+ v3 = icmp.ne v2, v1
+ brif v3, block1, block2
+block1:
+ v4 = load.ptr v0
+ v5 = icmp.eq v4, v1
+ return v5
+block2:
+ v6 = iconst.i8 0
+ return v6
+}";
+    let (_, module) = apply(source);
+    assert_eq!(module.to_string().matches(" = icmp").count(), 2, "{module}");
+}
