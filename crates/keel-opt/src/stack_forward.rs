@@ -6,7 +6,8 @@
 //! arbitrary pointers cannot alias.
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
-    BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
+    BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value,
+    ValueDef,
 };
 
 /// Opt-in composite pass: retain ordinary forwarding, then clean up the CFG
@@ -45,7 +46,6 @@ pub fn run(func: &mut Function) -> bool {
     let mut addresses = FxHashMap::default();
     // One scan gathers the slot addresses and pointer offsets, and the
     // frame observers and stack marks that make this pass give up.
-    let mut instructions = Vec::new();
     let mut offsets = Vec::new();
     // These operations can inspect the frame or invalidate captured state,
     // even without receiving a fixed-slot address as an explicit argument.
@@ -57,7 +57,6 @@ pub fn run(func: &mut Function) -> bool {
     let mut aliased_mark = false;
     let mut restore = false;
     for (_, inst) in func.layout_insts() {
-        instructions.push(inst);
         match *func.inst_data(inst) {
             InstData::StackAddr { slot } => {
                 let value = func.first_result(inst);
@@ -122,7 +121,9 @@ pub fn run(func: &mut Function) -> bool {
     if marks.is_empty() && restore {
         return false;
     }
-    for &inst in instructions.iter().filter(|_| !marks.is_empty()) {
+    // Nothing changes the function before the rewrite loop, so the later
+    // scans revisit the same instructions in the same order.
+    for (_, inst) in func.layout_insts().filter(|_| !marks.is_empty()) {
         let data = func.inst_data(inst);
         if let InstData::Intrinsic {
             id: keel_ir::Intrinsic::StackRestore,
@@ -156,10 +157,18 @@ pub fn run(func: &mut Function) -> bool {
     // as well; this path deliberately makes no whole-function lifetime proof.
     let local_only = !marks.is_empty() || restore;
 
-    for &inst in &instructions {
+    // Most operands are not addresses; a dense bit spares their lookups.
+    let mut is_address = vec![0u64; func.num_values().div_ceil(64)];
+    for v in addresses.keys() {
+        is_address[v.index() / 64] |= 1 << (v.index() % 64);
+    }
+    for (_, inst) in func.layout_insts() {
         let data = func.inst_data(inst);
         data.for_each_operand(|v| {
             let v = func.resolve(v);
+            if is_address[v.index() / 64] & (1 << (v.index() % 64)) == 0 {
+                return;
+            }
             let Some(&(slot, offset)) = addresses.get(&v) else {
                 return;
             };
@@ -262,10 +271,16 @@ pub fn run(func: &mut Function) -> bool {
     let dominators = analysis.as_ref().map(|analysis| &analysis.dom);
     let mut changed = false;
     let mut remaining_loads = FxHashSet::default();
+    // Per-block state and the block's instruction snapshot, reused.
+    let mut bytes: FxHashMap<(StackSlot, usize), (Value, usize)> = FxHashMap::default();
+    let mut exact: FxHashMap<(StackSlot, usize, Type), Value> = FxHashMap::default();
+    let mut insts = Vec::new();
     for block in func.blocks().collect::<Vec<_>>() {
-        let mut bytes: FxHashMap<(StackSlot, usize), (Value, usize)> = FxHashMap::default();
-        let mut exact: FxHashMap<(StackSlot, usize, Type), Value> = FxHashMap::default();
-        for (position, inst) in func.block_insts(block).to_vec().into_iter().enumerate() {
+        bytes.clear();
+        exact.clear();
+        insts.clear();
+        insts.extend_from_slice(func.block_insts(block));
+        for (position, &inst) in insts.iter().enumerate() {
             match *func.inst_data(inst) {
                 InstData::Store { addr, value, .. } => {
                     let Some(&(slot, offset)) = addresses.get(&func.resolve(addr)) else {
