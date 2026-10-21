@@ -16,6 +16,7 @@
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp};
+use std::collections::hash_map::Entry;
 
 pub fn run(func: &mut Function) -> bool {
     let cfg = ControlFlowGraph::compute(func);
@@ -28,7 +29,9 @@ pub fn run(func: &mut Function) -> bool {
     // Entries are never removed. One is in scope while its block is open on
     // the walk, i.e. while that block dominates the current one; a stale
     // entry from a closed sibling is simply overwritten.
-    let mut table: FxHashMap<InstData, Inst> = FxHashMap::default();
+    let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
+    let mut table: FxHashMap<InstData, Inst> =
+        FxHashMap::with_capacity_and_hasher(layout, Default::default());
     let mut open = vec![false; func.num_blocks()];
     // (block, whether its instructions were visited)
     let mut stack = vec![(entry, false)];
@@ -48,8 +51,9 @@ pub fn run(func: &mut Function) -> bool {
                 continue;
             }
             let key = canonical(func, data);
-            match table.get(&key) {
-                Some(&existing) if open[func.inst_block(existing).index()] => {
+            match table.entry(key) {
+                Entry::Occupied(entry) if open[func.inst_block(*entry.get()).index()] => {
+                    let existing = *entry.get();
                     let n = func.inst_results(inst).len();
                     for k in 0..n.min(func.inst_results(existing).len()) {
                         let result = func.inst_results(inst)[k];
@@ -60,8 +64,12 @@ pub fn run(func: &mut Function) -> bool {
                     func.remove_inst(inst);
                     changed = true;
                 }
-                _ => {
-                    table.insert(key, inst);
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() = inst;
+                    i += 1;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(inst);
                     i += 1;
                 }
             }
