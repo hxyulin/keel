@@ -1678,6 +1678,24 @@ fn run_extended(f: &mut Function, target: VectorTarget, casts: bool, multi: bool
     changed
 }
 
+/// Whether a reachable block has a successor at or before it in reverse
+/// postorder, as every cycle of reachable blocks does.
+fn reachable_cycle(f: &Function) -> bool {
+    let analysis = crate::analysis::get(f);
+    let rpo = analysis.dom.rpo();
+    let mut position = vec![usize::MAX; f.num_blocks()];
+    for (i, &block) in rpo.iter().enumerate() {
+        position[keel_ir::EntityRef::index(block)] = i;
+    }
+    rpo.iter().enumerate().any(|(i, &block)| {
+        analysis
+            .cfg
+            .succs(block)
+            .iter()
+            .any(|&s| position[keel_ir::EntityRef::index(s)] <= i)
+    })
+}
+
 /// C conditional expressions initially have diamond CFGs. Normalize only a
 /// bounded private trial and publish it only after a reduction vectorizes.
 /// Rejected candidates do not leave extra selects or change unrelated layouts.
@@ -1689,6 +1707,12 @@ fn normalize_conditional_loop(f: &mut Function, target: VectorTarget) -> bool {
         .blocks()
         .any(|b| Some(b) != f.entry_block() && f.block_params(b).len() >= 2)
     {
+        return false;
+    }
+    // A reduction needs a loop. The trial's cleanup only removes, bypasses
+    // or splits edges, which never closes a cycle or reaches unreachable
+    // code, so an acyclic function cannot gain one.
+    if !reachable_cycle(f) {
         return false;
     }
     let mut trial = f.clone();
