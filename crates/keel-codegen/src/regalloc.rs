@@ -622,7 +622,7 @@ fn build_fast_intervals(
     profiling::scope!("contiguous-live-intervals");
     backend_scope!(Intervals);
     let live = with_scratch(|scratch| {
-        compute_liveness(func, cfg, order, selection, scratch);
+        compute_liveness(func, cfg, order, is_call, returns_twice, selection, scratch);
         Liveness {
             live_in: std::mem::take(&mut scratch.live_in),
             live_out: std::mem::take(&mut scratch.live_out),
@@ -864,14 +864,15 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
 /// and growing its own.
 #[derive(Default)]
 struct Scratch {
-    /// Each walked instruction's operands, in walk order, recorded by
-    /// liveness for the interval walk, with the end of each instruction's.
-    operands: Vec<Value>,
-    operand_ends: Vec<u32>,
+    /// Per reachable block, in order: its header and end points, and the
+    /// end of its segments.
+    bounds: Vec<(u32, u32)>,
+    segment_ends: Vec<u32>,
+    /// The points each value occupies within each block, before extending
+    /// them to the block's header or end where it is live in or out.
+    segments: Vec<(Value, u32, u32)>,
     exposed: Vec<(u32, u32)>,
-    /// Per value: the blocks defining and using it last seen, and the block
-    /// holding its definition.
-    stamps: Vec<(u32, u32)>,
+    /// The block holding each value's definition.
     def_block: Vec<u32>,
     reachable: Vec<bool>,
     start: Vec<u32>,
@@ -985,87 +986,147 @@ fn liveness(
     selection: &crate::select::Selection,
 ) -> Liveness {
     let mut scratch = Scratch::default();
-    compute_liveness(func, cfg, order, selection, &mut scratch);
+    compute_liveness(
+        func,
+        cfg,
+        order,
+        &|_| false,
+        &|_| false,
+        selection,
+        &mut scratch,
+    );
     Liveness {
         live_in: scratch.live_in,
         live_out: scratch.live_out,
     }
 }
 
-/// [`liveness`] into `scratch.live_in` and `scratch.live_out`, also recording
-/// every walked instruction's operands in `scratch.operands`.
+/// Extends `v`'s range in the current block to `point`.
+fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
+    let range = &mut open[v.index()];
+    *range = Some(match *range {
+        None => {
+            touched.push(v);
+            (point, point)
+        }
+        Some((start, end)) => (start.min(point), end.max(point)),
+    });
+}
+
+/// [`liveness`] into `scratch.live_in` and `scratch.live_out`. The same walk
+/// numbers the program points (see the module docs) and records each block's
+/// bounds and segments, and the calls. Returns the number of slots.
 fn compute_liveness(
     func: &Function,
     cfg: &ControlFlowGraph,
     order: &[Block],
+    is_call: &dyn Fn(&InstData) -> bool,
+    returns_twice: &dyn Fn(&InstData) -> bool,
     selection: &crate::select::Selection,
     scratch: &mut Scratch,
-) {
+) -> u32 {
     profiling::scope!("liveness");
     backend_scope!(Liveness);
     let n = func.num_blocks();
-    let operands = &mut scratch.operands;
-    let operand_ends = &mut scratch.operand_ends;
-    operands.clear();
-    operand_ends.clear();
-    // In verified SSA, every operand in the only reachable block is defined
-    // there (parameters included). Even a self edge introduces no live-in
-    // value: edge arguments are explicit reads and parameters are definitions.
-    // The exact fixed point is empty, so only record the operands.
-    if order.len() <= 1 {
-        for &block in order {
-            for &inst in func.block_insts(block) {
-                if selection.covered(inst) {
-                    continue;
-                }
-                selection.for_each_operand(func, inst, |v| operands.push(v));
-                operand_ends.push(operands.len() as u32);
-            }
-        }
-        scratch.live_in.fill(n, &[]);
-        scratch.live_out.fill(n, &[]);
-        return;
-    }
     let num_values = func.num_values();
-    // Upward-exposed uses as (value, block) occurrences, at most one per pair.
-    let exposed = &mut scratch.exposed;
+    let Scratch {
+        bounds,
+        segment_ends,
+        segments,
+        exposed,
+        def_block,
+        reachable,
+        open,
+        touched,
+        calls,
+        preserved_calls,
+        twice,
+        ..
+    } = scratch;
+    let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
+    bounds.clear();
+    segment_ends.clear();
+    segments.clear();
+    // Upward-exposed uses as (value, block) occurrences, at most one per
+    // pair: reads of values not yet seen in the block.
     exposed.clear();
-    // Block stamps (defined, used) avoid trees and clearing a value-sized
-    // set per block.
-    let stamps = &mut scratch.stamps;
-    refill(stamps, num_values, (0, 0));
     // The reachable block holding each value's (non-covered) definition.
-    let def_block = &mut scratch.def_block;
     refill(def_block, num_values, u32::MAX);
-    let reachable = &mut scratch.reachable;
     refill(reachable, n, false);
+    refill(open, num_values, None);
+    touched.clear();
+    // Read points of calls, and of calls that return twice, in increasing
+    // order.
+    calls.clear();
+    preserved_calls.clear();
+    twice.clear();
+    // Slot `k` owns the read point 2k and the write point 2k + 1.
+    let mut slot = 0u32;
     for &block in order {
         let b = block.index() as u32;
-        let stamp = b + 1;
         reachable[block.index()] = true;
+        let header = 2 * slot + 1;
+        slot += 1;
         for &param in func.block_params(block) {
-            stamps[param.index()].0 = stamp;
             def_block[param.index()] = b;
+            if !is_alias(param) {
+                extend(open, param, header, touched);
+            }
         }
         for &inst in func.block_insts(block) {
+            let (read, write) = (2 * slot, 2 * slot + 1);
+            slot += 1;
             if selection.covered(inst) {
                 continue;
             }
             selection.for_each_operand(func, inst, |v| {
-                operands.push(v);
-                let i = v.index();
-                let (defined, used) = &mut stamps[i];
-                if *defined != stamp && *used != stamp {
-                    exposed.push((i as u32, b));
-                    *used = stamp;
+                if open[v.index()].is_none() {
+                    exposed.push((v.index() as u32, b));
                 }
+                extend(open, v, read, touched);
             });
-            operand_ends.push(operands.len() as u32);
-            for &v in func.inst_results(inst) {
-                stamps[v.index()].0 = stamp;
-                def_block[v.index()] = b;
+            for &result in func.inst_results(inst) {
+                def_block[result.index()] = b;
+                // An alias's instruction is dead; its result goes nowhere.
+                if !is_alias(result) {
+                    extend(open, result, write, touched);
+                }
+            }
+            let data = func.inst_data(inst);
+            if is_call(data) {
+                calls.push(read);
+                if !selection.preserved_call_gprs.is_empty() {
+                    preserved_calls.push((
+                        read,
+                        selection
+                            .preserved_call_gprs
+                            .get(&inst)
+                            .copied()
+                            .unwrap_or(0),
+                    ));
+                }
+            }
+            if returns_twice(data) {
+                twice.push(read);
             }
         }
+        // The terminator's write point: values live out survive the
+        // block-argument copies on the way out.
+        bounds.push((header, 2 * slot - 1));
+        for v in touched.drain(..) {
+            let (from, to) = open[v.index()].take().unwrap();
+            segments.push((v, from, to));
+        }
+        segment_ends.push(segments.len() as u32);
+    }
+    // In verified SSA, every operand in the only reachable block is defined
+    // there (parameters included). Even a self edge introduces no live-in
+    // value: edge arguments are explicit reads and parameters are definitions.
+    // The exact fixed point is empty.
+    if order.len() <= 1 {
+        scratch.live_in.fill(n, &[]);
+        scratch.live_out.fill(n, &[]);
+        return slot;
     }
     // Group the use blocks by value (a counting sort keeps block order).
     let start = &mut scratch.start;
@@ -1131,10 +1192,11 @@ fn compute_liveness(
     }
     scratch.live_in.fill(n, live_in);
     scratch.live_out.fill(n, live_out);
+    slot
 }
 
-/// Numbers the program points (see the module docs) and builds one interval
-/// per defined value.
+/// Builds one interval per defined value: the program points of each
+/// reachable block it occupies, live in or live out of.
 fn build_intervals(
     func: &Function,
     cfg: &ControlFlowGraph,
@@ -1146,22 +1208,22 @@ fn build_intervals(
     profiling::scope!("live-intervals");
     backend_scope!(Intervals);
     with_scratch(|scratch| {
-        compute_liveness(func, cfg, order, selection, scratch);
-        intervals_from_liveness(func, order, is_call, returns_twice, selection, scratch)
+        let slot = compute_liveness(func, cfg, order, is_call, returns_twice, selection, scratch);
+        intervals_from_liveness(func, order, selection, slot, scratch)
     })
 }
 
 fn intervals_from_liveness(
     func: &Function,
     order: &[Block],
-    is_call: &dyn Fn(&InstData) -> bool,
-    returns_twice: &dyn Fn(&InstData) -> bool,
     selection: &crate::select::Selection,
+    slot: u32,
     scratch: &mut Scratch,
 ) -> Vec<Interval> {
     let Scratch {
-        operands,
-        operand_ends,
+        bounds,
+        segment_ends,
+        segments,
         live_in,
         live_out,
         open,
@@ -1174,88 +1236,26 @@ fn intervals_from_liveness(
         list,
         ..
     } = scratch;
-    let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
     // Each value's ranges, built block by block: `open` is the range in
-    // the current block, from the first point to the last seen there.
-    // Closed ranges are chained per value through `pieces`.
-    refill(open, func.num_values(), None);
+    // the current block, its segment extended to the header if the value
+    // is live in and to the end if live out. Closed ranges are chained per
+    // value through `pieces`.
     refill(chains, func.num_values(), (u32::MAX, u32::MAX));
     pieces.clear();
-    touched.clear();
-    fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
-        let range = &mut open[v.index()];
-        *range = Some(match *range {
-            None => {
-                touched.push(v);
-                (point, point)
-            }
-            Some((start, end)) => (start.min(point), end.max(point)),
-        });
-    }
-    // Read points of calls, and of calls that return twice, in increasing
-    // order.
-    calls.clear();
-    preserved_calls.clear();
-    twice.clear();
-
-    // Slot `k` owns the read point 2k and the write point 2k + 1.
-    let mut slot = 0u32;
-    // The walked instruction, indexing the operands liveness recorded.
-    let mut walked = 0;
-    let mut first_operand = 0;
-    for &block in order {
-        let header = 2 * slot + 1;
-        slot += 1;
-        for &param in func.block_params(block) {
-            if !is_alias(param) {
-                extend(open, param, header, touched);
-            }
+    let mut values = 0;
+    let mut first_segment = 0;
+    for (k, &block) in order.iter().enumerate() {
+        let (header, end) = bounds[k];
+        let last_segment = segment_ends[k] as usize;
+        for &(v, from, to) in &segments[first_segment..last_segment] {
+            open[v.index()] = Some((from, to));
+            touched.push(v);
         }
+        first_segment = last_segment;
         for &v in &live_in[block.index()] {
             extend(open, v, header, touched);
         }
-
-        for &inst in func.block_insts(block) {
-            let (read, write) = (2 * slot, 2 * slot + 1);
-            slot += 1;
-            let data = func.inst_data(inst);
-            if selection.covered(inst) {
-                continue;
-            }
-            let last_operand = operand_ends[walked] as usize;
-            walked += 1;
-            for &v in &operands[first_operand..last_operand] {
-                extend(open, v, read, touched);
-            }
-            first_operand = last_operand;
-            for &result in func.inst_results(inst) {
-                // An alias's instruction is dead; its result goes nowhere.
-                if !is_alias(result) {
-                    extend(open, result, write, touched);
-                }
-            }
-            if is_call(data) {
-                calls.push(read);
-                if !selection.preserved_call_gprs.is_empty() {
-                    preserved_calls.push((
-                        read,
-                        selection
-                            .preserved_call_gprs
-                            .get(&inst)
-                            .copied()
-                            .unwrap_or(0),
-                    ));
-                }
-            }
-            if returns_twice(data) {
-                twice.push(read);
-            }
-        }
-
-        // The terminator's write point: values live out survive the
-        // block-argument copies on the way out.
-        let end = 2 * slot - 1;
         for &v in &live_out[block.index()] {
             extend(open, v, end, touched);
         }
@@ -1273,7 +1273,10 @@ fn intervals_from_liveness(
                     pieces.push(((from, to), u32::MAX));
                     match pieces.get_mut(*last as usize) {
                         Some((_, next)) => *next = index,
-                        None => *first = index,
+                        None => {
+                            *first = index;
+                            values += 1;
+                        }
                     }
                     *last = index;
                 }
@@ -1288,7 +1291,7 @@ fn intervals_from_liveness(
             points.get(next).is_some_and(|&c| c < to)
         })
     };
-    let mut intervals = Vec::new();
+    let mut intervals = Vec::with_capacity(values);
     for (i, &(first, _)) in chains.iter().enumerate() {
         if first == u32::MAX {
             continue;
