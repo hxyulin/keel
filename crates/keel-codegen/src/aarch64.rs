@@ -114,6 +114,7 @@ use keel_ir::{
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 mod absolute;
+mod absolute_diff;
 mod constant_plan;
 mod native;
 mod output;
@@ -586,6 +587,7 @@ struct FunctionCompiler<'a> {
     packed_low_loads: HashMap<Inst, Value>,
     absolute_values: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
+    absolute_differences: HashMap<Inst, absolute_diff::ExactSabal>,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` results only used as the address of loads and stores
@@ -875,6 +877,7 @@ impl<'a> FunctionCompiler<'a> {
                 })
         };
         let absolute_values = absolute::select(func, &mut selection);
+        let absolute_differences = absolute_diff::select(func, &mut selection);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         selection.fuse_aarch64_selects(func, |data| {
             folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
@@ -969,6 +972,7 @@ impl<'a> FunctionCompiler<'a> {
             packed_absolute_values,
             absolute_values,
             widening_adds,
+            absolute_differences,
             stack_slot_offsets,
             copy_base,
             sret_save,
@@ -1424,6 +1428,10 @@ impl<'a> FunctionCompiler<'a> {
                 },
             );
             self.def_done(result, d);
+            return;
+        }
+        if let Some(&difference) = self.absolute_differences.get(&inst) {
+            self.vector_absolute_difference(difference, result);
             return;
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {

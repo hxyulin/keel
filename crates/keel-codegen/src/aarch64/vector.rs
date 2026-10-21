@@ -149,6 +149,37 @@ fn canonical_mask(func: &Function, mut value: Value) -> bool {
 }
 
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_absolute_difference(
+        &mut self,
+        difference: absolute_diff::ExactSabal,
+        result: Option<Value>,
+    ) {
+        // Capture every retained leaf before touching a destructive destination.
+        let acc = self.use_freg(difference.accumulator, FS0);
+        let left = self.use_freg(difference.left, FS1);
+        let right = self.use_freg(difference.right, FS2);
+        let d = self.def_freg(result);
+        let work = if (d == left || d == right) && d != acc {
+            FS0
+        } else {
+            d
+        };
+        self.move_vector(work, acc);
+        self.native(
+            Opcode::SABAL_asimddiff_L,
+            [
+                (FieldId::Q, 0),
+                (FieldId::size, 2),
+                (FieldId::Rd, work.into()),
+                (FieldId::Rn, left.into()),
+                (FieldId::Rm, right.into()),
+            ],
+            |out| write!(out, "sabal\tv{work}.2d, v{left}.2s, v{right}.2s"),
+        );
+        self.move_vector(d, work);
+        self.def_done(result, d);
+    }
+
     // EXT reads both operands before writing, including when d aliases either
     // input. Separate reserved spill scratches keep both captured sources live.
     pub(super) fn vector_shuffle_window(
