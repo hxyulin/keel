@@ -80,6 +80,13 @@ impl Write for Output {
         };
         Ok(())
     }
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        match self {
+            Self::Text(t) => t.push(c),
+            Self::Structured(_) => panic!("compiler-generated x86 text must use typed emission"),
+        };
+        Ok(())
+    }
 }
 impl Sink for Output {
     fn label(&mut self, name: String) {

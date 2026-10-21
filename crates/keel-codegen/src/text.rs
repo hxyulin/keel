@@ -38,7 +38,9 @@ fn small(n: usize) -> &'static str {
     &SMALL[start..start + len]
 }
 
-/// `prefix` followed by the decimal text of `n`.
+/// `prefix` followed by the decimal text of `n`. Inlined, so that a
+/// literal prefix is written as a constant-length copy.
+#[inline]
 pub(crate) fn write_decimal<W: Write + ?Sized>(out: &mut W, prefix: &str, n: i128) -> fmt::Result {
     if (0..1000).contains(&n) {
         if !prefix.is_empty() {
@@ -46,6 +48,10 @@ pub(crate) fn write_decimal<W: Write + ?Sized>(out: &mut W, prefix: &str, n: i12
         }
         return out.write_str(small(n as usize));
     }
+    write_large(out, prefix, n)
+}
+
+fn write_large<W: Write + ?Sized>(out: &mut W, prefix: &str, n: i128) -> fmt::Result {
     let mut buf = [0u8; 64];
     let mut i = buf.len();
     let mut magnitude = n.unsigned_abs();
@@ -76,7 +82,8 @@ pub(crate) fn write_decimal<W: Write + ?Sized>(out: &mut W, prefix: &str, n: i12
 
 /// A one-character prefix such as a register class, then `n`.
 pub(crate) fn write_class<W: Write + ?Sized>(out: &mut W, class: char, n: i128) -> fmt::Result {
-    write_decimal(out, class.encode_utf8(&mut [0; 4]), n)
+    out.write_char(class)?;
+    write_decimal(out, "", n)
 }
 
 /// `{prefix}{function}_{block}` without `format!`.

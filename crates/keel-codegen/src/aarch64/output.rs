@@ -184,6 +184,13 @@ impl Write for Output {
         }
         Ok(())
     }
+    fn write_char(&mut self, c: char) -> fmt::Result {
+        match self {
+            Self::Text(s) => s.push(c),
+            Self::Structured(_) => panic!("compiler-generated text must use a typed emission path"),
+        }
+        Ok(())
+    }
 }
 
 impl crate::metadata::Sink for Output {
