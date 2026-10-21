@@ -295,6 +295,8 @@ fn convert(f: &mut Function, head: Block) -> bool {
         f.first_result(*subtract),
         f.first_result(*empty_value),
     );
+    let debit_loc = f.inst_loc(*neg_branch);
+    let credit_loc = f.inst_loc(term);
     for i in operations {
         f.move_inst(i, InsertPoint::Before(term));
     }
@@ -304,6 +306,8 @@ fn convert(f: &mut Function, head: Block) -> bool {
     let selected = f
         .ins(InsertPoint::Before(term))
         .select(cond, credit_value, debit_or_zero);
+    f.set_inst_loc(def(f, debit_or_zero).unwrap(), debit_loc);
+    f.set_inst_loc(def(f, selected).unwrap(), credit_loc);
     *f.inst_data_mut(term) = D::Jump {
         dest: BlockCall {
             block: join,

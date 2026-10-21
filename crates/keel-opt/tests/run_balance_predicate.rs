@@ -101,7 +101,7 @@ fn rejects_changed_predicates_widths_arithmetic_and_carried_values() {
 }
 
 #[test]
-fn refuses_effects_in_arms_and_extra_users_of_removed_values() {
+fn refuses_effects_in_private_arms() {
     let store = BALANCE.replace(
         "v22 = uext.i64 v14",
         "store v14, v13\n    v22 = uext.i64 v14",
@@ -112,6 +112,29 @@ fn refuses_effects_in_arms_and_extra_users_of_removed_values() {
         "v51 = udiv v17, v41\n    v27 = isub v17, v41",
     );
     apply(&call, false);
+}
+
+#[test]
+fn replacement_selects_retain_the_corresponding_branch_locations() {
+    let mut m = keel_ir::parse(BALANCE).unwrap();
+    m.files.push("balance.c".into());
+    let f = &mut m.functions[0];
+    let branches: Vec<_> = f.layout_insts().filter_map(|(_, i)| match *f.inst_data(i) {
+        D::Brif { cond, .. } => Some((i, cond)), _ => None,
+    }).collect();
+    let mut locations = std::collections::HashMap::new();
+    for (i, cond) in branches {
+        let loc = keel_ir::SourceLoc { file: keel_ir::SourceFile::new(0), line: 100 + i.index() as u32, col: 1, scope: None };
+        f.set_inst_loc(i, Some(loc));
+        locations.insert(cond, loc);
+    }
+    assert!(run_balance_predicate::run(f));
+    for (_, i) in f.layout_insts() {
+        if let D::Select { args } = f.inst_data(i) {
+            assert_eq!(f.inst_loc(i), locations.get(&args[0]).copied());
+        }
+    }
+    keel_ir::verify_module(&m).unwrap();
 }
 
 #[test]
