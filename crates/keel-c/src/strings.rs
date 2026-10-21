@@ -12,8 +12,9 @@ pub(crate) struct Strings<'a> {
     literals: HashSet<&'a [u8]>,
 }
 
-/// A word-at-a-time multiplicative hash; the high half of the product
-/// mixes every byte, so the slot index takes its bits from there.
+/// A word-at-a-time multiplicative hash. Only the top bits of the last
+/// product depend on every byte, so slot indices take their bits from the
+/// top.
 fn hash(bytes: &[u8]) -> u32 {
     const K: u64 = 0x51_7c_c1_b7_27_22_0a_95;
     let mut h = bytes.len() as u64;
@@ -27,6 +28,11 @@ fn hash(bytes: &[u8]) -> u32 {
         h = (h.rotate_left(5) ^ word).wrapping_mul(K);
     }
     (h >> 32) as u32
+}
+
+/// The first slot to look in for hash `h`, in a table of `len` slots.
+fn slot(h: u32, len: usize) -> usize {
+    (h >> (32 - len.trailing_zeros())) as usize
 }
 
 impl<'a> Strings<'a> {
@@ -48,7 +54,7 @@ impl<'a> Strings<'a> {
     pub fn intern_utf8(&mut self, text: &[u8]) -> &'a str {
         let h = hash(text);
         let mask = self.names.len() - 1;
-        let mut i = h as usize & mask;
+        let mut i = slot(h, self.names.len());
         loop {
             match self.names[i] {
                 (stored, Some(name)) => {
@@ -75,7 +81,7 @@ impl<'a> Strings<'a> {
         let mask = self.names.len() - 1;
         for (h, name) in old {
             if name.is_some() {
-                let mut i = h as usize & mask;
+                let mut i = slot(h, self.names.len());
                 while self.names[i].1.is_some() {
                     i = (i + 1) & mask;
                 }
