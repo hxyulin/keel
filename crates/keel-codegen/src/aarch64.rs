@@ -1437,10 +1437,10 @@ impl<'a> FunctionCompiler<'a> {
                 let label = self.label(block);
                 self.out.label(label);
                 for &inst in func.block_insts(block) {
-                    if !self.out.structured() {
-                        self.out.push_str("\t; ");
-                        func.write_inst_to(&mut self.out, inst).unwrap();
-                        self.out.push_str("\n");
+                    if let Output::Text(text) = &mut self.out {
+                        text.push_str("\t; ");
+                        func.write_inst_to(text, inst).unwrap();
+                        text.push('\n');
                     }
                     if self.debug {
                         self.set_srcloc(func.inst_loc(inst));
@@ -1505,27 +1505,27 @@ impl<'a> FunctionCompiler<'a> {
     /// A comment listing where each value lives, to make the output
     /// readable.
     fn allocation_comment(&mut self) {
-        if self.out.structured() {
+        // Write straight into the output text, set aside while the locations
+        // are read, rather than building the line in its own string.
+        let Output::Text(out) = &mut self.out else {
             return;
-        }
+        };
         backend_scope!(AllocationAnnotations);
-        // Write straight into the output, set aside while the locations are
-        // read, rather than building the line in its own string.
-        let mut out = std::mem::replace(&mut self.out, Output::Text(String::new()));
+        let mut out = std::mem::take(out);
         out.push_str("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
                 crate::text::write_decimal(&mut out, " v", value.index() as i128).unwrap();
-                out.write_char('=').unwrap();
+                out.push('=');
                 self.write_loc_name(&mut out, loc);
             }
             if let Some(hi) = self.alloc.hi_loc(value) {
-                out.write_char(':').unwrap();
+                out.push(':');
                 self.write_loc_name(&mut out, hi);
             }
         }
-        out.push_str("\n");
-        self.out = out;
+        out.push('\n');
+        self.out = Output::Text(out);
     }
 
     fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
@@ -5130,17 +5130,20 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn mach<const N: usize>(&mut self, op: &str, args: [Arg; N]) {
-        if self.out.structured() {
-            let instruction = native::lower(op, &args);
-            self.out.native(|| instruction, |_| unreachable!());
-        } else {
-            self.out.push_str("\t");
-            self.out.push_str(op);
-            for (i, a) in args.iter().enumerate() {
-                self.out.push_str(if i == 0 { "\t" } else { ", " });
-                a.write_to(&mut self.out).unwrap();
+        match &mut self.out {
+            Output::Structured(_) => {
+                let instruction = native::lower(op, &args);
+                self.out.native(|| instruction, |_| unreachable!());
             }
-            self.out.push_str("\n");
+            Output::Text(text) => {
+                text.push('\t');
+                text.push_str(op);
+                for (i, a) in args.iter().enumerate() {
+                    text.push_str(if i == 0 { "\t" } else { ", " });
+                    a.write_to(text).unwrap();
+                }
+                text.push('\n');
+            }
         }
     }
 
