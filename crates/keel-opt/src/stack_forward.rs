@@ -44,26 +44,61 @@ pub fn run(func: &mut Function) -> bool {
     // Propagate addresses only along constant in-bounds ptradd chains. Any
     // other use, including storing/passing/returning an address, escapes it.
     let mut addresses = FxHashMap::default();
+    // One scan gathers the slot addresses and pointer offsets, and the
+    // frame observers and stack marks that make this pass give up.
+    let mut instructions = Vec::new();
+    let mut offsets = Vec::new();
+    // These operations can inspect the frame or invalidate captured state,
+    // even without receiving a fixed-slot address as an explicit argument.
+    let mut observer = false;
+    // A saved SP can itself become a frame observer if inspected, converted,
+    // passed or used as an address. Only opaque marks used directly by restore
+    // qualify; do not infer this from the absence of fixed-slot address escapes.
+    let mut marks = FxHashSet::default();
+    let mut aliased_mark = false;
+    let mut restore = false;
+    for (_, inst) in func.layout_insts() {
+        instructions.push(inst);
+        match *func.inst_data(inst) {
+            InstData::StackAddr { slot } => {
+                let value = func.first_result(inst);
+                if func.resolve(value) == value {
+                    addresses.insert(value, (slot, 0usize));
+                }
+            }
+            InstData::Binary {
+                op: BinaryOp::Ptradd,
+                ..
+            } => offsets.push(inst),
+            InstData::InlineAsm { .. } => observer = true,
+            InstData::Intrinsic { id, .. } => match id {
+                keel_ir::Intrinsic::FrameAddress => observer = true,
+                keel_ir::Intrinsic::StackSave => {
+                    let mark = func.first_result(inst);
+                    aliased_mark |= func.resolve(mark) != mark;
+                    marks.insert(mark);
+                }
+                keel_ir::Intrinsic::StackRestore => restore = true,
+                _ => {}
+            },
+            InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
+                observer |= func.callee(callee).sig.returns_twice
+            }
+            InstData::CallIndirect { sig, .. } => observer |= func.signature(sig).returns_twice,
+            _ => {}
+        }
+    }
+    // Every rewrite below starts from a fixed slot address.
+    if addresses.is_empty() || observer || aliased_mark {
+        return false;
+    }
     let sizes: FxHashMap<_, _> = func
         .stack_slots()
         .map(|(s, d)| (s, d.size as usize))
         .collect();
-    let instructions: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
-    for &inst in &instructions {
-        if let InstData::StackAddr { slot } = *func.inst_data(inst) {
-            let value = func.first_result(inst);
-            if func.resolve(value) == value {
-                addresses.insert(value, (slot, 0usize));
-            }
-        }
-    }
-    // Every rewrite below starts from a fixed slot address.
-    if addresses.is_empty() {
-        return false;
-    }
     loop {
         let before = addresses.len();
-        for &inst in &instructions {
+        for &inst in &offsets {
             if let InstData::Binary {
                 op: BinaryOp::Ptradd,
                 args,
@@ -84,40 +119,11 @@ pub fn run(func: &mut Function) -> bool {
     // must continue to observe memory even when the program never escapes
     // the address itself.
     let mut escaped: FxHashSet<_> = func.debug_vars.iter().map(|v| v.slot).collect();
-    // These operations can inspect the frame or invalidate captured state,
-    // even without receiving a fixed-slot address as an explicit argument.
-    if instructions.iter().any(|&i| match func.inst_data(i) {
-        InstData::InlineAsm { .. } => true,
-        InstData::Intrinsic { id, .. } => matches!(id, keel_ir::Intrinsic::FrameAddress),
-        InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
-            func.callee(*callee).sig.returns_twice
-        }
-        InstData::CallIndirect { sig, .. } => func.signature(*sig).returns_twice,
-        _ => false,
-    }) {
+    // Without marks, any restore is of an unknown stack pointer.
+    if marks.is_empty() && restore {
         return false;
     }
-
-    // A saved SP can itself become a frame observer if inspected, converted,
-    // passed or used as an address. Only opaque marks used directly by restore
-    // qualify; do not infer this from the absence of fixed-slot address escapes.
-    let mut marks = FxHashSet::default();
-    for &inst in &instructions {
-        if matches!(
-            func.inst_data(inst),
-            InstData::Intrinsic {
-                id: keel_ir::Intrinsic::StackSave,
-                ..
-            }
-        ) {
-            let mark = func.first_result(inst);
-            if func.resolve(mark) != mark {
-                return false;
-            }
-            marks.insert(mark);
-        }
-    }
-    for &inst in &instructions {
+    for &inst in instructions.iter().filter(|_| !marks.is_empty()) {
         let data = func.inst_data(inst);
         if let InstData::Intrinsic {
             id: keel_ir::Intrinsic::StackRestore,
@@ -149,15 +155,7 @@ pub fn run(func: &mut Function) -> bool {
     // to local intervals: no dominance facts
     // may cross a mark/restore, even through another block. Keep their stores
     // as well; this path deliberately makes no whole-function lifetime proof.
-    let local_only = instructions.iter().any(|&i| {
-        matches!(
-            func.inst_data(i),
-            InstData::Intrinsic {
-                id: keel_ir::Intrinsic::StackSave | keel_ir::Intrinsic::StackRestore,
-                ..
-            }
-        )
-    });
+    let local_only = !marks.is_empty() || restore;
 
     for &inst in &instructions {
         let data = func.inst_data(inst);
