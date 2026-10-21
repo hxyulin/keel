@@ -5,6 +5,28 @@ through `keel opt -p` or an explicit `compile`/`cc` pipeline. They are not in
 Fast or Full defaults. They do not change register allocation or weaken the
 generic vectorizer's restrictions on multiple potentially faulting streams.
 
+Current application validation is recorded in
+[the ARM applicability report](ordered-real-apps-20261021.html). Neither pass
+activated on any of the 44 Lua, QuickJS, and SQLite translation units. Both
+activated on their separate kernel controls. Adding the passes produced
+identical application IR, objects, and executables compared with the same
+scalar-cleanup pipeline. Kernel speedups therefore do not establish a benefit
+for these applications, and neither pass is promoted into Full.
+
+Recheck applicability with a frozen compiler and prepared application sources:
+
+```sh
+python3 suite/fast_opt_locked.py target/ordered-lock.jsonl \
+  python3 suite/ordered_reductions_validate.py \
+  --keel /absolute/path/to/keel --inputs target/suite \
+  --output target/ordered-activation-new
+```
+
+Use a fresh output directory. The validator discovers the compiler's actual
+default schedule from its report and compares each pass, their combination,
+and scalar cleanup alone. It checks kernel activation separately from real
+application activation; it performs no native timing.
+
 `adjacent-diff` recognizes a bounded rotated loop summing absolute differences
 between consecutive signed i32 elements. It discovers the pointer and bound
 through dataflow, including ordinary two-argument functions. Both the merged

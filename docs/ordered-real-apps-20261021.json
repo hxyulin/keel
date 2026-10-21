@@ -1,0 +1,879 @@
+{
+  "date": "2026-10-21",
+  "host": "MacHost ARM",
+  "linuxhost_used": false,
+  "complete": true,
+  "compiler_sha256": "3f3bf7e28b63de9f057ae7af70f4a6353868bbd4432ccf567435f7449e2b44d3",
+  "pipeline": {
+    "baseline": [
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "load-reuse",
+      "stack-promote",
+      "phi-simplify",
+      "dce",
+      "simplify-cfg",
+      "loop-strength-reduce",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "loop-unroll",
+      "loop-reduce-multi",
+      "loop-rotate",
+      "phi-simplify",
+      "dce"
+    ],
+    "cleanup": [
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "load-reuse",
+      "stack-promote",
+      "phi-simplify",
+      "dce",
+      "simplify-cfg",
+      "loop-strength-reduce",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "loop-unroll",
+      "loop-reduce-multi",
+      "loop-rotate",
+      "phi-simplify",
+      "dce",
+      "canonicalize",
+      "instcombine",
+      "dce"
+    ],
+    "wide": [
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "load-reuse",
+      "stack-promote",
+      "phi-simplify",
+      "dce",
+      "simplify-cfg",
+      "loop-strength-reduce",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "loop-unroll",
+      "loop-reduce-multi",
+      "loop-rotate",
+      "phi-simplify",
+      "dce",
+      "adjacent-diff",
+      "canonicalize",
+      "instcombine",
+      "dce"
+    ],
+    "state": [
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "load-reuse",
+      "stack-promote",
+      "phi-simplify",
+      "dce",
+      "simplify-cfg",
+      "loop-strength-reduce",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "loop-unroll",
+      "loop-reduce-multi",
+      "loop-rotate",
+      "phi-simplify",
+      "dce",
+      "run-balance-predicate",
+      "canonicalize",
+      "instcombine",
+      "dce"
+    ],
+    "both": [
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "inline-noninterposable",
+      "simplify-cfg",
+      "canonicalize",
+      "instcombine",
+      "call-contracts",
+      "simplify-cfg",
+      "gvn",
+      "small-memory",
+      "stack-forward",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "gcm",
+      "adjacent-abs",
+      "loop-vectorize",
+      "loop-reduce",
+      "load-reuse",
+      "stack-promote",
+      "phi-simplify",
+      "dce",
+      "simplify-cfg",
+      "loop-strength-reduce",
+      "canonicalize",
+      "instcombine",
+      "dce",
+      "loop-unroll",
+      "loop-reduce-multi",
+      "loop-rotate",
+      "phi-simplify",
+      "dce",
+      "adjacent-diff",
+      "run-balance-predicate",
+      "canonicalize",
+      "instcombine",
+      "dce"
+    ]
+  },
+  "applications": [
+    {
+      "app": "lua",
+      "inputs": 33,
+      "wide_changed": 0,
+      "state_changed": 0,
+      "both_changed": 0,
+      "ir_equal_to_cleanup": true,
+      "objects_identical": 33,
+      "executables_identical": true,
+      "checks": {
+        "clang-O2": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-baseline": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-cleanup": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-both": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        }
+      },
+      "binaries": {
+        "clang-O2": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/lua/clang-O2/lua",
+          "sha256": "c68107f70f5d16990a5b248079db1e9f03438843e290fd0e468ca7a97ae29932",
+          "bytes": 298128
+        },
+        "keel-baseline": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/lua/keel-baseline/lua",
+          "sha256": "03fbf440d6ba8a611a4a961e7cd0b4894c420a5d7f403444cd411ee625f94e3f",
+          "bytes": 543648
+        },
+        "keel-cleanup": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/lua/keel-cleanup/lua",
+          "sha256": "910cb3c6d883435698ad1fddc32327271d15d69d348a878ad7854b27ce20ebd2",
+          "bytes": 543648
+        },
+        "keel-both": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/lua/keel-both/lua",
+          "sha256": "910cb3c6d883435698ad1fddc32327271d15d69d348a878ad7854b27ce20ebd2",
+          "bytes": 543648
+        }
+      }
+    },
+    {
+      "app": "quickjs",
+      "inputs": 9,
+      "wide_changed": 0,
+      "state_changed": 0,
+      "both_changed": 0,
+      "ir_equal_to_cleanup": true,
+      "objects_identical": 9,
+      "executables_identical": true,
+      "checks": {
+        "clang-O2": {
+          "suite_test_passed": true,
+          "commands": 9,
+          "benchmark_outputs_passed": true
+        },
+        "keel-baseline": {
+          "suite_test_passed": true,
+          "commands": 9,
+          "benchmark_outputs_passed": true
+        },
+        "keel-cleanup": {
+          "suite_test_passed": true,
+          "commands": 9,
+          "benchmark_outputs_passed": true
+        },
+        "keel-both": {
+          "suite_test_passed": true,
+          "commands": 9,
+          "benchmark_outputs_passed": true
+        }
+      },
+      "binaries": {
+        "clang-O2": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/quickjs/clang-O2/qjs",
+          "sha256": "fb9208925d6a7f22186f499b3b72f66f180c2868048b914f03ac28fdd1cf3634",
+          "bytes": 1027504
+        },
+        "keel-baseline": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/quickjs/keel-baseline/qjs",
+          "sha256": "a13309a1764912a7cf9b45f8e49d13cd30f91bead3d066d8377389f084f29b32",
+          "bytes": 1486384
+        },
+        "keel-cleanup": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/quickjs/keel-cleanup/qjs",
+          "sha256": "a6eeb0a68f82a7fbb737d7c75efacd6b0b7715c2648c6061222d563af7f03712",
+          "bytes": 1486384
+        },
+        "keel-both": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/quickjs/keel-both/qjs",
+          "sha256": "a6eeb0a68f82a7fbb737d7c75efacd6b0b7715c2648c6061222d563af7f03712",
+          "bytes": 1486384
+        }
+      }
+    },
+    {
+      "app": "sqlite",
+      "inputs": 2,
+      "wide_changed": 0,
+      "state_changed": 0,
+      "both_changed": 0,
+      "ir_equal_to_cleanup": true,
+      "objects_identical": 2,
+      "executables_identical": true,
+      "checks": {
+        "clang-O2": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-baseline": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-cleanup": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        },
+        "keel-both": {
+          "suite_test_passed": true,
+          "commands": 1,
+          "benchmark_outputs_passed": true
+        }
+      },
+      "binaries": {
+        "clang-O2": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/sqlite/clang-O2/sqlite3",
+          "sha256": "8f1ae07053a6fabeb08a3c8771c438399ce8cb13c37a17fbf4ff5a4b687841d0",
+          "bytes": 1352424
+        },
+        "keel-baseline": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/sqlite/keel-baseline/sqlite3",
+          "sha256": "1342ba051738715e46a82d6a9e6312faac9166d78e7fe6556ac9e91ae17de668",
+          "bytes": 1911608
+        },
+        "keel-cleanup": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/sqlite/keel-cleanup/sqlite3",
+          "sha256": "2659a80ab4e72caf98a480ca7894974acbc85520412bf569c3e20948130188fb",
+          "bytes": 1911608
+        },
+        "keel-both": {
+          "status": "built",
+          "binary": "target/ordered-real-apps-20261021/apps/sqlite/keel-both/sqlite3",
+          "sha256": "2659a80ab4e72caf98a480ca7894974acbc85520412bf569c3e20948130188fb",
+          "bytes": 1911608
+        }
+      }
+    }
+  ],
+  "positive_control": {
+    "app": "positive-control",
+    "source": "suite/runtime-kernels/kernels.c",
+    "input_sha256": "0b83ca8710b02722147af56a5d4dab616a7593941cec800b4e8ebe653340a0a5",
+    "configurations": {
+      "baseline": {
+        "ir_sha256": "8ac3bdc7f9a92f19016abc85d5429e74dab15171e111bec5d7ec256ac4ef6db5",
+        "activation": [],
+        "changed_functions": []
+      },
+      "cleanup": {
+        "ir_sha256": "487aa1da05da2d8e6382449fe6649e9d386f5849c567de13d4ec1f2bd28c232a",
+        "activation": [],
+        "changed_functions": []
+      },
+      "wide": {
+        "ir_sha256": "f5aecaa7d1a8e048b7ec9dee05b49c9427fe507360a3f04a37d609a9598a6341",
+        "activation": [
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_positive32",
+            "changed": false,
+            "pass_ns": 1500
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_balance32",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_positive64",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_balance64",
+            "changed": false,
+            "pass_ns": 42
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_sensor_mix",
+            "changed": false,
+            "pass_ns": 42
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_clamped",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_unsigned_high",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_adjacent",
+            "changed": true,
+            "pass_ns": 14750
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_buckets",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_run_balance",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_widen32",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_widen_u32",
+            "changed": false,
+            "pass_ns": 0
+          }
+        ],
+        "changed_functions": [
+          "rk_adjacent"
+        ],
+        "identical_to_cleanup": false
+      },
+      "state": {
+        "ir_sha256": "37533bf124dffadc1a8f11e9ffb990d80d8a974e927ab848f37f0c52955ba74f",
+        "activation": [
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_positive32",
+            "changed": false,
+            "pass_ns": 2625
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_balance32",
+            "changed": false,
+            "pass_ns": 333
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_positive64",
+            "changed": false,
+            "pass_ns": 334
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_balance64",
+            "changed": false,
+            "pass_ns": 292
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_sensor_mix",
+            "changed": false,
+            "pass_ns": 500
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_clamped",
+            "changed": false,
+            "pass_ns": 334
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_unsigned_high",
+            "changed": false,
+            "pass_ns": 292
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_adjacent",
+            "changed": false,
+            "pass_ns": 334
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_buckets",
+            "changed": false,
+            "pass_ns": 667
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_run_balance",
+            "changed": true,
+            "pass_ns": 4334
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_widen32",
+            "changed": false,
+            "pass_ns": 333
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_widen_u32",
+            "changed": false,
+            "pass_ns": 250
+          }
+        ],
+        "changed_functions": [
+          "rk_run_balance"
+        ],
+        "identical_to_cleanup": false
+      },
+      "both": {
+        "ir_sha256": "62397dd7e6934b43fa030c00c732dda1a092e2ddd72ea83aed5ca8c413ff7ed1",
+        "activation": [
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_positive32",
+            "changed": false,
+            "pass_ns": 1500
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_balance32",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_positive64",
+            "changed": false,
+            "pass_ns": 42
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_balance64",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_sensor_mix",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_clamped",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_unsigned_high",
+            "changed": false,
+            "pass_ns": 42
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_adjacent",
+            "changed": true,
+            "pass_ns": 13458
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_buckets",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_run_balance",
+            "changed": false,
+            "pass_ns": 41
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_widen32",
+            "changed": false,
+            "pass_ns": 0
+          },
+          {
+            "pass_name": "adjacent-diff",
+            "function": "rk_widen_u32",
+            "changed": false,
+            "pass_ns": 42
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_positive32",
+            "changed": false,
+            "pass_ns": 958
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_balance32",
+            "changed": false,
+            "pass_ns": 500
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_positive64",
+            "changed": false,
+            "pass_ns": 375
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_balance64",
+            "changed": false,
+            "pass_ns": 292
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_sensor_mix",
+            "changed": false,
+            "pass_ns": 625
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_clamped",
+            "changed": false,
+            "pass_ns": 458
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_unsigned_high",
+            "changed": false,
+            "pass_ns": 292
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_adjacent",
+            "changed": false,
+            "pass_ns": 1250
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_buckets",
+            "changed": false,
+            "pass_ns": 1125
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_run_balance",
+            "changed": true,
+            "pass_ns": 5291
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_widen32",
+            "changed": false,
+            "pass_ns": 375
+          },
+          {
+            "pass_name": "run-balance-predicate",
+            "function": "rk_widen_u32",
+            "changed": false,
+            "pass_ns": 250
+          }
+        ],
+        "changed_functions": [
+          "rk_adjacent",
+          "rk_run_balance"
+        ],
+        "identical_to_cleanup": false
+      }
+    }
+  },
+  "decision": "Keep adjacent-diff and run-balance-predicate opt-in. No promotion or runtime claim for Lua, QuickJS or SQLite. Stop using targeted kernel timing as evidence that these passes close the application gap.",
+  "explanation": [
+    "adjacent-diff requires a complete 4\u20135-block, at-most-40-instruction function with an exact adjacent-difference loop. It cannot optimize that pattern nested inside a larger interpreter function.",
+    "run-balance-predicate requires the exact signed-positive credit / saturating-debit-by-17 recurrence and specific private-arm and loop-carried structure. It is not general loop branch elimination.",
+    "Scalar cleanup alone changes IR in 11 inputs (7 Lua, 2 QuickJS, 2 SQLite). Any difference versus plain Full must be attributed separately; the two loop passes add no application code changes."
+  ],
+  "limits": [
+    "ARM native only. No new x86 runtime evidence.",
+    "No runtime timing campaign: candidate and cleanup controls have identical complete executables.",
+    "Application correctness uses the configured upstream-suite checks and benchmark output comparisons, not proof of all program behavior.",
+    "An initial harness run stopped on a function-free translation unit because it expected function-pass observations. The final validator accepts missing function observations and checks the observed indices against the positive-control schedule."
+  ],
+  "reproduce": [
+    "python3 suite/fast_opt_locked.py LOG.jsonl python3 suite/ordered_reductions_validate.py --keel FROZEN_KEEL --inputs target/suite --output NEW_DIRECTORY"
+  ],
+  "evidence": {
+    "target/ordered-real-apps-20261021/activation-final/report.json": "484a92374e4c57b53862e21eb4e823af1a2441fadd023b92fb526145ee45c827",
+    "target/ordered-real-apps-20261021/activation-final/commands.jsonl": "5c582198ae6efd9acb3bf1c8d2f9afe0e8b5b2a9735e9ec53f398e61be163662",
+    "target/ordered-real-apps-20261021/apps/report.json": "ad71fcdf2e7023f6f7b5be204bc3dd2dfc2c0d12b920a3bb369392ae00743abf",
+    "target/ordered-real-apps-20261021/apps/commands.jsonl.gz": "728c0a94091d77a47bec2ee2166f652a53b548959e118ddf5cb20bb0ab8841d2",
+    "target/ordered-real-apps-20261021/apps_checks.py": "b9832f8e983e0d5c2dcc933c049ba18d8c7e4a953e0e4740e535b4b31328e4ba",
+    "target/ordered-real-apps-20261021/apps-configs.json": "026b1bae5f7385c9fd5fbf36f02774be1efa73d0ecda18430e557d8a4b5c7eb7",
+    "target/ordered-real-apps-20261021/build.log": "2ee196224324ced6471d192a6db5e7b6ffb2a8c059f08b2bc6be273207f02371"
+  },
+  "runner_sha256": "7b7cb47a9b3f59be08a758d90fb90489eb7d57118c548ede1e9e8f6b5d753823"
+}
