@@ -1,10 +1,15 @@
-//! Closed positive-i64 clamp. The mask is deliberately never published:
-//! ~sign differs from (x > 0) at zero, but the selected result is exactly zero.
+//! Closed i64x2 clamps and sign selects. Covered masks are never published.
 use super::*;
 use keel_ir::{VectorBinaryOp, VectorType};
 use std::collections::HashMap;
 
-pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Plan {
+    Positive(Value),
+    Select { x: Value, otherwise: Value },
+}
+
+pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Plan> {
     if func
         .layout_insts()
         .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
@@ -35,7 +40,7 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
                 continue;
             }
             let InstData::VectorIcmp {
-                cond: IntCC::Sgt,
+                cond,
                 args: [x, zero],
             } = *func.inst_data(compare)
             else {
@@ -45,33 +50,55 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             let mask = func.first_result(compare);
             if func.value_type(x) != Type::Vector(VectorType::I64x2)
                 || uses[mask.index()] != 1
-                || vector::literal_i64x2(func, zero) != Some(0)
+                || func.value_type(mask) != Type::Vector(VectorType::I64x2)
+                || func.value_type(func.first_result(root)) != Type::Vector(VectorType::I64x2)
             {
                 continue;
             }
-            let accepted = match *func.inst_data(root) {
+            let literal = vector::literal_i64x2(func, zero);
+            // Keep the strict-positive clamp first. Its predicate differs from
+            // ~sign at zero, so it must never share the sign-select proof.
+            let positive = cond == IntCC::Sgt && literal == Some(0);
+            let negative = matches!(
+                (cond, literal),
+                (IntCC::Slt, Some(0)) | (IntCC::Ugt, Some(i64::MAX))
+            );
+            let selected = match *func.inst_data(root) {
                 InstData::VectorBinary {
                     op: VectorBinaryOp::And,
                     args,
                 } => {
                     let args = args.map(|v| func.resolve(v));
-                    args == [mask, x] || args == [x, mask]
+                    (positive && (args == [mask, x] || args == [x, mask]))
+                        .then_some(Plan::Positive(x))
                 }
                 InstData::VectorSelect { args: [m, a, b] } => {
-                    func.resolve(m) == mask
-                        && func.resolve(a) == x
-                        && vector::literal_i64x2(func, b) == Some(0)
+                    let b = func.resolve(b);
+                    if func.resolve(m) != mask || func.resolve(a) != x {
+                        None
+                    } else if positive && vector::literal_i64x2(func, b) == Some(0) {
+                        Some(Plan::Positive(x))
+                    } else if negative && func.value_type(b) == Type::Vector(VectorType::I64x2) {
+                        Some(Plan::Select { x, otherwise: b })
+                    } else {
+                        None
+                    }
                 }
-                _ => false,
+                _ => None,
             };
-            if !accepted {
-                continue;
-            }
+            let Some(selected) = selected else { continue };
             // Only pure compare is suppressed. Loads stay in place, with their
             // original 16-byte instruction, ordering, and debug information.
             plan.cover(compare);
-            plan.set_operands(root, vec![x]);
-            result.insert(root, x);
+            plan.set_operands(
+                root,
+                match selected {
+                    Plan::Positive(x) => vec![x],
+                    // Occurrences, including X == F, match the actual leaf reads.
+                    Plan::Select { x, otherwise } => vec![x, otherwise],
+                },
+            );
+            result.insert(root, selected);
         }
     }
     result

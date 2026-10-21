@@ -136,3 +136,121 @@ fn independent_false_literal_requires_its_own_fresh_proof() {
     f.replace_all_uses(alias, f.first_result(splat));
     assert_eq!(select(&f, &mut Selection::default()).len(), 1);
 }
+
+#[test]
+fn closed_sign_select_proofs_and_leaf_occurrences() {
+    for (cc, literal) in [("slt", "0"), ("ugt", "9223372036854775807")] {
+        let src = SOURCE
+            .replace("vicmp.sgt", &format!("vicmp.{cc}"))
+            .replace("iconst.i64 0", &format!("iconst.i64 {literal}"))
+            .replace("vand v5,v4", "vselect v5,v4,v21");
+        let f = function(&src);
+        let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
+        let x = f.first_result(insts[2]);
+        let otherwise = f.block_params(f.entry_block().unwrap())[3];
+        let mut plan = Selection::default();
+        assert!(matches!(
+            select(&f, &mut plan)[&insts[4]],
+            Plan::Select { .. }
+        ));
+        assert_eq!(plan.operands(&f, insts[4]), vec![x, otherwise]);
+        assert!(plan.operands(&f, insts[3]).is_empty());
+        assert!(!plan.covered(insts[2]));
+        let equal = function(&src.replace("vselect v5,v4,v21", "vselect v5,v4,v4"));
+        let mut plan = Selection::default();
+        assert_eq!(select(&equal, &mut plan).len(), 1);
+        assert_eq!(plan.operands(&equal, insts[4]), vec![x, x]);
+        // Every inspected producer, including root, must remain canonical.
+        for (index, param) in [(0, 2), (1, 3), (3, 3), (4, 3)] {
+            let mut d = f.clone();
+            let p = d.block_params(d.entry_block().unwrap())[param];
+            d.replace_all_uses(d.first_result(insts[index]), p);
+            assert!(select(&d, &mut Selection::default()).is_empty());
+        }
+        // Resolve ordinary aliases for either leaf and threshold.
+        for (from, to) in [(otherwise, x), (otherwise, f.first_result(insts[1]))] {
+            let mut d = f.clone();
+            d.replace_all_uses(from, to);
+            let mut plan = Selection::default();
+            assert_eq!(select(&d, &mut plan).len(), 1);
+            assert_eq!(plan.operands(&d, insts[4]), vec![x, to]);
+        }
+        for i in [insts[3], insts[4]] {
+            let mut plan = Selection::default();
+            plan.cover(i);
+            assert!(select(&f, &mut plan).is_empty());
+            let mut plan = Selection::default();
+            plan.matches.insert(
+                i,
+                Match {
+                    machine: Machine::Madd,
+                    args: vec![],
+                    shift: 0,
+                },
+            );
+            assert!(select(&f, &mut plan).is_empty());
+            let mut plan = Selection::default();
+            plan.conditions.insert(i, (insts[3], false));
+            assert!(select(&f, &mut plan).is_empty());
+            for kind in [OperandKind::Use, OperandKind::Def] {
+                let mut plan = Selection::default();
+                plan.set_constraint(i, ValuePart::low(f.first_result(i)), kind, Constraint::Any);
+                assert!(select(&f, &mut plan).is_empty());
+            }
+        }
+        let loc = keel_ir::SourceLoc {
+            file: keel_ir::SourceFile::new(0),
+            line: 1,
+            col: 1,
+            scope: None,
+        };
+        let mut debug = f.clone();
+        for &i in &insts[3..5] {
+            debug.set_inst_loc(i, Some(loc));
+        }
+        assert_eq!(select(&debug, &mut Selection::default()).len(), 1);
+        for i in [insts[3], insts[4]] {
+            for changed in [
+                None,
+                Some(keel_ir::SourceLoc {
+                    file: keel_ir::SourceFile::new(1),
+                    ..loc
+                }),
+                Some(keel_ir::SourceLoc { line: 2, ..loc }),
+                Some(keel_ir::SourceLoc { col: 2, ..loc }),
+                Some(keel_ir::SourceLoc {
+                    scope: Some(keel_ir::DebugScope::new(0)),
+                    ..loc
+                }),
+            ] {
+                let mut d = debug.clone();
+                d.set_inst_loc(i, changed);
+                assert!(select(&d, &mut Selection::default()).is_empty());
+            }
+        }
+        for rejected in [
+            src.replace(" return", " v30 = asm \"\", \"=r\"() -> i32\n return"),
+            src.replace(" v6 =", " fence seq_cst\n v6 ="),
+            src.replace(" return", " store v5,v1\n return"),
+            src.replace(" return", " jump block1(v5)\nblock1(v30:i64x2):\n return"),
+            src.replace(&format!("iconst.i64 {literal}"), "iconst.i64 1"),
+            src.replace("vsplat.i64x2 v2", "vsplat.i64x2 v20"),
+            src.replace("vselect v5,v4,v21", "vselect v5,v21,v4"),
+            src.replace("vselect v5,v4,v21", "vselect v5,v4,v5"),
+            src.replace(&format!("vicmp.{cc}"), "vicmp.sge"),
+            src.replace(&format!("vicmp.{cc} v4,v3"), &format!("vicmp.{cc} v3,v4")),
+            src.replace("i64x2", "i32x4")
+                .replace("iconst.i64", "iconst.i32"),
+        ] {
+            assert!(
+                select(&function(&rejected), &mut Selection::default()).is_empty(),
+                "{rejected}"
+            );
+        }
+        // An extra mask occurrence hidden behind an SSA alias still escapes.
+        let mut d = function(&src.replace(" return", " store v21,v1\n return"));
+        let alias = d.block_params(d.entry_block().unwrap())[3];
+        d.replace_all_uses(alias, d.first_result(insts[3]));
+        assert!(select(&d, &mut Selection::default()).is_empty());
+    }
+}

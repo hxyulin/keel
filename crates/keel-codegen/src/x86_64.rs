@@ -413,7 +413,7 @@ struct FunctionCompiler<'a> {
     selection: crate::select::Selection,
     packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: std::collections::HashMap<Inst, Value>,
-    packed_sign_values: std::collections::HashMap<Inst, Value>,
+    packed_sign_values: std::collections::HashMap<Inst, packed_sign::Plan>,
     packed_positive_values: std::collections::HashMap<Inst, Value>,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
@@ -1016,7 +1016,12 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         if let Some(&value) = self.packed_sign_values.get(&inst) {
-            self.vector_positive64(value, result);
+            match value {
+                packed_sign::Plan::Positive(x) => self.vector_positive64(x, result),
+                packed_sign::Plan::Select { x, otherwise } => {
+                    self.vector_sign_select(x, otherwise, result)
+                }
+            }
             return;
         }
         if let Some(&addr) = self.packed_positive_values.get(&inst) {

@@ -277,6 +277,21 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Andnps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
         self.vector_publish(result);
     }
+    pub(super) fn vector_sign_select(&mut self, x: Value, otherwise: Value, result: Option<Value>) {
+        // Read both retained leaves before any destination write. FS0 also
+        // serves spilled results; FS1/FS2 preserve either input alias and X==F.
+        self.vector_stage(x, FS1);
+        self.vector_stage(otherwise, FS2);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+        );
+        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS0)), asm_arg(&31i64)]);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+        self.vector_publish(result);
+    }
     pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
         self.vector_stage(value, FS1);
         self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0))]);
