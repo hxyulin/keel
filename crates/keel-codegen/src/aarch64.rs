@@ -5390,3 +5390,6 @@ mod tests {
         assert_eq!(signed_reciprocal(64, 3), (0x5555_5555_5555_5556, 0));
     }
 }
+
+#[cfg(test)]
+mod parallel_copy_tests;
