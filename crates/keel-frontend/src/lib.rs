@@ -33,7 +33,7 @@ use keel_ir::{
     Block, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstBuilder, SourceLoc, Type, Value,
 };
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap as HashMap;
 
 keel_ir::entity!(
     /// A mutable variable of the source program.
@@ -93,7 +93,7 @@ impl Definitions {
                     Some(i) => entries[i].1 = value,
                     None if entries.len() < 32 => entries.push((var, value)),
                     None => {
-                        let mut map = HashMap::with_capacity(64);
+                        let mut map = HashMap::with_capacity_and_hasher(64, Default::default());
                         map.extend(std::mem::take(entries));
                         map.insert(var, value);
                         self.entries = Entries::Large(map);
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn sparse_definitions_survive_updates_spilling_and_promotion() {
         let mut defs = Definitions::default();
-        let mut reference = HashMap::new();
+        let mut reference = HashMap::default();
         for (i, key) in [900_000, 7, 40_000, 42].into_iter().enumerate() {
             defs.insert(Variable::new(key), Value::new(i));
             reference.insert(Variable::new(key), Value::new(i));

@@ -4,7 +4,7 @@
 use crate::parse::Parser;
 use crate::types::*;
 use keel_ir::{DebugMember, DebugType, DebugTypeData, Encoding, EntityRef, MemberLocation, Module};
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap as HashMap;
 
 /// Adds C types to a module's debug type table, each once.
 #[derive(Default)]

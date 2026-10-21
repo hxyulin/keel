@@ -9,7 +9,7 @@
 
 use crate::strings::Strings;
 use crate::{Error, Loc};
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap as HashMap;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tok<'a> {

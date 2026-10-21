@@ -1,7 +1,7 @@
 //! Compilation-scoped byte storage and interned names. Frontend references
 //! cannot outlive the arena; the returned IR owns the strings it needs.
 use bumpalo::Bump;
-use std::collections::HashSet;
+use keel_ir::fxhash::FxHashSet as HashSet;
 
 pub(crate) struct Strings<'a> {
     arena: &'a Bump,
@@ -13,8 +13,8 @@ impl<'a> Strings<'a> {
     pub fn new(arena: &'a Bump) -> Self {
         Self {
             arena,
-            names: HashSet::new(),
-            literals: HashSet::new(),
+            names: HashSet::default(),
+            literals: HashSet::default(),
         }
     }
 

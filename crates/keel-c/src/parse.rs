@@ -18,7 +18,7 @@ use crate::types::*;
 use crate::{Error, Loc};
 use keel_ir::Target;
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet};
+use keel_ir::fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::rc::Rc;
 
 pub type R<T> = Result<T, Error>;
@@ -297,7 +297,7 @@ impl<'a> Parser<'a> {
             text,
             pos: 0,
             scopes: vec![Scope::default()],
-            names: HashMap::new(),
+            names: HashMap::default(),
             type_nodes: TypeNodes::default(),
             plain_sugar: Rc::new(Sugar::Plain),
             structs: Vec::new(),
@@ -306,9 +306,9 @@ impl<'a> Parser<'a> {
             globals: Vec::new(),
             funcs: Vec::new(),
             strings: Vec::new(),
-            literal_ids: [HashMap::new(), HashMap::new()],
+            literal_ids: [HashMap::default(), HashMap::default()],
             fs: None,
-            external_def: HashSet::new(),
+            external_def: HashSet::default(),
             last_params: Vec::new(),
             unique: 0,
             target,
@@ -2439,7 +2439,7 @@ mod tests {
             Strings::new(&arena),
         );
         let words = ["a", "b", "c", "d", "e", "f", "g"];
-        let mut model = vec![HashMap::new()];
+        let mut model = vec![HashMap::default()];
         let mut state = 7u32;
         for step in 0..3_000 {
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
@@ -2447,7 +2447,7 @@ mod tests {
             match (state >> 16) % 8 {
                 0 if model.len() < 8 => {
                     p.push_scope();
-                    model.push(HashMap::new());
+                    model.push(HashMap::default());
                 }
                 1 if model.len() > 1 => {
                     p.pop_scope();

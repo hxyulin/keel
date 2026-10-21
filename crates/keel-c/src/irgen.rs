@@ -28,7 +28,7 @@ use keel_ir::{
     Intrinsic, Language, MemoryFlags, Module, Ordering, OverflowOp, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, StackSlot, Symbol, Type, Value, ValueDef,
 };
-use std::collections::HashMap;
+use keel_ir::fxhash::FxHashMap as HashMap;
 
 type R<T> = Result<T, Error>;
 
@@ -68,15 +68,15 @@ impl<'p> Gen<'p> {
             files,
             module: Module::default(),
             debug,
-            srcfiles: HashMap::new(),
+            srcfiles: HashMap::default(),
             used: vec![false; p.globals.len()],
             worklist: Vec::new(),
             strings_used: vec![false; p.strings.len()],
-            unprototyped: HashMap::new(),
-            anon: HashMap::new(),
+            unprototyped: HashMap::default(),
+            anon: HashMap::default(),
             dtypes: DebugTypes::default(),
             global_alignments: None,
-            generated_alignments: HashMap::new(),
+            generated_alignments: HashMap::default(),
             volatile_members: vec![std::cell::Cell::new(None); p.structs.len()],
             ssa: FunctionBuilderContext::new(),
         }
@@ -170,7 +170,7 @@ impl<'p> Gen<'p> {
 
     fn symbol_alignment(&mut self, name: &str) -> u32 {
         let globals = self.global_alignments.get_or_insert_with(|| {
-            let mut alignments = HashMap::with_capacity(self.p.globals.len());
+            let mut alignments = HashMap::with_capacity_and_hasher(self.p.globals.len(), Default::default());
             for global in &self.p.globals {
                 alignments
                     .entry(global.symbol)
@@ -449,11 +449,11 @@ impl<'p> Gen<'p> {
             b,
             def,
             locals: Vec::new(),
-            alignments: HashMap::new(),
+            alignments: HashMap::default(),
             sret: None,
             breaks: Vec::new(),
             continues: Vec::new(),
-            labels: HashMap::new(),
+            labels: HashMap::default(),
             dispatch: None,
             dispatch_table,
             cases: Vec::new(),
@@ -3339,7 +3339,7 @@ mod alignment_tests {
         }
         f.ins(keel_ir::InsertPoint::End(entry))
             .return_(&[result.unwrap()]);
-        g.preserve_access_alignment(&mut f, HashMap::new());
+        g.preserve_access_alignment(&mut f, HashMap::default());
         keel_ir::verify(&f).unwrap();
         let alignments: Vec<_> = f
             .layout_insts()
@@ -3466,7 +3466,7 @@ mod alignment_tests {
         f.replace_all_uses(alias, chain[3]);
         f.ins(End(next)).load(Type::I32, alias);
         f.ins(End(next)).return_(&[]);
-        let mut seeds = HashMap::new();
+        let mut seeds = HashMap::default();
         seeds.insert(assumed, 32);
         let slots: Vec<_> = f.stack_slots().map(|(_, d)| d.align).collect();
         let symbols: Vec<_> = f
