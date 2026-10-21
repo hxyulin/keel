@@ -504,7 +504,7 @@ fn countdown_bounds_prove_nonwrapping_disjoint_footprints_for_every_residue() {
             let mut remain = n - 2;
             let mut ptr = u128::from(base) + 8;
             let end = u128::from(base) + 4 * u128::from(n);
-            // Large counts sample the first and final groups, avoiding huge loops.
+            // Large counts jump directly to the final group, avoiding huge loops.
             if remain > 256 {
                 let skip = (remain / 8 - 1) * 8;
                 remain -= skip;

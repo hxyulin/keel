@@ -122,8 +122,8 @@ int main(void) {
                     compare_fault(mem+page-4*valid+misalign,2+8*(group+1));
                     ++unroll_faults;
                 }
-    // Pair cleanup and scalar tail after a completed unrolled group, all
-    // residues; the extra sample must fault exactly as the scalar does.
+    // After three completed groups, residues 0..6 exercise cleanup/tail;
+    // residue 7 admits a fourth main trip. Compare each fault to the scalar.
     for (uint64_t residue=0;residue<8;residue++) {
         uint64_t valid=26+residue;
         compare_fault(mem+page-4*valid,valid+1); ++unroll_faults;
