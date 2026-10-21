@@ -90,8 +90,8 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 
-// SSE2 handles equality at every integer width and signed ordering through i32.
-// Keep wider/unsigned ordering on the existing scalar legalization path.
+// SSE2 handles equality and signed ordering at every integer width.
+// i64 ordering uses a dword recipe; unsigned ordering still uses lane legalization.
 pub(super) fn packed_compare(cond: IntCC, shape: VectorType) -> Option<Opcode> {
     use VectorType::*;
     Some(match (cond, shape) {
@@ -100,7 +100,7 @@ pub(super) fn packed_compare(cond: IntCC, shape: VectorType) -> Option<Opcode> {
         (IntCC::Eq | IntCC::Ne, I32x4 | I64x2) => Opcode::Pcmpeqd,
         (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I8x16) => Opcode::Pcmpgtb,
         (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I16x8) => Opcode::Pcmpgtw,
-        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I32x4) => Opcode::Pcmpgtd,
+        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I32x4 | I64x2) => Opcode::Pcmpgtd,
         _ => return None,
     })
 }
@@ -125,16 +125,44 @@ impl FunctionCompiler<'_> {
         let swap = matches!(cond, IntCC::Slt | IntCC::Sge);
         self.vector_stage(args[usize::from(swap)], FS0);
         self.vector_stage(args[usize::from(!swap)], FS1);
-        self.emit(
-            packed_compare(cond, shape).unwrap(),
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
-        );
-        if shape == VectorType::I64x2 {
+        if shape == VectorType::I64x2 && !matches!(cond, IntCC::Eq | IntCC::Ne) {
+            // Compare signed high dwords, breaking ties by UNSIGNED low dwords.
+            // Bias just the low dwords before pcmpgtd. Three reserved registers
+            // suffice even when every operand and the result is spilled.
+            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Psrlq, [asm_arg(&xmm(FS2)), asm_arg(&63i64)]);
+            self.emit(Opcode::Psllq, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS0))]);
+            self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
             self.emit(
                 Opcode::Pshufd,
-                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xa0i64)],
+            );
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0)), asm_arg(&0xf5i64)],
             );
             self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xf5i64)],
+            );
+            self.emit(Opcode::Orps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        } else {
+            self.emit(
+                packed_compare(cond, shape).unwrap(),
+                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+            );
+            if shape == VectorType::I64x2 {
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                );
+                self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            }
         }
         if matches!(cond, IntCC::Ne | IntCC::Sle | IntCC::Sge) {
             self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);

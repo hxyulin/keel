@@ -437,3 +437,161 @@ fn packed_arithmetic_edges_execute_across_calls_and_forced_spills() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[path = "common/x86_packed.rs"]
+mod x86_packed;
+
+#[test]
+fn packed_integer_compare_oracle_emits_both_object_routes() {
+    let (source, harness) = x86_packed::fixture();
+    let evidence = std::env::var_os("KEEL_X86_PACKED_EVIDENCE").map(std::path::PathBuf::from);
+    if let Some(dir) = &evidence {
+        fs::create_dir_all(dir).unwrap();
+        fs::write(dir.join("oracle.c"), &harness).unwrap();
+        fs::write(dir.join("oracle.keel"), &source).unwrap();
+    }
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        for tiny in [false, true] {
+            let (text, program) = compile(
+                &source,
+                SelectionTier::Baseline,
+                allocation,
+                tiny,
+                Features::default(),
+            );
+            if let Some(dir) = &evidence {
+                let stem = format!("{allocation:?}-tiny-{tiny}");
+                fs::write(dir.join(format!("{stem}.s")), &text).unwrap();
+                fs::write(
+                    dir.join(format!("{stem}.o")),
+                    keel_asm::x86::assemble_program_object_with_features(
+                        &program,
+                        Features::default(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            }
+        }
+    }
+    let dir = temp("packed-compare-syntax");
+    let c = dir.join("oracle.c");
+    fs::write(&c, harness).unwrap();
+    command(
+        Command::new("clang")
+            .args([
+                "-target",
+                "x86_64-unknown-linux-gnu",
+                "-ffreestanding",
+                "-fsyntax-only",
+            ])
+            .arg(&c),
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[test]
+fn packed_integer_compare_boundaries_aliases_live_inputs_and_spills_execute() {
+    let (source, harness) = x86_packed::fixture();
+    let dir = temp("packed-compare-runtime");
+    let c = dir.join("oracle.c");
+    fs::write(&c, harness).unwrap();
+    for selection in [
+        SelectionTier::Baseline,
+        SelectionTier::Trees,
+        SelectionTier::Full,
+    ] {
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            for tiny in [false, true] {
+                println!("packed compare: {selection:?} {allocation:?} tiny={tiny}");
+                let (_, program) =
+                    compile(&source, selection, allocation, tiny, Features::default());
+                let object = dir.join("oracle.o");
+                fs::write(
+                    &object,
+                    keel_asm::x86::assemble_program_object_with_features(
+                        &program,
+                        Features::default(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+                let exe = dir.join("oracle");
+                command(
+                    Command::new("clang")
+                        .args(["-O2", "-msse2", "-mno-avx"])
+                        .arg(&c)
+                        .arg(&object)
+                        .arg("-o")
+                        .arg(&exe),
+                );
+                command(&mut Command::new(exe));
+            }
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn packed_compare_recipe_encodings_match_clang_sse2() {
+    use object::{Object, ObjectSection};
+    let (source, _) = x86_packed::fixture();
+    let (text, _) = compile(
+        &source,
+        SelectionTier::Baseline,
+        AllocationTier::Full,
+        true,
+        Features::default(),
+    );
+    let mut assembly = String::from(".intel_syntax noprefix\n.text\n");
+    let mut comparison = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with('#') {
+            comparison = line.contains(" = vicmp.");
+        } else if comparison && !line.trim().is_empty() {
+            assembly += line;
+            assembly += "\n";
+        }
+    }
+    assert!(assembly.contains("psrlq"));
+    assert!(assembly.contains("pcmpgtd"));
+    let dir = temp("packed-encoding");
+    let input = dir.join("recipes.s");
+    let output = dir.join("clang.o");
+    fs::write(&input, &assembly).unwrap();
+    command(
+        Command::new("clang")
+            .args([
+                "-target",
+                "x86_64-unknown-linux-gnu",
+                "-msse2",
+                "-mno-avx",
+                "-c",
+            ])
+            .arg(&input)
+            .arg("-o")
+            .arg(&output),
+    );
+    let ours =
+        keel_asm::x86::assemble_object_with_features(&assembly, Features::default()).unwrap();
+    let clang = fs::read(&output).unwrap();
+    let text_bytes = |bytes: &[u8]| {
+        object::File::parse(bytes)
+            .unwrap()
+            .section_by_name(".text")
+            .unwrap()
+            .data()
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(text_bytes(&ours), text_bytes(&clang));
+    if let Some(evidence) = std::env::var_os("KEEL_X86_PACKED_EVIDENCE") {
+        let evidence = std::path::PathBuf::from(evidence);
+        fs::create_dir_all(&evidence).unwrap();
+        fs::write(evidence.join("recipes.s"), assembly).unwrap();
+        fs::write(evidence.join("recipes-keel.o"), ours).unwrap();
+        fs::write(evidence.join("recipes-clang.o"), clang).unwrap();
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
