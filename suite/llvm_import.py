@@ -443,22 +443,37 @@ class Importer:
                 addr = self.emit(f'ptradd {addr}, {offset}')
             return addr
         if op in self.BINARY:
-            if op in (8, 10, 12, 20) and (l.GetNUW(inst) or l.GetNSW(inst)):
-                raise Unsupported('nuw/nsw arithmetic is not in the initial subset')
-            if op in (14, 15, 21, 22) and l.GetExact(inst):
-                raise Unsupported('exact arithmetic is not in the initial subset')
-            if op == 24 and re.search(r'\bor disjoint\b', l.printed(inst)):
-                raise Unsupported('disjoint OR is not in the initial subset')
+            # nsw/nuw, disjoint and exact only add poison outcomes. Ordinary
+            # wrapping/bitwise/shift/division results refine those outcomes;
+            # on non-poison inputs the operations agree. Do not infer these
+            # flags as Keel optimizer facts. Explicit poison/undef/freeze still
+            # fail closed. See llvm_import_flags_validate.py for the domain.
             if self.width(inst) == 1 and op not in (23, 24, 25):
                 raise Unsupported('i1 arithmetic other than boolean bitwise operations')
             a, b = map(self.value, operands())
+            if op == 15:
+                # LLVM sdiv MIN/-1 is immediate UB for concrete operands, but
+                # a poison dividend can flow through sdiv to an unselected
+                # select arm on a defined execution. Refining that dividend
+                # to MIN must not introduce Keel's overflow trap. Totalize
+                # just the overflow pair; a zero (or poison) divisor remains
+                # immediate LLVM UB, so retain Keel's zero-divisor trap.
+                ty = self.type(l.TypeOf(inst))
+                minimum = self.emit(f'iconst.{ty} {-(1 << (self.width(inst) - 1))}')
+                minus_one = self.emit(f'iconst.{ty} -1')
+                is_min = self.emit(f'icmp.eq {a}, {minimum}')
+                is_minus_one = self.emit(f'icmp.eq {b}, {minus_one}')
+                overflow = self.emit(f'and {is_min}, {is_minus_one}')
+                one = self.emit(f'iconst.{ty} 1')
+                b = self.emit(f'select {overflow}, {one}, {b}')
+            # Keel srem MIN/-1 is already nontrapping (zero), which also
+            # safely refines a poison dividend; no extra lowering is needed.
             return self.emit(f'{self.BINARY[op]} {a}, {b}')
         if op in (30, 31, 32, 39, 40, 41):
             arg = l.GetOperand(inst, 0)
             value = self.value(arg)
             ty = self.type(l.TypeOf(inst))
-            if re.search(r'\b(?:zext nneg|trunc (?:nuw|nsw))\b', l.printed(inst)):
-                raise Unsupported('poison-sensitive conversion flags')
+            # trunc nuw/nsw and zext nneg likewise refine to ordinary casts.
             if op == 41:
                 source_ty = self.type(l.TypeOf(arg))
                 if source_ty == ty:
@@ -489,9 +504,10 @@ class Importer:
                 value = self.emit(f'uext.i64 {value}')
             return self.emit(f'{name}.{ty} {value}')
         if op == 42:
-            if re.search(r'\bicmp samesign\b', l.printed(inst)):
-                raise Unsupported('samesign comparison')
+            # samesign adds poison for opposite signs; ordinary icmp refines it.
             args = operands()
+            if not self.width(args[0]) and re.search(r'\bicmp samesign\b', l.printed(inst)):
+                raise Unsupported('samesign comparison requires scalar integers')
             cc = self.CMP[l.GetICmpPredicate(inst)]
             if self.width(args[0]) == 1 and cc not in ('eq', 'ne'):
                 raise Unsupported('ordered i1 comparison')
