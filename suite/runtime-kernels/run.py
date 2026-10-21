@@ -60,7 +60,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--keel', required=True, type=Path)
     ap.add_argument('--baseline-keel', type=Path, help='optional frozen Keel Full; interleaved with current configurations')
-    ap.add_argument('--full-passes', help='experimental current-Full pipeline; frozen baseline keeps its default pipeline')
+    ap.add_argument('--full-passes', help='experimental current-Full pipeline; baseline is independent')
     ap.add_argument('--baseline-passes', help='explicit frozen-Full pipeline for matched experimental comparisons')
     ap.add_argument('--clang', required=True, type=Path)
     ap.add_argument('--gcc', type=Path, help='optional actual GCC, never auto-selected')

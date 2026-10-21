@@ -66,8 +66,11 @@ between separate campaigns; internal layout and physical code pages remain
 uncontrolled. Inspect unchanged-function controls before attributing small gains.
 
 `--full-passes comma,separated,passes` replaces only the current Full pipeline
-for an opt-in experiment. The frozen baseline retains its default pipeline,
-and None/Fast/Clang remain unchanged. Exact flags are saved in the results;
+for an opt-in experiment. The frozen baseline retains its default pipeline
+unless `--baseline-passes comma,separated,passes` is supplied alongside
+`--baseline-keel`. Use the same explicit pipeline for both compilers to isolate
+an implementation change in an experimental pass. None/Fast/Clang remain
+unchanged. Exact flags are saved in the results;
 label such runs experimental until correctness, review and timing gates pass.
 
 Configurations are Keel None (`--opt-tier none`, baseline selection), Fast and
