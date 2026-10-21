@@ -187,6 +187,8 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
             for allocator in [
                 &AllocationTier::Fast as &dyn keel_codegen::regalloc::RegisterAllocator,
                 &AllocationTier::Full,
+                #[cfg(feature = "experimental-regalloc")]
+                &AllocationTier::Split,
                 &ScratchEdit,
             ] {
                 let pipeline = CodegenPipeline {
@@ -241,5 +243,12 @@ fn native_chain_pressure_unknown_clobbers_recursion_shuffles_and_transfers() {
             }
         }
     }
-    assert_eq!(configurations, 56);
+    assert_eq!(
+        configurations,
+        if cfg!(feature = "experimental-regalloc") {
+            80
+        } else {
+            56
+        }
+    );
 }
