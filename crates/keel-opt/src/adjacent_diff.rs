@@ -500,9 +500,9 @@ fn transform(f: &mut Function, c: Candidate) {
     let neg = e(
         f,
         vector,
-        D::VectorBinary {
-            op: V::Isub,
-            args: [z, diff],
+        D::VectorUnary {
+            op: UnaryOp::Ineg,
+            arg: diff,
         },
     );
     let abs = e(
