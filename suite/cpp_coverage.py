@@ -144,6 +144,9 @@ def main(argv=None):
         global_helper = IMPORTER.with_name('llvm_import_globals.py')
         shutil.copy2(global_helper, out / global_helper.name)
         report['environment']['globals_helper_sha256'] = digest(global_helper)
+        linkage_helper = IMPORTER.with_name('llvm_import_linkage.py')
+        shutil.copy2(linkage_helper, out / linkage_helper.name)
+        report['environment']['linkage_helper_sha256'] = digest(linkage_helper)
         report['environment']['python'] = sys.version
         report['environment']['keel'] = {'path': str(Path(args.keel).resolve()), 'sha256': digest(Path(args.keel))}
         report['environment']['importer_sha256'] = digest(IMPORTER)

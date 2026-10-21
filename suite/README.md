@@ -29,7 +29,8 @@ are cached; keel builds are redone each time.
 
 `cargo suite test-frontends --out target/frontend-check-1` runs the C attribute
 and preprocessing regression tests, the representative C CLI compatibility
-check, the LLVM importer's native/rejection, indirect-call/ABI, scalar FP and global-object validation,
+check, the LLVM importer's native/rejection, indirect-call/ABI, scalar FP,
+global-object and bounded ODR-linkage validation,
 and all 13 C++ profiles
 with an independent Rust C ABI boundary. Nine C++ profiles must pass at
 None/Fast/Full; four runtime-feature probes may report explicit unsupported
@@ -37,7 +38,7 @@ features. This command adds no application downloads or performance runs.
 
 The output directory must be new. It contains `report.json`, per-stage command
 logs, and the child runners' detailed artifacts under `llvm-import/`, `llvm-calls/`,
-`llvm-fp/`, `llvm-globals/` and
+`llvm-fp/`, `llvm-globals/`, `llvm-linkage/` and
 `cpp-coverage/`. Any failed build, test, native comparison or required profile
 makes the command fail. Expected C++ probe rejections remain visible in
 `cpp-coverage/report.json`. Existing artifacts are never overwritten.

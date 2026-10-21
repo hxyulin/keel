@@ -101,7 +101,7 @@ and separate stdout/stderr files for every command. `report.json` records exact
 argv/cwd/return codes, compiler and LLVM versions, selected and actual IR target,
 data layout, source revision, importer/binary hashes, flags, IR optimization
 levels, per-case import diagnostics, native reference results, differential
-results, and the report exit code. The importer and its globals helper are
+results, and the report exit code. The importer and its globals/linkage helpers are
 snapshotted and hashed. Commands
 use absolute artifact paths. Reproduction after source changes needs a new run.
 

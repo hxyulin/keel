@@ -190,3 +190,14 @@ check nested layouts, mutations, exact FP initializers, external resolution and
 relocations. A combined case loads an FP callback from global storage, calls it
 indirectly and reads an external FP object. Source/destination and downstream
 verifier preservation checks are required. The aggregate stage is `llvm-globals`.
+
+`--localize-odr-functions` enables a separate bounded experiment. The caller
+asserts no outside translation unit needs the imported ODR helper symbols;
+eligible direct-only `linkonce_odr`/`available_externally` definitions are kept
+under their original names as local copies. Address escapes, named-storage
+dependencies, calls outside the defined local helper closure, weak linkage and
+COMDAT remain rejected. This is not general symbol coalescing and stays disabled
+by default. See the [ODR contract](llvm_import_linkage_fixtures/README.md).
+The `llvm-linkage` aggregate stage runs 57 checks, including 34 rejections,
+mixed-TU native comparisons, identity/shared-storage controls and default-mode
+rejection. The ordinary C++ runner continues to use strict linkage mode.
