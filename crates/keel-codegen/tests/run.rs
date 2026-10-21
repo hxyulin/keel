@@ -556,7 +556,12 @@ fn debug_session(
     )
     .unwrap();
 
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("debug");
+    // Baseline and rematerializing debug tests may run concurrently. Each
+    // session must own its assembly, executable and dsymutil outputs.
+    static NEXT_SESSION: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let session = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("debug-{}-{session}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let stem = keel.file_stem().unwrap().to_string_lossy();
     let asm_path = dir.join(format!("{stem}.s"));
