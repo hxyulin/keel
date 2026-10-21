@@ -44,10 +44,11 @@ impl RegisterAllocator for Controlled {
             "stacka" => [Loc::Stack(0), Loc::FReg(1), Loc::FReg(1)],
             "stackb" => [Loc::FReg(0), Loc::Stack(0), Loc::FReg(0)],
             "stackresult" => [Loc::FReg(0), Loc::FReg(1), Loc::Stack(0)],
-            "stackall" => [Loc::Stack(0), Loc::Stack(1), Loc::Stack(2)],
+            "stackall" => [Loc::Stack(0), Loc::Stack(2), Loc::Stack(4)],
             _ => unreachable!(),
         };
-        a.spill_slots = 3;
+        // A vector spill occupies two eight-byte allocation slots.
+        a.spill_slots = 6;
         for (i, loc) in locations.into_iter().enumerate() {
             a.locs[0][i] = Some(loc);
         }
@@ -415,10 +416,10 @@ impl RegisterAllocator for SelectControlled {
             "spilla" => locs[lhs] = Loc::Stack(0),
             "spillb" => locs[rhs] = Loc::Stack(0),
             "spillresult" => locs[3] = Loc::Stack(0),
-            "allspills" => locs = [Loc::Stack(0), Loc::Stack(1), Loc::Stack(2), Loc::Stack(3)],
+            "allspills" => locs = [Loc::Stack(0), Loc::Stack(2), Loc::Stack(4), Loc::Stack(6)],
             _ => unreachable!(),
         }
-        a.spill_slots = 4;
+        a.spill_slots = 8;
         for (i, loc) in locs.into_iter().enumerate() {
             a.locs[0][i] = Some(loc);
         }
