@@ -55,7 +55,7 @@ class LLVM:
             'PrintValueToString': (P, [P]), 'GlobalGetValueType': (P, [P]),
             'TypeOf': (P, [P]), 'GetTypeKind': (U, [P]), 'GetIntTypeWidth': (U, [P]),
             'GetTypeContext': (P, [P]), 'IntTypeInContext': (P, [P, U]),
-            'IsAConstantFP': (P, [P]), 'ConstBitCast': (P, [P, P]),
+            'IsAConstantFP': (P, [P]), 'IsAInsertValueInst': (P, [P]), 'ConstBitCast': (P, [P, P]),
             'GetFCmpPredicate': (U, [P]), 'GetFastMathFlags': (U, [P]),
             'CanValueUseFastMathFlags': (C.c_int, [P]),
             'GetPointerAddressSpace': (U, [P]), 'GetReturnType': (P, [P]),
@@ -256,6 +256,32 @@ class Importer:
             return 'void', []
         return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)))
 
+    def integer_pair_type(self, ty):
+        """Only the LLVM-lowered Apple arm64 two-word integer aggregate."""
+        l = self.l
+        return (l.GetTypeKind(ty) == 11 and l.GetArrayLength2(ty) == 2
+                and l.GetTypeKind(l.GetElementType(ty)) == 8
+                and l.GetIntTypeWidth(l.GetElementType(ty)) == 64
+                and l.ABISizeOfType(self.td, ty) == 16
+                and l.ABIAlignmentOfType(self.td, ty) == 8)
+
+    def aggregate_component(self, value, index):
+        # Resolve insert chains structurally, even when LLVM block order is not
+        # dominance order. An overwritten poison/undef lane is never evaluated;
+        # every observed lane must ultimately be a supported, defined scalar.
+        l = self.l
+        if not self.integer_pair_type(l.TypeOf(value)) or index not in (0, 1):
+            raise Unsupported('aggregate component outside exact two-i64 contract')
+        if value in self.aggregate_params:
+            return self.aggregate_params[value][index]
+        if l.IsAInsertValueInst(value):
+            if l.GetNumIndices(value) != 1 or l.GetIndices(value)[0] > 1:
+                raise Unsupported('insertvalue outside exact two-i64 contract')
+            if l.GetIndices(value)[0] == index:
+                return self.value(l.GetOperand(value, 1))
+            return self.aggregate_component(l.GetOperand(value, 0), index)
+        raise Unsupported('aggregate SSA requires parameter or insertvalue with defined observed lanes')
+
     def abi_signature(self, value, fty, call=False, definition=False):
         """Use LLVM's function type and explicit ABI contract, never infer C types."""
         l = self.l
@@ -289,7 +315,12 @@ class Importer:
                 # type; LLVM's verifier checks the rest of the contract.
                 if l.GetEnumAttributeKind(attr) == returned_kind and (index == 0 or ty != types[0]):
                     raise Unsupported('returned requires a parameter with the exact result type')
-            text = self.type(ty, abi=True)
+            if l.GetTypeKind(ty) in (10, 11):
+                if index == 0 or not self.integer_pair_type(ty):
+                    raise Unsupported('aggregate ABI supports only exact [2 x i64] parameters; aggregate returns unsupported')
+                text = 'ptr byval {i64, i64}'
+            else:
+                text = self.type(ty, abi=True)
             sret = l.attribute(value, index, 'sret', call=call)
             if sret:
                 # LLVM already lowered this result to x8. Keel reclassifies sret
@@ -618,8 +649,16 @@ class Importer:
             if self.block not in self.split_pads:
                 self.lines.append('    ' + ', '.join(self.pairs[inst]) + ' = landingpad ' + self.clauses(inst))
             return None
+        if op == 54:  # insertvalue, resolved per observed lane (no memory alias).
+            if not self.integer_pair_type(l.TypeOf(inst)):
+                raise Unsupported('insertvalue outside exact two-i64 contract')
+            return None
         if op == 53:  # extractvalue
             source = l.GetOperand(inst, 0)
+            if self.integer_pair_type(l.TypeOf(source)):
+                if l.GetNumIndices(inst) != 1:
+                    raise Unsupported('extractvalue outside exact two-i64 contract')
+                return self.aggregate_component(source, l.GetIndices(inst)[0])
             if source not in self.pairs or l.GetNumIndices(inst) != 1:
                 raise Unsupported('extractvalue requires a landingpad pair or acyclic pair PHI')
             index = l.GetIndices(inst)[0]
@@ -680,7 +719,22 @@ class Importer:
                     raise Unsupported('call-site ABI differs from declaration')
             if op == 5 and not direct:
                 raise Unsupported('indirect invoke is unsupported')
-            args = ', '.join(self.value(l.GetOperand(inst, i)) for i in range(len(params)))
+            arguments = []
+            for i in range(len(params)):
+                arg = l.GetOperand(inst, i)
+                if self.integer_pair_type(l.TypeOf(arg)):
+                    # One explicit byval argument retains register exhaustion,
+                    # stack alignment and copy semantics in Keel's ABI planner.
+                    lanes = [self.aggregate_component(arg, n) for n in range(2)]
+                    address = self.emit('stack_addr ' + self.aggregate_slots[inst, i])
+                    self.lines.append(f'    store {lanes[0]}, {address}')
+                    offset = self.emit('iconst.i64 8')
+                    high = self.emit(f'ptradd {address}, {offset}')
+                    self.lines.append(f'    store {lanes[1]}, {high}')
+                    arguments.append(address)
+                else:
+                    arguments.append(self.value(arg))
+            args = ', '.join(arguments)
             if direct:
                 expr = f'call {self.symbol(callee)}({args})'
                 if op == 5:
@@ -787,6 +841,8 @@ class Importer:
             self.lines = ['func ' + signature + ' cc(c)' + local + personality + ' {']
             self.values = {l.GetParam(fn, i): f'v{i}' for i in range(l.CountParams(fn))}
             self.next_value = len(params)
+            self.aggregate_params = {}
+            self.aggregate_slots = {}
             self.blocks = {block: f'block{i}' for i, block in enumerate(blocks)}
             instructions = {block: list(sequence(l.GetFirstInstruction, l.GetNextInstruction, block))
                             for block in blocks}
@@ -809,6 +865,9 @@ class Importer:
                         if not self.landing_pair_type(l.TypeOf(inst)):
                             raise Unsupported('landingpad result must be unpacked {ptr, i32}')
                         self.pairs[inst] = self.fresh_pair()
+                        continue
+                    if (l.GetInstructionOpcode(inst) == 54
+                            and self.integer_pair_type(l.TypeOf(inst))):
                         continue
                     if l.GetTypeKind(l.TypeOf(inst)) != 0:
                         self.type(l.TypeOf(inst))
@@ -843,12 +902,21 @@ class Importer:
                     slot = f'ss{len(self.slots)}'
                     self.slots[inst] = slot
                     self.lines.append(f'    {slot} = stack_slot {size}, align {align}')
+            for block in blocks:
+                for inst in instructions[block]:
+                    if l.GetInstructionOpcode(inst) not in (45, 5):
+                        continue
+                    for i in range(l.GetNumArgOperands(inst)):
+                        if self.integer_pair_type(l.TypeOf(l.GetOperand(inst, i))):
+                            slot = f'ss{len(self.slots) + len(self.aggregate_slots)}'
+                            self.aggregate_slots[inst, i] = slot
+                            self.lines.append(f'    {slot} = stack_slot 16, align 8')
             aliases = {}
             for block in blocks:
                 self.block = block
                 parameters = []
                 if block == blocks[0]:
-                    parameters += [f'v{i}: {self.type(l.TypeOf(l.GetParam(fn, i)))}' for i in range(len(params))]
+                    parameters += [f'v{i}: {"ptr" if self.integer_pair_type(l.TypeOf(l.GetParam(fn, i))) else self.type(l.TypeOf(l.GetParam(fn, i)))}' for i in range(len(params))]
                 if block in self.split_pads:
                     a, b = self.pairs[self.pad_insts[block]]
                     parameters += [f'{a}: ptr', f'{b}: i32']
@@ -859,6 +927,15 @@ class Importer:
                     else:
                         parameters += [f'{self.values[phi]}: {self.type(l.TypeOf(phi))}']
                 self.lines.append(self.blocks[block] + ('(' + ', '.join(parameters) + ')' if parameters else '') + ':')
+                if block == blocks[0]:
+                    for i in range(len(params)):
+                        arg = l.GetParam(fn, i)
+                        if self.integer_pair_type(l.TypeOf(arg)):
+                            low = self.emit(f'load.i64 v{i}')
+                            offset = self.emit('iconst.i64 8')
+                            address = self.emit(f'ptradd v{i}, {offset}')
+                            high = self.emit(f'load.i64 {address}')
+                            self.aggregate_params[arg] = (low, high)
                 for inst in instructions[block]:
                     if l.GetInstructionOpcode(inst) == 44:
                         continue
