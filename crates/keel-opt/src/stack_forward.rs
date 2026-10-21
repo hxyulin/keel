@@ -57,6 +57,10 @@ pub fn run(func: &mut Function) -> bool {
             }
         }
     }
+    // Every rewrite below starts from a fixed slot address.
+    if addresses.is_empty() {
+        return false;
+    }
     loop {
         let before = addresses.len();
         for &inst in &instructions {
@@ -185,6 +189,10 @@ pub fn run(func: &mut Function) -> bool {
                 escaped.insert(slot);
             }
         });
+    }
+    // Only accesses to a nonescaping slot are forwarded or removed.
+    if addresses.values().all(|(slot, _)| escaped.contains(slot)) {
+        return false;
     }
     // Count all writers, including writes in unreachable blocks and writes
     // of a different type. A cross-block fact is eligible only if every byte
