@@ -162,6 +162,10 @@ pub struct Parser<'a> {
     pub funcs: Vec<FuncDef<'a>>,
     pub strings: Vec<StrLit<'a>>,
     literal_ids: [HashMap<&'a [u8], usize>; 2],
+    /// Emptied statement buffers, for blocks to reuse.
+    stmt_bufs: Vec<Vec<Stmt<'a>>>,
+    /// Emptied argument buffers, for calls to reuse.
+    pub(crate) expr_bufs: Vec<Vec<Expr<'a>>>,
     pub(crate) fs: Option<FuncState<'a>>,
     /// Functions declared at file scope at least once without `inline` (or with
     /// `extern`), for which inline-only emission does not apply.
@@ -397,6 +401,8 @@ impl<'a> Parser<'a> {
             funcs: Vec::new(),
             strings: Vec::new(),
             literal_ids: [HashMap::default(), HashMap::default()],
+            stmt_bufs: Vec::new(),
+            expr_bufs: Vec::new(),
             fs: None,
             external_def: HashSet::default(),
             last_params: Vec::new(),
@@ -914,19 +920,19 @@ impl<'a> Parser<'a> {
     fn declarations(&mut self) -> R<()> {
         while self.peek() != Tok::Eof {
             if !self.eat(";") {
-                self.declaration(true)?;
+                // File-scope declarations initialize no locals.
+                self.declaration(true, &mut Vec::new())?;
             }
             self.release_tokens();
         }
         Ok(())
     }
 
-    /// A declaration, at file scope or in a block. Returns the statements
-    /// initializing the locals it declares.
-    pub(crate) fn declaration(&mut self, file_scope: bool) -> R<Vec<Stmt<'a>>> {
-        let mut out = Vec::new();
+    /// A declaration, at file scope or in a block. Adds the statements
+    /// initializing the locals it declares to `out`.
+    pub(crate) fn declaration(&mut self, file_scope: bool, out: &mut Vec<Stmt<'a>>) -> R<()> {
         if self.static_assert()? {
-            return Ok(out);
+            return Ok(());
         }
         let spec = self.decl_spec()?;
         if spec.infer && spec.storage == Storage::Typedef {
@@ -936,7 +942,7 @@ impl<'a> Parser<'a> {
             ));
         }
         if !spec.infer && self.eat(";") {
-            return Ok(out);
+            return Ok(());
         }
         // A block-scope `static` or `extern` declares a global, whose
         // initializer must outlive the function's body arena.
@@ -944,10 +950,22 @@ impl<'a> Parser<'a> {
         if !file_scope && matches!(spec.storage, Storage::Static | Storage::Extern) {
             self.nodes = self.arena;
         }
-        let declared = self.declarators(file_scope, &spec, &mut out);
+        let declared = self.declarators(file_scope, &spec, out);
         self.nodes = nodes;
-        declared?;
-        Ok(out)
+        declared
+    }
+
+    /// A buffer for the statements of a block, from those recycled.
+    fn stmt_buf(&mut self) -> Vec<Stmt<'a>> {
+        self.stmt_bufs.pop().unwrap_or_default()
+    }
+
+    /// The statements in `buf`, with the nodes; recycles `buf`.
+    fn finish_stmts(&mut self, mut buf: Vec<Stmt<'a>>) -> &'a [Stmt<'a>] {
+        let stmts = self.slice(&buf);
+        buf.clear();
+        self.stmt_bufs.push(buf);
+        stmts
     }
 
     /// The declarators of a declaration with specifiers `spec`, through
@@ -1357,7 +1375,7 @@ impl<'a> Parser<'a> {
         // function switch back to `arena` (see `declaration`), and on an
         // error the whole tree is dropped.
         self.nodes = unsafe { nodes.get() };
-        let body = self.block_items().map(|body| self.slice(&body));
+        let body = self.block_items();
         self.nodes = self.arena;
         let body = body?;
         self.pop_scope();
@@ -2344,17 +2362,18 @@ impl<'a> Parser<'a> {
     // ---- statements ----
 
     /// The items of a `{}` block, after the `{`, in a new scope.
-    pub(crate) fn block_items(&mut self) -> R<Vec<Stmt<'a>>> {
-        let mut out = Vec::new();
+    /// The statements of a block, through the `}`.
+    pub(crate) fn block_items(&mut self) -> R<&'a [Stmt<'a>]> {
+        let mut out = self.stmt_buf();
         while !self.eat("}") {
             if self.is_declaration_start() {
-                out.extend(self.declaration(false)?);
+                self.declaration(false, &mut out)?;
             } else {
                 out.push(self.statement()?);
             }
             self.release_tokens();
         }
-        Ok(out)
+        Ok(self.finish_stmts(out))
     }
 
     fn is_declaration_start(&self) -> bool {
@@ -2411,8 +2430,10 @@ impl<'a> Parser<'a> {
                         None
                     } else if self.is_declaration_start() {
                         {
-                            let decls = self.declaration(false)?;
-                            Some(self.stmt_node(Stmt::Block(self.slice(&decls))))
+                            let mut decls = self.stmt_buf();
+                            self.declaration(false, &mut decls)?;
+                            let decls = self.finish_stmts(decls);
+                            Some(self.stmt_node(Stmt::Block(decls)))
                         }
                     } else {
                         let e = self.expr()?;
@@ -2574,7 +2595,7 @@ impl<'a> Parser<'a> {
             let scope = self.push_block();
             let items = self.block_items()?;
             self.pop_block();
-            return Ok(Stmt::Scoped(scope, self.slice(&items)));
+            return Ok(Stmt::Scoped(scope, items));
         }
         if self.eat(";") {
             return Ok(Stmt::Block(&[]));
@@ -2591,8 +2612,9 @@ impl<'a> Parser<'a> {
             return Ok(Stmt::Block(&[]));
         }
         if self.is_declaration_start() {
-            let decls = self.declaration(false)?;
-            return Ok(Stmt::Block(self.slice(&decls)));
+            let mut decls = self.stmt_buf();
+            self.declaration(false, &mut decls)?;
+            return Ok(Stmt::Block(self.finish_stmts(decls)));
         }
         self.statement()
     }

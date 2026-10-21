@@ -704,7 +704,7 @@ impl<'a> Parser<'a> {
     }
 
     fn call(&mut self, callee: Expr<'a>, loc: Loc) -> R<Expr<'a>> {
-        let mut args = Vec::new();
+        let mut args = self.expr_bufs.pop().unwrap_or_default();
         while !self.eat(")") {
             if !args.is_empty() {
                 self.expect(",")?;
@@ -714,21 +714,22 @@ impl<'a> Parser<'a> {
         self.make_call(callee, args, loc)
     }
 
-    fn make_call(&mut self, callee: Expr<'a>, raw_args: Vec<Expr<'a>>, loc: Loc) -> R<Expr<'a>> {
+    /// A call of `callee` with `args`, converted in place. The buffer is
+    /// recycled.
+    fn make_call(&mut self, callee: Expr<'a>, mut args: Vec<Expr<'a>>, loc: Loc) -> R<Expr<'a>> {
         let f = self.rvalue(callee);
         let Some(fty) = f.ty.pointee().and_then(Ty::func) else {
             return Err(Error::new(loc, "call of a non-function"));
         };
-        let mut args = Vec::new();
-        for (i, arg) in raw_args.into_iter().enumerate() {
-            let arg = if let Some(param) = fty.params.get(i) {
+        for i in 0..args.len() {
+            let arg = args[i];
+            args[i] = if let Some(param) = fty.params.get(i) {
                 self.convert_for_assign(arg, param)?
             } else if fty.variadic || !fty.prototyped {
                 self.default_promote(arg)
             } else {
                 return Err(Error::new(arg.loc, "too many arguments"));
             };
-            args.push(arg);
         }
         if args.len() < fty.params.len() {
             return Err(Error::new(loc, "too few arguments"));
@@ -740,12 +741,10 @@ impl<'a> Parser<'a> {
         }
         let returned = f.sugar.function_return(&self.typedefs);
         let sugar = *returned.unqualified(&self.typedefs);
-        Ok(mk(
-            ExprKind::Call(self.node(f), self.slice(&args)),
-            fty.ret,
-            loc,
-        )
-        .with_sugar(sugar))
+        let call = ExprKind::Call(self.node(f), self.slice(&args));
+        args.clear();
+        self.expr_bufs.push(args);
+        Ok(mk(call, fty.ret, loc).with_sugar(sugar))
     }
 
     /// Promotions for arguments without a parameter type.
@@ -814,16 +813,13 @@ impl<'a> Parser<'a> {
                 let mut stmts = self.block_items()?;
                 self.pop_block();
                 self.expect(")")?;
-                let value = match stmts.pop() {
-                    Some(Stmt::Expr(e)) => {
-                        let e = self.rvalue(e);
+                let value = match stmts.split_last() {
+                    Some((Stmt::Expr(e), rest)) => {
+                        stmts = rest;
+                        let e = self.rvalue(*e);
                         Some(self.node(e))
                     }
-                    Some(s) => {
-                        stmts.push(s);
-                        None
-                    }
-                    None => None,
+                    _ => None,
                 };
                 let ty = value.as_ref().map_or(Ty::Void, |v| v.ty);
                 let sugar = value
@@ -832,7 +828,7 @@ impl<'a> Parser<'a> {
                 Ok(mk(
                     ExprKind::StmtExpr {
                         scope,
-                        stmts: self.slice(&stmts),
+                        stmts,
                         value,
                     },
                     ty,
