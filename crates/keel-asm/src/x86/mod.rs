@@ -62,33 +62,53 @@ impl Default for Sym {
 }
 /// Symbols by name. The hash index holds only names and positions in a
 /// dense table, keeping its power-of-two (often half-empty) buckets small.
+/// Layout passes declare the same names, so [`Self::clear`] keeps the index
+/// and its slots: a slot is visible once declared in the current pass.
 #[derive(Default)]
 struct Symbols {
     index: FxHashMap<Box<str>, u32>,
     table: Vec<Sym>,
+    /// The pass that last declared each slot.
+    declared: Vec<u32>,
+    pass: u32,
+    len: usize,
 }
 impl Symbols {
     fn len(&self) -> usize {
-        self.table.len()
+        self.len
+    }
+    fn slot(&self, name: &str) -> Option<usize> {
+        let i = *self.index.get(name)? as usize;
+        (self.declared[i] == self.pass).then_some(i)
     }
     fn get(&self, name: &str) -> Option<&Sym> {
-        self.index.get(name).map(|&i| &self.table[i as usize])
+        self.slot(name).map(|i| &self.table[i])
     }
     fn get_mut(&mut self, name: &str) -> Option<&mut Sym> {
-        self.index.get(name).map(|&i| &mut self.table[i as usize])
+        self.slot(name).map(|i| &mut self.table[i])
     }
     /// The named symbol, declared with default attributes on first use.
     fn entry(&mut self, name: &str) -> &mut Sym {
         let i = match self.index.get(name) {
-            Some(&i) => i,
+            Some(&i) => {
+                let i = i as usize;
+                if self.declared[i] != self.pass {
+                    self.declared[i] = self.pass;
+                    self.table[i] = Sym::default();
+                    self.len += 1;
+                }
+                i
+            }
             None => {
-                let i = self.table.len() as u32;
-                self.index.insert(name.into(), i);
+                let i = self.table.len();
+                self.index.insert(name.into(), i as u32);
                 self.table.push(Sym::default());
+                self.declared.push(self.pass);
+                self.len += 1;
                 i
             }
         };
-        &mut self.table[i as usize]
+        &mut self.table[i]
     }
     fn insert(&mut self, name: &str, sym: Sym) {
         *self.entry(name) = sym;
@@ -96,14 +116,20 @@ impl Symbols {
     fn iter(&self) -> impl Iterator<Item = (&str, &Sym)> {
         self.index
             .iter()
+            .filter(|&(_, &i)| self.declared[i as usize] == self.pass)
             .map(|(name, &i)| (&**name, &self.table[i as usize]))
     }
     fn values(&self) -> impl Iterator<Item = &Sym> {
-        self.table.iter()
+        self.table
+            .iter()
+            .zip(&self.declared)
+            .filter(|&(_, &pass)| pass == self.pass)
+            .map(|(sym, _)| sym)
     }
+    /// Begin the next pass with no symbols declared.
     fn clear(&mut self) {
-        self.index.clear();
-        self.table.clear();
+        self.pass += 1;
+        self.len = 0;
     }
 }
 impl std::ops::Index<&str> for Symbols {
