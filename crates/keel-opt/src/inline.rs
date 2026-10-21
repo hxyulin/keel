@@ -534,6 +534,13 @@ fn run_observed_policy(
         .filter(|f| admit_noninterposable && small_scc_wrapper(f))
         .map(|f| f.name.clone())
         .collect();
+    let recursive_bodies: HashSet<_> = module
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(i, f)| recursive[*i] && wrapper_bodies.contains(&f.name))
+        .map(|(_, f)| f.name.clone())
+        .collect();
     let wrappers: HashSet<_> = module
         .functions
         .iter()
@@ -629,7 +636,7 @@ fn run_observed_policy(
                 ))
             } else if decl.attrs.noinline {
                 Some(("noinline policy", "noinline"))
-            } else if wrapper_bodies.contains(&caller.name) {
+            } else if recursive_bodies.contains(&caller.name) {
                 Some(("frozen recursive wrapper body", "recursive_wrapper_body"))
             } else if let Some(callee) = templates.get(&decl.name) {
                 if decl.sig != callee.sig {

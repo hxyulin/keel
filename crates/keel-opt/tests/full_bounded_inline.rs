@@ -228,3 +228,42 @@ fn wrapper_cycles_and_wrapper_to_wrapper_edges_stay_out_of_line() {
     }
     assert_eq!(m.to_string(), before);
 }
+
+#[test]
+fn readonly_leaf_instruction_block_and_edge_caps_are_exact() {
+    fn fixture(arms: usize, padding: usize, extra_edges: usize) -> String {
+        let cases = (1..arms + extra_edges)
+            .map(|i| format!("{i}: block{}", i % arms + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut s = format!(
+            "func @leaf(ptr, i64) -> ptr local {{\nblock0(v0: ptr, v1: i64):\n v2 = load.ptr v0\n"
+        );
+        for i in 0..padding {
+            s.push_str(&format!(" v{} = iconst.i64 0\n", i + 3));
+        }
+        s.push_str(&format!(" switch v1, block1, [{cases}]\n"));
+        for i in 1..=arms {
+            s.push_str(&format!("block{i}:\n return v2\n"));
+        }
+        s.push_str("}\nfunc @outer(ptr, i64) -> ptr {\nblock0(v0: ptr, v1: i64):\n v2 = call @leaf(v0, v1)\n return v2\n}");
+        s
+    }
+    for (arms, padding, edges, expected) in [
+        (15, 79, 0, "inlined"), // 16 blocks, 96 instructions.
+        (15, 80, 0, "profitability_blocks"),
+        (16, 0, 0, "profitability_blocks"),
+        (15, 0, 17, "inlined"), // Exactly 32 switch edges.
+        (15, 0, 18, "profitability_blocks"),
+    ] {
+        assert_eq!(
+            outcome(
+                &fixture(arms, padding, edges),
+                "inline-noninterposable",
+                "outer",
+                "leaf"
+            ),
+            expected
+        );
+    }
+}
