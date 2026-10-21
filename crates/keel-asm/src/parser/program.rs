@@ -36,6 +36,27 @@ impl<'a> Input<'a> {
             }
         }
     }
+    /// The labels and branches a structured input declares, so a pass can
+    /// reserve their tables at once rather than leave outgrown copies in its
+    /// arena. Text input reserves nothing.
+    pub(super) fn reservations(self) -> (usize, usize) {
+        use keel_asm_ir::SymbolicInstruction as S;
+        match self {
+            Self::Text(_) => (0, 0),
+            Self::Program(Program { items }) | Self::Compact(Compact { items, .. }) => items
+                .iter()
+                .fold((0, 0), |(labels, branches), item| match item {
+                    Item::Label(_) | Item::Directive(keel_asm_ir::Directive::ZeroFill { .. }) => {
+                        (labels + 1, branches)
+                    }
+                    Item::Branch { .. }
+                    | Item::Symbolic(S::Conditional { .. } | S::Compare { .. }) => {
+                        (labels, branches + 1)
+                    }
+                    _ => (labels, branches),
+                }),
+        }
+    }
     pub(super) fn lines(self, arena: &'a Bump) -> Lines<'a> {
         match self {
             Self::Text(s) => Lines {

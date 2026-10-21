@@ -529,7 +529,8 @@ fn assemble_pass(
     let mut symbolic_leb = false;
     let mut has_build_version = false;
     let mut leb_differences = BumpVec::new_in(&arena);
-    let mut label_order = BumpVec::new_in(&arena);
+    let (label_count, branch_count) = source.reservations();
+    let mut label_order = BumpVec::with_capacity_in(label_count, &arena);
     let mut result = Assembly {
         build_version: crate::BuildVersion::default(),
         linker_optimization_hints: Vec::new(),
@@ -548,12 +549,13 @@ fn assemble_pass(
     let mut aliases = BTreeMap::new();
     let mut current = 0;
     let mut labels: Labels = FxHashMap::default();
+    labels.reserve(label_count);
     let mut globals: FxHashMap<&str, usize> = FxHashMap::default();
     let mut private_externs = FxHashMap::default();
     let mut weak_definitions = FxHashMap::default();
     let mut weak_hidden = FxHashMap::default();
     let mut common = BTreeMap::new();
-    let mut branches = BumpVec::new_in(&arena);
+    let mut branches = BumpVec::with_capacity_in(branch_count, &arena);
     let mut loh = BumpVec::new_in(&arena);
     let mut addresses = BumpVec::new_in(&arena);
     let mut data_fixups = BumpVec::new_in(&arena);
