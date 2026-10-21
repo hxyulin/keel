@@ -36,7 +36,8 @@ def check(binary, corpus):
         for raw in invalid:
             path.write_bytes(raw)
             result = subprocess.run([binary, str(path), '1'], capture_output=True)
-            assert result.returncode == 1, (raw, result.returncode, result.stderr)
+            assert result.returncode == 3, (raw, result.returncode, result.stderr)
+            assert not result.stdout and result.stderr.startswith(b'parse error at '), raw
     print(json.dumps(dict(valid_edges=len(valid), rejected=len(invalid)), sort_keys=True))
 
 

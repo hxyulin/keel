@@ -36,6 +36,8 @@ def command(argv):
             return s.decode(errors='replace') if isinstance(s, bytes) else (s or '')
         return dict(argv=argv, returncode=None, timeout_seconds=600,
                     stdout=decoded(e.stdout), stderr=decoded(e.stderr))
+    except OSError as e:
+        return dict(argv=argv, returncode=None, failure='launch_error', stdout='', stderr=str(e))
 
 
 def main():

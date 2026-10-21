@@ -17,6 +17,10 @@ sys.path.insert(0, str(ROOT / 'suite'))
 from cpp_coverage import Runner, Failed, classify_import, digest, SENTINEL
 
 
+class Blocked(Failed):
+    """An unsupported import with successful reference and blocker checks."""
+
+
 def oracle():
     rows, total = [], 0
     for r in range(64):
@@ -113,7 +117,6 @@ def main():
             if digest(ir) != mod['ir_sha256']:
                 raise Failed('input IR changed')
             if mod['import_status'] != 'accepted':
-                report['status'] = 'blocked' if mod['import_status'] == 'rejected' else 'failed'
                 report['blocker'] = stderr
                 if mod['import_status'] == 'rejected' and 'i1 is internal only' in stderr:
                     # A separate minimal source, never a rewrite of upstream IR.
@@ -131,6 +134,9 @@ def main():
                         status=classify_import(rr['returncode'], Path(rr['stdout']).read_bytes(), diagnostic, reduced_dest.read_bytes() == SENTINEL))
                     if digest(reduced) != reduced_hash or report['reduced_case']['status'] != 'rejected':
                         raise Failed('reduced case did not reproduce rejection')
+                if mod['import_status'] == 'rejected':
+                    report['status'] = 'blocked'
+                    raise Blocked('import did not accept ' + name)
                 raise Failed('import did not accept ' + name)
         report['stage'] = 'keel_differential'
         for tier in ['none', 'fast', 'full']:
@@ -144,7 +150,10 @@ def main():
             report['tiers'].append(dict(tier=tier, status='passed'))
         report.update(status='passed', stage='complete')
         code = 0
+    except Blocked as e:
+        report['error'] = str(e)
     except Exception as e:
+        report['status'] = 'failed'
         report['error'] = str(e)
     finally:
         report['exit_code'] = code

@@ -13,11 +13,30 @@ from pathlib import Path
 import shutil
 import subprocess
 import tarfile
-import tomllib
+try:
+    import tomllib
+except ImportError:
+    from pip._vendor import tomli as tomllib
 
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def command(argv, cwd=None):
+    argv = [str(a) for a in argv]
+    row = {'argv': argv, 'cwd': str(cwd) if cwd else None}
+    try:
+        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=600)
+        row.update(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+    except subprocess.TimeoutExpired as error:
+        def decoded(value):
+            return value.decode(errors='replace') if isinstance(value, bytes) else (value or '')
+        row.update(returncode=None, failure='timeout', timeout_seconds=600,
+                   stdout=decoded(error.stdout), stderr=decoded(error.stderr))
+    except OSError as error:
+        row.update(returncode=None, failure='launch_error', stdout='', stderr=str(error))
+    return row
 
 
 def main():
@@ -40,14 +59,11 @@ def main():
         (work / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
 
     def run(argv, cwd=None):
-        argv = [str(a) for a in argv]
-        result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=600)
-        row = {'argv': argv, 'cwd': str(cwd) if cwd else None,
-               'returncode': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr}
+        row = command(argv, cwd)
         report['commands'].append(row)
-        if result.returncode:
+        if row['returncode'] != 0:
             raise RuntimeError(json.dumps(row))
-        return result.stdout
+        return row['stdout']
 
     try:
         clang = Path(shutil.which('clang')).resolve()
@@ -65,7 +81,11 @@ def main():
                              'url': manifest['fetch'][0]['url']}
         # The pinned official archive is verified before extracting it.
         with tarfile.open(archive) as tar:
-            tar.extractall(work, filter='data')
+            for member in tar.getmembers():
+                destination = (work / member.name).resolve()
+                if work not in destination.parents or not (member.isfile() or member.isdir()):
+                    raise RuntimeError('unsafe archive member: ' + member.name)
+            tar.extractall(work)
         lib = work / manifest['build']['dir']
         report['upstream'] = {name: sha(lib / name) for name in ['lz4.c', 'lz4.h']}
         report['inputs'] = {name: sha(suite / name)
@@ -121,8 +141,10 @@ def main():
                 binary = dest / 'lz4-workload'
                 run([clang, *[obj for _, obj in commands], '-o', binary])
                 output = run([binary, 'test'])
-                if reference is None:
+                if name == 'clang-O2':
                     reference = output
+                if reference is None:
+                    raise RuntimeError('no successful Clang-O2 correctness reference')
                 if output != reference:
                     raise RuntimeError('correctness output differs from clang-O2: ' + output)
                 report['builds'][name] = {'status': 'passed', 'output': output,
@@ -130,6 +152,9 @@ def main():
             except Exception as error:
                 report['builds'][name] = {'status': 'failed', 'error': str(error)}
                 report['errors'].append(name + ': ' + str(error))
+                if name == 'clang-O2':
+                    save()
+                    raise RuntimeError('Clang-O2 correctness reference failed') from error
             save()
         report['complete'] = len(report['builds']) == 4 and not report['errors']
     except Exception as error:

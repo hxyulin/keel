@@ -97,7 +97,7 @@ int main(int argc, char **argv) {
         char *output;
         if (!doc) {
             fprintf(stderr, "parse error at %zu: %s\n", error.pos, error.msg);
-            free(input); return 1;
+            free(input); return 3; /* Distinct parser rejection, not an internal failure. */
         }
         if (!visit(&before, yyjson_doc_get_root(doc), 0)) {
             yyjson_doc_free(doc); free(input); return 1;
