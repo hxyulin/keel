@@ -17,7 +17,6 @@ pub fn run(f: &mut Function) -> bool {
 
 /// Explicit opt-in for bounded promotion in large functions. The default pass
 /// retains its original admission limits and SSA construction.
-#[allow(dead_code)] // Registered separately by callers opting into the candidate.
 pub fn run_large(f: &mut Function) -> bool {
     run_impl(f, true)
 }
@@ -43,6 +42,15 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         ),
         _ => false,
     }) {
+        return false;
+    }
+    // Bound allocated block-index vectors and syntactic edges as well as
+    // layout size. Switch duplicates also consume edge argument growth.
+    let edge_count: usize = insts
+        .iter()
+        .map(|&i| f.inst_data(i).branch_dests().len())
+        .sum();
+    if large && (f.num_blocks() > 8192 || edge_count > 16384) {
         return false;
     }
     let cfg = ControlFlowGraph::compute(f);
@@ -304,6 +312,14 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
             }
             params_left -= params;
         }
+        if large {
+            let construction =
+                blocks.len() * 3 + edge_count + relevant_insts.iter().map(Vec::len).sum::<usize>();
+            if work_left < construction {
+                break;
+            }
+            work_left -= construction;
+        }
         let mut incoming = vec![None; f.num_blocks()];
         for &b in &blocks {
             if initialized[b.index()] && (!large || live[b.index()]) {
@@ -353,9 +369,8 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     // is dead too. Otherwise keep its complete original byte footprint.
     for i in retained_initializers {
         let &(slot, offset, ty) = &accesses[&i];
-        let still_read = accesses.iter().any(|(&other, &(s, o, t))| {
-            s == slot
-                && o < offset + width(ty)
+        let still_read = by_slot[&slot].iter().any(|&(other, (_, o, t))| {
+            o < offset + width(ty)
                 && offset < o + width(t)
                 && !f.is_removed(other)
                 && matches!(f.inst_data(other), InstData::Load { .. })

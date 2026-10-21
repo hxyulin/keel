@@ -224,6 +224,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "ordered adjacent i32 reduction with narrow history (opt-in)",
         run: adjacent_diff::run_narrow,
     },
+    BuiltinPass {
+        name: "stack-promote-large",
+        description: "bounded private field promotion with pruned SSA for large functions (opt-in)",
+        run: stack_promote::run_large,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -288,6 +293,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[20],
     &AggregateReturn,
     &inline::InlineCheapReserve,
+    &BUILTINS[21],
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
