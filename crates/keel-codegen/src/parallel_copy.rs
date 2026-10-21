@@ -39,6 +39,14 @@ pub fn sequentialize<L: Copy + Eq>(moves: &[(L, L)], temp: L) -> Vec<(L, L)> {
 
     // A move onto itself does nothing (and would never become ready).
     let mut pending: Vec<(L, L)> = moves.iter().copied().filter(|(d, s)| d != s).collect();
+    // Usually no move reads another's destination. Then every move is ready
+    // from the start and they run in their given order.
+    if pending
+        .iter()
+        .all(|&(dst, _)| pending.iter().all(|&(_, src)| src != dst))
+    {
+        return pending;
+    }
     let mut out = Vec::with_capacity(pending.len());
     while !pending.is_empty() {
         let ready = pending
