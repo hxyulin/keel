@@ -42,7 +42,7 @@ class FrontendValidation(unittest.TestCase):
 
     def test_stage_failures_propagate_and_other_checks_continue(self):
         for name in ('harness-tests', 'c-attributes', 'c-preprocess', 'c-native',
-                     'llvm-import', 'llvm-calls', 'llvm-fp', 'cpp-coverage'):
+                     'llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'cpp-coverage'):
             with self.subTest(stage=name):
                 code, report = self.run_harness(fail=name)
                 self.assertEqual(code, 1)
@@ -59,7 +59,7 @@ class FrontendValidation(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report['status'], 'passed_with_skips')
         skips = [stage['name'] for stage in report['stages'] if stage['status'] == 'skipped']
-        self.assertEqual(skips, ['llvm-import', 'llvm-calls', 'llvm-fp', 'cpp-coverage'])
+        self.assertEqual(skips, ['llvm-import', 'llvm-calls', 'llvm-fp', 'llvm-globals', 'cpp-coverage'])
         code, report = self.run_harness(system='Linux', machine='x86_64', extra=['--require-llvm'])
         self.assertEqual(code, 1)
         self.assertEqual(report['status'], 'failed')

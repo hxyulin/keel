@@ -141,6 +141,9 @@ def main(argv=None):
         revision = runner.require(['git', 'rev-parse', 'HEAD'])
         report['environment']['git_commit'] = Path(revision['stdout']).read_text().strip()
         shutil.copy2(IMPORTER, out/'llvm_import.py')
+        global_helper = IMPORTER.with_name('llvm_import_globals.py')
+        shutil.copy2(global_helper, out / global_helper.name)
+        report['environment']['globals_helper_sha256'] = digest(global_helper)
         report['environment']['python'] = sys.version
         report['environment']['keel'] = {'path': str(Path(args.keel).resolve()), 'sha256': digest(Path(args.keel))}
         report['environment']['importer_sha256'] = digest(IMPORTER)

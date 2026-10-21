@@ -2,7 +2,7 @@
 
 Run `suite/llvm_import_globals_validate.py --libllvm LIBLLVM23 --keel PRIVATE_KEEL --out NEW_ARTIFACT_DIR` through `suite/fast_opt_locked.py LOG ...`. The validator does not acquire a nested lease. The parent aggregate runner can invoke it with the same three arguments inside its lease. Build Keel with a private `CARGO_TARGET_DIR` and `cargo build --offline --locked -j2 -p keel` under the lease.
 
-The importer helper `suite/llvm_import_globals.py` supports Apple AArch64, little-endian, address-space-zero objects with scalar i1/i8/i16/i32/i64 and pointer fields, arrays, nested nonopaque structs, and packed structs. LLVM TargetData determines allocation sizes, field offsets, array strides, and natural alignment. Explicit padding preserves object layout; padding bytes may be zeroed. Nonempty objects must fit u32; oversized aggregate layouts are rejected before potentially overflowing LLVM size queries. Objects retain constant/writable status and external/internal/private linkage; declarations emit `decl data`. Unused objects are retained and validated too.
+The importer helper `suite/llvm_import_globals.py` supports Apple AArch64, little-endian, address-space-zero objects with scalar i1/i8/i16/i32/i64, f32/f64 and pointer fields, arrays, nested nonopaque structs, and packed structs. LLVM TargetData determines allocation sizes, field offsets, array strides, and natural alignment. Explicit padding preserves object layout; padding bytes may be zeroed. Nonempty objects must fit u32; oversized aggregate layouts are rejected before potentially overflowing LLVM size queries. Objects retain constant/writable status and external/internal/private linkage; declarations emit `decl data`. Unused objects are retained and validated too.
 
 Definitions use the greater of natural and requested alignment, up to Keel's 4096 limit. Nulls and aggregate zero initializers need no relocation. Nonzero pointer initializers require an eight-byte-aligned field offset and object alignment of at least eight: a packed pointer at offset zero can work with explicit align 8, whereas a packed pointer at offset one is rejected. Packed null pointers do not need loader relocations and remain supported.
 
@@ -12,6 +12,15 @@ TLS, common, weak, linkonce, available_externally, aliases, ifuncs, COMDAT, cust
 
 `objects.c` and `objects.cpp` are compiled with actual Clang C/C++ frontends (`-O0 -fno-common -S -emit-llvm`); those emitted inputs are imported unchanged and also compiled by Clang for the reference run. Common linkage is deliberately not implemented. `layout.ll` adds nested aggregate, i1 memory, recursive self pointer, one-past, external addend, private storage, and packed relocation cases. Both native drivers contain independent assertions for values, ABI offsets/size/alignment, address equality, nulls, external resolution, writable state, and function pointers. Each runs against LLVM native output and Keel None/Fast/Full output. The imported LLVM has no indirect calls; the separately compiled native driver calls the exported function pointers.
 
-Floating-point globals, including zero initializers, nested FP fields, and external FP objects, are explicitly rejected. For FP integration, the parent should extend only `Globals.layout` and `Globals.initializer` after validating exact float bit serialization (including NaNs, signed zero, and LLVM allocation size); the helper does not rely on `Importer.layout_type` accepting FP. No floating-point instruction handling or indirect-call handling is added by this milestone.
+Floating-point globals, zero initializers, nested FP fields and external FP
+objects are supported after merging the scalar FP track. LLVM constant bitcasts
+produce integer data atoms without host floating-point conversion. `fp.ll` and
+`fp_driver.c` assert exact negative-zero, subnormal and signaling-NaN bits,
+nested layout, constant GEP pointers, mutations and external resolution. A
+global function pointer also exercises indirect FP calls through both native
+and Keel code. Half/bfloat/x87/FP128 and unsupported FP aggregate forms remain
+rejected. The validator has 45 negative cases and 12 native tier executions.
 
-The old `suite/llvm_import_validate.py` has a global-data rejection that is intentionally obsolete after this change; parent integration owns updating that expectation and aggregate/docs integration. All other old importer guards remain in place.
+`suite/frontend_validate.py` invokes this validator under its host lease. The
+old scalar validator now rejects weak global storage rather than ordinary
+globals; its remaining guards stay active.

@@ -73,6 +73,15 @@ rename; unsupported input leaves an existing destination intact.
   unsupported-layout allocations are rejected. Stack contents remain uninitialized;
   validation only reads initialized bytes. Final native frame-size limits still apply at
   compilation. Lifetime/stack intrinsics remain rejected.
+- Global definitions and declarations with ordinary external/internal/private
+  linkage, const/writable storage, integer/f32/f64/pointer fields and nested
+  arrays/structs. TargetData determines layout and explicit padding; floating
+  initializers serialize raw bits, including negative zero and NaN payloads.
+  Function/data addresses and constant GEP relocations retain checked u32
+  nonnegative addends. Pointer relocations require an eight-byte-aligned field
+  and object alignment of at least eight. Defined-object addends may reach one
+  past the object; external bounds are unknown. See the
+  [global-object contract](llvm_import_globals_fixtures/README.md).
 - Direct C calls with matching declaration/call types and ABI attributes, plus
   scalar indirect C calls using the call-site function type and explicit ABI
   extensions. Function addresses, pointer PHIs and stack roundtrips are supported.
@@ -103,15 +112,16 @@ security-hardening, or source-level tooling replacement for LLVM.
 
 ## Explicit rejections
 
-Global data/aliases/ifuncs, half/bfloat/x87/FP128, vectors, `frem`,
+Global aliases/ifuncs, TLS/common/weak/linkonce/COMDAT/sections and unsupported
+global attributes, half/bfloat/x87/FP128, vectors, `frem`,
 aggregate SSA values and ABIs beyond the bounded sret contract, i128,
 i1 ABI parameters/returns, varargs, non-C calls, intrinsics, operand bundles, inline assembly, atomics,
 exception handling, GC, special sections, explicit prefix/prologue data and
 unsupported ABI attributes are outside this first implementation. Failure is
 module-wide; it does not silently discard unsupported functions. Consequently,
 ordinary unoptimized Rust/C++ output and full applications usually need more
-support. Followups need explicit global storage/initializer/relocation and symbol
-contracts; broader aggregate SSA lowering and byval/sret ABI proofs. Those features are
+support. Followups need broader symbol/linkage contracts, aggregate SSA lowering
+and byval/sret ABI proofs. Those features are
 not silently approximated here.
 
 SME/ZA/streaming ABI attributes (`aarch64_*`) are rejected on definitions,
@@ -173,3 +183,10 @@ builds for handwritten LLVM and untouched Clang O0/O1 output at None/Fast/Full.
 Independent assertions cover NaNs, infinities, signed zeros, subnormals, ties,
 conversion boundaries, PHIs/selects, stack-passed FP arguments and indirect FP
 calls. The aggregate runner invokes it as `llvm-fp` under the same host lease.
+
+`llvm_import_globals_validate.py` covers 45 rejection cases and 12 native builds
+at None/Fast/Full, including untouched Clang C/C++ output. Independent assertions
+check nested layouts, mutations, exact FP initializers, external resolution and
+relocations. A combined case loads an FP callback from global storage, calls it
+indirectly and reads an external FP object. Source/destination and downstream
+verifier preservation checks are required. The aggregate stage is `llvm-globals`.

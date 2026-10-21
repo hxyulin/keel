@@ -69,7 +69,7 @@ def main():
             'bad-phi': 'define i32 @f(i32 %x) { br label %b\nb: %p = phi i32 [ %x, %b ]\nret i32 %p }',
             'duplicate-phi': 'define i32 @f(i32 %x) { %c = icmp eq i32 %x, 0\nbr i1 %c, label %b, label %b\nb: %p = phi i32 [ 1, %0 ], [ 2, %0 ]\nret i32 %p }',
             'late-failure': 'define i32 @good() { ret i32 7 }\ndefine i32 @bad() { ret i32 poison }',
-            'global': '@g = global i32 0\ndefine void @f() { ret void }',
+            'weak-global': '@g = weak global i32 0\ndefine void @f() { ret void }',
             'atomic': 'define i32 @f(ptr %p) { %v = load atomic i32, ptr %p monotonic, align 4\nret i32 %v }',
             'abi-byval': 'define void @f(ptr byval(i32) %p) { ret void }',
             'abi-sret': 'define void @f(ptr sret(i32) %p) { ret void }',

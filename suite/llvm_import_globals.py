@@ -2,7 +2,7 @@
 
 No LLVM text is rewritten. Layout comes from the verified module's TargetData;
 relocations obey Keel's eight-byte alignment and unsigned-u32 addend contract.
-Floating-point memory types deliberately remain unsupported (including zero).
+Floating-point initializers serialize through integer bits, avoiding host rounding.
 """
 import ctypes as C
 import re
@@ -80,7 +80,9 @@ class Globals:
         # before TargetData queries: LLVM's fixed-width size math may overflow.
         l, td = self.l, self.i.td
         kind = l.GetTypeKind(ty)
-        if kind == 8 and l.GetIntTypeWidth(ty) in (1, 8, 16, 32, 64):
+        if kind in (2, 3):
+            self.i.type(ty)
+        elif kind == 8 and l.GetIntTypeWidth(ty) in (1, 8, 16, 32, 64):
             pass
         elif kind == 12 and l.GetPointerAddressSpace(ty) == 0:
             pass
@@ -98,7 +100,7 @@ class Globals:
                 if bound > 0xffffffff:
                     raise self.Unsupported('global struct layout exceeds u32')
         else:
-            raise self.Unsupported('unsupported global layout (floating-point/unsized/vector/address-space type)')
+            raise self.Unsupported('unsupported global layout (unsized/vector/address-space/unsupported scalar type)')
         size = l.ABISizeOfType(td, ty)
         if size > 0xffffffff:
             raise self.Unsupported('global layout exceeds u32')
@@ -163,6 +165,11 @@ class Globals:
         if l.IsAConstantAggregateZero(value) or l.IsAConstantPointerNull(value):
             return [(size, f'zero {size}')] if size else []
         kind = l.GetTypeKind(ty)
+        if kind in (2, 3) and l.IsAConstantFP(value):
+            width = 32 if kind == 2 else 64
+            integer = l.IntTypeInContext(l.GetTypeContext(ty), width)
+            bits = l.ConstIntGetZExtValue(l.ConstBitCast(value, integer))
+            return [(width // 8, f'i{width} 0x{bits:0{width // 4}x}')]
         if kind == 8 and l.IsAConstantInt(value):
             width = l.GetIntTypeWidth(ty)
             number = l.ConstIntGetZExtValue(value) if width == 1 else l.ConstIntGetSExtValue(value)
@@ -195,7 +202,7 @@ class Globals:
             if size > cursor:
                 items.append((size - cursor, f'zero {size - cursor}'))
             return items
-        raise self.Unsupported('unsupported global initializer (undef/poison/FP/integer expression)')
+        raise self.Unsupported('unsupported global initializer (undef/poison/integer expression)')
 
     def definitions(self):
         l, i = self.l, self.i

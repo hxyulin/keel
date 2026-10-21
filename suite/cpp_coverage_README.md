@@ -101,7 +101,8 @@ and separate stdout/stderr files for every command. `report.json` records exact
 argv/cwd/return codes, compiler and LLVM versions, selected and actual IR target,
 data layout, source revision, importer/binary hashes, flags, IR optimization
 levels, per-case import diagnostics, native reference results, differential
-results, and the report exit code. The importer is also snapshotted. Commands
+results, and the report exit code. The importer and its globals helper are
+snapshotted and hashed. Commands
 use absolute artifact paths. Reproduction after source changes needs a new run.
 
 Before each import the destination contains a sentinel. Rejection must return
@@ -172,3 +173,13 @@ The run used the reproduction command above, private Keel target directory
 `/tmp/keel-frontend-integrated-lock.jsonl`. A subsequent run after promoting
 the three cases to required is retained at
 `/private/tmp/keel-frontend-integrated-cpp-r2/report.json`.
+
+After integrating globals, scalar FP and indirect calls, the aggregate run at
+`target/frontend-globals-integration-1/` still passes nine profiles and reports
+four expected probe rejections. All 26 native references and 54 differential
+executions pass. The first virtual-dispatch blocker is now the generated
+method's unsupported linkage, and the EH blocker is the function personality;
+ordinary global storage no longer blocks these modules. Runtime constexpr
+linkage and signed no-wrap arithmetic remain unsupported. Dedicated aggregate
+stages separately cover globals, FP and indirect calls, including a combined
+global FP callback fixture; these results do not claim general C++ runtime support.

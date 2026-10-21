@@ -295,12 +295,14 @@ See [the C frontend design](docs/design.md#c-frontend) for supported
 extensions, compatibility limits and possible next additions.
 
 The diagnostic [LLVM → Keel importer](suite/llvm_import_README.md) accepts a
-scalar subset with CFG/PHIs, layout-aware GEP and fixed entry-block stack slots
+scalar subset with CFG/PHIs, layout-aware GEP, fixed entry-block stack slots,
+f32/f64 operations, globals/relocations and indirect C calls
 on Apple AArch64. The [C++ coverage runner](suite/cpp_coverage_README.md) exercises
 untouched Clang output through this path and compares native execution at
 None/Fast/Full, including C and optional Rust ABI boundaries. These are bounded
-coverage tools; full C++ applications, aggregate ABIs and exception handling
-remain outside the importer's supported scope.
+coverage tools; full C++ applications, general aggregate ABIs and exception
+handling remain outside the importer's supported scope. Only the documented
+three-i64 struct-return ABI is currently accepted.
 
 ## Assembler (A64 subset)
 

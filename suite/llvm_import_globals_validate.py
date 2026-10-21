@@ -59,8 +59,9 @@ def main():
             ('clang-c', 'clang', FIXTURES/'objects.c', FIXTURES/'driver.c'),
             ('clang-cpp', 'clang++', FIXTURES/'objects.cpp', FIXTURES/'driver.c'),
             ('layout', 'clang', FIXTURES/'layout.ll', FIXTURES/'layout_driver.c'),
+            ('fp', 'clang', FIXTURES/'fp.ll', FIXTURES/'fp_driver.c'),
         ]:
-            if name != 'layout':
+            if name not in ('layout', 'fp'):
                 emitted = out / f'{name}.ll'
                 run([compiler, '-O0', '-fno-common', '-S', '-emit-llvm', source, '-o', emitted])
                 source = emitted
@@ -81,7 +82,9 @@ def main():
             run(['clang', '-O0', '-c', driver, '-o', out/f'{name}.driver.o'])
             run(['clang', out/f'{name}.driver.o', out/f'{name}.reference.o', '-o', out/f'{name}.reference'])
             expected = run([out/f'{name}.reference']).stdout
-            assert expected == (b'nested layout assertions passed\n' if name == 'layout' else b'global object assertions passed\n')
+            expected_messages = {'layout': b'nested layout assertions passed\n',
+                                 'fp': b'floating global assertions passed\n'}
+            assert expected == expected_messages.get(name, b'global object assertions passed\n')
             for tier in ('none', 'fast', 'full'):
                 obj, exe = out/f'{name}.{tier}.o', out/f'{name}.{tier}'
                 run([args.keel, 'compile', '--opt-tier', tier, '--emit-object', dest, '-o', obj])

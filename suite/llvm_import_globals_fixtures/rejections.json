@@ -25,10 +25,6 @@
   "overalign": "@g = global i8 0, align 8192",
   "integer-width": "@g = global i24 9",
   "vector": "@g = global <2 x i32> zeroinitializer",
-  "float": "@g = global float 1.0",
-  "float-zero": "@g = global double 0.0",
-  "float-nested": "@g = global { i8, double } zeroinitializer",
-  "float-external": "@g = external global double",
   "undef": "@g = global i32 undef",
   "poison": "@g = global ptr poison",
   "nested-undef": "@g = global [2 x i32] [i32 1, i32 undef]",
@@ -43,5 +39,9 @@
   "inrange": "@a = global [4 x i8] zeroinitializer\n@g = global ptr getelementptr inrange(0, 4) (i8, ptr @a, i64 1)",
   "metadata": "@g = global i32 1, !type !0\n!0 = !{i64 0, !\"type\"}",
   "late-failure": "@good = global i32 7\n@bad = global ptr poison\ndefine i32 @f() { ret i32 1 }",
-  "late-function": "@good = global i32 7\ndefine i32 @f() { ret i32 poison }"
+  "late-function": "@good = global i32 7\ndefine i32 @f() { ret i32 poison }",
+  "half": "@g = global half 1.0",
+  "half-zero": "@g = global half 0.0",
+  "half-nested": "@g = global { i8, half } zeroinitializer",
+  "half-external": "@g = external global half"
 }
