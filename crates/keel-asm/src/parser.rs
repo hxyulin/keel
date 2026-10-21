@@ -398,14 +398,17 @@ fn instruction_with_features(
 }
 
 fn symbol(s: &str) -> Result<(), String> {
+    if is_symbol(s) {
+        Ok(())
+    } else {
+        Err(format!("invalid symbol `{s}`"))
+    }
+}
+fn is_symbol(s: &str) -> bool {
     // Bytes of non-ASCII characters are rejected like the characters.
     let valid = |b: &u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'$');
-    match s.as_bytes() {
-        [first, rest @ ..] if valid(first) && !first.is_ascii_digit() && rest.iter().all(valid) => {
-            Ok(())
-        }
-        _ => Err(format!("invalid symbol `{s}`")),
-    }
+    matches!(s.as_bytes(), [first, rest @ ..]
+        if valid(first) && !first.is_ascii_digit() && rest.iter().all(valid))
 }
 struct Branch<'a> {
     section: usize,
@@ -1857,7 +1860,7 @@ fn assemble_pass(
             add(name.as_str());
         }
     }
-    names.sort_unstable();
+    names.sort_unstable_by(|a, b| name_order(a, b));
     for name in common.keys() {
         if labels.contains_key(name) {
             return Err(Error::new(
@@ -1884,6 +1887,27 @@ fn assemble_pass(
         })
         .collect();
     Ok((result, symbolic_leb, locations))
+}
+
+/// `str` order, comparing eight bytes at a time inline: labels share long
+/// prefixes (`Lfunction_block12`), which a `memcmp` call per comparison
+/// handles slowly.
+fn name_order(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut a, mut b) = (a.as_bytes(), b.as_bytes());
+    while let (Some((x, rest_a)), Some((y, rest_b))) =
+        (a.split_first_chunk::<8>(), b.split_first_chunk::<8>())
+    {
+        if x != y {
+            return u64::from_be_bytes(*x).cmp(&u64::from_be_bytes(*y));
+        }
+        (a, b) = (rest_a, rest_b);
+    }
+    for (x, y) in a.iter().zip(b) {
+        if x != y {
+            return x.cmp(y);
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 fn native_expression(e: &keel_asm_ir::Expression) -> data::Expression<'_> {
@@ -1953,5 +1977,38 @@ mod layout_replay_tests {
         }
         assert!(passes >= 3);
         assert_eq!(words.len(), 6); // branches, ADR and symbol relocations excluded
+    }
+}
+
+#[cfg(test)]
+mod name_order_tests {
+    #[test]
+    fn matches_str_order() {
+        let names = [
+            "",
+            "L",
+            "La",
+            "Lsqlite3VdbeExec_block447",
+            "Lsqlite3VdbeExec_block45",
+            "Lsqlite3VdbeExec_block4",
+            "Lsqlite3VdbeExec",
+            "Lsqlite3Vdbe",
+            "_sqlite3",
+            "_sqlite3_",
+            "ltmp_section1",
+            "Z",
+            "a$b",
+            "a.b",
+            "abcdefgh",
+            "abcdefghi",
+            "abcdefgg",
+            "abcdefgh\u{e9}",
+            "abcdefgh\u{7f}",
+        ];
+        for a in names {
+            for b in names {
+                assert_eq!(super::name_order(a, b), a.cmp(b), "{a:?} {b:?}");
+            }
+        }
     }
 }

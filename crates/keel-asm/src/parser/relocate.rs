@@ -2,7 +2,7 @@
 //! general expression evaluator: one symbol, an optional modifier, and
 //! integer addends are enough for Keel's address and call sequences.
 use super::text::Trim;
-use super::{count, integer, is_integer, reg, symbol};
+use super::{count, integer, is_integer, is_symbol, reg, symbol};
 use crate::FieldId;
 use crate::{Relocation, RelocationKind};
 
@@ -29,6 +29,14 @@ fn plain(text: &str) -> Result<(&str, i64), String> {
     Ok((name, if tail.is_empty() { 0 } else { addend(tail)? }))
 }
 pub(super) fn expression(text: &str) -> Result<Expression<'_>, String> {
+    // A bare symbol, as every structured branch target is, parses as itself.
+    if is_symbol(text) {
+        return Ok(Expression {
+            name: text,
+            modifier: None,
+            addend: 0,
+        });
+    }
     let (name, modifier, value) = if let Some((base, tail)) = text.split_once('@') {
         let (name, before) = plain(base)?;
         let (modifier, after) = match tail.find(['+', '-']) {

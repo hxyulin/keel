@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 pub(super) struct Atoms<'a> {
     arena: &'a Bump,
     names: Vec<&'a str>,
-    boundaries: BTreeMap<(usize, u64), u32>,
+    /// Atom starts by (section, offset), sorted once collected.
+    boundaries: Vec<((usize, u64), u32)>,
     owners: FxHashMap<&'a str, u32>,
     defaults: BTreeMap<usize, u32>,
 }
@@ -28,7 +29,7 @@ impl<'a> Atoms<'a> {
         let mut result = Self {
             arena,
             names: Vec::new(),
-            boundaries: BTreeMap::new(),
+            boundaries: Vec::new(),
             owners: FxHashMap::default(),
             defaults: BTreeMap::new(),
         };
@@ -36,13 +37,13 @@ impl<'a> Atoms<'a> {
             return result;
         }
         result.owners.reserve(order.len());
+        let mut boundaries = BTreeMap::new();
         let mut current = BTreeMap::new();
         for (name, location) in order {
             if !name.starts_with('L') || globals.contains_key(name) {
                 // Aliases at one address share an atom.
                 let next = result.names.len() as u32;
-                let owner = *result
-                    .boundaries
+                let owner = *boundaries
                     .entry((location.section, location.offset))
                     .or_insert(next);
                 if owner == next {
@@ -67,6 +68,7 @@ impl<'a> Atoms<'a> {
                 .unwrap_or_else(|| result.default(location.section, prefix));
             result.owners.insert(*name, owner);
         }
+        result.boundaries = boundaries.into_iter().collect();
         for (section, &atom) in &result.defaults {
             labels.insert(
                 result.names[atom as usize],
@@ -91,10 +93,12 @@ impl<'a> Atoms<'a> {
         self.owners.get(name).copied().or_else(|| self.at(location))
     }
     fn at(&self, location: Location) -> Option<u32> {
-        self.boundaries
-            .range((location.section, 0)..=(location.section, location.offset))
-            .next_back()
-            .map(|(_, &atom)| atom)
+        let key = (location.section, location.offset);
+        let end = self.boundaries.partition_point(|&(start, _)| start <= key);
+        end.checked_sub(1)
+            .map(|i| self.boundaries[i])
+            .filter(|&((section, _), _)| section == location.section)
+            .map(|(_, atom)| atom)
             .or_else(|| self.defaults.get(&location.section).copied())
     }
     pub(super) fn same(&self, a: (&str, Location), b: (&str, Location)) -> bool {
