@@ -88,7 +88,7 @@ class LLVM:
             'GetFirstInstruction': (P, [P]), 'GetNextInstruction': (P, [P]),
             'GetInstructionOpcode': (U, [P]), 'GetNumOperands': (C.c_int, [P]),
             'GetOperand': (P, [P, U]), 'IsAConstantInt': (P, [P]),
-            'IsAConstantPointerNull': (P, [P]), 'IsAFunction': (P, [P]),
+            'IsAConstantPointerNull': (P, [P]), 'IsAFunction': (P, [P]), 'IsAInstruction': (P, [P]),
             'ConstIntGetZExtValue': (C.c_ulonglong, [P]),
             'ConstIntGetSExtValue': (C.c_longlong, [P]),
             'GetICmpPredicate': (U, [P]), 'GetCalledValue': (P, [P]),
@@ -188,6 +188,11 @@ def sequence(first, next_, owner):
 
 class Importer:
     ABI_UNSUPPORTED = ABI_UNSUPPORTED
+    MEMORY_INTRINSICS = {
+        'llvm.memcpy.p0.p0.i64': 'memcpy',
+        'llvm.memmove.p0.p0.i64': 'memmove',
+        'llvm.memset.p0.i64': 'memset',
+    }
     BINARY = {8: 'iadd', 10: 'isub', 12: 'imul', 14: 'udiv', 15: 'sdiv',
               17: 'urem', 18: 'srem', 20: 'shl', 21: 'ushr', 22: 'sshr',
               23: 'and', 24: 'or', 25: 'xor'}
@@ -254,7 +259,8 @@ class Importer:
         l.check_function_attributes(fn)
         if fn in self.personalities:
             return 'void', []
-        return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)))
+        return self.abi_signature(fn, fty, definition=bool(l.GetFirstBasicBlock(fn)),
+                                  memory_intrinsic=l.name(fn) in self.MEMORY_INTRINSICS)
 
     def integer_pair_type(self, ty):
         """Only the LLVM-lowered Apple arm64 two-word integer aggregate."""
@@ -282,7 +288,7 @@ class Importer:
             return self.aggregate_params[value][index]
         raise Unsupported('unsupported aggregate SSA: requires parameter or insertvalue with defined observed lanes')
 
-    def abi_signature(self, value, fty, call=False, definition=False):
+    def abi_signature(self, value, fty, call=False, definition=False, memory_intrinsic=False):
         """Use LLVM's function type and explicit ABI contract, never infer C types."""
         l = self.l
         if l.IsFunctionVarArg(fty):
@@ -290,6 +296,13 @@ class Importer:
         params = (P * l.CountParamTypes(fty))()
         l.GetParamTypes(fty, params)
         types = [l.GetReturnType(fty), *params]
+        if memory_intrinsic:
+            name = l.name(l.GetCalledValue(value) if call else value)
+            expected = ['void', 'ptr', 'i8' if self.MEMORY_INTRINSICS[name] == 'memset' else 'ptr', 'i64', 'i8']
+            if (definition or len(types) != 5
+                    or [self.type(t) for t in types] != expected
+                    or l.GetTypeKind(types[4]) != 8 or l.GetIntTypeWidth(types[4]) != 1):
+                raise Unsupported('unsupported memory intrinsic signature')
         # These attributes constrain valid values/memory but do not change the
         # machine calling convention. All other parameter/return contracts fail
         # closed, including new LLVM ABI attributes such as noext.
@@ -308,6 +321,9 @@ class Importer:
             attrs = (P * count(value, index))()
             get(value, index, attrs)
             for attr in attrs:
+                if (memory_intrinsic and index == 4 and not l.IsStringAttribute(attr)
+                        and l.GetEnumAttributeKind(attr) == l.GetEnumAttributeKindForName(b'immarg', 6)):
+                    continue
                 if l.IsStringAttribute(attr) or l.GetEnumAttributeKind(attr) not in kinds:
                     raise Unsupported('unsupported parameter/return ABI attribute')
                 # Omit LLVM's returned promise without creating Keel return or
@@ -350,7 +366,7 @@ class Importer:
             # extension is NOT equivalent: true would be -1 rather than 1.
             # Unspecified extension remains outside the proven contract.
             if (l.GetTypeKind(ty) == 8 and l.GetIntTypeWidth(ty) == 1
-                    and extensions != ['zeroext']):
+                    and extensions != ['zeroext'] and not (memory_intrinsic and index == 4)):
                 raise Unsupported('i1 ABI parameters/returns require explicit zeroext')
             if index == 0 and text in ('i8', 'i16') and (definition or call) and not extensions:
                 raise Unsupported('i8/i16 return definitions/calls require signext or zeroext')
@@ -684,7 +700,25 @@ class Importer:
             if callee in self.personalities:
                 raise Unsupported('personality may only be a symbolic EH reference')
             fty = l.GetCalledFunctionType(inst)
-            ret, params = self.abi_signature(inst, fty, call=True)
+            memory = l.IsAFunction(callee) and l.name(callee) in self.MEMORY_INTRINSICS
+            ret, params = self.abi_signature(inst, fty, call=True, memory_intrinsic=memory)
+            if memory:
+                if (op != 45 or fty != l.GlobalGetValueType(callee)
+                        or (ret, params) != self.signatures[callee]
+                        or l.GetNumArgOperands(inst) != 4):
+                    raise Unsupported('unsupported memory intrinsic call')
+                volatile = l.GetOperand(inst, 3)
+                if not l.IsAConstantInt(volatile) or l.ConstIntGetZExtValue(volatile):
+                    raise Unsupported('volatile memory intrinsics are unsupported')
+                args = ', '.join(self.value(l.GetOperand(inst, i)) for i in range(3))
+                operation = self.MEMORY_INTRINSICS[l.name(callee)]
+                # LLVM memcpy permits identical pointers; Keel memcpy requires
+                # nonoverlapping regions. Memmove preserves that extra defined
+                # case without inventing disjointness facts.
+                if operation == 'memcpy':
+                    operation = 'memmove'
+                self.lines.append(f'    intrinsic {operation}({args})')
+                return None
             if l.IsAFunction(callee) and l.name(callee) in ('llvm.lifetime.start.p0', 'llvm.lifetime.end.p0'):
                 # LLVM 23 canonicalizes the older size+pointer form to a single
                 # pointer. Keep fixed slots alive for the whole function: this
@@ -824,6 +858,14 @@ class Importer:
                     raise Unsupported('personality may only be a symbolic EH reference')
         output = self.globals.definitions()
         for fn in functions:
+            if l.name(fn) in self.MEMORY_INTRINSICS:
+                # Intrinsics have no ordinary machine ABI or addressable symbol.
+                for use in sequence(l.GetFirstUse, l.GetNextUse, fn):
+                    user = l.GetUser(use)
+                    if (not l.IsAInstruction(user) or l.GetInstructionOpcode(user) != 45
+                            or l.GetCalledValue(user) != fn):
+                        raise Unsupported('memory intrinsic requires a direct call')
+                continue
             ret, params = self.signatures[fn]
             name = self.symbol(fn)
             signature = name + '(' + ', '.join(params) + ')'

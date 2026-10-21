@@ -271,3 +271,37 @@ cases retain source hashes, existing destinations and empty stdout. The runner
 writes JSON command/evidence records and an HTML report. Run it under
 `fast_opt_locked.py` with `--libllvm`, `--keel` and a fresh `--out` directory.
 It is standalone; this change does not alter the default validation pipeline.
+
+## Bounded memory-intrinsic transport
+
+The importer accepts direct, nonvolatile `llvm.memcpy.p0.p0.i64`,
+`llvm.memmove.p0.p0.i64`, and `llvm.memset.p0.i64` calls. These have exactly
+`void (ptr, ptr, i64, i1)` or `void (ptr, i8, i64, i1)` signatures. Only their
+last parameter receives the intrinsic-only `immarg` exception; ordinary i1
+ABI checks remain unchanged. The volatility flag must be constant false.
+Declarations are consumed rather than emitted as addressable runtime symbols.
+
+LLVM memcpy permits equal pointers, whereas Keel's memcpy contract requires
+nonoverlap. Consequently imported LLVM memcpy uses Keel **memmove** conservatively;
+memmove and memset otherwise map directly. This preserves the identical-pointer
+case without claiming disjointness. Alignment and alias promises are omitted,
+not converted into new Keel optimization facts. Constant and dynamic i64 lengths
+are supported. Other address spaces, length overloads, inline/atomic variants,
+volatile operations, invokes, and address-taking remain rejected.
+
+The semantics reference is LLVM's [memory intrinsics](https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic).
+Run the focused correctness gate under the suite lock:
+
+```sh
+python3 suite/fast_opt_locked.py target/llvm-memory-lock.jsonl \
+  python3 suite/llvm_import_memory_validate.py \
+  --libllvm /absolute/path/to/libLLVM.dylib --keel /absolute/path/to/keel \
+  --out target/llvm-memory-validation
+```
+
+It runs independent native memory checks through None/Fast/Full and both Keel
+object routes, including zero-length null pointers, identical pointers,
+overlapping moves, unaligned accesses and protected-page boundaries. Negative
+cases preserve an existing destination. Intrinsic address-taking is rejected by
+LLVM's verifier; the other cases exercise importer rejections. This gate is
+Apple ARM native coverage, not x86 execution or a timing comparison.
