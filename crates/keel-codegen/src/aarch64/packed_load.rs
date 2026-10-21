@@ -5,6 +5,13 @@ pub(super) fn select(
     func: &Function,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, Value> {
+    // Every chain contains a vector splat; skip the use counts without one.
+    if !func
+        .layout_insts()
+        .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
+    {
+        return HashMap::new();
+    }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
         func.inst_data(inst).for_each_operand(|v| {
@@ -16,10 +23,13 @@ pub(super) fn select(
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(4) {
             let [load, splat, cast, widen] = [chain[0], chain[1], chain[2], chain[3]];
+            if !matches!(func.inst_data(splat), InstData::VectorSplat { .. }) {
+                continue;
+            }
             if chain.iter().any(|&i| {
                 selection.covered(i)
                     || selection.matches.contains_key(&i)
-                    || selection.constraints().keys().any(|&(at, _, _)| at == i)
+                    || selection.has_constraint(i)
             }) {
                 continue;
             }

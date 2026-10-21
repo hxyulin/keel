@@ -97,6 +97,8 @@ impl OperandTable {
 #[derive(Default)]
 pub struct Selection {
     constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
+    /// Dense per-instruction "has any constraint" flags mirroring `constraints`.
+    constrained: Vec<bool>,
     /// Target-proven GPRs untouched by a complete call lowering sequence.
     /// Absent entries retain the ordinary ABI clobber set.
     pub(crate) preserved_call_gprs: HashMap<Inst, u64>,
@@ -213,6 +215,14 @@ impl Selection {
         constraint: Constraint,
     ) {
         self.constraints.insert((inst, part, kind), constraint);
+        if self.constrained.len() <= inst.index() {
+            self.constrained.resize(inst.index() + 1, false);
+        }
+        self.constrained[inst.index()] = true;
+    }
+    /// Whether any operand or result of `inst` carries a constraint.
+    pub(crate) fn has_constraint(&self, inst: Inst) -> bool {
+        self.constrained.get(inst.index()).copied().unwrap_or(false)
     }
     pub fn constraint(&self, inst: Inst, part: ValuePart, kind: OperandKind) -> Constraint {
         self.constraints
@@ -380,7 +390,7 @@ impl Selection {
                                 || !matches!(func.inst_data(i), InstData::Iconst { .. })))
                         || self.matches.contains_key(&i)
                         || self.conditions.contains_key(&i)
-                        || self.constraints.keys().any(|&(at, _, _)| at == i)
+                        || self.has_constraint(i)
                         || func.inst_loc(i).map(|l| (l.file, l.line)) != location
                 }) {
                     continue;
@@ -435,10 +445,8 @@ impl Selection {
             };
             if self.covered(compare)
                 || self.covered(branch)
-                || self
-                    .constraints
-                    .keys()
-                    .any(|&(inst, _, _)| inst == compare || inst == branch)
+                || self.has_constraint(compare)
+                || self.has_constraint(branch)
             {
                 continue;
             }

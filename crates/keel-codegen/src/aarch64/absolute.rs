@@ -2,10 +2,16 @@
 use super::*;
 
 pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
-    if func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
-    {
+    // Every cover ends at a scalar select; skip the use counts without one.
+    let mut candidate = false;
+    for (_, i) in func.layout_insts() {
+        match func.inst_data(i) {
+            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::Select { .. } => candidate = true,
+            _ => {}
+        }
+    }
+    if !candidate {
         return HashMap::new();
     }
     let mut uses = vec![0u8; func.num_values()];
@@ -19,11 +25,14 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
     for block in func.blocks() {
         for chain in func.block_insts(block).windows(3) {
             let [first, second, select] = [chain[0], chain[1], chain[2]];
+            if !matches!(func.inst_data(select), InstData::Select { .. }) {
+                continue;
+            }
             if chain.iter().any(|&i| {
                 plan.covered(i)
                     || plan.matches.contains_key(&i)
                     || plan.conditions.contains_key(&i)
-                    || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                    || plan.has_constraint(i)
             }) {
                 continue;
             }

@@ -628,10 +628,8 @@ fn preserves_fusion_boundaries(
     producer: Inst,
     consumer: Inst,
 ) -> bool {
-    !selection
-        .constraints()
-        .keys()
-        .any(|&(inst, _, _)| inst == producer || inst == consumer)
+    !selection.has_constraint(producer)
+        && !selection.has_constraint(consumer)
         && !matches!(
             (func.inst_loc(producer), func.inst_loc(consumer)),
             (Some(a), Some(b)) if a.file != b.file || a.line != b.line
@@ -645,6 +643,18 @@ pub(super) fn select_widening_adds(
     func: &Function,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, WideningAdd> {
+    // Every pair is rooted at a low-lane widening.
+    if !func.layout_insts().any(|(_, i)| {
+        matches!(
+            func.inst_data(i),
+            InstData::Convert {
+                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                ..
+            }
+        )
+    }) {
+        return HashMap::new();
+    }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
         func.inst_data(inst).for_each_operand(|v| {
@@ -657,15 +667,15 @@ pub(super) fn select_widening_adds(
     for (block, inst) in func.layout_insts() {
         if let Some((producer_block, producer)) = previous
             && producer_block == block
-            && !selection.covered(producer)
-            && !selection.covered(inst)
-            && preserves_fusion_boundaries(func, selection, producer, inst)
             && let InstData::Convert {
                 op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
                 ty,
                 arg,
             } = *func.inst_data(producer)
             && let InstData::VectorBinary { op: V::Iadd, args } = *func.inst_data(inst)
+            && !selection.covered(producer)
+            && !selection.covered(inst)
+            && preserves_fusion_boundaries(func, selection, producer, inst)
             && uses[func.first_result(producer).index()] == 1
             && func
                 .value_type(func.resolve(arg))
@@ -712,6 +722,13 @@ pub(super) fn select_replicate_loads(
     func: &Function,
     selection: &mut crate::select::Selection,
 ) -> HashMap<Inst, Value> {
+    // Every pair is rooted at a vector splat.
+    if !func
+        .layout_insts()
+        .any(|(_, i)| matches!(func.inst_data(i), InstData::VectorSplat { .. }))
+    {
+        return HashMap::new();
+    }
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {
         func.inst_data(inst).for_each_operand(|v| {
@@ -724,15 +741,15 @@ pub(super) fn select_replicate_loads(
     for (block, inst) in func.layout_insts() {
         if let Some((load_block, load)) = previous
             && load_block == block
-            && !selection.covered(load)
-            && !selection.covered(inst)
-            && preserves_fusion_boundaries(func, selection, load, inst)
             && let InstData::VectorSplat { ty, arg } = *func.inst_data(inst)
             && let InstData::Load {
                 ty: scalar,
                 addr,
                 flags,
             } = *func.inst_data(load)
+            && !selection.covered(load)
+            && !selection.covered(inst)
+            && preserves_fusion_boundaries(func, selection, load, inst)
             && !flags.volatile
             && scalar.is_int()
             && ty.vector().is_some_and(|s| s.lane_type() == scalar)

@@ -63,9 +63,16 @@ fn zero(f: &Function, v: Value) -> bool {
 
 pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, MinMax> {
     let mut selected = HashMap::new();
-    if f.layout_insts()
-        .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
-    {
+    // Every cover starts at a vector compare; skip the use lists without one.
+    let mut candidate = false;
+    for (_, i) in f.layout_insts() {
+        match f.inst_data(i) {
+            InstData::InlineAsm { .. } => return selected,
+            InstData::VectorIcmp { .. } => candidate = true,
+            _ => {}
+        }
+    }
+    if !candidate {
         return selected;
     }
     // Whole-layout resolved occurrences include repeated successor arguments.
@@ -80,6 +87,9 @@ pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashM
     for block in f.blocks() {
         for pair in f.block_insts(block).windows(2) {
             let (cmp, root) = (pair[0], pair[1]);
+            if !matches!(f.inst_data(cmp), InstData::VectorIcmp { .. }) {
+                continue;
+            }
             if pair.iter().any(|&i| {
                 let mut raw = Vec::new();
                 f.inst_data(i).for_each_operand(|v| raw.push(f.resolve(v)));
@@ -90,7 +100,7 @@ pub(super) fn select(f: &Function, plan: &mut crate::select::Selection) -> HashM
                     || plan.binary_memory.contains_key(&i)
                     || plan.division_remainders.contains_key(&i)
                     || plan.select_compares.contains_key(&i)
-                    || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                    || plan.has_constraint(i)
                     || plan.operands(f, i) != raw
             }) || f.inst_loc(cmp) != f.inst_loc(root)
             {

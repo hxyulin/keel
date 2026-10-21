@@ -10,10 +10,16 @@ pub(super) enum Plan {
 }
 
 pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Plan> {
-    if func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
-    {
+    // Every cover starts at a vector compare; skip the use counts without one.
+    let mut candidate = false;
+    for (_, i) in func.layout_insts() {
+        match func.inst_data(i) {
+            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::VectorIcmp { .. } => candidate = true,
+            _ => {}
+        }
+    }
+    if !candidate {
         return HashMap::new();
     }
     let mut uses = vec![0u8; func.num_values()];
@@ -28,12 +34,15 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
         for pair in func.block_insts(block).windows(2) {
             let compare = pair[0];
             let root = pair[1];
+            if !matches!(func.inst_data(compare), InstData::VectorIcmp { .. }) {
+                continue;
+            }
             if pair.iter().any(|&i| {
                 func.inst_results(i).is_empty()
                     || plan.covered(i)
                     || plan.matches.contains_key(&i)
                     || plan.conditions.contains_key(&i)
-                    || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                    || plan.has_constraint(i)
                     || func.resolve(func.first_result(i)) != func.first_result(i)
             }) || func.inst_loc(compare) != func.inst_loc(root)
             {

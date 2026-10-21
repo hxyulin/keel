@@ -49,9 +49,21 @@ pub(super) fn select(
     plan: &mut crate::select::Selection,
 ) -> HashMap<Inst, ExactSabal> {
     let mut selected = HashMap::new();
-    if f.layout_insts()
-        .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
-    {
+    // Every chain starts with a low I32x4 -> I64x2 widening; without one (or
+    // with inline assembly) there is nothing to build use lists for.
+    let mut candidate = false;
+    for (_, i) in f.layout_insts() {
+        match f.inst_data(i) {
+            InstData::InlineAsm { .. } => return selected,
+            InstData::Convert {
+                op: ConvertOp::SwidenLow,
+                ty: Type::Vector(VectorType::I64x2),
+                ..
+            } => candidate = true,
+            _ => {}
+        }
+    }
+    if !candidate {
         return selected;
     }
     // Operand positions are occurrence identities. In particular, duplicate
@@ -66,6 +78,15 @@ pub(super) fn select(
     }
     for b in f.blocks() {
         for chain in f.block_insts(b).windows(7) {
+            if !matches!(
+                f.inst_data(chain[0]),
+                InstData::Convert {
+                    op: ConvertOp::SwidenLow,
+                    ..
+                }
+            ) {
+                continue;
+            }
             let loc = f.inst_loc(chain[0]).map(|l| (l.file, l.line));
             if chain.iter().any(|&i| {
                 let mut raw = Vec::new();
@@ -77,7 +98,7 @@ pub(super) fn select(
                     || plan.binary_memory.contains_key(&i)
                     || plan.division_remainders.contains_key(&i)
                     || plan.select_compares.contains_key(&i)
-                    || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                    || plan.has_constraint(i)
                     || plan.operands(f, i) != raw
                     || f.inst_loc(i).map(|l| (l.file, l.line)) != loc
             }) {

@@ -98,7 +98,7 @@ pub(super) fn select(
                 || f.inst_loc(i) != f.inst_loc(root)
                 || plan.covered(i)
                 || plan.matches.contains_key(&i)
-                || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                || plan.has_constraint(i)
                 || !operands_ok
         }) {
             continue;

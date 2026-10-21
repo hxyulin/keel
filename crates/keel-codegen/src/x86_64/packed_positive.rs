@@ -5,10 +5,16 @@ use std::collections::HashMap;
 
 pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
     // Inline assembly can carry target-specific register and memory contracts.
-    if func
-        .layout_insts()
-        .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
-    {
+    // Every chain contains a vector splat; skip the use counts without one.
+    let mut candidate = false;
+    for (_, i) in func.layout_insts() {
+        match func.inst_data(i) {
+            InstData::InlineAsm { .. } => return HashMap::new(),
+            InstData::VectorSplat { .. } => candidate = true,
+            _ => {}
+        }
+    }
+    if !candidate {
         return HashMap::new();
     }
     let mut uses = vec![0u8; func.num_values()];
@@ -23,11 +29,14 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
         for chain in func.block_insts(block).windows(6) {
             let [load, splat, cast, compare, and, widen] =
                 [chain[0], chain[1], chain[2], chain[3], chain[4], chain[5]];
+            if !matches!(func.inst_data(splat), InstData::VectorSplat { .. }) {
+                continue;
+            }
             if chain.iter().any(|&i| {
                 plan.covered(i)
                     || plan.matches.contains_key(&i)
                     || plan.conditions.contains_key(&i)
-                    || plan.constraints().keys().any(|&(at, _, _)| at == i)
+                    || plan.has_constraint(i)
             }) {
                 continue;
             }
