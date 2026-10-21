@@ -1,0 +1,90 @@
+decl @make_pair(ptr sret {i64,i64}, i64) cc(c)
+decl @increment(ptr sret {i64,i64}, ptr byval {i64,i64}) cc(c)
+decl @make_hfa(ptr sret {f64,f64}, f64) cc(c)
+decl @make_nine(ptr sret [9 x i8], i64) cc(c)
+func @fixed_pair(i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:i64):
+ v1 = stack_addr ss0
+ call @make_pair(v1,v0)
+ v2 = load.i64 v1
+ v3 = iconst.i64 8
+ v4 = ptradd v1,v3
+ v5 = load.i64 v4
+ v6 = xor v2,v5
+ return v6
+}
+func @external(ptr,i64)->i64 cc(c) {
+block0(v0:ptr,v1:i64):
+ call @make_pair(v0,v1)
+ v2 = load.i64 v0
+ return v2
+}
+func @indirect(ptr,i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:ptr,v1:i64):
+ v2 = stack_addr ss0
+ call_indirect v0(v2,v1) : (ptr sret {i64,i64},i64) cc(c)
+ v3 = load.i64 v2
+ return v3
+}
+func @dynamic(i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:i64):
+ v1 = stack_addr ss0
+ v2 = iconst.i64 8192
+ v3 = intrinsic stack_alloc(v2)
+ store v0,v3
+ call @make_pair(v1,v0)
+ v4 = load.i64 v1
+ v5 = load.i64 v3
+ v6 = xor v4,v5
+ return v6
+}
+func @overlap(i64)->i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:i64):
+ v1 = stack_addr ss0
+ store v0,v1
+ v2 = iconst.i64 8
+ v3 = ptradd v1,v2
+ v4 = iconst.i64 17
+ v5 = iadd v0,v4
+ store v5,v3
+ call @increment(v1,v1)
+ v6 = load.i64 v1
+ v7 = load.i64 v3
+ v8 = xor v6,v7
+ return v8
+}
+func @fixed_hfa(f64)->f64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0:f64):
+ v1 = stack_addr ss0
+ call @make_hfa(v1,v0)
+ v2 = load.f64 v1
+ v3 = iconst.i64 8
+ v4 = ptradd v1,v3
+ v5 = load.f64 v4
+ v6 = fadd v2,v5
+ return v6
+}
+func @fixed_nine(i64)->i64 cc(c) {
+ ss0 = stack_slot 9, align 1
+ ss1 = stack_slot 8, align 1
+block0(v0:i64):
+ v1 = stack_addr ss0
+ v2 = stack_addr ss1
+ v3 = iconst.i64 81985529216486895
+ store v3,v2
+ call @make_nine(v1,v0)
+ v4 = load.i64 v1
+ v5 = iconst.i64 8
+ v6 = ptradd v1,v5
+ v7 = load.i8 v6
+ v8 = uext.i64 v7
+ v9 = load.i64 v2
+ v10 = xor v4,v8
+ v11 = xor v10,v9
+ return v11
+}

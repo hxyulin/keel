@@ -578,6 +578,14 @@ enum BrifTest {
     Zero(Reg),
 }
 
+struct RegisterSret<'a> {
+    regs: Vec<Loc>,
+    layout: &'a Layout,
+    /// A fixed object can be addressed again after the call without keeping
+    /// its pointer in the call's private save slot.
+    stack_offset: Option<usize>,
+}
+
 struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
@@ -2263,7 +2271,7 @@ impl<'a> FunctionCompiler<'a> {
         &mut self,
         args: &[Value],
         params: &'s [AbiParam],
-    ) -> Option<(Vec<Loc>, &'s Layout)> {
+    ) -> Option<RegisterSret<'s>> {
         let kinds = arg_kinds(self.func, params, args);
         let (locs, _) = abi::arg_locs(&kinds, params.len());
         let mut moves = Vec::new();
@@ -2323,13 +2331,20 @@ impl<'a> FunctionCompiler<'a> {
                 }
                 ArgLoc::SretMemory => late.push(Late::Sret(arg)),
                 ArgLoc::SretRegs(regs) => {
-                    let p = self.use_reg(arg, S0);
-                    let save = self.sret_save.expect("planned");
-                    self.mach(
-                        "str",
-                        [(Reg::x(p)).into(), Address::offset(self.base, save).into()],
-                    );
-                    sret = Some((regs, layout.expect("a struct")));
+                    let stack_offset = self.fixed_sret_stack_offset(arg);
+                    if stack_offset.is_none() {
+                        let p = self.use_reg(arg, S0);
+                        let save = self.sret_save.expect("planned");
+                        self.mach(
+                            "str",
+                            [(Reg::x(p)).into(), Address::offset(self.base, save).into()],
+                        );
+                    }
+                    sret = Some(RegisterSret {
+                        regs,
+                        layout: layout.expect("a struct"),
+                        stack_offset,
+                    });
                 }
             }
         }
@@ -2954,10 +2969,24 @@ impl<'a> FunctionCompiler<'a> {
         }
     }
 
+    fn fixed_sret_stack_offset(&self, arg: Value) -> Option<usize> {
+        if self.has_inline_asm {
+            return None;
+        }
+        let value = self.func.resolve(arg);
+        let ValueDef::Result(inst, 0) = self.func.value_def(value) else {
+            return None;
+        };
+        let InstData::StackAddr { slot } = *self.func.inst_data(inst) else {
+            return None;
+        };
+        (self.func.first_result(inst) == value).then(|| self.stack_slot_offsets[slot.index()])
+    }
+
     /// Moves a call's result, if it has one, from x0 or v0 to its place,
     /// and stores a struct result that came back in registers to its
     /// `sret` address.
-    fn call_result(&mut self, result: Option<Value>, sret: Option<(Vec<Loc>, &Layout)>) {
+    fn call_result(&mut self, result: Option<Value>, sret: Option<RegisterSret<'_>>) {
         if let Some(value) = result
             && let Some(loc) = self.defined(value)
         {
@@ -2966,12 +2995,21 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit_move(hi, Loc::Reg(1));
             }
         }
-        if let Some((regs, layout)) = sret {
-            let save = self.sret_save.expect("planned");
-            self.mach(
-                "ldr",
-                [(Reg::x(S0)).into(), Address::offset(self.base, save).into()],
-            );
+        if let Some(RegisterSret {
+            regs,
+            layout,
+            stack_offset,
+        }) = sret
+        {
+            if let Some(offset) = stack_offset {
+                self.address(Loc::Reg(S0), self.base, offset);
+            } else {
+                let save = self.sret_save.expect("planned");
+                self.mach(
+                    "ldr",
+                    [(Reg::x(S0)).into(), Address::offset(self.base, save).into()],
+                );
+            }
             match abi::classify(layout) {
                 StructClass::Hfa { ty, .. } => {
                     for (&(offset, _), &r) in layout.leaves().iter().zip(&regs) {
