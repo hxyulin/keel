@@ -109,10 +109,11 @@ int main(void) {
                 check(mem+page-4*n,n); ++unroll_values;
             }
     }
-    // Enter the main loop with each of its four ordered 8-byte loads
-    // independently meeting the guard page, in both the first and second
-    // groups. Test either sample and a sample straddling the page boundary.
-    // n includes the entire group, so these cannot fall back to pair cleanup.
+    // Aligned cases reach each main-loop load in the first and second groups.
+    // Misaligned cases also compare straddling faults; when lane=0, a preceding
+    // sample may fault first (including the prefix in the first group).
+    // n includes the entire group, preventing pair cleanup in the main cases.
+    // Equal fault addresses check agreement, not independent proof of load order.
     for (uint64_t group=0;group<2;group++)
         for (uint64_t load=0;load<4;load++)
             for (uint64_t lane=0;lane<2;lane++)
