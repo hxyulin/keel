@@ -343,3 +343,12 @@ values across it, and an unextended byte result. Native execution covers Apple
 ARM through all three optimization tiers, both selection/allocation tiers and
 both object routes. x86 checks emission only. Separate Rust tests exercise empty
 allocation pools on both targets and direct/text object parity.
+
+The optional optimizer pass `internal-fast-calls` can also convert eligible native
+C private helpers to `cc(fast)` and remove their C-only narrow extension contracts.
+It updates every direct callee signature together. Address-taken functions,
+assembly-bearing modules, aggregate transport and tail-call endpoints are kept
+conservative. The pass is registered but is absent from default Fast and Full
+pipelines. When evaluating it after Full, append it to the explicit Full pass
+list: `-p` replaces the pipeline rather than extending `-O`.
+See `docs/fast-call-performance-20261022.html` for measured limits.

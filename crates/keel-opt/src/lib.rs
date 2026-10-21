@@ -31,6 +31,7 @@ mod report;
 pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report};
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
+mod internal_fast_calls;
 mod known_bits;
 mod load_narrow;
 mod load_reuse;
@@ -278,6 +279,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::InlineCheapReserve,
     &BUILTINS[21],
     &call_load_reuse::CallLoadReuse,
+    &internal_fast_calls::InternalFastCalls,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
