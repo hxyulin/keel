@@ -17,33 +17,31 @@ fn packed(m: &keel_ir::Module) -> bool {
     })
 }
 #[test]
-fn source_rings_and_predicate_widths_are_explicit_and_arm_only() {
-    let source = source();
-    for pass in ["loop-reduce", "loop-reduce-multi"] {
-        let m = optimize(&source, VectorTarget::Aarch64Neon, pass);
-        let mut again = m.clone();
-        keel_opt::run_passes_for_target(&mut again, &[pass], VectorTarget::Aarch64Neon).unwrap();
-        assert_eq!(m.to_string(), again.to_string());
-        for f in &m.functions {
-            let text = f.to_string();
-            assert!(text.contains("widen_low.i64x2"), "{text}");
-            assert!(
-                !text.contains("load.i32x4"),
-                "must read exactly two i32 elements: {text}"
-            );
-            if f.name.starts_with("wrap_") {
-                assert!(text.contains("i32x4"));
+fn source_rings_and_predicate_widths_are_explicit_on_native_targets() {
+    for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+        let source = source();
+        for pass in ["loop-reduce", "loop-reduce-multi"] {
+            let m = optimize(&source, target, pass);
+            let mut again = m.clone();
+            keel_opt::run_passes_for_target(&mut again, &[pass], target).unwrap();
+            assert_eq!(m.to_string(), again.to_string());
+            for f in &m.functions {
+                let text = f.to_string();
+                assert!(text.contains("widen_low.i64x2"), "{text}");
+                assert!(
+                    !text.contains("load.i32x4"),
+                    "must read exactly two i32 elements: {text}"
+                );
+                if f.name.starts_with("wrap_") {
+                    assert!(text.contains("i32x4"));
+                }
             }
         }
+        for target in [VectorTarget::Portable] {
+            assert!(!packed(&optimize(&source, target, "loop-reduce")));
+        }
+        assert!(!packed(&optimize(&source, target, "fast-loop-reduce")));
     }
-    for target in [VectorTarget::Portable, VectorTarget::X86Sse2] {
-        assert!(!packed(&optimize(&source, target, "loop-reduce")));
-    }
-    assert!(!packed(&optimize(
-        &source,
-        VectorTarget::Aarch64Neon,
-        "fast-loop-reduce"
-    )));
 }
 #[test]
 fn volatile_effects_traps_and_multiple_faulting_reads_stay_scalar() {

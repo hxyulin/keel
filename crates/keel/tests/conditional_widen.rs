@@ -49,7 +49,7 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
             &format!("{stem}.keel"),
         ]);
         let ir = fs::read_to_string(dir.join(format!("{stem}.keel"))).unwrap();
-        if target.starts_with("aarch64") {
+        {
             let m = keel_ir::parse(&ir).unwrap();
             for name in ["rk_positive32", "rk_balance32"] {
                 let f = m.functions.iter().find(|f| f.name == name).unwrap();
@@ -96,19 +96,27 @@ fn full_frontend_conditional_widening_preserves_corpus_shapes_and_object_routes(
             );
         }
     }
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    #[cfg(any(
+        all(target_arch = "aarch64", target_os = "macos"),
+        all(target_arch = "x86_64", target_os = "linux")
+    ))]
     {
         // Reuse the protected-page oracle with ABI adapters for the two corpus
         // signatures. Nonzero starts/seeds are covered by the IR native gate.
         let oracle = include_str!("../../keel-opt/tests/conditional_widen/oracle.c");
         let adapters = "\nextern uint64_t rk_positive32(const void*,const void*,const void*,uint64_t);\nextern uint64_t rk_balance32(const void*,const void*,const void*,uint64_t);\nuint64_t positive(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_positive32((const char*)a+4*start,0,0,n-start):0);}\nuint64_t balance(const void *a,uint64_t n,uint64_t start,uint64_t seed){return seed+(start<n?rk_balance32((const char*)a+4*start,0,0,n-start):0);}\n";
         fs::write(dir.join("oracle.c"), oracle.to_owned() + adapters).unwrap();
+        let native_target = if cfg!(target_arch = "x86_64") {
+            "x86_64-unknown-linux-gnu"
+        } else {
+            "aarch64-apple-darwin"
+        };
         for isel in ["none", "all"] {
             run(Command::new("clang").current_dir(&dir).args([
                 "-O2",
                 "-DORACLE_CASES=2",
                 "oracle.c",
-                &format!("aarch64-apple-darwin-{isel}.o"),
+                &format!("{native_target}-{isel}.o"),
                 "-o",
                 "test",
             ]));

@@ -380,8 +380,10 @@ impl Analyze<'_> {
                 if self.f.inst_block(compare) != self.c.body
                     || !matches!(predicate_ty, Type::I32 | Type::I64)
                     || predicate_shape != shape
-                        && !(self.target == VectorTarget::Aarch64Neon
-                            && predicate_ty == Type::I32
+                        && !(matches!(
+                            self.target,
+                            VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
+                        ) && predicate_ty == Type::I32
                             && shape.lane_type() == Type::I64)
                     || predicate_ty == Type::I64
                         && !matches!(
@@ -409,7 +411,10 @@ impl Analyze<'_> {
                 arg,
                 ..
             } if self.conditional
-                && self.target == VectorTarget::Aarch64Neon
+                && matches!(
+                    self.target,
+                    VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
+                )
                 && matches!(self.c.output, Output::Sum { .. })
                 && !def(self.f, arg).is_some_and(|i| {
                     matches!(

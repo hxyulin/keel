@@ -643,78 +643,62 @@ block3:
 }
 
 #[test]
-fn mixed_width_load_reductions_are_full_arm_only_exact_footprint_and_idempotent() {
-    for (from, to) in [
-        (Type::I8, Type::I32),
-        (Type::I8, Type::I64),
-        (Type::I16, Type::I32),
-        (Type::I16, Type::I64),
-        (Type::I32, Type::I64),
-    ] {
-        for op in ["sext", "uext"] {
-            let source = widening_sum(from, to, op);
-            let m = reduce_sum(&source, VectorTarget::Aarch64Neon);
-            let text = m.to_string();
-            let widen = if op == "sext" {
-                "swiden_low"
-            } else {
-                "uwiden_low"
-            };
-            assert!(text.contains(widen), "{from} -> {to}: {text}");
-            assert_eq!(
-                text,
-                reduce_sum(&source, VectorTarget::Aarch64Neon).to_string()
-            );
-            let mut twice = m.clone();
-            keel_opt::run_passes_for_target(
-                &mut twice,
-                &["loop-reduce"],
-                VectorTarget::Aarch64Neon,
-            )
-            .unwrap();
-            assert_eq!(text, twice.to_string());
-            keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
-            // Packed reads cover exactly destination_lanes source elements.
-            let expected = 16 / to.bytes().unwrap() * from.bytes().unwrap();
-            let f = &m.functions[0];
-            for (_, i) in f.layout_insts() {
-                if let InstData::Load { ty, .. } = f.inst_data(i) {
-                    assert!([Some(expected), from.bytes()].contains(&ty.bytes()));
-                    assert!(!ty.is_vector());
+fn mixed_width_load_reductions_are_full_native_only_exact_footprint_and_idempotent() {
+    for target in [VectorTarget::Aarch64Neon, VectorTarget::X86Sse2] {
+        for (from, to) in [
+            (Type::I8, Type::I32),
+            (Type::I8, Type::I64),
+            (Type::I16, Type::I32),
+            (Type::I16, Type::I64),
+            (Type::I32, Type::I64),
+        ] {
+            for op in ["sext", "uext"] {
+                let source = widening_sum(from, to, op);
+                let m = reduce_sum(&source, target);
+                let text = m.to_string();
+                let widen = if op == "sext" {
+                    "swiden_low"
+                } else {
+                    "uwiden_low"
+                };
+                assert!(text.contains(widen), "{from} -> {to}: {text}");
+                assert_eq!(text, reduce_sum(&source, target).to_string());
+                let mut twice = m.clone();
+                keel_opt::run_passes_for_target(&mut twice, &["loop-reduce"], target).unwrap();
+                assert_eq!(text, twice.to_string());
+                keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
+                // Packed reads cover exactly destination_lanes source elements.
+                let expected = 16 / to.bytes().unwrap() * from.bytes().unwrap();
+                let f = &m.functions[0];
+                for (_, i) in f.layout_insts() {
+                    if let InstData::Load { ty, .. } = f.inst_data(i) {
+                        assert!([Some(expected), from.bytes()].contains(&ty.bytes()));
+                        assert!(!ty.is_vector());
+                    }
                 }
+                for target in [VectorTarget::Portable] {
+                    assert_eq!(packed(&reduce_sum(&source, target)), 0);
+                }
+                let mut fast = keel_ir::parse(&source).unwrap();
+                keel_opt::run_passes_for_target(&mut fast, &["fast-loop-reduce"], target).unwrap();
+                assert_eq!(packed(&fast), 0);
+                let mut volatile_module = keel_ir::parse(&source).unwrap();
+                let f = &mut volatile_module.functions[0];
+                let load = f
+                    .layout_insts()
+                    .find(|(_, i)| matches!(f.inst_data(*i), InstData::Load { .. }))
+                    .unwrap()
+                    .1;
+                if let InstData::Load { flags, .. } = f.inst_data_mut(load) {
+                    flags.volatile = true;
+                }
+                keel_opt::run_passes_for_target(&mut volatile_module, &["loop-reduce"], target)
+                    .unwrap();
+                assert_eq!(packed(&volatile_module), 0);
             }
-            for target in [VectorTarget::Portable, VectorTarget::X86Sse2] {
-                assert_eq!(packed(&reduce_sum(&source, target)), 0);
-            }
-            let mut fast = keel_ir::parse(&source).unwrap();
-            keel_opt::run_passes_for_target(
-                &mut fast,
-                &["fast-loop-reduce"],
-                VectorTarget::Aarch64Neon,
-            )
-            .unwrap();
-            assert_eq!(packed(&fast), 0);
-            let mut volatile_module = keel_ir::parse(&source).unwrap();
-            let f = &mut volatile_module.functions[0];
-            let load = f
-                .layout_insts()
-                .find(|(_, i)| matches!(f.inst_data(*i), InstData::Load { .. }))
-                .unwrap()
-                .1;
-            if let InstData::Load { flags, .. } = f.inst_data_mut(load) {
-                flags.volatile = true;
-            }
-            keel_opt::run_passes_for_target(
-                &mut volatile_module,
-                &["loop-reduce"],
-                VectorTarget::Aarch64Neon,
-            )
-            .unwrap();
-            assert_eq!(packed(&volatile_module), 0);
         }
     }
 }
-
 #[test]
 fn widening_never_commutes_across_narrow_wrapping_arithmetic_or_hidden_reads() {
     let source = widening_sum(Type::I16, Type::I64, "sext");
