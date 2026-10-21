@@ -1169,12 +1169,44 @@ impl<'a> Parser<'a> {
             self.expect("(")?;
             self.expect("(")?;
             while !self.is(")") {
+                let loc = self.loc();
                 let name = match self.advance() {
                     Tok::Ident(s) => s,
                     _ => return Err(self.unexpected("an attribute")),
                 };
                 let name = name.trim_matches('_');
                 match name {
+                    // These change linkage, retention, placement or execution.
+                    // Accepting their syntax without implementing the contract
+                    // would silently change the program, even on a prototype
+                    // or on an otherwise unused declaration.
+                    "weak" | "weakref" | "alias" | "ifunc" | "constructor" | "destructor"
+                    | "cleanup" | "section" | "used" | "retain" => {
+                        return Err(Error::new(
+                            loc,
+                            format!("attribute `{name}` requires semantics that are not supported"),
+                        ));
+                    }
+                    "visibility" => {
+                        self.expect("(")?;
+                        // Default visibility is already the emission policy.
+                        // Decode adjacent string tokens just as asm labels do.
+                        let mut visibility = Vec::new();
+                        if !matches!(self.peek(), Tok::Str { .. }) {
+                            return Err(self.unexpected("a visibility string"));
+                        }
+                        while let Tok::Str { bytes, .. } = self.peek() {
+                            visibility.extend_from_slice(bytes);
+                            self.advance();
+                        }
+                        self.expect(")")?;
+                        if visibility != b"default" {
+                            return Err(Error::new(
+                                loc,
+                                "non-default visibility is not supported; only visibility(\"default\") is supported",
+                            ));
+                        }
+                    }
                     "aligned" if self.eat("(") => {
                         let n = self.alignment_constant(false)?;
                         attrs.aligned = Some(attrs.aligned.unwrap_or(1).max(n));

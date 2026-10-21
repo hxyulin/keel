@@ -17,8 +17,9 @@
 //! `__auto_type` follows GNU's single-variable inference and initializer
 //! scope rules. Atomic pointer prefix/postfix `++` and `--` are supported.
 //! Attribute syntax is accepted more broadly than its semantics: many
-//! attributes are ignored. See `docs/design.md`'s C frontend section for
-//! extension coverage and compatibility limits.
+//! attributes are ignored. Selected unimplemented linkage and lifetime
+//! attributes are diagnosed; see `docs/c-frontend-coverage.md` and
+//! `docs/design.md`'s C frontend section for compatibility limits.
 
 mod ast;
 mod debug;
