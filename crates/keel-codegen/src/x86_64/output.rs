@@ -101,7 +101,8 @@ impl Sink for Output {
                     s.push_str(&name);
                     s.push_str(":\n");
                 } else {
-                    writeln!(s, "{}:", crate::data::asm_string(&name)).unwrap();
+                    write_quoted(s, &name);
+                    s.push_str(":\n");
                 }
             }
             Self::Structured(p) => p.label(name),
@@ -109,48 +110,73 @@ impl Sink for Output {
     }
     fn directive(&mut self, d: Directive) {
         match self {
-            Self::Text(s) => match &d {
-                Directive::Cfi(keel_asm_ir::Cfi::Offset { register, offset }) => {
-                    crate::text::write_decimal(s, "\t.cfi_offset ", (*register).into()).unwrap();
-                    crate::text::write_decimal(s, ", ", (*offset).into()).unwrap();
-                    s.push('\n');
+            Self::Text(s) => {
+                use crate::text::write_decimal;
+                match &d {
+                    Directive::Cfi(keel_asm_ir::Cfi::Offset { register, offset }) => {
+                        write_decimal(s, "\t.cfi_offset ", (*register).into()).unwrap();
+                        write_decimal(s, ", ", (*offset).into()).unwrap();
+                    }
+                    Directive::Cfi(keel_asm_ir::Cfi::DefCfa { register, offset }) => {
+                        write_decimal(s, "\t.cfi_def_cfa ", (*register).into()).unwrap();
+                        write_decimal(s, ", ", (*offset).into()).unwrap();
+                    }
+                    Directive::Global(name) => {
+                        s.push_str("\t.globl ");
+                        write_quoted(s, name);
+                    }
+                    Directive::Integer {
+                        width,
+                        expression,
+                        got: false,
+                    } => {
+                        s.push_str(match width {
+                            1 => "\t.byte ",
+                            2 => "\t.short ",
+                            4 => "\t.long ",
+                            8 => "\t.quad ",
+                            _ => unreachable!(),
+                        });
+                        keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
+                    }
+                    Directive::Size { name, expression } => {
+                        s.push_str("\t.size ");
+                        write_quoted(s, name);
+                        s.push_str(", ");
+                        keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
+                    }
+                    Directive::Align(n) => write_decimal(s, "\t.p2align\t", (*n).into()).unwrap(),
+                    Directive::Bytes(bytes) if !bytes.is_empty() => write_bytes(s, bytes),
+                    _ => {
+                        writeln!(s, "\t{d}").unwrap();
+                        return;
+                    }
                 }
-                Directive::Cfi(keel_asm_ir::Cfi::DefCfa { register, offset }) => {
-                    crate::text::write_decimal(s, "\t.cfi_def_cfa ", (*register).into()).unwrap();
-                    crate::text::write_decimal(s, ", ", (*offset).into()).unwrap();
-                    s.push('\n');
-                }
-                Directive::Global(name) => {
-                    writeln!(s, "\t.globl {}", crate::data::asm_string(name)).unwrap()
-                }
-                Directive::Integer {
-                    width,
-                    expression,
-                    got: false,
-                } => {
-                    s.push_str(match width {
-                        1 => "\t.byte ",
-                        2 => "\t.short ",
-                        4 => "\t.long ",
-                        8 => "\t.quad ",
-                        _ => unreachable!(),
-                    });
-                    keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
-                    s.push('\n');
-                }
-                Directive::Size { name, expression } => {
-                    write!(s, "\t.size {}, ", crate::data::asm_string(name)).unwrap();
-                    keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
-                    s.push('\n');
-                }
-                _ => {
-                    s.push('\t');
-                    d.write_to(s).unwrap();
-                    s.push('\n');
-                }
-            },
+                s.push('\n');
+            }
             Self::Structured(p) => p.directive(d),
         }
+    }
+    fn bytes(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        match self {
+            Self::Text(s) => {
+                write_bytes(s, bytes);
+                s.push('\n');
+            }
+            Self::Structured(p) => p.directive(Directive::Bytes(bytes.to_vec())),
+        }
+    }
+}
+
+/// `\t.byte\t` and the decimal bytes separated by `, `.
+fn write_bytes(out: &mut String, bytes: &[u8]) {
+    out.push_str("\t.byte\t");
+    for (i, &b) in bytes.iter().enumerate() {
+        let separator = if i > 0 { ", " } else { "" };
+        crate::text::write_decimal(out, separator, b.into()).unwrap();
     }
 }
 
@@ -245,4 +271,26 @@ pub(super) fn offset_memory(m: &Memory, offset: i128) -> Memory {
     let mut m = m.clone();
     m.displacement.expression.constant += offset;
     m
+}
+
+/// `name` as a quoted assembler string, with `"` and `\\` escaped
+/// and other bytes outside printable ASCII in octal.
+fn write_quoted(out: &mut String, name: &str) {
+    out.push('"');
+    for b in name.bytes() {
+        match b {
+            b'"' | b'\\' => {
+                out.push('\\');
+                out.push(char::from(b));
+            }
+            b' '..=b'~' => out.push(char::from(b)),
+            _ => {
+                out.push('\\');
+                for shift in [6, 3, 0] {
+                    out.push(char::from(b'0' + (b >> shift & 7)));
+                }
+            }
+        }
+    }
+    out.push('"');
 }

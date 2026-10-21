@@ -3,21 +3,6 @@
 use crate::Format;
 use crate::metadata::{Directive, Expression, SectionKind, Sink};
 use keel_ir::{DataInit, DataItem, DataObject};
-use std::fmt::Write;
-
-/// `s` as a quoted assembler string.
-pub(crate) fn asm_string(s: &str) -> String {
-    let mut quoted = String::from("\"");
-    for b in s.bytes() {
-        match b {
-            b'"' | b'\\' => write!(quoted, "\\{}", b as char).unwrap(),
-            b' '..=b'~' => quoted.push(b as char),
-            _ => write!(quoted, "\\{b:03o}").unwrap(),
-        }
-    }
-    quoted.push('"');
-    quoted
-}
 
 /// Emits a data object into the section its contents call for:
 ///
