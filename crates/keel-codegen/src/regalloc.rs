@@ -1328,29 +1328,34 @@ fn linear_scan_with_preference<'a>(
 
     // Intervals holding a register, with that register: live at the
     // current point (active), or in a hole (inactive).
-    let mut active: Vec<(&Interval, Loc)> = Vec::new();
-    let mut inactive: Vec<(&Interval, Loc)> = Vec::new();
+    let mut active: Vec<Held> = Vec::new();
+    let mut inactive: Vec<Held> = Vec::new();
     let mut spilled = Vec::new();
     let mut moved = Vec::new();
+    // How many active intervals of each class hold each register, kept up to
+    // date with `active` rather than recounted for every interval.
+    let mut occupied = [[0u32; 256]; 2];
     for cur in sorted {
         let pos = cur.start();
         // Intervals that have ended give up their register; the others
         // move between active and inactive as they enter or leave holes.
-        active.retain(|&(iv, reg)| {
-            if iv.end() < pos {
-                false
-            } else if iv.covers(pos) {
-                true
-            } else {
-                moved.push((iv, reg));
-                false
+        // A single range covers every point up to its end once started.
+        active.retain(|held| {
+            if held.end >= pos && (held.single || held.iv.covers(pos)) {
+                return true;
             }
+            occupied[held.iv.float as usize][register_number(held.reg) as usize] -= 1;
+            if held.end >= pos {
+                moved.push(*held);
+            }
+            false
         });
-        inactive.retain(|&(iv, reg)| {
-            if iv.end() < pos {
+        inactive.retain(|held| {
+            if held.end < pos {
                 false
-            } else if iv.covers(pos) {
-                active.push((iv, reg));
+            } else if held.iv.covers(pos) {
+                occupied[held.iv.float as usize][register_number(held.reg) as usize] += 1;
+                active.push(*held);
                 false
             } else {
                 true
@@ -1388,26 +1393,21 @@ fn linear_scan_with_preference<'a>(
             }
             _ => false,
         };
-        // Compute these once, rather than rescanning active/inactive for
-        // every candidate register and again for every eviction candidate.
-        let mut occupied = RegisterMask::default();
-        for &(iv, reg) in &active {
-            if iv.float == cur.float {
-                occupied.insert(register_number(reg));
-            }
-        }
+        // Compute this once, rather than rescanning inactive for every
+        // candidate register and again for every eviction candidate.
+        let held_by_class = &occupied[cur.float as usize];
         let mut blocked = RegisterMask::default();
-        for &(iv, reg) in &inactive {
-            if iv.float == cur.float
-                && !blocked.contains(register_number(reg))
-                && iv.intersects(cur)
+        for held in &inactive {
+            if held.iv.float == cur.float
+                && !blocked.contains(register_number(held.reg))
+                && held.iv.intersects(cur)
             {
-                blocked.insert(register_number(reg));
+                blocked.insert(register_number(held.reg));
             }
         }
         let blocked_by_inactive = |reg: Loc| blocked.contains(register_number(reg));
         let available = |r: Loc| {
-            allowed(r) && !occupied.contains(register_number(r)) && !blocked_by_inactive(r)
+            allowed(r) && held_by_class[register_number(r) as usize] == 0 && !blocked_by_inactive(r)
         };
         let preferred = hints
             .get(&cur.value)
@@ -1427,7 +1427,8 @@ fn linear_scan_with_preference<'a>(
             });
         if let Some(reg) = free {
             locs[cur.half][cur.value.index()] = Some(reg);
-            active.push((cur, reg));
+            occupied[cur.float as usize][register_number(reg) as usize] += 1;
+            active.push(Held::new(cur, reg));
             continue;
         }
 
@@ -1437,21 +1438,46 @@ fn linear_scan_with_preference<'a>(
         let victim = active
             .iter()
             .enumerate()
-            .filter(|(_, (_, reg))| allowed(*reg) && !blocked_by_inactive(*reg))
-            .max_by(|(_, (a, _)), (_, (b, _))| priority(b, a))
+            .filter(|(_, held)| allowed(held.reg) && !blocked_by_inactive(held.reg))
+            .max_by(|(_, a), (_, b)| priority(b.iv, a.iv))
             .map(|(i, _)| i);
         match victim {
-            Some(i) if priority(cur, active[i].0).is_gt() => {
-                let (evicted, reg) = active.swap_remove(i);
+            Some(i) if priority(cur, active[i].iv).is_gt() => {
+                let Held {
+                    iv: evicted, reg, ..
+                } = active.swap_remove(i);
                 locs[evicted.half][evicted.value.index()] = None;
                 spilled.push(evicted);
                 locs[cur.half][cur.value.index()] = Some(reg);
-                active.push((cur, reg));
+                // The register passes between intervals of the same class.
+                occupied[evicted.float as usize][register_number(reg) as usize] -= 1;
+                occupied[cur.float as usize][register_number(reg) as usize] += 1;
+                active.push(Held::new(cur, reg));
             }
             _ => spilled.push(cur),
         }
     }
     spilled
+}
+
+/// An interval holding a register during the scan, with its end cached.
+#[derive(Clone, Copy)]
+struct Held<'a> {
+    iv: &'a Interval,
+    reg: Loc,
+    end: u32,
+    single: bool,
+}
+
+impl<'a> Held<'a> {
+    fn new(iv: &'a Interval, reg: Loc) -> Self {
+        Self {
+            iv,
+            reg,
+            end: iv.end(),
+            single: iv.ranges.len() == 1,
+        }
+    }
 }
 
 /// Gives each spilled interval a stack slot, reusing the slots of intervals
