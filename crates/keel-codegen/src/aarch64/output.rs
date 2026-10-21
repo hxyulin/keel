@@ -48,7 +48,8 @@ impl Output {
     pub(super) fn label(&mut self, label: String) {
         match self {
             Self::Text(out) => {
-                writeln!(out, "{label}:").unwrap();
+                out.push_str(&label);
+                out.push_str(":\n");
             }
             Self::Structured(out) => out.label(label),
         }
@@ -56,7 +57,9 @@ impl Output {
     pub(super) fn branch(&mut self, link: bool, target: String) {
         match self {
             Self::Text(out) => {
-                writeln!(out, "\t{}\t{target}", if link { "bl" } else { "b" }).unwrap();
+                out.push_str(if link { "\tbl\t" } else { "\tb\t" });
+                out.push_str(&target);
+                out.push('\n');
             }
             Self::Structured(out) => out.branch(link, target),
         }

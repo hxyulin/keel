@@ -105,7 +105,8 @@ impl Sink for Output {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b"_.$".contains(&b))
                 {
-                    writeln!(s, "{name}:").unwrap();
+                    s.push_str(&name);
+                    s.push_str(":\n");
                 } else {
                     writeln!(s, "{}:", crate::data::asm_string(&name)).unwrap();
                 }
