@@ -236,12 +236,14 @@ impl Selection {
 
     /// Fusion changes where operands are read. Publish the compare's selected
     /// leaves at the branch before allocation, rather than hiding this in emission.
+    /// `uses` are [`crate::fold::use_counts`] of `func`.
     pub(crate) fn fuse_compares(
         &mut self,
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
+        uses: &[u8],
     ) -> HashSet<Value> {
-        self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func))
+        self.fuse_compare_pairs(func, folds, crate::fold::fused_compare_pairs(func, uses))
     }
 
     /// Only adjacent single-use scalar compares: move their inputs to the
@@ -250,14 +252,8 @@ impl Selection {
         &mut self,
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
+        uses: &[u8],
     ) {
-        let mut uses = vec![0u8; func.num_values()];
-        for (_, i) in func.layout_insts() {
-            func.inst_data(i).for_each_operand(|v| {
-                let n = &mut uses[func.resolve(v).index()];
-                *n = (*n + 1).min(2);
-            });
-        }
         let mut pairs = Vec::new();
         for block in func.blocks() {
             for pair in func.block_insts(block).windows(2) {
@@ -315,8 +311,9 @@ impl Selection {
         &mut self,
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
+        uses: &[u8],
     ) -> HashSet<Value> {
-        self.fuse_compare_pairs(func, folds, crate::fold::aarch64_compare_pairs(func))
+        self.fuse_compare_pairs(func, folds, crate::fold::aarch64_compare_pairs(func, uses))
     }
 
     /// Delay an integer compare to its sole select consumer. Only cross a
@@ -326,6 +323,7 @@ impl Selection {
         &mut self,
         func: &Function,
         folds: impl Fn(&InstData) -> Vec<Value>,
+        uses: &[u8],
     ) {
         // Inline assembly can observe NZCV without declaring a flag input,
         // including at a later block. Keep every old flag definition intact.
@@ -334,13 +332,6 @@ impl Selection {
             .any(|(_, i)| matches!(func.inst_data(i), InstData::InlineAsm { .. }))
         {
             return;
-        }
-        let mut uses = vec![0u8; func.num_values()];
-        for (_, i) in func.layout_insts() {
-            func.inst_data(i).for_each_operand(|v| {
-                let n = &mut uses[func.resolve(v).index()];
-                *n = n.saturating_add(1).min(2);
-            });
         }
         let mut pairs = Vec::new();
         for block in func.blocks() {

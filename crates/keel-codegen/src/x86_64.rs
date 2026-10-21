@@ -627,11 +627,12 @@ impl<'a> FunctionCompiler<'a> {
         let mut selection = pipeline
             .selector
             .select(func, crate::select::Target::X86, &|data| folds(func, data));
+        let uses = fold::use_counts(func);
         let fused_compares = {
             backend_scope!(CompareFusion);
-            selection.fuse_compares(func, |data| folds(func, data))
+            selection.fuse_compares(func, |data| folds(func, data), &uses)
         };
-        selection.fuse_x86_selects(func, |data| folds(func, data));
+        selection.fuse_x86_selects(func, |data| folds(func, data), &uses);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         let packed_positive_values = packed_positive::select(func, &mut selection);
         let packed_sign_values = packed_sign::select(func, &mut selection);

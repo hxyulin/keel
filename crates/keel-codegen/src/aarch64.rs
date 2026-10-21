@@ -981,22 +981,28 @@ impl<'a> FunctionCompiler<'a> {
                         .collect()
                 })
         };
-        let absolute_values = absolute::select(func, &mut selection);
+        // Raw IR use counts never change while selecting this function.
+        let uses = fold::use_counts(func);
+        let absolute_values = absolute::select(func, &mut selection, &uses);
         let absolute_differences = absolute_diff::select(func, &mut selection);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         let packed_minmax = packed_minmax::select(func, &mut selection);
-        let extended_adds = extended_add::select(func, &mut selection);
-        selection.fuse_aarch64_selects(func, |data| {
-            folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
-        });
+        let extended_adds = extended_add::select(func, &mut selection, &uses);
+        selection.fuse_aarch64_selects(
+            func,
+            |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
+            &uses,
+        );
         let packed_low_loads = packed_load::select(func, &mut selection);
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let widening_adds = vector::select_widening_adds(func, &mut selection);
         let fused_compares = {
             backend_scope!(CompareFusion);
-            selection.fuse_aarch64_compares(func, |data| {
-                folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
-            })
+            selection.fuse_aarch64_compares(
+                func,
+                |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
+                &uses,
+            )
         };
         for (_, inst) in func.layout_insts() {
             if let InstData::Call { func: callee, .. } = func.inst_data(inst) {

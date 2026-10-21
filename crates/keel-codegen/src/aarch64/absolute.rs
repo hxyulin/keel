@@ -1,7 +1,12 @@
 //! Keep a bounded, sole-use scalar abs expression on NZCV.
 use super::*;
 
-pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> HashMap<Inst, Value> {
+/// `uses` are [`crate::fold::use_counts`] of `func`.
+pub(super) fn select(
+    func: &Function,
+    plan: &mut crate::select::Selection,
+    uses: &[u8],
+) -> HashMap<Inst, Value> {
     // Every cover ends at a scalar select; skip the use counts without one.
     let mut candidate = false;
     for (_, i) in func.layout_insts() {
@@ -13,13 +18,6 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
     }
     if !candidate {
         return HashMap::default();
-    }
-    let mut uses = vec![0u8; func.num_values()];
-    for (_, i) in func.layout_insts() {
-        func.inst_data(i).for_each_operand(|v| {
-            let n = &mut uses[func.resolve(v).index()];
-            *n = n.saturating_add(1);
-        });
     }
     let mut result = HashMap::default();
     for block in func.blocks() {

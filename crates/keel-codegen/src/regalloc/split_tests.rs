@@ -1177,7 +1177,7 @@ fn phi_cycles_duplicate_edges_and_fused_compare_keep_home_dataflow() {
     for fuse in [false, true] {
         let mut selection = Selection::default();
         if fuse {
-            selection.fuse_compares(f, |_| vec![]);
+            selection.fuse_compares(f, |_| vec![], &crate::fold::use_counts(f));
         }
         let input = test_input(f, &selection);
         let (a, ivs) = forced_baseline(&input);

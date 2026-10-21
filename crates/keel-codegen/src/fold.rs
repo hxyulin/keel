@@ -133,35 +133,53 @@ pub(crate) fn folded_values(
 /// itself, a compare and a conditional branch, with no 0/1 value in between.
 #[cfg(test)]
 pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
-    fused_compare_pairs(func)
+    fused_compare_pairs(func, &use_counts(func))
         .into_iter()
         .map(|(value, _, _)| value)
         .collect()
 }
 
-pub(crate) fn fused_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, false)
+/// Raw IR operand occurrences of every resolved value, saturated at 2: the
+/// selection passes only distinguish a single use from none or several.
+pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
+    let mut uses = vec![0u8; func.num_values()];
+    for (_, inst) in func.layout_insts() {
+        func.inst_data(inst).for_each_operand(|v| {
+            let count = &mut uses[func.resolve(v).index()];
+            *count = (*count + 1).min(2);
+        });
+    }
+    uses
+}
+
+pub(crate) fn fused_compare_pairs(
+    func: &Function,
+    uses: &[u8],
+) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
+    compare_pairs(func, false, uses)
 }
 
 /// ARM can delay an exact-width integer compare over at most four tiny pure
 /// definitions. Selection must transfer its operand occurrences to the branch;
 /// emission must generate the compare there, after all intervening lowering.
-pub(crate) fn aarch64_compare_pairs(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    compare_pairs(func, true)
+pub(crate) fn aarch64_compare_pairs(
+    func: &Function,
+    uses: &[u8],
+) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
+    compare_pairs(func, true, uses)
 }
 
-fn compare_pairs(func: &Function, aarch64: bool) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
-    // Only zero, one, or multiple raw IR uses matter for compare fusion.
-    let mut uses = vec![0u8; func.num_values()];
+/// `uses` are [`use_counts`]: only zero, one, or multiple raw IR uses matter.
+fn compare_pairs(
+    func: &Function,
+    aarch64: bool,
+    uses: &[u8],
+) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
     let mut candidates = Vec::new();
     for block in func.blocks() {
         let insts = func.block_insts(block);
         for (i, &inst) in insts.iter().enumerate() {
             let data = func.inst_data(inst);
-            data.for_each_operand(|v| {
-                let count = &mut uses[func.resolve(v).index()];
-                *count = (*count + 1).min(2);
-            });
             let compare = match *data {
                 InstData::Icmp { args, .. } => func.value_type(func.resolve(args[0])) != Type::I128,
                 InstData::Fcmp { .. } => true,
@@ -441,6 +459,10 @@ block2:
         assert!(fused_compares(&func).is_empty());
     }
 
+    fn aarch64_compare_pairs_of(func: &Function) -> Vec<(Value, keel_ir::Inst, keel_ir::Inst)> {
+        aarch64_compare_pairs(func, &use_counts(func))
+    }
+
     fn span_source(ty: &str, gap: &str, compare: &str, edge: &str) -> String {
         format!(
             "func @f({ty}, {ty}) -> {ty} {{
@@ -459,13 +481,13 @@ block2:
     #[test]
     fn arm_bounded_span_transfers_duplicate_uses_to_branch() {
         let func = function(&span_source("i64", "v3 = iconst.i64 7", "icmp.eq", "v0"));
-        assert!(fused_compare_pairs(&func).is_empty()); // x86 contract unchanged
-        let pairs = aarch64_compare_pairs(&func);
+        assert!(fused_compare_pairs(&func, &use_counts(&func)).is_empty()); // x86 contract unchanged
+        let pairs = aarch64_compare_pairs(&func, &use_counts(&func));
         assert_eq!(pairs.len(), 1);
         let (cond, compare, branch) = pairs[0];
         let mut selection = Selection::default();
         assert_eq!(
-            selection.fuse_aarch64_compares(&func, |_| vec![]),
+            selection.fuse_aarch64_compares(&func, |_| vec![], &use_counts(&func)),
             HashSet::from_iter([cond])
         );
         assert!(selection.covered(compare));
@@ -480,7 +502,7 @@ block2:
         let mut aliases = func.clone();
         aliases.replace_all_uses(leaves[2], leaves[1]);
         let mut selection = Selection::default();
-        selection.fuse_aarch64_compares(&aliases, |_| vec![]);
+        selection.fuse_aarch64_compares(&aliases, |_| vec![], &use_counts(&aliases));
         assert_eq!(selection.operands(&aliases, branch), vec![leaves[1]; 3]);
     }
 
@@ -494,7 +516,10 @@ block2:
             "v3 = uext.i64 v2",
         ] {
             let func = function(&span_source("i64", gap, "icmp.eq", "v0"));
-            assert!(aarch64_compare_pairs(&func).is_empty(), "{gap}");
+            assert!(
+                aarch64_compare_pairs(&func, &use_counts(&func)).is_empty(),
+                "{gap}"
+            );
         }
         for (ty, compare) in [
             ("i8", "icmp.eq"),
@@ -503,7 +528,10 @@ block2:
             ("f64", "fcmp.eq"),
         ] {
             let func = function(&span_source(ty, "v3 = iconst.i64 7", compare, "v0"));
-            assert!(aarch64_compare_pairs(&func).is_empty(), "{ty}");
+            assert!(
+                aarch64_compare_pairs(&func, &use_counts(&func)).is_empty(),
+                "{ty}"
+            );
         }
         for n in 1..=4 {
             let gap = (0..n)
@@ -511,7 +539,8 @@ block2:
                 .collect::<Vec<_>>()
                 .join("\n");
             assert_eq!(
-                aarch64_compare_pairs(&function(&span_source("i64", &gap, "icmp.eq", "v0"))).len(),
+                aarch64_compare_pairs_of(&function(&span_source("i64", &gap, "icmp.eq", "v0")))
+                    .len(),
                 1
             );
         }
@@ -531,13 +560,13 @@ block2:
         for &inst in &insts {
             func.set_inst_loc(inst, Some(loc));
         }
-        assert_eq!(aarch64_compare_pairs(&func).len(), 1);
+        assert_eq!(aarch64_compare_pairs(&func, &use_counts(&func)).len(), 1);
         for index in [1, 2] {
             func.set_inst_loc(insts[index], Some(SourceLoc { line: 11, ..loc }));
-            assert!(aarch64_compare_pairs(&func).is_empty());
+            assert!(aarch64_compare_pairs(&func, &use_counts(&func)).is_empty());
             func.set_inst_loc(insts[index], Some(loc));
         }
         func.set_inst_loc(insts[1], None);
-        assert!(aarch64_compare_pairs(&func).is_empty());
+        assert!(aarch64_compare_pairs(&func, &use_counts(&func)).is_empty());
     }
 }

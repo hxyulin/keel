@@ -554,7 +554,11 @@ block0(v0: i64, v1: i64):
         let module = keel_ir::parse("func @f(i64) -> i64 {\nblock0(v0: i64):\n v1 = iconst.i64 7\n v2 = icmp.eq v0, v1\n brif v2, block1(v1), block1(v0)\nblock1(v3: i64):\n return v3\n}").unwrap();
         let func = &module.functions[0];
         let mut selection = Selection::default();
-        selection.fuse_compares(func, |_| vec![Value::new(1)]);
+        selection.fuse_compares(
+            func,
+            |_| vec![Value::new(1)],
+            &crate::fold::use_counts(func),
+        );
         let insts = func.block_insts(func.entry_block().unwrap());
         assert!(selection.covered(insts[1]));
         // The immediate compare operand disappears, but the edge's v1 use stays.
