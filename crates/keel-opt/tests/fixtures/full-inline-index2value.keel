@@ -1,0 +1,104 @@
+; Retained Lua helper after Full at ed5d8ca6, 14 blocks / 82 instructions.
+func @index2value(ptr, i32) -> ptr cc(c) local {
+block0(v0: ptr, v1: i32):
+    v2 = iconst.i64 32
+    v3 = ptradd v0, v2
+    v4 = load.ptr v3
+    v5 = iconst.i32 0
+    v6 = icmp.sgt v1, v5
+    brif v6, block1, block2
+block1:
+    v7 = load.ptr v4
+    v8 = sext.i64 v1
+    v9 = iconst.i64 16
+    v74 = iconst.i64 4
+    v10 = shl v8, v74
+    v11 = ptradd v7, v10
+    v13 = ptradd v0, v9
+    v14 = load.ptr v13
+    v15 = icmp.uge v11, v14
+    brif v15, block4, block5
+block2:
+    v21 = iconst.i32 -1001000
+    v22 = icmp.sle v1, v21
+    brif v22, block8, block7
+block4:
+    v16 = iconst.i64 24
+    v17 = ptradd v0, v16
+    v18 = load.ptr v17
+    v19 = iconst.i64 80
+    v20 = ptradd v18, v19
+    return v20
+block5:
+    return v11
+block7:
+    v23 = iconst.i64 16
+    v24 = ptradd v0, v23
+    v25 = load.ptr v24
+    v26 = sext.i64 v1
+    v75 = iconst.i64 4
+    v28 = shl v26, v75
+    v29 = ptradd v25, v28
+    return v29
+block8:
+    v83 = iconst.i32 -1001000
+    v31 = icmp.eq v1, v83
+    brif v31, block10, block11
+block10:
+    v32 = iconst.i64 24
+    v33 = ptradd v0, v32
+    v34 = load.ptr v33
+    v35 = iconst.i64 64
+    v36 = ptradd v34, v35
+    return v36
+block11:
+    v39 = load.ptr v4
+    v40 = iconst.i64 8
+    v41 = ptradd v39, v40
+    v42 = load.i8 v41
+    v43 = uext.i32 v42
+    v44 = iconst.i32 102
+    v45 = icmp.eq v43, v44
+    brif v45, block13, block14
+block13:
+    v47 = load.ptr v39
+    v48 = iconst.i64 10
+    v49 = ptradd v47, v48
+    v50 = load.i8 v49
+    v51 = uext.i32 v50
+    v84 = iconst.i32 -1001000
+    v38 = isub v84, v1
+    v52 = icmp.sle v38, v51
+    brif v52, block16, block17
+block14:
+    v67 = iconst.i64 24
+    v68 = ptradd v0, v67
+    v69 = load.ptr v68
+    v70 = iconst.i64 80
+    v71 = ptradd v69, v70
+    return v71
+block16:
+    v85 = iconst.i64 32
+    v54 = ptradd v47, v85
+    v55 = iconst.i32 1
+    v56 = isub v38, v55
+    v57 = sext.i64 v56
+    v76 = iconst.i64 4
+    v59 = shl v57, v76
+    v60 = ptradd v54, v59
+    jump block18(v60)
+block17:
+    v61 = iconst.i64 24
+    v62 = ptradd v0, v61
+    v63 = load.ptr v62
+    v64 = iconst.i64 80
+    v65 = ptradd v63, v64
+    jump block18(v65)
+block18(v66: ptr):
+    return v66
+}
+func @lookup(ptr, i32) -> ptr cc(c) {
+block0(v0: ptr, v1: i32):
+ v2 = call @index2value(v0, v1)
+ return v2
+}

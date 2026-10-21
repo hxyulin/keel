@@ -163,6 +163,10 @@ fn cheap_leaf_switch(f: &Function) -> bool {
     if !switch {
         return false;
     }
+    acyclic_cfg(f)
+}
+
+fn acyclic_cfg(f: &Function) -> bool {
     // Check all laid-out blocks, including unreachable cycles. Use compact
     // layout indices rather than arena IDs: deleted blocks can leave holes.
     let blocks: Vec<_> = f.blocks().collect();
@@ -189,6 +193,60 @@ fn cheap_leaf_switch(f: &Function) -> bool {
         }
     }
     visited == blocks.len()
+}
+
+// Full-only allowance for scalar address/index helpers. This does not infer
+// memory safety or speculate loads: ordinary cloning retains flags and order.
+// Count unreachable blocks and duplicate edges as well as executable layout.
+fn readonly_leaf(f: &Function) -> bool {
+    if f.blocks().count() > 16
+        || f.layout_insts().count() > 96
+        || f.stack_slots().next().is_some()
+        || f.sig
+            .params
+            .iter()
+            .any(|p| matches!(p.purpose, Purpose::ByVal(_)))
+    {
+        return false;
+    }
+    let mut edges = 0;
+    let mut loads = 0;
+    for (_, i) in f.layout_insts() {
+        let data = f.inst_data(i);
+        match data {
+            InstData::Iconst { .. }
+            | InstData::Icmp { .. }
+            | InstData::Convert { .. }
+            | InstData::SymbolAddr { .. }
+            | InstData::Load { .. }
+            | InstData::Select { .. }
+            | InstData::Return { .. }
+            | InstData::Jump { .. }
+            | InstData::Brif { .. }
+            | InstData::Switch { .. } => {}
+            InstData::Binary { op, .. }
+                if matches!(
+                    op,
+                    BinaryOp::Iadd
+                        | BinaryOp::Isub
+                        | BinaryOp::Imul
+                        | BinaryOp::Shl
+                        | BinaryOp::Ushr
+                        | BinaryOp::Sshr
+                        | BinaryOp::Ptradd
+                        | BinaryOp::And
+                        | BinaryOp::Or
+                        | BinaryOp::Xor
+                ) => {}
+            _ => return false,
+        }
+        loads += usize::from(matches!(data, InstData::Load { .. }));
+        edges += data.branch_dests().len();
+        if edges > 32 {
+            return false;
+        }
+    }
+    loads > 0 && acyclic_cfg(f)
 }
 
 fn byval_copy_chunks(size: u64) -> impl Iterator<Item = (u64, Type)> {
@@ -231,9 +289,9 @@ pub struct InlineSkip {
     pub reason: &'static str,
 }
 
-fn profitability_reason(f: &Function) -> Option<&'static str> {
+fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
     let scale = if f.attrs.inlinehint { 2 } else { 1 };
-    if f.attrs.alwaysinline {
+    if f.attrs.alwaysinline || (full && readonly_leaf(f)) {
         return None;
     }
     if f.blocks().count() > MAX_BLOCKS * scale && !cheap_leaf_switch(f) {
@@ -441,7 +499,7 @@ fn run_observed_policy(
     for (index, f) in module.functions.iter().enumerate() {
         let legality = eligibility_reason(f, admit_noninterposable);
         let profitability = if legality.is_none() {
-            profitability_reason(f)
+            profitability_reason(f, admit_noninterposable)
         } else {
             None
         };
