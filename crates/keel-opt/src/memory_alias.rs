@@ -93,7 +93,12 @@ impl AliasInfo {
         // Every value visited so far is on `path`; short paths are searched
         // directly, and only a long chain pays for a set.
         let mut seen = FxHashSet::default();
-        while !self.addresses.contains_key(&v) {
+        // A value outside the map is its own root at offset 0 (see
+        // `address`), so only constant offset paths are stored.
+        let mut base = loop {
+            if let Some(&known) = self.addresses.get(&v) {
+                break known;
+            }
             let revisit = if path.len() < 16 {
                 path.iter().any(|&(p, _)| p == v)
             } else {
@@ -118,14 +123,14 @@ impl AliasInfo {
                 },
                 _ => None,
             };
-            if let Some((base, n)) = next {
-                path.push((v, n));
-                v = base;
-            } else {
-                self.addresses.insert(v, Address { root: v, offset: 0 });
+            match next {
+                Some((base, n)) => {
+                    path.push((v, n));
+                    v = base;
+                }
+                None => break Address { root: v, offset: 0 },
             }
-        }
-        let mut base = self.addresses[&v];
+        };
         for (v, n) in path.into_iter().rev() {
             base = base
                 .offset
