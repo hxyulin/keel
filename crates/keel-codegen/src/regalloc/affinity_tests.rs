@@ -403,6 +403,7 @@ fn inactive_interference_blocks_an_otherwise_available_consensus_register() {
         half: 0,
         ranges,
         crosses_call: false,
+        preserved_gprs: 0,
         float: false,
         vector: false,
     };

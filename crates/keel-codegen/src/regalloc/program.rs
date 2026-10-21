@@ -96,8 +96,16 @@ impl AllocationInput<'_> {
     /// globally reserved, even in sequences that do not explicitly use them.
     pub fn for_each_clobber(&self, inst: Inst, mut visit: impl FnMut(Loc)) {
         if (self.is_call)(self.func.inst_data(inst)) {
+            let preserved = self
+                .selection
+                .preserved_call_gprs
+                .get(&inst)
+                .copied()
+                .unwrap_or(0);
             for &r in self.pools.caller_saved {
-                visit(Loc::Reg(r));
+                if preserved & 1u64.checked_shl(r.into()).unwrap_or(0) == 0 {
+                    visit(Loc::Reg(r));
+                }
             }
             for &r in self.pools.float_caller_saved {
                 visit(Loc::FReg(r));
@@ -218,6 +226,40 @@ impl Allocation {
             .get(&(block, part))
             .copied()
             .or_else(|| self.locs[usize::from(part.high)][part.value.index()])
+    }
+
+    /// Conservative register mentions in a finalized allocation, including
+    /// sparse overrides and transfer-only temporaries. Registers >=64 cannot
+    /// participate in the current target's compact preservation proofs.
+    pub(crate) fn mentioned_gprs(&self) -> u64 {
+        let mut mask = 0;
+        let mut mention = |loc| {
+            if let Loc::Reg(r) = loc {
+                mask |= 1u64.checked_shl(r.into()).unwrap_or(0);
+            }
+        };
+        for loc in self.locs.iter().flatten().flatten() {
+            mention(*loc);
+        }
+        for edit in &self.edits.instructions {
+            for &(_, loc) in edit.uses.iter().chain(&edit.defs) {
+                mention(loc);
+            }
+            for &(dst, src) in edit.before.iter().chain(&edit.after) {
+                mention(dst);
+                mention(src);
+            }
+        }
+        for &loc in self.edits.params.values() {
+            mention(loc);
+        }
+        for moves in self.edits.edges.values() {
+            for &(dst, src) in moves {
+                mention(dst);
+                mention(src);
+            }
+        }
+        mask
     }
 
     /// Account for every physical register mentioned by sparse edits before

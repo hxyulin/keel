@@ -253,6 +253,7 @@ fn range_intersections_match_pairwise_inclusive_overlap() {
         half: 0,
         ranges,
         crosses_call: false,
+        preserved_gprs: 0,
         float: false,
         vector: false,
     };

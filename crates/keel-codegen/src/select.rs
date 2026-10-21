@@ -97,6 +97,9 @@ impl OperandTable {
 #[derive(Default)]
 pub struct Selection {
     constraints: HashMap<(Inst, ValuePart, OperandKind), Constraint>,
+    /// Target-proven GPRs untouched by a complete call lowering sequence.
+    /// Absent entries retain the ordinary ABI clobber set.
+    pub(crate) preserved_call_gprs: HashMap<Inst, u64>,
     pub matches: HashMap<Inst, Match>,
     covered: Vec<bool>,
     /// Single-use ptradd results encoded at their original memory consumer.

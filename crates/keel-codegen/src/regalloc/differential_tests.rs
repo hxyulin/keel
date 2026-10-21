@@ -303,6 +303,7 @@ fn assert_reference_equivalence(
                 start: b.start(),
                 end: b.end(),
                 crosses_call: b.crosses_call,
+                preserved_gprs: b.preserved_gprs,
                 float: b.float,
                 vector: b.vector,
             },

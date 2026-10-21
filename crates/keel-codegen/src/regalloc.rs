@@ -443,6 +443,7 @@ struct Interval {
     /// Sorted, disjoint `[from, to]` ranges of points where it is live.
     ranges: Vec<(u32, u32)>,
     crosses_call: bool,
+    preserved_gprs: u64,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
     vector: bool,
@@ -518,6 +519,31 @@ fn register_number(loc: Loc) -> u8 {
     }
 }
 
+/// Intersect proofs only at calls strictly inside actual live ranges. Calls in
+/// lifetime holes cannot constrain the value; an unknown call contributes zero.
+fn call_preserves(calls: &[(u32, u64)], ranges: &[(u32, u32)]) -> u64 {
+    let mut preserved = u64::MAX;
+    let mut work = 0;
+    for &(from, to) in ranges {
+        let start = calls.partition_point(|&(point, _)| point <= from);
+        for &(point, mask) in &calls[start..] {
+            if point >= to {
+                break;
+            }
+            work += 1;
+            // Bound extra proof work on values spanning many call sites.
+            if work > 64 {
+                return 0;
+            }
+            preserved &= mask;
+            if preserved == 0 {
+                return 0;
+            }
+        }
+    }
+    preserved
+}
+
 /// The fast tier never materializes lifetime holes, including for spills.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct FastInterval {
@@ -526,6 +552,7 @@ struct FastInterval {
     start: u32,
     end: u32,
     crosses_call: bool,
+    preserved_gprs: u64,
     float: bool,
     vector: bool,
 }
@@ -547,7 +574,13 @@ fn build_fast_intervals(
     let mut touched = Vec::new();
     let mut crosses_call = vec![false; func.num_values()];
     let mut crosses_twice = vec![false; func.num_values()];
+    let mut preserved_gprs = if selection.preserved_call_gprs.is_empty() {
+        Vec::new()
+    } else {
+        vec![u64::MAX; func.num_values()]
+    };
     let mut calls = Vec::new();
+    let mut preserved_calls = Vec::new();
     let mut twice = Vec::new();
     let mut slot = 0u32;
 
@@ -593,6 +626,16 @@ fn build_fast_intervals(
             let data = func.inst_data(inst);
             if is_call(data) {
                 calls.push(read);
+                if !selection.preserved_call_gprs.is_empty() {
+                    preserved_calls.push((
+                        read,
+                        selection
+                            .preserved_call_gprs
+                            .get(&inst)
+                            .copied()
+                            .unwrap_or(0),
+                    ));
+                }
             }
             if returns_twice(data) {
                 twice.push(read);
@@ -613,9 +656,13 @@ fn build_fast_intervals(
                 None => (from, to),
             });
             crosses_call[i] |= crosses(&calls, from, to);
+            if !selection.preserved_call_gprs.is_empty() {
+                preserved_gprs[i] &= call_preserves(&preserved_calls, &[(from, to)]);
+            }
             crosses_twice[i] |= crosses(&twice, from, to);
         }
         calls.clear();
+        preserved_calls.clear();
         twice.clear();
     }
     let mut intervals = Vec::new();
@@ -635,6 +682,11 @@ fn build_fast_intervals(
                 start,
                 end,
                 crosses_call: crosses_call[i],
+                preserved_gprs: if selection.preserved_call_gprs.is_empty() || crosses_twice[i] {
+                    0
+                } else {
+                    preserved_gprs[i]
+                },
                 float: ty.is_float() || ty.is_vector(),
                 vector: ty.is_vector(),
             });
@@ -675,7 +727,10 @@ fn fast_scan_with_priority<'a>(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let caller = if cur.crosses_call { &[][..] } else { caller };
+        let caller_allowed = |r: u8| {
+            !cur.crosses_call
+                || !cur.float && (cur.preserved_gprs & 1u64.checked_shl(r.into()).unwrap_or(0) != 0)
+        };
         let callee = if cur.crosses_call && cur.vector {
             &[][..]
         } else {
@@ -689,8 +744,9 @@ fn fast_scan_with_priority<'a>(
         }
         let free = caller
             .iter()
-            .chain(callee)
             .copied()
+            .filter(|&r| caller_allowed(r))
+            .chain(callee.iter().copied())
             .find(|&r| !occupied.contains(r));
         if let Some(r) = free {
             let reg = class(r);
@@ -704,6 +760,7 @@ fn fast_scan_with_priority<'a>(
             .filter(|(_, (iv, reg))| {
                 iv.float == cur.float
                     && (caller.contains(&register_number(*reg))
+                        && caller_allowed(register_number(*reg))
                         || callee.contains(&register_number(*reg)))
             })
             .max_by(|(_, (a, _)), (_, (b, _))| priority(b, a))
@@ -915,6 +972,7 @@ fn build_intervals(
     // Read points of calls, and of calls that return twice, in increasing
     // order.
     let mut calls = Vec::new();
+    let mut preserved_calls = Vec::new();
     let mut twice = Vec::new();
 
     // Slot `k` owns the read point 2k and the write point 2k + 1.
@@ -947,6 +1005,16 @@ fn build_intervals(
             }
             if is_call(data) {
                 calls.push(read);
+                if !selection.preserved_call_gprs.is_empty() {
+                    preserved_calls.push((
+                        read,
+                        selection
+                            .preserved_call_gprs
+                            .get(&inst)
+                            .copied()
+                            .unwrap_or(0),
+                    ));
+                }
             }
             if returns_twice(data) {
                 twice.push(read);
@@ -986,6 +1054,11 @@ fn build_intervals(
             continue;
         }
         let crosses_call = crosses(&calls, &list);
+        let preserved_gprs = if selection.preserved_call_gprs.is_empty() || crosses(&twice, &list) {
+            0
+        } else {
+            call_preserves(&preserved_calls, &list)
+        };
         if crosses(&twice, &list) {
             list = vec![(0, slot * 2)];
         }
@@ -997,6 +1070,7 @@ fn build_intervals(
             half: 0,
             ranges: list,
             crosses_call,
+            preserved_gprs,
             float: ty.is_float() || ty.is_vector(),
             vector: ty.is_vector(),
         });
@@ -1006,6 +1080,7 @@ fn build_intervals(
                 half: 1,
                 ranges,
                 crosses_call,
+                preserved_gprs,
                 float: false,
                 vector: false,
             });
@@ -1171,10 +1246,10 @@ fn linear_scan_with_preference<'a>(
         } else {
             (pools.caller_saved, pools.callee_saved, Loc::Reg)
         };
-        let callers = if cur.crosses_call {
-            &[][..]
-        } else {
-            caller_saved
+        let callers = caller_saved;
+        let caller_allowed = |r: u8| {
+            !cur.crosses_call
+                || !cur.float && (cur.preserved_gprs & 1u64.checked_shl(r.into()).unwrap_or(0) != 0)
         };
         let callee_saved = if cur.crosses_call && cur.vector {
             &[][..]
@@ -1182,8 +1257,12 @@ fn linear_scan_with_preference<'a>(
             callee_saved
         };
         let allowed = |r: Loc| match r {
-            Loc::Reg(n) if !cur.float => callers.contains(&n) || callee_saved.contains(&n),
-            Loc::FReg(n) if cur.float => callers.contains(&n) || callee_saved.contains(&n),
+            Loc::Reg(n) if !cur.float => {
+                callers.contains(&n) && caller_allowed(n) || callee_saved.contains(&n)
+            }
+            Loc::FReg(n) if cur.float => {
+                callers.contains(&n) && caller_allowed(n) || callee_saved.contains(&n)
+            }
             _ => false,
         };
         // Compute these once, rather than rescanning active/inactive for
@@ -1412,6 +1491,7 @@ mod tests {
                 half: 0,
                 ranges: vec![(0, 5)],
                 crosses_call: false,
+                preserved_gprs: 0,
                 float: false,
                 vector: false,
             },
@@ -1420,6 +1500,7 @@ mod tests {
                 half: 0,
                 ranges: vec![(2, 9)],
                 crosses_call: false,
+                preserved_gprs: 0,
                 float: false,
                 vector: false,
             },
@@ -1430,6 +1511,7 @@ mod tests {
             start: iv.start(),
             end: iv.end(),
             crosses_call: iv.crosses_call,
+            preserved_gprs: iv.preserved_gprs,
             float: iv.float,
             vector: iv.vector,
         });
@@ -1557,6 +1639,7 @@ mod tests {
             half,
             ranges: vec![(start, end)],
             crosses_call: false,
+            preserved_gprs: 0,
             float: vector,
             vector,
         })
@@ -1569,6 +1652,7 @@ mod tests {
                 start: iv.start(),
                 end: iv.end(),
                 crosses_call: iv.crosses_call,
+                preserved_gprs: iv.preserved_gprs,
                 float: iv.float,
                 vector: iv.vector,
             })
@@ -1844,3 +1928,6 @@ mod transfer_tests;
 
 #[cfg(all(test, feature = "experimental-regalloc"))]
 mod affinity_tests;
+
+#[cfg(test)]
+mod call_preserves_tests;
