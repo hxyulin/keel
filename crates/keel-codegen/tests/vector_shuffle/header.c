@@ -1,0 +1,14 @@
+typedef __UINT8_TYPE__ u8;
+typedef __UINT64_TYPE__ u64;
+typedef __SIZE_TYPE__ usize;
+extern void *memcpy(void *,const void *,usize);
+extern void *memset(void *,int,usize);
+extern int memcmp(const void *,const void *,usize);
+extern int printf(const char *,...);
+extern void *mmap(void *,usize,int,int,int,long);
+extern int mprotect(void *,usize,int);
+extern int munmap(void *,usize);
+extern long sysconf(int);
+typedef u64 V_i64x2 __attribute__((vector_size(16)));
+typedef double V_f64x2 __attribute__((vector_size(16)));
+struct Case {const char *name;void (*run)(const void *,const void *,void *);unsigned same,live;};
