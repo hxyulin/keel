@@ -35,6 +35,7 @@ static void check(const unsigned char *a,uint64_t n) {
 }
 static int output_fd;
 static void fault(int sig,siginfo_t *info,void *unused) {
+    (void)sig;
     (void)unused;
     uintptr_t addr=(uintptr_t)info->si_addr;
     (void)!write(output_fd,&addr,sizeof(addr));
