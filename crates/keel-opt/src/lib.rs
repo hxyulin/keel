@@ -32,6 +32,7 @@ pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod internal_fast_calls;
+pub mod private_aggregate;
 mod known_bits;
 mod load_narrow;
 mod load_reuse;
