@@ -1,0 +1,21 @@
+decl @effect(ptr)
+func @copy_value(ptr, i64, i64) -> i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+block0(v0: ptr, v1: i64, v2: i64):
+ v3 = stack_addr ss0
+ v4 = iconst.i64 8
+ v5 = ptradd v3, v4
+ v6 = intrinsic stack_save()
+ v7 = iconst.i64 32
+ v8 = intrinsic stack_alloc(v7)
+ store v1, v8
+ store v1, v3
+ store v2, v5
+ call @effect(v0)
+ v9 = load.i32 v3
+ v10 = sext.i64 v9
+ intrinsic stack_restore(v6)
+ v11 = load.i64 v5
+ v12 = iadd v10, v11
+ return v12
+}

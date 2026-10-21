@@ -1,0 +1,26 @@
+func @sub_values(i64, i64, i64) -> i64 cc(c) {
+ ss0 = stack_slot 16, align 8
+ ss1 = stack_slot 16, align 8
+block0(v0: i64, v1: i64, v2: i64):
+ v3 = stack_addr ss0
+ v4 = stack_addr ss1
+ v5 = iconst.i64 8
+ v6 = ptradd v3, v5
+ v7 = ptradd v4, v5
+ store v0, v3
+ store v1, v4
+ store v2, v6
+ store v2, v7
+ brif v2, block2, block1
+block1:
+ v8 = load.i32 v3
+ v9 = load.i32 v4
+ v10 = sext.i64 v8
+ v11 = sext.i64 v9
+ v12 = isub v10, v11
+ return v12
+block2:
+ v13 = load.f64 v3
+ v14 = bitcast.i64 v13
+ return v14
+}

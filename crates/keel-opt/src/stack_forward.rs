@@ -1,8 +1,8 @@
 //! Byte-aware forwarding in nonescaping fixed stack objects. Only integer
-//! loads up to 64 bits are reconstructed, and only from bytes stored earlier
-//! in the same block. Exact-type uniquely written pieces can also be forwarded
-//! across blocks when their store dominates the load. This handles the union
-//! temporaries exposed by inlining aggregate helpers without assuming that
+//! loads up to 64 bits are reconstructed from earlier stores in the same
+//! block, or integer subranges of uniquely written dominating pieces. Exact
+//! types can also forward from uniquely written dominating pieces. This
+//! handles union temporaries exposed by aggregate helpers without assuming that
 //! arbitrary pointers cannot alias.
 use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
@@ -51,7 +51,10 @@ pub fn run(func: &mut Function) -> bool {
     let instructions: Vec<_> = func.layout_insts().map(|(_, i)| i).collect();
     for &inst in &instructions {
         if let InstData::StackAddr { slot } = *func.inst_data(inst) {
-            addresses.insert(func.first_result(inst), (slot, 0usize));
+            let value = func.first_result(inst);
+            if func.resolve(value) == value {
+                addresses.insert(value, (slot, 0usize));
+            }
         }
     }
     loop {
@@ -64,6 +67,7 @@ pub fn run(func: &mut Function) -> bool {
                 && let Some(&(slot, offset)) = addresses.get(&func.resolve(args[0]))
                 && let Some(n) = constant(func, args[1]).and_then(|n| usize::try_from(n).ok())
                 && let Some(end) = offset.checked_add(n).filter(|&n| n <= sizes[&slot])
+                && func.resolve(func.first_result(inst)) == func.first_result(inst)
             {
                 addresses.insert(func.first_result(inst), (slot, end));
             }
@@ -80,12 +84,7 @@ pub fn run(func: &mut Function) -> bool {
     // even without receiving a fixed-slot address as an explicit argument.
     if instructions.iter().any(|&i| match func.inst_data(i) {
         InstData::InlineAsm { .. } => true,
-        InstData::Intrinsic { id, .. } => matches!(
-            id,
-            keel_ir::Intrinsic::FrameAddress
-                | keel_ir::Intrinsic::StackRestore
-                | keel_ir::Intrinsic::StackSave
-        ),
+        InstData::Intrinsic { id, .. } => matches!(id, keel_ir::Intrinsic::FrameAddress),
         InstData::Call { func: callee, .. } | InstData::Invoke { func: callee, .. } => {
             func.callee(*callee).sig.returns_twice
         }
@@ -94,6 +93,67 @@ pub fn run(func: &mut Function) -> bool {
     }) {
         return false;
     }
+
+    // A saved SP can itself become a frame observer if inspected, converted,
+    // passed or used as an address. Only opaque marks used directly by restore
+    // qualify; do not infer this from the absence of fixed-slot address escapes.
+    let mut marks = HashSet::new();
+    for &inst in &instructions {
+        if matches!(
+            func.inst_data(inst),
+            InstData::Intrinsic {
+                id: keel_ir::Intrinsic::StackSave,
+                ..
+            }
+        ) {
+            let mark = func.first_result(inst);
+            if func.resolve(mark) != mark {
+                return false;
+            }
+            marks.insert(mark);
+        }
+    }
+    for &inst in &instructions {
+        let data = func.inst_data(inst);
+        if let InstData::Intrinsic {
+            id: keel_ir::Intrinsic::StackRestore,
+            args,
+        } = data
+            && !marks.contains(&func.resolve(args[0]))
+        {
+            return false;
+        }
+        let mut observed = false;
+        data.for_each_operand(|v| {
+            if marks.contains(&func.resolve(v))
+                && !matches!(
+                    data,
+                    InstData::Intrinsic {
+                        id: keel_ir::Intrinsic::StackRestore,
+                        ..
+                    }
+                )
+            {
+                observed = true;
+            }
+        });
+        if observed {
+            return false;
+        }
+    }
+    // Opaque stack marks delimit dynamic lifetimes. Restrict such functions
+    // to local intervals: no dominance facts
+    // may cross a mark/restore, even through another block. Keep their stores
+    // as well; this path deliberately makes no whole-function lifetime proof.
+    let local_only = instructions.iter().any(|&i| {
+        matches!(
+            func.inst_data(i),
+            InstData::Intrinsic {
+                id: keel_ir::Intrinsic::StackSave | keel_ir::Intrinsic::StackRestore,
+                ..
+            }
+        )
+    });
 
     for &inst in &instructions {
         let data = func.inst_data(inst);
@@ -132,7 +192,7 @@ pub fn run(func: &mut Function) -> bool {
     // This avoids phi nodes and iterative memory dataflow at joins/loops.
     let mut writers = HashMap::<(StackSlot, usize), usize>::new();
     let mut stores = Vec::new();
-    for block in func.blocks() {
+    for block in func.blocks().filter(|_| !local_only) {
         for (position, &inst) in func.block_insts(block).iter().enumerate() {
             if let InstData::Store { addr, value, .. } = *func.inst_data(inst)
                 && let Some(&(slot, offset)) = addresses.get(&func.resolve(addr))
@@ -155,14 +215,39 @@ pub fn run(func: &mut Function) -> bool {
         })
         .map(|(key, fact, _)| (key, fact))
         .collect();
+    // A uniquely written integer piece also defines its integer subranges.
+    // Enumerate at most 20 proper subranges per eight-byte store, retaining
+    // the same whole-range writer proof. Never reinterpret floats or pointers.
+    let mut subranges = HashMap::new();
+    for (&(slot, offset, ty), &(block, position, value)) in &unique {
+        let Some(width) = integer_width(ty) else {
+            continue;
+        };
+        for subty in [Type::I8, Type::I16, Type::I32] {
+            let subwidth = integer_width(subty).unwrap();
+            if subwidth >= width {
+                continue;
+            }
+            for source in 0..=width - subwidth {
+                subranges.insert(
+                    (slot, offset + source, subty),
+                    (block, position, value, source),
+                );
+            }
+        }
+    }
     // Avoid building dominance for functions with only local candidates.
     let cross_block = func.blocks().any(|block| {
         func.block_insts(block).iter().any(|&inst| {
             if let InstData::Load { addr, ty, .. } = *func.inst_data(inst)
                 && let Some(&(slot, offset)) = addresses.get(&func.resolve(addr))
-                && let Some(&(store_block, _, _)) = unique.get(&(slot, offset, ty))
             {
-                store_block != block
+                unique
+                    .get(&(slot, offset, ty))
+                    .is_some_and(|&(store_block, _, _)| store_block != block)
+                    || subranges
+                        .get(&(slot, offset, ty))
+                        .is_some_and(|&(store_block, _, _, _)| store_block != block)
             } else {
                 false
             }
@@ -226,18 +311,33 @@ pub fn run(func: &mut Function) -> bool {
                             dominates.then_some(value)
                         },
                     );
-                    let forwarded =
-                        exact
-                            .get(&(slot, offset, ty))
-                            .copied()
-                            .or(global)
-                            .or_else(|| {
-                                let width = integer_width(ty)?;
-                                let parts = (0..width)
-                                    .map(|n| bytes.get(&(slot, offset + n)).copied())
-                                    .collect::<Option<Vec<_>>>()?;
-                                Some(reconstruct(func, inst, ty, &parts))
-                            });
+                    let forwarded = exact
+                        .get(&(slot, offset, ty))
+                        .copied()
+                        .or(global)
+                        .or_else(|| {
+                            let width = integer_width(ty)?;
+                            let parts = (0..width)
+                                .map(|n| bytes.get(&(slot, offset + n)).copied())
+                                .collect::<Option<Vec<_>>>()?;
+                            Some(reconstruct(func, inst, ty, &parts))
+                        })
+                        .or_else(|| {
+                            let &(store_block, store_position, value, source) =
+                                subranges.get(&(slot, offset, ty))?;
+                            let dominates = if store_block == block {
+                                store_position < position
+                            } else {
+                                dominators.as_ref()?.dominates(store_block, block)
+                            };
+                            if !dominates {
+                                return None;
+                            }
+                            let parts: Vec<_> = (0..integer_width(ty)?)
+                                .map(|n| (value, source + n))
+                                .collect();
+                            Some(reconstruct(func, inst, ty, &parts))
+                        });
                     if let Some(value) = forwarded {
                         func.replace_all_uses(func.first_result(inst), value);
                         func.remove_inst(inst);
@@ -249,7 +349,7 @@ pub fn run(func: &mut Function) -> bool {
                 // Nonescaping fixed slots cannot be touched by an ordinary
                 // call. Stack lifetime operations, however, are barriers.
                 InstData::Intrinsic {
-                    id: keel_ir::Intrinsic::StackRestore,
+                    id: keel_ir::Intrinsic::StackSave | keel_ir::Intrinsic::StackRestore,
                     ..
                 } => {
                     bytes.clear();
@@ -264,6 +364,7 @@ pub fn run(func: &mut Function) -> bool {
     for (_, inst) in func.layout_insts().collect::<Vec<_>>() {
         if let InstData::Store { addr, .. } = *func.inst_data(inst)
             && let Some(&(slot, _)) = addresses.get(&func.resolve(addr))
+            && !local_only
             && !escaped.contains(&slot)
             && !remaining_loads.contains(&slot)
         {
