@@ -29,6 +29,24 @@ impl Output {
             Self::Structured(p) => p.x86_instruction(i),
         }
     }
+    /// Continue `module`'s text in place instead of building the function in
+    /// its own string and copying it over. Gives where the function begins.
+    /// Structured functions keep their own program until [`Self::end_function`].
+    pub(super) fn begin_function(&mut self, module: &mut Self) -> usize {
+        if let (Self::Text(own), Self::Text(text)) = (&mut *self, module) {
+            debug_assert!(own.is_empty());
+            std::mem::swap(own, text);
+            return own.len();
+        }
+        0
+    }
+    /// Hands the module's output, now ending with this function, back.
+    pub(super) fn end_function(self, module: &mut Self) {
+        match (self, module) {
+            (Self::Text(own), Self::Text(text)) => *text = own,
+            (own, module) => module.append(own),
+        }
+    }
     pub(super) fn append(&mut self, other: Self) {
         match (self, other) {
             (Self::Text(s), Self::Text(t)) => s.push_str(&t),

@@ -766,6 +766,7 @@ impl<'a> FunctionCompiler<'a> {
         });
         out.label(symbol.clone());
         out.label(format!(".L{name}_begin"));
+        self.out.begin_function(out);
         // The prologue takes the function's location, or else that of its
         // first located instruction, with column 0; the first located
         // instruction after it ends the prologue.
@@ -838,7 +839,7 @@ impl<'a> FunctionCompiler<'a> {
             name: symbol.clone(),
             expression: Expression::difference(".", symbol),
         });
-        out.append(self.out);
+        self.out.end_function(out);
         self.scope_marks
     }
 

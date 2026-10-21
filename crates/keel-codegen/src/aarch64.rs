@@ -315,15 +315,16 @@ const COND_BRANCH_RANGE: usize = 1 << 20;
 /// Makes the conditional branches of a function too big for them to be
 /// sure to reach their targets into a branch on the opposite condition
 /// over a `b`, which reaches ±128 MiB. Interpreter loops get that big.
-fn relax_branches(out: &mut String, name: &str) {
+/// Relaxes the function whose text is `out[start..]`.
+fn relax_branches(out: &mut String, start: usize, name: &str) {
     // An upper bound on the size: every line that is not a label, a
     // comment or a directive is one instruction; data in the code is
     // jump table entries, four bytes each. Each counted line takes at least
     // one byte of text, so short functions need no line scan at all.
-    if out.len().saturating_mul(4) < COND_BRANCH_RANGE {
+    if (out.len() - start).saturating_mul(4) < COND_BRANCH_RANGE {
         return;
     }
-    let size: usize = out
+    let size: usize = out[start..]
         .lines()
         .filter(|l| l.starts_with('\t') && !l.starts_with("\t;"))
         .filter(|l| !l.starts_with("\t.") || l.starts_with("\t.long"))
@@ -332,7 +333,9 @@ fn relax_branches(out: &mut String, name: &str) {
     if size < COND_BRANCH_RANGE {
         return;
     }
-    relax_text(out, name, &mut 0);
+    let mut text = out.split_off(start);
+    relax_text(&mut text, name, &mut 0);
+    out.push_str(&text);
 }
 fn relax_text(out: &mut String, name: &str, n: &mut usize) {
     let mut relaxed = String::with_capacity(out.len() + out.len() / 8);
@@ -1172,6 +1175,7 @@ impl<'a> FunctionCompiler<'a> {
         out.align(2);
         out.label(format!("_{name}"));
         out.label(format!("L{name}_begin"));
+        let start = self.out.begin_function(out);
         self.allocation_comment();
 
         if self.debug {
@@ -1390,13 +1394,13 @@ impl<'a> FunctionCompiler<'a> {
             self.out.label(format!("L{name}_end"));
             {
                 backend_scope!(Relaxation);
-                self.out.relax(name);
+                self.out.relax(name, start);
             }
             self.out.directive(Directive::Cfi(Cfi::End));
             if func.personality.is_some() {
                 self.eh.emit(&mut self.out, name);
             }
-            out.append(self.out);
+            self.out.end_function(out);
         }
         self.scope_marks
     }
