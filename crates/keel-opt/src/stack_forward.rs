@@ -41,6 +41,10 @@ pub fn run_with_cfg(func: &mut Function) -> bool {
 }
 
 pub fn run(func: &mut Function) -> bool {
+    // Every rewrite below starts from a slot address.
+    if func.num_stack_slots() == 0 {
+        return false;
+    }
     // Propagate addresses only along constant in-bounds ptradd chains. Any
     // other use, including storing/passing/returning an address, escapes it.
     let mut addresses = FxHashMap::default();
