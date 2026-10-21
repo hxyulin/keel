@@ -92,6 +92,7 @@ use std::collections::HashSet;
 use std::fmt::Write;
 mod output;
 mod packed_load;
+mod packed_positive;
 mod vector;
 use output::*;
 
@@ -411,6 +412,7 @@ struct FunctionCompiler<'a> {
     selection: crate::select::Selection,
     packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: std::collections::HashMap<Inst, Value>,
+    packed_positive_values: std::collections::HashMap<Inst, Value>,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` and `iconst` results folded into every use, which
@@ -605,6 +607,7 @@ impl<'a> FunctionCompiler<'a> {
         };
         selection.fuse_x86_selects(func, |data| folds(func, data));
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
+        let packed_positive_values = packed_positive::select(func, &mut selection);
         let packed_low_loads = packed_load::select(func, &mut selection);
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
@@ -657,6 +660,7 @@ impl<'a> FunctionCompiler<'a> {
             folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
             fused_compares,
             packed_low_loads,
+            packed_positive_values,
             packed_absolute_values,
             selection,
             stack_slot_offsets,
@@ -1005,6 +1009,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {
             self.vector_absolute(value, result);
+            return;
+        }
+        if let Some(&addr) = self.packed_positive_values.get(&inst) {
+            self.vector_positive32(addr, result);
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {

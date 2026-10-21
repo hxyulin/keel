@@ -191,6 +191,17 @@ impl FunctionCompiler<'_> {
         self.emit(Opcode::Psubq, [asm_arg(&xmm(d)), asm_arg(&xmm(FS1))]);
         self.def_done(result, d);
     }
+    /// Load before defining the result; only reserved vector scratch is touched.
+    pub(super) fn vector_positive32(&mut self, addr: Value, result: Option<Value>) {
+        let at = self.mem(addr, S0, Type::I64);
+        self.emit(Opcode::Movq, [asm_arg(&xmm(FS0)), asm_arg(&at)]);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS0))]);
+        self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Punpckldq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.vector_publish(result);
+    }
     pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
         self.vector_stage(value, FS1);
         self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0))]);
