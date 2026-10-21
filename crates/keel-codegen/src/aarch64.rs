@@ -637,6 +637,8 @@ struct FunctionCompiler<'a> {
     /// Outgoing arguments, spill slots and IR stack slots; the
     /// callee-saved area is separate.
     frame_size: usize,
+    /// A private leaf that neither needs nor observes a stack frame.
+    frameless: bool,
     /// The block emitted after the current one, which a branch can fall
     /// through to.
     next_block: Option<Block>,
@@ -870,6 +872,49 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         }
+        let has_tls_getter = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
+            InstData::SymbolAddr { symbol } => module
+                .data_object(func.symbol_name(*symbol))
+                .is_some_and(|data| data.thread_local),
+            _ => false,
+        });
+        // A scalar integer private leaf never runs the wide-ABI staging or
+        // call helpers that reserve x0-x7. Let it compute in its argument/result
+        // bank directly. Respect custom pools, including forced-spill tests.
+        let argument_bank = func.sig.cc == CallConv::Fast
+            && !has_tls_getter
+            && module.files.is_empty()
+            && func.personality.is_none()
+            && incoming == 0
+            && func.num_stack_slots() == 0
+            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
+            && pools.caller_saved == REGISTERS.caller_saved
+            && pools.callee_saved == REGISTERS.callee_saved
+            && pools.float_caller_saved == REGISTERS.float_caller_saved
+            && pools.float_callee_saved == REGISTERS.float_callee_saved
+            && (0..func.num_values()).all(|i| {
+                matches!(
+                    func.value_type(Value::new(i)),
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::Ptr
+                )
+            })
+            && !func.layout_insts().any(|(_, i)| {
+                let d = func.inst_data(i);
+                is_call(func, d)
+                    || matches!(
+                        d,
+                        InstData::Intrinsic { .. }
+                            | InstData::InlineAsm { .. }
+                            | InstData::ReturnCall { .. }
+                            | InstData::ReturnCallIndirect { .. }
+                            | InstData::LandingPad { .. }
+                    )
+            });
+        let mut private_callers = Vec::new();
+        if argument_bank {
+            private_callers.extend(0..8);
+        }
+        private_callers.extend_from_slice(pools.caller_saved);
         let callee_saved: Vec<u8> = (pools.callee_saved.iter().copied())
             .filter(|&r| !(moves_sp && r == BASE) && !asm_saved.contains(&r))
             .collect();
@@ -877,6 +922,7 @@ impl<'a> FunctionCompiler<'a> {
             .filter(|r| !asm_float_saved.contains(r))
             .collect();
         let pools = Pools {
+            caller_saved: &private_callers,
             callee_saved: &callee_saved,
             float_callee_saved: &float_callee_saved,
             ..*pools
@@ -966,6 +1012,27 @@ impl<'a> FunctionCompiler<'a> {
         if frame_size > MAX_FRAME_SIZE {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
+        let frameless = func.sig.cc == CallConv::Fast
+            && !has_tls_getter
+            && module.files.is_empty()
+            && func.personality.is_none()
+            && frame_size == 0
+            && incoming == 0
+            && alloc.callee_saved_used.is_empty()
+            && alloc.float_callee_saved_used.is_empty()
+            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
+            && !func.layout_insts().any(|(_, i)| {
+                let d = func.inst_data(i);
+                is_call(d)
+                    || matches!(
+                        d,
+                        InstData::Intrinsic { .. }
+                            | InstData::InlineAsm { .. }
+                            | InstData::ReturnCall { .. }
+                            | InstData::ReturnCallIndirect { .. }
+                            | InstData::LandingPad { .. }
+                    )
+            });
         let folded_values = {
             backend_scope!(Folding);
             let folded_values = {
@@ -1015,6 +1082,7 @@ impl<'a> FunctionCompiler<'a> {
             base: if moves_sp { "x19" } else { "sp" },
             variadic_offset: 16 + incoming.next_multiple_of(8),
             frame_size,
+            frameless,
             next_block: None,
             out: Output::new(structured),
             uses_trap: false,
@@ -1072,38 +1140,44 @@ impl<'a> FunctionCompiler<'a> {
             self.out
                 .directive(Directive::Cfi(Cfi::Lsda(format!("L{name}_lsda"))));
         }
-        self.native(
-            Opcode::STP_64_ldstpair_pre,
-            [
-                (FieldId::Rt, 29),
-                (FieldId::Rt2, 30),
-                (FieldId::Rn, 31),
-                (FieldId::imm7, 126),
-            ],
-            |out| out.write_str("stp\tx29, x30, [sp, #-16]!"),
-        );
-        self.native(
-            Opcode::ADD_64_addsub_imm,
-            [
-                (FieldId::Rd, 29),
-                (FieldId::Rn, 31),
-                (FieldId::imm12, 0),
-                (FieldId::sh, 0),
-            ],
-            |out| out.write_str("mov\tx29, sp"),
-        );
-        self.out.directive(Directive::Cfi(Cfi::DefCfa {
-            register: 29,
-            offset: 16,
-        }));
-        self.out.directive(Directive::Cfi(Cfi::Offset {
-            register: 30,
-            offset: -8,
-        }));
-        self.out.directive(Directive::Cfi(Cfi::Offset {
-            register: 29,
-            offset: -16,
-        }));
+        if self.frameless {
+            // The AArch64 CIE starts at CFA = sp. Keep LR and FP untouched;
+            // offset zero also has the standard frameless compact encoding.
+            self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(0)));
+        } else {
+            self.native(
+                Opcode::STP_64_ldstpair_pre,
+                [
+                    (FieldId::Rt, 29),
+                    (FieldId::Rt2, 30),
+                    (FieldId::Rn, 31),
+                    (FieldId::imm7, 126),
+                ],
+                |out| out.write_str("stp\tx29, x30, [sp, #-16]!"),
+            );
+            self.native(
+                Opcode::ADD_64_addsub_imm,
+                [
+                    (FieldId::Rd, 29),
+                    (FieldId::Rn, 31),
+                    (FieldId::imm12, 0),
+                    (FieldId::sh, 0),
+                ],
+                |out| out.write_str("mov\tx29, sp"),
+            );
+            self.out.directive(Directive::Cfi(Cfi::DefCfa {
+                register: 29,
+                offset: 16,
+            }));
+            self.out.directive(Directive::Cfi(Cfi::Offset {
+                register: 30,
+                offset: -8,
+            }));
+            self.out.directive(Directive::Cfi(Cfi::Offset {
+                register: 29,
+                offset: -16,
+            }));
+        }
         // Push the callee-saved registers in pairs, keeping `sp` 16-byte
         // aligned; an odd one out still takes 16 bytes. Pair `k` is at
         // `x29 - 16 * (k + 1)`, which is 16 bytes further from the CFA.
@@ -1166,8 +1240,9 @@ impl<'a> FunctionCompiler<'a> {
         if self.base != "sp" {
             self.mach("mov", [(self.base).into(), (Reg::SP).into()]);
         }
-        // Arguments arrive in x0–x7 and v0–v7, which are never allocated,
-        // so this copy has no cycles; it may still store to spill slots.
+        // Arguments arrive in x0–x7 and v0–v7. Scalar private leaves
+        // may allocate the integer argument bank, so use a parallel copy
+        // that also handles cycles; it may still store to spill slots.
         // Stack arguments are in the caller's frame, just above ours. An
         // `sret` address arrives in x8, which is also a scratch register,
         // so nothing may use scratch registers before it is copied: only
@@ -3397,6 +3472,9 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Restores the callee-saved registers, `sp` and the frame pointer.
     fn epilogue(&mut self) {
+        if self.frameless {
+            return;
+        }
         let saved = self.alloc.callee_saved_used.clone();
         let float_saved = self.alloc.float_callee_saved_used.clone();
         let pairs = saved.len().div_ceil(2) + float_saved.len().div_ceil(2);

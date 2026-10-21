@@ -447,6 +447,8 @@ struct FunctionCompiler<'a> {
     /// Outgoing arguments, spill slots and IR stack slots: what `sub rsp`
     /// allocates below the saved registers.
     frame_size: usize,
+    /// A private leaf with no stack frame or callee-save obligations.
+    frameless: bool,
     /// The callee-saved registers pushed, in order.
     saved: Vec<u8>,
     /// The block emitted after the current one, which a branch can fall
@@ -655,6 +657,33 @@ impl<'a> FunctionCompiler<'a> {
         if frame_size > i32::MAX as usize / 2 {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
+        let has_tls_address = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
+            InstData::SymbolAddr { symbol } => module
+                .data_object(func.symbol_name(*symbol))
+                .is_some_and(|data| data.thread_local),
+            _ => false,
+        });
+        let frameless = func.sig.cc == CallConv::Fast
+            && !has_tls_address
+            && module.files.is_empty()
+            && func.personality.is_none()
+            && frame_size == 0
+            && named.stack == 0
+            && saved.is_empty()
+            && func.sig.params.iter().all(|p| p.purpose == Purpose::Normal)
+            && !func.layout_insts().any(|(_, i)| {
+                let d = func.inst_data(i);
+                is_call(d)
+                    || matches!(
+                        d,
+                        InstData::Intrinsic { .. }
+                            | InstData::InlineAsm { .. }
+                            | InstData::ReturnCall { .. }
+                            | InstData::ReturnCallIndirect { .. }
+                            | InstData::Invoke { .. }
+                            | InstData::LandingPad { .. }
+                    )
+            });
         Ok(Self {
             func,
             module,
@@ -679,6 +708,7 @@ impl<'a> FunctionCompiler<'a> {
             reg_save,
             named,
             frame_size,
+            frameless,
             saved,
             next_block: None,
             features: pipeline.selector.x86_features(),
@@ -731,14 +761,22 @@ impl<'a> FunctionCompiler<'a> {
             self.prologue_end = true;
         }
         self.out.directive(Directive::Cfi(Cfi::Start));
-        self.emit(Opcode::Push, [asm_arg(&(r64(5)))]);
-        self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
-        self.out.directive(Directive::Cfi(Cfi::Offset {
-            register: 6,
-            offset: -16,
-        }));
-        self.emit(Opcode::Mov, [asm_arg(&(r64(5))), asm_arg(&(r64(4)))]);
-        self.out.directive(Directive::Cfi(Cfi::DefCfaRegister(6)));
+        if self.frameless {
+            // The return address remains at rsp; the caller's rbp is untouched.
+            self.out.directive(Directive::Cfi(Cfi::DefCfa {
+                register: 7,
+                offset: 8,
+            }));
+        } else {
+            self.emit(Opcode::Push, [asm_arg(&(r64(5)))]);
+            self.out.directive(Directive::Cfi(Cfi::DefCfaOffset(16)));
+            self.out.directive(Directive::Cfi(Cfi::Offset {
+                register: 6,
+                offset: -16,
+            }));
+            self.emit(Opcode::Mov, [asm_arg(&(r64(5))), asm_arg(&(r64(4)))]);
+            self.out.directive(Directive::Cfi(Cfi::DefCfaRegister(6)));
+        }
         // Each push is 8 bytes further from the CFA, which is rbp + 16.
         for (k, r) in self.saved.clone().into_iter().enumerate() {
             self.emit(Opcode::Push, [asm_arg(&(r64(r)))]);
@@ -2545,6 +2583,9 @@ impl<'a> FunctionCompiler<'a> {
 
     /// Restores the callee-saved registers, rsp and rbp.
     fn epilogue(&mut self) {
+        if self.frameless {
+            return;
+        }
         if self.saved.is_empty() {
             self.emit(Opcode::Mov, [asm_arg(&(r64(4))), asm_arg(&(r64(5)))]);
         } else {
