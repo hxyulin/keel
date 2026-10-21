@@ -4,7 +4,6 @@
 //! types can also forward from uniquely written dominating pieces. This
 //! handles union temporaries exposed by aggregate helpers without assuming that
 //! arbitrary pointers cannot alias.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, StackSlot, Type, Value, ValueDef,
@@ -259,10 +258,8 @@ pub fn run(func: &mut Function) -> bool {
             }
         })
     });
-    let dominators = cross_block.then(|| {
-        let cfg = ControlFlowGraph::compute(func);
-        DominatorTree::compute(func, &cfg)
-    });
+    let analysis = cross_block.then(|| crate::analysis::get(func));
+    let dominators = analysis.as_ref().map(|analysis| &analysis.dom);
     let mut changed = false;
     let mut remaining_loads = FxHashSet::default();
     for block in func.blocks().collect::<Vec<_>>() {

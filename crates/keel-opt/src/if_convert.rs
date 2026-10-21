@@ -18,7 +18,7 @@ pub fn run(f: &mut Function) -> bool {
     // Visit children first, independent of layout order. Each original head is
     // considered once; newly exposed outer shapes retain the same arm budgets
     // (including selects already introduced by inner conversions).
-    let heads = ControlFlowGraph::compute(f).reverse_postorder(f);
+    let heads = crate::analysis::get(f).dom.rpo().to_vec();
     for head in heads.into_iter().rev() {
         if !f.is_block_inserted(head) {
             continue;
@@ -29,8 +29,9 @@ pub fn run(f: &mut Function) -> bool {
         let D::Brif { cond, dests } = f.inst_data(term).clone() else {
             continue;
         };
-        let cfg = ControlFlowGraph::compute(f);
-        if !cfg.reverse_postorder(f).contains(&head) {
+        let analysis = crate::analysis::get(f);
+        let cfg = &analysis.cfg;
+        if !analysis.dom.is_reachable(head) {
             continue;
         }
         if dests[0].block == dests[1].block {
@@ -46,8 +47,8 @@ pub fn run(f: &mut Function) -> bool {
             continue;
         }
         let paths = [
-            paths(f, &cfg, head, &dests[0]),
-            paths(f, &cfg, head, &dests[1]),
+            paths(f, cfg, head, &dests[0]),
+            paths(f, cfg, head, &dests[1]),
         ];
         // The zero-block prefix represents a direct edge to the join. Longer
         // prefixes admit private forwarding blocks left by nested ternaries.

@@ -3,7 +3,6 @@
 //! No uninitialized SSA values are invented: a forward must analysis
 //! proves every load initialized on every path, including zero-trip loops.
 //! All frame observers and exception/nonlocal continuations are excluded.
-use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, EntityRef, Function, InsertPoint, InstData, StackSlot, Type, Value, ValueDef,
@@ -75,8 +74,8 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
     {
         return false;
     }
-    let cfg = ControlFlowGraph::compute(f);
-    let rpo = cfg.reverse_postorder(f);
+    let analysis = crate::analysis::get(f);
+    let (cfg, rpo) = (&analysis.cfg, analysis.dom.rpo());
     let entry = rpo[0];
     // Avoid fabricating edge values for unreachable predecessors. Cleanup can
     // remove those blocks before this pass. Entry backedges need an entry phi.

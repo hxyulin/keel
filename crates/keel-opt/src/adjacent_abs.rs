@@ -57,13 +57,15 @@ pub fn run(f: &mut Function) -> bool {
             || Some(arm) == f.entry_block()
             || !dests[0].args.is_empty()
             || !f.block_params(arm).is_empty()
-            || ControlFlowGraph::compute(f).preds(arm) != [head]
         {
             continue;
         }
         let [neg, jump] = *f.block_insts(arm) else {
             continue;
         };
+        if ControlFlowGraph::compute(f).preds(arm) != [head] {
+            continue;
+        }
         let D::Unary {
             op: UnaryOp::Ineg,
             arg,

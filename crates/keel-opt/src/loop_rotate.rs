@@ -1,6 +1,5 @@
 //! Bounded guarded rotation. Header tests are copied to the latch; the original
 //! entry guard remains, so no body access executes on an empty loop.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{Block, Function, InstData as D, Value};
 pub(crate) struct LoopRotate;
@@ -35,8 +34,8 @@ impl crate::Pass for LoopRotate {
     }
 }
 fn rotate(f: &mut Function, h: Block) -> bool {
-    let cfg = ControlFlowGraph::compute(f);
-    let dom = DominatorTree::compute(f, &cfg);
+    let analysis = crate::analysis::get(f);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let hi = f.block_insts(h).to_vec();
     if hi.len() < 2 || hi.len() > 5 || f.block_params(h).len() > 4 {
         return false;

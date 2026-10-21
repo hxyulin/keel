@@ -4,7 +4,7 @@
 //! anchors the parameter. An unanchored cycle is not a copy. Every edge is
 //! considered, including both arms of one branch and unreachable predecessors.
 
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::dominators::DominatorTree;
 use keel_ir::{Block, EntityRef, Function, Inst, Value, ValueDef};
 
 fn replacement(
@@ -50,8 +50,8 @@ pub fn run(func: &mut Function) -> bool {
     {
         return false;
     }
-    let cfg = ControlFlowGraph::compute(func);
-    let dom = DominatorTree::compute(func, &cfg);
+    let analysis = crate::analysis::get(func);
+    let dom = &analysis.dom;
     let mut incoming = vec![Vec::new(); func.num_blocks()];
     let mut users: Vec<Vec<Block>> = vec![Vec::new(); func.num_values()];
     // Only terminators branch.

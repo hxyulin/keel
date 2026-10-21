@@ -3,8 +3,8 @@
 //! A [`Pass`] returns whether it changed anything. Most passes work on one
 //! function at a time; module passes such as inlining use `run_module`.
 //! Function passes compute the analyses they need
-//! (CFG, dominators) themselves; there is no analysis cache until one is
-//! needed.
+//! (CFG, dominators) themselves, through a cache that reuses them while the
+//! CFG is unchanged; see `analysis`.
 //!
 //! Passes must preserve valid IR regardless of verification policy. Repeated
 //! checks after passes and canonical restoration default on with debug assertions
@@ -17,6 +17,7 @@ use std::fmt;
 
 mod adjacent_abs;
 mod adjacent_diff;
+mod analysis;
 mod branch_ranges;
 mod call_contracts;
 mod call_load_reuse;
@@ -33,7 +34,6 @@ pub use inline::{InlineReport, InlineSkip, run_with_report as inline_with_report
 pub use report::{InlineSite, IrCounts, OptimizationReport, PassObservation};
 mod instcombine;
 mod internal_fast_calls;
-pub mod private_aggregate;
 mod known_bits;
 mod load_narrow;
 mod load_reuse;
@@ -42,6 +42,7 @@ mod loop_rotate;
 mod loop_strength_reduce;
 mod loop_unroll;
 mod loop_vectorize;
+pub mod private_aggregate;
 pub use loop_vectorize::VectorTarget;
 mod memory_alias;
 mod memory_forward;
@@ -603,6 +604,15 @@ impl Versions {
     }
 }
 
+/// Drops cached analyses when a pipeline ends, however it ends.
+struct ClearAnalyses;
+
+impl Drop for ClearAnalyses {
+    fn drop(&mut self) {
+        analysis::clear();
+    }
+}
+
 /// Custom pipeline with scoped options; canonical restoration always runs.
 pub fn run_pipeline_for_target_with_options(
     module: &mut Module,
@@ -612,6 +622,7 @@ pub fn run_pipeline_for_target_with_options(
 ) -> Result<(), OptError> {
     let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
+    let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
     for &pass in passes {
@@ -714,6 +725,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
     let verification_enabled = options.verification.enabled();
     use std::time::Instant;
     profiling::scope!("optimization");
+    let _clear = ClearAnalyses;
     let mut canonical = vec![false; module.functions.len()];
     let mut versions = Versions::new(module.functions.len());
     for (pipeline_index, &pass) in passes.iter().enumerate() {

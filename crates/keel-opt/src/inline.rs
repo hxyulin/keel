@@ -7,7 +7,6 @@
 //! Instruction growth bounds the increase in layout instructions before cleanup;
 //! the removed call pays for the jump entering the cloned body.
 use crate::{InlineSite, Pass};
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp, BlockCall, DebugScope, EntityRef, Function, InsertPoint, Inst, InstData, Intrinsic,
@@ -1164,8 +1163,8 @@ fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
         var.param = false;
         caller.debug_vars.push(var);
     }
-    let cfg = ControlFlowGraph::compute(callee);
-    let dom = DominatorTree::compute(callee, &cfg);
+    let analysis = crate::analysis::get(callee);
+    let dom = &analysis.dom;
     let mut blocks = FxHashMap::default();
     let mut values = FxHashMap::default();
     for &old in dom.rpo() {

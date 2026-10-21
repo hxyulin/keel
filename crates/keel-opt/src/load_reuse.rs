@@ -89,12 +89,13 @@ fn run(func: &mut Function) -> bool {
     if !func.debug_vars.is_empty() {
         return false;
     }
-    let cfg = ControlFlowGraph::compute(func);
+    let analysis = crate::analysis::get(func);
+    let cfg = &analysis.cfg;
     let aliases = AliasInfo::compute(func);
     let mut exits: Vec<Option<(usize, Facts)>> = vec![None; func.num_blocks()];
     let mut changed = false;
-    for block in cfg.reverse_postorder(func) {
-        let (depth, mut facts) = incoming(func, &cfg, block, &exits);
+    for &block in analysis.dom.rpo() {
+        let (depth, mut facts) = incoming(func, cfg, block, &exits);
         // Only the visited load is removed; the next one moves into its place.
         let mut i = 0;
         while let Some(&inst) = func.block_insts(block).get(i) {

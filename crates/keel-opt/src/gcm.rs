@@ -37,15 +37,13 @@
 //! trap, so running one on a path that did not run it before (hoisting out
 //! of a loop that runs zero times) is harmless.
 
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
-use keel_ir::loops::LoopDepth;
 use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(func);
-    let domtree = DominatorTree::compute(func, &cfg);
-    let loops = LoopDepth::compute(func, &cfg, &domtree);
+    let analysis = crate::analysis::get(func);
+    let domtree = &analysis.dom;
+    let loops = analysis.loops(func);
 
     // Depth of each block in the dominator tree; the entry is 0.
     let mut dom_depth = vec![0u32; func.num_blocks()];

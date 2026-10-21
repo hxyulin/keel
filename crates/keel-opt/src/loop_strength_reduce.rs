@@ -2,7 +2,7 @@
 //! Invariant offsets are absorbed into existing recurrences without new state.
 //! No pointer arithmetic is widened and no load or potentially trapping operation
 //! is moved. Entry multiplication is pure, including on the zero-trip path.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::dominators::DominatorTree;
 use keel_ir::{
     BinaryOp as B, Block, Function, InsertPoint, Inst, InstData as D, Type, Value, ValueDef,
 };
@@ -43,8 +43,8 @@ fn emit(f: &mut Function, before: Inst, data: D) -> Value {
 }
 
 pub fn run(f: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(f);
-    let dom = DominatorTree::compute(f, &cfg);
+    let analysis = crate::analysis::get(f);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let headers: Vec<_> = f.blocks().collect();
     let mut budget = 16;
     let mut changed = false;
@@ -147,7 +147,7 @@ pub fn run(f: &mut Function) -> bool {
                 } else {
                     continue;
                 };
-                if f.value_type(stride) != ty || !invariant(f, &dom, pre, stride) {
+                if f.value_type(stride) != ty || !invariant(f, dom, pre, stride) {
                     continue;
                 }
                 let initial = emit(
@@ -212,8 +212,8 @@ fn fold_offsets(f: &mut Function) -> bool {
     {
         return false;
     }
-    let cfg = ControlFlowGraph::compute(f);
-    let dom = DominatorTree::compute(f, &cfg);
+    let analysis = crate::analysis::get(f);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let mut budget = 16;
     let mut changed = false;
     for header in f.blocks().collect::<Vec<_>>() {
@@ -291,7 +291,7 @@ fn fold_offsets(f: &mut Function) -> bool {
             };
             // Literal steps may still be in the body before GCM. Every other
             // step must already dominate entry, so it cannot depend on r.
-            if !invariant(f, &dom, pre, delta)
+            if !invariant(f, dom, pre, delta)
                 && !def(f, delta).is_some_and(|i| matches!(f.inst_data(i), D::Iconst { .. }))
             {
                 continue;
@@ -332,7 +332,7 @@ fn fold_offsets(f: &mut Function) -> bool {
                 };
                 let other = f.resolve(other);
                 if f.inst_block(i) != body
-                    || !invariant(f, &dom, pre, other)
+                    || !invariant(f, dom, pre, other)
                     || offset.is_some_and(|o| o != other)
                     || f.resolve(f.first_result(i)) != f.first_result(i)
                 {

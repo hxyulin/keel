@@ -1,5 +1,4 @@
 //! Consume explicit direct-callee contracts, without inferring contracts from bodies.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashSet;
 use keel_ir::{Block, Clause, EntityRef, Function, Inst, InstData, ValueDef};
 
@@ -38,8 +37,8 @@ pub fn run(func: &mut Function) -> bool {
         };
         let block = func.inst_block(inst);
         let normal = dests[0].clone();
-        let cfg = ControlFlowGraph::compute(func);
-        let dom = DominatorTree::compute(func, &cfg);
+        let analysis = crate::analysis::get(func);
+        let dom = &analysis.dom;
         if !dom.is_reachable(block) {
             continue;
         }
@@ -123,7 +122,8 @@ fn deletion_plan(
     successor: Option<Block>,
     suffix: &[Inst],
 ) -> Option<Vec<Block>> {
-    let cfg = ControlFlowGraph::compute(func);
+    let analysis = crate::analysis::get(func);
+    let cfg = &analysis.cfg;
     let mut reachable = vec![false; func.num_blocks()];
     let mut work = vec![func.entry_block()?];
     while let Some(block) = work.pop() {

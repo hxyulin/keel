@@ -13,14 +13,13 @@
 //! Pinned instructions are never numbered: two loads of the same address
 //! may see different memory.
 
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{BinaryOp, EntityRef, Function, Inst, InstData, IntCC, OverflowOp};
 use std::collections::hash_map::Entry;
 
 pub fn run(func: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(func);
-    let domtree = DominatorTree::compute(func, &cfg);
+    let analysis = crate::analysis::get(func);
+    let domtree = &analysis.dom;
     let Some(entry) = func.entry_block() else {
         return false;
     };

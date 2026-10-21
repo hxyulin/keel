@@ -14,7 +14,6 @@
 //! a folded NaN may differ in payload from the one the machine would make.
 
 use fp::Float;
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::{
     BinaryOp, ConvertOp, Function, InsertPoint, Inst, InstData, IntCC, OverflowOp, Type, UnaryOp,
     Value, ValueDef,
@@ -23,8 +22,8 @@ use keel_ir::{
 mod fp;
 
 pub fn run(func: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(func);
-    let domtree = DominatorTree::compute(func, &cfg);
+    let analysis = crate::analysis::get(func);
+    let domtree = &analysis.dom;
     let mut changed = false;
     for &block in domtree.rpo() {
         for inst in func.block_insts(block).to_vec() {

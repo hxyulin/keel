@@ -165,6 +165,15 @@ impl ControlFlowGraph {
         order
     }
 
+    /// Releases spare capacity, for a graph kept for a long time. Arrays
+    /// from the reuse pool may be sized for a much larger function.
+    pub fn shrink_to_fit(&mut self) {
+        self.succ_range.shrink_to_fit();
+        self.succs.shrink_to_fit();
+        self.pred_start.shrink_to_fit();
+        self.preds.shrink_to_fit();
+    }
+
     pub fn preds(&self, block: Block) -> &[Block] {
         let i = block.index();
         &self.preds[self.pred_start[i] as usize..self.pred_start[i + 1] as usize]
@@ -244,6 +253,13 @@ impl DominatorTree {
         }
         tree.idom[entry.index()] = None;
         tree
+    }
+
+    /// Releases spare capacity, like [`ControlFlowGraph::shrink_to_fit`].
+    pub fn shrink_to_fit(&mut self) {
+        self.rpo.shrink_to_fit();
+        self.rpo_number.shrink_to_fit();
+        self.idom.shrink_to_fit();
     }
 
     fn intersect(&self, mut a: Block, mut b: Block) -> Block {

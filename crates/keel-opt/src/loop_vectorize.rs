@@ -5,7 +5,7 @@
 //! The separate loop-reduce passes handle read-only wrapping integer sums.
 //! Runtime range checks permit identical or disjoint streams, rejecting partial
 //! overlap. The original loop handles short inputs, aliasing, and the tail.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::dominators::DominatorTree;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, Inst, InstData as D, IntCC, Type, Value,
@@ -507,7 +507,7 @@ fn analyze(
     f: &Function,
     header: Block,
     target: VectorTarget,
-    analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
+    analysis: &mut Option<std::rc::Rc<crate::analysis::Analysis>>,
     affine: bool,
     casts: bool,
     multi: bool,
@@ -556,11 +556,8 @@ fn analyze(
         (IntCC::Sle, false, true) => (args[0], true, 1),
         _ => return None,
     };
-    let (cfg, dom) = analysis.get_or_insert_with(|| {
-        let cfg = ControlFlowGraph::compute(f);
-        let dom = DominatorTree::compute(f, &cfg);
-        (cfg, dom)
-    });
+    let analysis = &**analysis.get_or_insert_with(|| crate::analysis::get(f));
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let body = dests[body_index].block;
     if body == header
         || cfg.preds(body) != [header]

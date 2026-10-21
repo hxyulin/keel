@@ -1,7 +1,6 @@
 //! Integer intervals from dominating conditional edges. Facts are scoped to
 //! dominator subtrees and never transported through memory or block arguments.
 //! Exact equality facts also cover pointers; they establish no dereferenceability.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
 use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Function, InstData, IntCC, Type, Value, ValueDef};
 
@@ -110,8 +109,8 @@ fn prove(r: Range, cond: IntCC, c: u128) -> Option<bool> {
 }
 
 pub fn run(func: &mut Function) -> bool {
-    let cfg = ControlFlowGraph::compute(func);
-    let dom = DominatorTree::compute(func, &cfg);
+    let analysis = crate::analysis::get(func);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     let Some(entry) = func.entry_block() else {
         return false;
     };

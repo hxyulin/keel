@@ -346,14 +346,14 @@ fn run(f: &mut Function) -> bool {
     }
     let mut changed = false;
     for _ in 0..8 {
-        let cfg = ControlFlowGraph::compute(f);
-        let dom = DominatorTree::compute(f, &cfg);
-        let depth = LoopDepth::compute(f, &cfg, &dom);
+        let analysis = crate::analysis::get(f);
+        let (cfg, dom) = (&analysis.cfg, &analysis.dom);
+        let depth = analysis.loops(f);
         let alias = AliasInfo::compute(f);
         let candidate = dom
             .rpo()
             .iter()
-            .find_map(|&h| analyze(f, &cfg, &dom, &depth, &alias, h));
+            .find_map(|&h| analyze(f, cfg, dom, depth, &alias, h));
         let Some(candidate) = candidate else {
             break;
         };

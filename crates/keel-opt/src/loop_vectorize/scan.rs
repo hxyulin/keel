@@ -26,7 +26,7 @@ fn same_edge(f: &Function, a: &BlockCall, b: &BlockCall) -> bool {
 fn analyze(
     f: &Function,
     header: Block,
-    analysis: &mut Option<(ControlFlowGraph, DominatorTree)>,
+    analysis: &mut Option<std::rc::Rc<crate::analysis::Analysis>>,
 ) -> Option<Scan> {
     let [pointer] = *f.block_params(header) else {
         return None;
@@ -172,11 +172,8 @@ fn analyze(
     if !f.block_insts(step).contains(&offset_inst) || !f.block_insts(step).contains(&increment) {
         return None;
     }
-    let (cfg, dom) = analysis.get_or_insert_with(|| {
-        let cfg = ControlFlowGraph::compute(f);
-        let dom = DominatorTree::compute(f, &cfg);
-        (cfg, dom)
-    });
+    let analysis = &**analysis.get_or_insert_with(|| crate::analysis::get(f));
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
     if cfg.preds(test) != [header] || cfg.preds(step) != [test] || cfg.preds(header).len() != 2 {
         return None;
     }

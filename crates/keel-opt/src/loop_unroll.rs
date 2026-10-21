@@ -5,9 +5,8 @@
 //! up to two extra same-width additive recurrences are forwarded sequentially.
 //! Whole iterations are cloned in order, including both loads, before beginning
 //! the next iteration; only the non-observable wrapping sum is reassociated.
-use keel_ir::dominators::{ControlFlowGraph, DominatorTree};
+use keel_ir::dominators::DominatorTree;
 use keel_ir::fxhash::{FxHashMap, FxHashSet};
-use keel_ir::loops::LoopDepth;
 use keel_ir::{
     BinaryOp as B, Block, BlockCall, ConvertOp, Function, InsertPoint, Inst, InstData as D, IntCC,
     Type, Value, ValueDef,
@@ -95,9 +94,9 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     }
     let body = dests[0].block;
-    let cfg = ControlFlowGraph::compute(f);
-    let dom = DominatorTree::compute(f, &cfg);
-    let depth = LoopDepth::compute(f, &cfg, &dom);
+    let analysis = crate::analysis::get(f);
+    let (cfg, dom) = (&analysis.cfg, &analysis.dom);
+    let depth = analysis.loops(f);
     if body == header
         || dests[1].block == header
         || dests[1].block == body
@@ -115,7 +114,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         return None;
     }
     let pre = *preds.iter().find(|&&b| b != body)?;
-    if pre == header || depth.depth(pre) >= depth.depth(header) || !invariant(f, &dom, pre, bound) {
+    if pre == header || depth.depth(pre) >= depth.depth(header) || !invariant(f, dom, pre, bound) {
         return None;
     }
     let pre_jump = *f.block_insts(pre).last()?;
@@ -125,7 +124,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
     if dest.block != header
         || dest.args.len() != params.len()
         || constant(f, dest.args[0]) != Some(0)
-        || !invariant(f, &dom, pre, dest.args[1])
+        || !invariant(f, dom, pre, dest.args[1])
     {
         return None;
     }
@@ -163,8 +162,8 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
         if f.resolve(param) != param
             || !matches!(f.value_type(param), Type::I32 | Type::I64)
             || f.inst_block(update) != body
-            || !invariant(f, &dom, pre, stride)
-            || !invariant(f, &dom, pre, seed)
+            || !invariant(f, dom, pre, stride)
+            || !invariant(f, dom, pre, seed)
         {
             return None;
         }
@@ -236,7 +235,7 @@ fn analyze(f: &Function, header: Block) -> Option<Candidate> {
             // its updated result cannot feed another operation in this body.
             if v == next_sum
                 || v == sum && i != reduction
-                || !(params.contains(&v) || local.contains(&v) || invariant(f, &dom, pre, v))
+                || !(params.contains(&v) || local.contains(&v) || invariant(f, dom, pre, v))
             {
                 ok = false;
             }

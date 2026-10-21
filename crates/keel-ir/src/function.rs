@@ -18,6 +18,7 @@ use crate::{
     Arena, Block, DataRef, EntityRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value,
 };
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum CallConv {
@@ -302,6 +303,13 @@ struct InstNode {
 
 const NO_BLOCK: u32 = u32::MAX;
 
+static NEXT_CFG_STAMP: AtomicU64 = AtomicU64::new(1);
+
+/// A stamp no function state has had before; see [`Function::cfg_stamp`].
+fn fresh_cfg_stamp() -> u64 {
+    NEXT_CFG_STAMP.fetch_add(1, Ordering::Relaxed)
+}
+
 /// Append-only pool offsets, checked on creation so that they fit `u32`.
 #[derive(Copy, Clone)]
 struct ResultRange {
@@ -387,6 +395,8 @@ pub struct Function {
     layout: Vec<Block>,
     /// Number of instructions in the layout's blocks.
     layout_len: usize,
+    /// Renewed whenever the CFG may change; see [`Function::cfg_stamp`].
+    cfg_stamp: u64,
     /// The function that interprets this function's landing pads while
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
@@ -497,6 +507,7 @@ impl Function {
             sig_index: KeyIndex::default(),
             layout: Vec::new(),
             layout_len: 0,
+            cfg_stamp: fresh_cfg_stamp(),
             personality: None,
             local: false,
             weak_odr: false,
@@ -615,6 +626,7 @@ impl Function {
             ..BlockData::default()
         });
         self.layout.push(block);
+        self.cfg_stamp = fresh_cfg_stamp();
         block
     }
 
@@ -801,6 +813,9 @@ impl Function {
             }
         };
         let data = &mut self.blocks[block];
+        if index == data.insts.len() {
+            self.cfg_stamp = fresh_cfg_stamp();
+        }
         self.block_insts.insert(&mut data.insts, index, inst);
         self.layout_len += usize::from(data.in_layout);
         self.insts[inst].block = block.index() as u32;
@@ -837,6 +852,9 @@ impl Function {
         let block = self.inst_block(inst);
         let index = self.position(inst);
         let data = &mut self.blocks[block];
+        if index + 1 == data.insts.len() {
+            self.cfg_stamp = fresh_cfg_stamp();
+        }
         self.block_insts.remove(&mut data.insts, index);
         self.layout_len -= usize::from(data.in_layout);
         self.insts[inst].block = NO_BLOCK;
@@ -862,6 +880,10 @@ impl Function {
     /// remove the old one. The verifier checks this contract after passes.
     #[inline]
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
+        let block = self.insts[inst].block;
+        if block != NO_BLOCK && self.block_insts(Block::new(block as usize)).last() == Some(&inst) {
+            self.cfg_stamp = fresh_cfg_stamp();
+        }
         &mut self.insts[inst].data
     }
 
@@ -916,6 +938,17 @@ impl Function {
             let index = self.layout.iter().position(|&b| b == block);
             self.layout.remove(index.expect("a block in the layout"));
         }
+        self.cfg_stamp = fresh_cfg_stamp();
+    }
+
+    /// Identifies the inputs of the control-flow graph: the block count, the
+    /// layout, and each block's last instruction. Every change to them gives
+    /// the function a stamp no function has had before, so functions with
+    /// equal stamps (a function and its unchanged clones) have equal CFGs.
+    /// Mutable access to a block's last instruction counts as a change.
+    #[inline]
+    pub fn cfg_stamp(&self) -> u64 {
+        self.cfg_stamp
     }
 
     /// Whether `block` is in the layout.
