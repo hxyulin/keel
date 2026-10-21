@@ -900,11 +900,51 @@ thread_local! {
     static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::default();
 }
 
+impl Scratch {
+    /// Arrays this size serve all but the largest functions. Keeping the
+    /// arrays of those would hold their memory through the rest of the
+    /// compilation for little gain.
+    const KEPT_BYTES: usize = 1 << 18;
+
+    fn heap_bytes(&self) -> usize {
+        fn bytes<T>(list: &Vec<T>) -> usize {
+            list.capacity() * std::mem::size_of::<T>()
+        }
+        bytes(&self.bounds)
+            + bytes(&self.segment_ends)
+            + bytes(&self.segments)
+            + bytes(&self.exposed)
+            + bytes(&self.def_block)
+            + bytes(&self.reachable)
+            + bytes(&self.start)
+            + bytes(&self.fill)
+            + bytes(&self.use_blocks)
+            + bytes(&self.in_entries)
+            + bytes(&self.out_entries)
+            + bytes(&self.marks)
+            + bytes(&self.stack)
+            + bytes(&self.live_in.start)
+            + bytes(&self.live_in.values)
+            + bytes(&self.live_out.start)
+            + bytes(&self.live_out.values)
+            + bytes(&self.open)
+            + bytes(&self.touched)
+            + bytes(&self.calls)
+            + bytes(&self.preserved_calls)
+            + bytes(&self.twice)
+            + bytes(&self.pieces)
+            + bytes(&self.chains)
+            + bytes(&self.list)
+    }
+}
+
 /// Runs `f` with this thread's scratch arrays.
 fn with_scratch<R>(f: impl FnOnce(&mut Scratch) -> R) -> R {
     let mut scratch = SCRATCH.try_with(|cell| cell.take()).unwrap_or_default();
     let result = f(&mut scratch);
-    let _ = SCRATCH.try_with(|cell| cell.replace(scratch));
+    if scratch.heap_bytes() <= Scratch::KEPT_BYTES {
+        let _ = SCRATCH.try_with(|cell| cell.replace(scratch));
+    }
     result
 }
 
