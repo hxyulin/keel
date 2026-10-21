@@ -873,6 +873,24 @@ impl<'a, 'b> FnTranslator<'a, 'b> {
                 let to_ty = ty(*to)?;
                 use k::ConvertOp as C;
                 let v = match op {
+                    C::SwidenLow | C::UwidenLow => {
+                        // Keel observes only the lowest destination-lane-count
+                        // source lanes, including multi-step width changes.
+                        let dest = to.vector().expect("verified widening destination");
+                        let lane_ty = ty(dest.lane_type())?;
+                        let zero = self.b.ins().iconst(lane_ty, 0);
+                        let mut value = self.b.ins().splat(to_ty, zero);
+                        for lane in 0..dest.lanes() {
+                            let part = self.b.ins().extractlane(x, lane);
+                            let part = if *op == C::SwidenLow {
+                                self.b.ins().sextend(lane_ty, part)
+                            } else {
+                                self.b.ins().uextend(lane_ty, part)
+                            };
+                            value = self.b.ins().insertlane(value, part, lane);
+                        }
+                        value
+                    }
                     C::Sext => self.b.ins().sextend(to_ty, x),
                     C::Uext => self.b.ins().uextend(to_ty, x),
                     C::Trunc => self.b.ins().ireduce(to_ty, x),

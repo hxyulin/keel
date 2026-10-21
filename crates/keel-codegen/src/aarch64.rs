@@ -1705,6 +1705,20 @@ impl<'a> FunctionCompiler<'a> {
                 );
                 self.def_done(result, d);
             }
+            InstData::Convert {
+                op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
+                ty,
+                arg,
+            } => {
+                self.vector_widen(op, ty, arg, result);
+            }
+            InstData::Convert {
+                op: ConvertOp::Bitcast,
+                ty,
+                arg,
+            } if ty.is_vector() && self.ty(arg).is_vector() => {
+                self.vector_bitcast(arg, result);
+            }
             InstData::Convert { op, ty, arg } if ty.is_float() || self.ty(arg).is_float() => {
                 self.float_convert(op, ty, arg, result);
             }

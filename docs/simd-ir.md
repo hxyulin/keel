@@ -352,3 +352,24 @@ For a comparison-controlled contribution with a zero false arm, reduction
 emission uses `vand` directly with the canonical comparison mask. This is local
 to predicates proven by the reduction matcher; general `vselect` still accepts
 arbitrary nonzero lane masks and keeps its explicit normalization.
+
+## Low-lane integer widening
+
+`swiden_low.DEST arg` and `uwiden_low.DEST arg` preserve a 128-bit vector while
+extending its lowest destination-lane-count integer lanes. The destination has
+wider integer lanes; all higher source lanes are ignored. For example,
+`swiden_low.i64x2` on i16x8 observes only its first two lanes and sign-extends
+each to i64. These operations do not saturate or move arithmetic across an
+extension. NEON emits `sshll`/`ushll` chains, shared x86 legalization uses exact
+scalar lanes, and the diagnostic Cranelift bridge extracts/extends/inserts the
+same lanes.
+
+Full ARM reduction discovery can extend a contiguous i8/i16/i32 load directly
+into an i32/i64 accumulator expression. Its grouped read is exactly the number
+of output lanes times the source element width, never an unconditional 16-byte
+read. It uses a packed scalar read, splat and bitcast before widening. All
+streams share one element width; original first-fault, address overflow, scalar
+tail and hidden-effect restrictions remain. Fast and Portable/SSE2 widening
+eligibility stay unchanged. This is a foundation for mixed-width reductions;
+compound narrowing, packed division and the full `k_narrow` expression remain
+outside this subset.

@@ -386,6 +386,11 @@ pub enum UnaryOp {
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum ConvertOp {
+    /// Extend the lowest destination-lane-count integer lanes of a 128-bit
+    /// vector into wider integer lanes. Upper source lanes are ignored.
+    /// Unlike scalar sext/uext, the result always remains 128 bits.
+    SwidenLow,
+    UwidenLow,
     Sext,
     Uext,
     Trunc,
@@ -481,7 +486,10 @@ impl InstData {
     pub fn is_vector_instruction(&self) -> bool {
         matches!(
             self,
-            Self::VectorSplat { .. }
+            Self::Convert {
+                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                ..
+            } | Self::VectorSplat { .. }
                 | Self::VectorUnary { .. }
                 | Self::VectorBinary { .. }
                 | Self::VectorExtract { .. }
@@ -934,6 +942,8 @@ impl fmt::Display for ConvertOp {
             ConvertOp::Sitofp => "sitofp",
             ConvertOp::Uitofp => "uitofp",
             ConvertOp::Bitcast => "bitcast",
+            ConvertOp::SwidenLow => "swiden_low",
+            ConvertOp::UwidenLow => "uwiden_low",
         })
     }
 }

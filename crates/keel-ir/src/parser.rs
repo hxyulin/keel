@@ -2323,6 +2323,8 @@ fn parse_convert_op(s: &str) -> Option<ConvertOp> {
         "sitofp" => ConvertOp::Sitofp,
         "uitofp" => ConvertOp::Uitofp,
         "bitcast" => ConvertOp::Bitcast,
+        "swiden_low" => ConvertOp::SwidenLow,
+        "uwiden_low" => ConvertOp::UwidenLow,
         _ => return None,
     })
 }

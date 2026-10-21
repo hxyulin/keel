@@ -15,7 +15,7 @@ fn needs_lowering(
     }
     match data {
         InstData::Convert {
-            op: ConvertOp::Bitcast,
+            op: ConvertOp::Bitcast | ConvertOp::SwidenLow | ConvertOp::UwidenLow,
             ty,
             arg,
         } => ty.is_vector() || func.value_type(*arg).is_vector(),
@@ -44,6 +44,10 @@ pub(crate) fn lower(
             continue;
         }
         let used = match data {
+            InstData::Convert {
+                op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+                ..
+            } => [true, false, false, true],
             InstData::Convert { .. } | InstData::VectorExtract { .. } => {
                 [true, false, false, false]
             }
@@ -76,6 +80,30 @@ pub(crate) fn lower(
             }
         }
         let result = match data {
+            InstData::Convert {
+                op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
+                ty,
+                arg,
+            } => {
+                let source = l.ty(arg).vector().unwrap();
+                let dest = ty.vector().unwrap();
+                l.store(pointers[0], arg);
+                for i in 0..dest.lanes() {
+                    let value = l.lane(pointers[0], i, source);
+                    let value = l.emit(InstData::Convert {
+                        op: if op == ConvertOp::SwidenLow {
+                            ConvertOp::Sext
+                        } else {
+                            ConvertOp::Uext
+                        },
+                        ty: dest.lane_type(),
+                        arg: value,
+                    });
+                    let at = l.address(pointers[3], i, dest);
+                    l.store(at, value);
+                }
+                l.load(pointers[3], ty)
+            }
             InstData::Convert { ty, arg, .. } => {
                 l.store(pointers[0], arg);
                 l.load(pointers[0], ty)

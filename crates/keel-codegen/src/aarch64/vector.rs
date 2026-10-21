@@ -99,6 +99,15 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorUnary { op, arg } => {
             unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
         }
+        InstData::Convert {
+            op: ConvertOp::SwidenLow | ConvertOp::UwidenLow,
+            ..
+        } => true,
+        InstData::Convert {
+            op: ConvertOp::Bitcast,
+            ty,
+            arg,
+        } => ty.is_vector() && f.value_type(*arg).is_vector(),
         InstData::VectorSplat { .. }
         | InstData::VectorSelect { .. }
         | InstData::VectorIcmp { .. } => true,
@@ -106,6 +115,63 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_widen(
+        &mut self,
+        op: ConvertOp,
+        ty: Type,
+        arg: Value,
+        result: Option<Value>,
+    ) {
+        let mut shape = self.ty(arg).vector().unwrap();
+        let destination = ty.vector().unwrap();
+        let d = self.def_freg(result);
+        let mut source = self.use_freg(arg, FS0);
+        while shape != destination {
+            let bytes = shape.lane_type().bytes().unwrap();
+            let next = VectorType::ALL
+                .into_iter()
+                .find(|s| s.lane_type().is_int() && s.lane_type().bytes() == Some(bytes * 2))
+                .unwrap();
+            let (opcode, name) = if op == ConvertOp::SwidenLow {
+                (Opcode::SSHLL_asimdshf_L, "sshll")
+            } else {
+                (Opcode::USHLL_asimdshf_L, "ushll")
+            };
+            let source_arrangement = match bytes {
+                1 => "8b",
+                2 => "4h",
+                4 => "2s",
+                _ => unreachable!(),
+            };
+            self.native(
+                opcode,
+                [
+                    (FieldId::Q, 0),
+                    (FieldId::immh, bytes),
+                    (FieldId::immb, 0),
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, source.into()),
+                ],
+                |out| {
+                    write!(
+                        out,
+                        "{name}\tv{d}.{}, v{source}.{source_arrangement}, #0",
+                        arrangement(next)
+                    )
+                },
+            );
+            source = d;
+            shape = next;
+        }
+        self.def_done(result, d);
+    }
+    pub(super) fn vector_bitcast(&mut self, arg: Value, result: Option<Value>) {
+        let source = self.use_freg(arg, FS0);
+        let d = self.def_freg(result);
+        self.move_vector(d, source);
+        self.def_done(result, d);
+    }
+
     pub(super) fn vector_extract(&mut self, arg: Value, lane: u8, result: Option<Value>) {
         let source = self.use_freg(arg, FS0);
         let d = self.def_reg(result);

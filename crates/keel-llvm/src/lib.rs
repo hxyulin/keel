@@ -458,6 +458,12 @@ impl Emitter<'_> {
                 let target = ty(*t)?;
                 let v = self.v(*arg);
                 let opcode = match op {
+                    // This diagnostic exporter intentionally rejects every
+                    // vector type; keep the new vector conversions in that
+                    // same explicit unsupported subset.
+                    ConvertOp::SwidenLow | ConvertOp::UwidenLow => {
+                        return Err("vector types are unsupported".into());
+                    }
                     ConvertOp::Sext => "sext",
                     ConvertOp::Uext => "zext",
                     ConvertOp::Trunc => "trunc",

@@ -608,3 +608,121 @@ fn conditional_zero_arms_use_canonical_mask_and_but_other_arms_keep_lane_selects
         }
     }
 }
+
+fn widening_sum(from: Type, to: Type, op: &str) -> String {
+    let bytes = from.bytes().unwrap();
+    let source = format!(
+        "func @widen(ptr,i64,{to}) -> {to} {{
+block0(v0: ptr,v1: i64,v2: {to}):
+ v3 = iconst.i64 0
+ jump block1(v3,v2)
+block1(v4: i64,v5: {to}):
+ v6 = icmp.ult v4,v1
+ brif v6,block2,block3
+block2:
+ v7 = iconst.i64 {bytes}
+ v8 = imul v4,v7
+ v9 = ptradd v0,v8
+ v10 = load.{from} v9
+ v11 = {op}.{to} v10
+ v12 = iadd v5,v11
+ v13 = iconst.i64 1
+ v14 = iadd v4,v13
+ jump block1(v14,v12)
+block3:
+ return v5
+}}"
+    );
+    if bytes == 1 {
+        source
+            .replace(" v8 = imul v4,v7\n", "")
+            .replace("ptradd v0,v8", "ptradd v0,v4")
+    } else {
+        source
+    }
+}
+
+#[test]
+fn mixed_width_load_reductions_are_full_arm_only_exact_footprint_and_idempotent() {
+    for (from, to) in [
+        (Type::I8, Type::I32),
+        (Type::I8, Type::I64),
+        (Type::I16, Type::I32),
+        (Type::I16, Type::I64),
+        (Type::I32, Type::I64),
+    ] {
+        for op in ["sext", "uext"] {
+            let source = widening_sum(from, to, op);
+            let m = reduce_sum(&source, VectorTarget::Aarch64Neon);
+            let text = m.to_string();
+            let widen = if op == "sext" {
+                "swiden_low"
+            } else {
+                "uwiden_low"
+            };
+            assert!(text.contains(widen), "{from} -> {to}: {text}");
+            assert_eq!(
+                text,
+                reduce_sum(&source, VectorTarget::Aarch64Neon).to_string()
+            );
+            let mut twice = m.clone();
+            keel_opt::run_passes_for_target(
+                &mut twice,
+                &["loop-reduce"],
+                VectorTarget::Aarch64Neon,
+            )
+            .unwrap();
+            assert_eq!(text, twice.to_string());
+            keel_ir::verify_module(&keel_ir::parse(&text).unwrap()).unwrap();
+            // Packed reads cover exactly destination_lanes source elements.
+            let expected = 16 / to.bytes().unwrap() * from.bytes().unwrap();
+            let f = &m.functions[0];
+            for (_, i) in f.layout_insts() {
+                if let InstData::Load { ty, .. } = f.inst_data(i) {
+                    assert!([Some(expected), from.bytes()].contains(&ty.bytes()));
+                    assert!(!ty.is_vector());
+                }
+            }
+            for target in [VectorTarget::Portable, VectorTarget::X86Sse2] {
+                assert_eq!(packed(&reduce_sum(&source, target)), 0);
+            }
+            let mut fast = keel_ir::parse(&source).unwrap();
+            keel_opt::run_passes_for_target(
+                &mut fast,
+                &["fast-loop-reduce"],
+                VectorTarget::Aarch64Neon,
+            )
+            .unwrap();
+            assert_eq!(packed(&fast), 0);
+            let mut volatile_module = keel_ir::parse(&source).unwrap();
+            let f = &mut volatile_module.functions[0];
+            let load = f
+                .layout_insts()
+                .find(|(_, i)| matches!(f.inst_data(*i), InstData::Load { .. }))
+                .unwrap()
+                .1;
+            if let InstData::Load { flags, .. } = f.inst_data_mut(load) {
+                flags.volatile = true;
+            }
+            keel_opt::run_passes_for_target(
+                &mut volatile_module,
+                &["loop-reduce"],
+                VectorTarget::Aarch64Neon,
+            )
+            .unwrap();
+            assert_eq!(packed(&volatile_module), 0);
+        }
+    }
+}
+
+#[test]
+fn widening_never_commutes_across_narrow_wrapping_arithmetic_or_hidden_reads() {
+    let source = widening_sum(Type::I16, Type::I64, "sext");
+    for extra in [
+        "v20 = iconst.i16 3\n v21 = imul v10,v20\n v11 = sext.i64 v21",
+        "v20 = load.i16 v9\n v11 = sext.i64 v10",
+    ] {
+        let source = source.replace("v11 = sext.i64 v10", extra);
+        assert_eq!(packed(&reduce_sum(&source, VectorTarget::Aarch64Neon)), 0);
+    }
+}

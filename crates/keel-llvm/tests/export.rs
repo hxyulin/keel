@@ -260,3 +260,14 @@ fn cli_whole_module_buffering_and_errors() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn low_lane_widening_keeps_the_exporters_explicit_vector_rejection() {
+    for op in ["swiden_low", "uwiden_low"] {
+        let source = format!("func @widen(ptr, ptr) {{\nblock0(v0: ptr, v1: ptr):\n v2 = load.i8x16 v0\n v3 = {op}.i64x2 v2\n store v3, v1\n return\n}}\n");
+        let module = keel_ir::parse(&source).unwrap();
+        keel_ir::verify_module(&module).unwrap();
+        let error = export(&module, TargetProfile::AppleArm64).unwrap_err();
+        assert!(error.contains("vector types are unsupported"), "{error}");
+    }
+}

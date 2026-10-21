@@ -1382,6 +1382,14 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
     // converts in one instruction.
     let small_int = |t: Type| t.is_int() && t != Type::I128;
     let ok = match op {
+        ConvertOp::SwidenLow | ConvertOp::UwidenLow => match (from.vector(), to.vector()) {
+            (Some(f), Some(t)) => {
+                f.lane_type().is_int()
+                    && t.lane_type().is_int()
+                    && f.lane_type().bytes() < t.lane_type().bytes()
+            }
+            _ => false,
+        },
         ConvertOp::Sext | ConvertOp::Uext | ConvertOp::Trunc => match (from.bytes(), to.bytes()) {
             (Some(f), Some(t)) if from.is_int() && to.is_int() => match op {
                 ConvertOp::Trunc => t < f,
@@ -1411,6 +1419,9 @@ fn check_convert(op: ConvertOp, from: Type, to: Type) -> Result<(), &'static str
         return Ok(());
     }
     Err(match op {
+        ConvertOp::SwidenLow | ConvertOp::UwidenLow => {
+            "needs integer vectors with wider destination lanes"
+        }
         ConvertOp::Sext | ConvertOp::Uext => "must convert an integer to a wider integer",
         ConvertOp::Trunc => "must convert an integer to a narrower integer",
         ConvertOp::Fpext => "converts f32 to f64",

@@ -166,6 +166,9 @@ struct Candidate {
     offsets: HashMap<Value, Value>,
     casts: HashMap<Value, NarrowRoundTrip>,
     extra_sums: Vec<Reduction>,
+    // All streams use this scalar memory width. Accumulator lanes may be wider.
+    stream_bytes: u32,
+    widening_loads: HashMap<Value, (Value, ConvertOp)>,
 }
 struct Reduction {
     accumulator: Value,
@@ -279,7 +282,7 @@ impl Analyze<'_> {
         if !invariant(self.f, self.dom, self.c.pre, base) {
             return None;
         }
-        let bytes = self.c.shape.lane_type().bytes()?;
+        let bytes = self.c.stream_bytes;
         let offset = self.f.resolve(offset);
         let invariant_offset = if bytes == 1 {
             self.index(offset)?
@@ -340,7 +343,12 @@ impl Analyze<'_> {
             return None;
         }
         match *self.f.inst_data(i) {
-            D::Load { flags, addr, .. } if !flags.volatile => self.address(addr)?,
+            D::Load { flags, addr, .. } if !flags.volatile => {
+                if self.c.stream_bytes != self.c.shape.lane_type().bytes()? {
+                    return None;
+                }
+                self.address(addr)?;
+            }
             D::Binary { op, args } => {
                 self.target.binary(op, self.c.shape.lane_type())?;
                 for arg in args {
@@ -378,6 +386,37 @@ impl Analyze<'_> {
                 }
                 self.allowed.insert(compare);
                 self.c.vectors.insert(mask);
+            }
+            D::Convert {
+                op: op @ (ConvertOp::Uext | ConvertOp::Sext),
+                arg,
+                ..
+            } if self.conditional
+                && self.target == VectorTarget::Aarch64Neon
+                && matches!(self.c.output, Output::Sum { .. })
+                && def(self.f, arg)
+                    .is_some_and(|load| matches!(self.f.inst_data(load), D::Load { .. })) =>
+            {
+                // A bounded first mixed-width case: extend a contiguous load
+                // before any arithmetic. Never commute extension across narrow
+                // arithmetic, whose wrap/sign bits are observable.
+                let load = def(self.f, arg)?;
+                let D::Load { ty, flags, addr } = *self.f.inst_data(load) else {
+                    unreachable!()
+                };
+                let bytes = ty.bytes()?;
+                if self.f.inst_block(load) != self.c.body
+                    || flags.volatile
+                    || !matches!(ty, Type::I8 | Type::I16 | Type::I32)
+                    || bytes >= self.c.shape.lane_type().bytes()?
+                    || !self.c.addresses.is_empty() && self.c.stream_bytes != bytes
+                {
+                    return None;
+                }
+                self.c.stream_bytes = bytes;
+                self.address(addr)?;
+                self.allowed.insert(load);
+                self.c.widening_loads.insert(v, (self.f.resolve(arg), op));
             }
             D::Convert {
                 op: ConvertOp::Uext | ConvertOp::Sext,
@@ -647,6 +686,8 @@ fn analyze(
         offsets: HashMap::new(),
         casts: HashMap::new(),
         extra_sums,
+        stream_bytes: shape.lane_type().bytes()?,
+        widening_loads: HashMap::new(),
     };
     let mut a = Analyze {
         f,
@@ -902,7 +943,7 @@ fn reduce_body(
                 f,
                 setup,
                 Type::I64,
-                i64::from(c.shape.lane_type().bytes().unwrap().trailing_zeros()),
+                i64::from(c.stream_bytes.trailing_zeros()),
             );
             let offset = bin(f, setup, B::Shl, index, shift);
             bin(f, setup, B::Ptradd, base, offset)
@@ -923,7 +964,12 @@ fn reduce_body(
             let p = if chunk == 0 {
                 p
             } else {
-                let offset = iconst(f, vector, Type::I64, (chunk * 16) as i64);
+                let offset = iconst(
+                    f,
+                    vector,
+                    Type::I64,
+                    chunk as i64 * i64::from(c.shape.lanes()) * i64::from(c.stream_bytes),
+                );
                 bin(f, vector, B::Ptradd, p, offset)
             };
             mapping.insert(addr, p);
@@ -962,6 +1008,71 @@ fn reduce_body(
                 D::Select { args } => D::VectorSelect {
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
+                D::Convert { .. } if c.widening_loads.contains_key(&result.unwrap()) => {
+                    let (load, op) = c.widening_loads[&result.unwrap()];
+                    let D::Load {
+                        ty: source,
+                        mut flags,
+                        addr,
+                    } = *f.inst_data(def(f, load).unwrap())
+                    else {
+                        unreachable!()
+                    };
+                    // Load exactly destination_lanes * source_bytes, then
+                    // reinterpret a splat of those packed bits. WidenLow only
+                    // observes those low lanes; repeated high bits are ignored.
+                    let packed_bytes = u32::from(c.shape.lanes()) * source.bytes().unwrap();
+                    let packed_ty = match packed_bytes {
+                        2 => Type::I16,
+                        4 => Type::I32,
+                        8 => Type::I64,
+                        _ => unreachable!(),
+                    };
+                    flags.align = flags.align.min(source.bytes().unwrap());
+                    let bits = emit(
+                        f,
+                        vector,
+                        D::Load {
+                            ty: packed_ty,
+                            flags,
+                            addr: mapping[&f.resolve(addr)],
+                        },
+                    );
+                    let packed_shape = VectorType::ALL
+                        .into_iter()
+                        .find(|s| s.lane_type() == packed_ty)
+                        .unwrap();
+                    let packed = emit(
+                        f,
+                        vector,
+                        D::VectorSplat {
+                            ty: Type::Vector(packed_shape),
+                            arg: bits,
+                        },
+                    );
+                    let source_shape = VectorType::ALL
+                        .into_iter()
+                        .find(|s| s.lane_type() == source)
+                        .unwrap();
+                    let packed = emit(
+                        f,
+                        vector,
+                        D::Convert {
+                            op: ConvertOp::Bitcast,
+                            ty: Type::Vector(source_shape),
+                            arg: packed,
+                        },
+                    );
+                    D::Convert {
+                        op: if op == ConvertOp::Sext {
+                            ConvertOp::SwidenLow
+                        } else {
+                            ConvertOp::UwidenLow
+                        },
+                        ty: Type::Vector(c.shape),
+                        arg: packed,
+                    }
+                }
                 D::Convert { .. } if c.casts.contains_key(&result.unwrap()) => {
                     let v = result.unwrap();
                     let cast = c.casts[&v];
@@ -1010,7 +1121,12 @@ fn reduce_body(
     let mut bases: Vec<_> = pointers.keys().copied().collect();
     bases.sort();
     for base in bases {
-        let step = iconst(f, vector, Type::I64, unroll * 16);
+        let step = iconst(
+            f,
+            vector,
+            Type::I64,
+            unroll * i64::from(c.shape.lanes()) * i64::from(c.stream_bytes),
+        );
         args.push(bin(f, vector, B::Ptradd, pointers[&base], step));
     }
     let zero = iconst(f, vector, ty, 0);
@@ -1048,7 +1164,7 @@ fn transform(f: &mut Function, mut c: Candidate, target: VectorTarget) {
     let ty = f.value_type(c.iv);
     let vi = f.append_block_param(vector, ty);
     let lanes = i64::from(c.shape.lanes());
-    let bytes = c.shape.lane_type().bytes().unwrap();
+    let bytes = c.stream_bytes;
     let zero = iconst(f, guard, ty, 0);
     let min = iconst(f, guard, ty, lanes * 4);
     let from_zero = constant(f, c.start) == Some(0);
