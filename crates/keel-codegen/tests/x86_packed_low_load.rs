@@ -257,6 +257,7 @@ typedef void (*Fn)(const void*,void*,uint64_t);
         assert_eq!(direct_loads(&text), 0);
         fs::write(dir.join("control.s"), text).unwrap();
         fs::write(dir.join("control.o"), obj).unwrap();
+        fs::write(dir.join("control.c"), &c).unwrap();
     }
     for sel in [
         SelectionTier::Baseline,
