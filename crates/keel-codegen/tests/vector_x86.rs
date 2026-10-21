@@ -595,3 +595,38 @@ fn packed_compare_recipe_encodings_match_clang_sse2() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn packed_compare_coalesces_result_without_staging_register_rhs() {
+    for shape in ["i8x16", "i16x8", "i32x4", "i64x2"] {
+        for cc in ["eq", "ne", "sgt", "sle"] {
+            let source = format!(
+                "func @cmp({shape}, {shape}) -> {shape} {{\nblock0(v0: {shape}, v1: {shape}):\n v2 = vicmp.{cc} v0, v1\n return v2\n}}\n"
+            );
+            for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+                let (text, _) = compile(
+                    &source,
+                    SelectionTier::Baseline,
+                    allocation,
+                    false,
+                    Features::default(),
+                );
+                let copies = text
+                    .lines()
+                    .filter(|l| l.trim_start().starts_with("movaps"))
+                    .count();
+                // The signed i64 recipe needs a mutable copy of rhs and a
+                // temporary copy of lhs; all other compares need no copies.
+                assert_eq!(
+                    copies,
+                    if shape == "i64x2" && matches!(cc, "sgt" | "sle") {
+                        2
+                    } else {
+                        0
+                    },
+                    "{text}"
+                );
+            }
+        }
+    }
+}

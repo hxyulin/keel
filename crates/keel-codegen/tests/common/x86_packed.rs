@@ -36,10 +36,16 @@ pub fn fixture() -> (String, String) {
                 c += &format!("extern void {name}(const void*,const void*,void*);\n");
                 let cast = if unsigned { uty } else { ty };
                 let (left, right) = if reverse { ("a", "b") } else { ("b", "a") };
+                let alias_name = format!("alias_{name}");
+                let (av, bv) = if reverse { (0, 1) } else { (1, 0) };
+                ir += &format!(
+                    "func @{alias_name}({shape}, {shape}) -> {shape} {{\nblock0(v0: {shape}, v1: {shape}):\n v2 = vicmp.{cc} v{av}, v{bv}\n return v2\n}}\n"
+                );
+                c += &format!("extern V_{shape} {alias_name}(V_{shape}, V_{shape});\n");
                 // Cartesian boundaries cover high equality, low unsigned ordering,
                 // sign transitions, and opposing outcomes in the two i64 lanes.
                 main += &format!(
-                    "{{ uint64_t edge[]={{0,1,2,0x7fffffffULL,0x80000000ULL,0xffffffffULL,0x100000000ULL,0x100000001ULL,0x17fffffffULL,0x180000000ULL,0x1ffffffffULL,0x7fffffff00000000ULL,0x7fffffffffffffffULL,0x8000000000000000ULL,0x8000000000000001ULL,0xffffffff00000000ULL,0xffffffff7fffffffULL,0xffffffff80000000ULL,0xfffffffffffffffeULL,0xffffffffffffffffULL}};\nfor(unsigned i=0;i<20;i++) for(unsigned j=0;j<20;j++) {{ {ty} a[{lanes}],b[{lanes}]; unsigned char input_a[17],input_b[17],output[49];\nfor(unsigned l=0;l<{lanes};l++) {{a[l]=({ty})edge[(i+7*l)%20]; b[l]=({ty})edge[(j+11*l)%20];}}\nmemcpy(input_a+1,a,16);memcpy(input_b+1,b,16);{name}(input_a+1,input_b+1,output+1);\n{ty} got[3*{lanes}];memcpy(got,output+1,48); for(unsigned l=0;l<{lanes};l++) {{ {ty} expected=(({cast}){left}[l] {symbol} ({cast}){right}[l]) ? ({ty})-1:0; if(got[l]!=expected||got[{lanes}+l]!=b[l]||got[2*{lanes}+l]!=a[l]) {{return 1;}} }} }} }}\n"
+                    "{{ uint64_t edge[]={{0,1,2,0x7fffffffULL,0x80000000ULL,0xffffffffULL,0x100000000ULL,0x100000001ULL,0x17fffffffULL,0x180000000ULL,0x1ffffffffULL,0x7fffffff00000000ULL,0x7fffffffffffffffULL,0x8000000000000000ULL,0x8000000000000001ULL,0xffffffff00000000ULL,0xffffffff7fffffffULL,0xffffffff80000000ULL,0xfffffffffffffffeULL,0xffffffffffffffffULL}};\nfor(unsigned i=0;i<20;i++) for(unsigned j=0;j<20;j++) {{ {ty} a[{lanes}],b[{lanes}]; unsigned char input_a[17],input_b[17],output[49];\nfor(unsigned l=0;l<{lanes};l++) {{a[l]=({ty})edge[(i+7*l)%20]; b[l]=({ty})edge[(j+11*l)%20];}}\nmemcpy(input_a+1,a,16);memcpy(input_b+1,b,16);{name}(input_a+1,input_b+1,output+1);\nV_{shape} va,vb,vr;memcpy(&va,a,16);memcpy(&vb,b,16);vr={alias_name}(va,vb); {ty} alias[{lanes}];memcpy(alias,&vr,16); {ty} got[3*{lanes}];memcpy(got,output+1,48); for(unsigned l=0;l<{lanes};l++) {{ {ty} expected=(({cast}){left}[l] {symbol} ({cast}){right}[l]) ? ({ty})-1:0; if(alias[l]!=expected||got[l]!=expected||got[{lanes}+l]!=b[l]||got[2*{lanes}+l]!=a[l]) {{return 1;}} }} }} }}\n"
                 );
             }
         }

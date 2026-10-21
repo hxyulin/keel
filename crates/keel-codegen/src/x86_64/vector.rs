@@ -123,52 +123,70 @@ impl FunctionCompiler<'_> {
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
         let swap = matches!(cond, IntCC::Slt | IntCC::Sge);
-        self.vector_stage(args[usize::from(swap)], FS0);
-        self.vector_stage(args[usize::from(!swap)], FS1);
+        let lhs = args[usize::from(swap)];
+        let rhs = args[usize::from(!swap)];
+        let d = self.def_freg(result);
+        let dst;
         if shape == VectorType::I64x2 && !matches!(cond, IntCC::Eq | IntCC::Ne) {
+            // Capture rhs first: the result may alias it. lhs can then be
+            // computed directly in the result register, including a spill's FS0.
+            self.vector_stage(rhs, FS1);
+            self.vector_stage(lhs, d);
+            dst = d;
             // Compare signed high dwords, breaking ties by UNSIGNED low dwords.
             // Bias just the low dwords before pcmpgtd. Three reserved registers
             // suffice even when every operand and the result is spilled.
             self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
             self.emit(Opcode::Psrlq, [asm_arg(&xmm(FS2)), asm_arg(&63i64)]);
             self.emit(Opcode::Psllq, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS2))]);
             self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS0))]);
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(dst))]);
             self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS1))]);
-            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
             self.emit(
                 Opcode::Pshufd,
                 [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xa0i64)],
             );
             self.emit(
                 Opcode::Pshufd,
-                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0)), asm_arg(&0xf5i64)],
+                [asm_arg(&xmm(dst)), asm_arg(&xmm(dst)), asm_arg(&0xf5i64)],
             );
-            self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
             self.emit(
                 Opcode::Pshufd,
                 [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xf5i64)],
             );
-            self.emit(Opcode::Orps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Orps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
         } else {
+            let a = self.use_freg(lhs, FS0);
+            let b = self.use_freg(rhs, FS1);
+            // A two-address operation must not destroy rhs before reading it.
+            // Reserved FS2 is disjoint from allocated registers and spill loads.
+            dst = if d == b && a != d { FS2 } else { d };
+            if dst != a {
+                self.emit(Opcode::Movaps, [asm_arg(&xmm(dst)), asm_arg(&xmm(a))]);
+            }
             self.emit(
                 packed_compare(cond, shape).unwrap(),
-                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+                [asm_arg(&xmm(dst)), asm_arg(&xmm(b))],
             );
             if shape == VectorType::I64x2 {
                 self.emit(
                     Opcode::Pshufd,
-                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(dst)), asm_arg(&0xb1i64)],
                 );
-                self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
             }
         }
         if matches!(cond, IntCC::Ne | IntCC::Sle | IntCC::Sge) {
             self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
         }
-        self.vector_publish(result);
+        if dst != d {
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(dst))]);
+        }
+        self.def_done(result, d);
     }
     pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
