@@ -251,24 +251,42 @@ impl FunctionCompiler<'_> {
     }
     pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
+        // Only a direct SSA integer comparison proves every lane is zero or
+        // all ones. Loaded masks, block parameters and lane-width-changing
+        // bitcasts must retain the arbitrary-nonzero-lane semantics.
+        let canonical = match self.func.value_def(self.func.resolve(args[0])) {
+            ValueDef::Result(inst, _) => {
+                matches!(self.func.inst_data(inst), InstData::VectorIcmp { .. })
+            }
+            _ => false,
+        };
         self.vector_stage(args[0], FS0);
-        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
-        self.emit(
-            packed_compare(IntCC::Eq, shape).unwrap(),
-            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
-        );
-        if shape == VectorType::I64x2 {
+        if !canonical {
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
             self.emit(
-                Opcode::Pshufd,
-                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                packed_compare(IntCC::Eq, shape).unwrap(),
+                [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
             );
-            self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            if shape == VectorType::I64x2 {
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+                );
+                self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+            }
         }
         self.vector_stage(args[1], FS1);
         self.vector_stage(args[2], FS2);
         // b ^ ((a ^ b) & !is_zero(mask)); masks need not be canonical.
         self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
-        self.emit(Opcode::Andnps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(
+            if canonical {
+                Opcode::Andps
+            } else {
+                Opcode::Andnps
+            },
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+        );
         self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
         self.vector_publish(result);
     }
