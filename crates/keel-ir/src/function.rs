@@ -890,12 +890,15 @@ impl Function {
         for &inst in self.block_insts.get(data.insts) {
             self.insts[inst].block = NO_BLOCK;
         }
-        if data.in_layout {
-            self.layout_len -= data.insts.len();
-        }
+        let removed = data.insts.len();
         data.insts.clear();
-        data.in_layout = false;
-        self.layout.retain(|&b| b != block);
+        if std::mem::replace(&mut data.in_layout, false) {
+            self.layout_len -= removed;
+            // A block is in the layout once; the blocks after it move up
+            // in one copy.
+            let index = self.layout.iter().position(|&b| b == block);
+            self.layout.remove(index.expect("a block in the layout"));
+        }
     }
 
     /// Whether `block` is in the layout.
