@@ -550,7 +550,10 @@ impl<'a> FunctionCompiler<'a> {
         // on the stack, so its stack arguments go where ours came in:
         // they must fit there. Structs are not supported.
         let byval_on_stack = named.locs.iter().any(|l| matches!(l, ArgLoc::OnStack(_)));
-        for (_, inst) in func.layout_insts() {
+        // One walk finds which (mostly rare) instruction kinds occur, so the
+        // checks and covers below only scan functions that can match.
+        let present = crate::kinds::InstKinds::of(func);
+        for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
@@ -576,7 +579,7 @@ impl<'a> FunctionCompiler<'a> {
         // arguments, staging for struct arguments in registers, and a slot
         // for an `sret` address.
         let (mut outgoing, mut staging, mut needs_sret_save) = (0, 0, false);
-        for (_, inst) in func.layout_insts() {
+        for (_, inst) in func.layout_insts().filter(|_| present.call) {
             let (args, params) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
                 InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
@@ -628,15 +631,37 @@ impl<'a> FunctionCompiler<'a> {
             .selector
             .select(func, crate::select::Target::X86, &|data| folds(func, data));
         let uses = fold::use_counts(func);
-        let fused_compares = {
+        // Each cover is anchored at an instruction kind; without one it
+        // selects nothing and leaves the selection untouched.
+        let fused_compares = if present.compare && present.brif {
             backend_scope!(CompareFusion);
             selection.fuse_compares(func, |data| folds(func, data), &uses)
+        } else {
+            HashSet::default()
         };
-        selection.fuse_x86_selects(func, |data| folds(func, data), &uses);
-        let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
-        let packed_positive_values = packed_positive::select(func, &mut selection);
-        let packed_sign_values = packed_sign::select(func, &mut selection);
-        let packed_low_loads = packed_load::select(func, &mut selection);
+        if present.select {
+            selection.fuse_x86_selects(func, |data| folds(func, data), &uses);
+        }
+        let packed_absolute_values = if present.vector_select {
+            crate::packed_absolute::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let packed_positive_values = if present.vector_splat {
+            packed_positive::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let packed_sign_values = if present.vector_icmp {
+            packed_sign::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let packed_low_loads = if present.vector_splat {
+            packed_load::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
@@ -679,12 +704,13 @@ impl<'a> FunctionCompiler<'a> {
         if frame_size > i32::MAX as usize / 2 {
             return Err(err(format!("frame of {frame_size} bytes is too large")));
         }
-        let has_tls_address = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
-            InstData::SymbolAddr { symbol } => symbols
-                .data_object(func.symbol_name(*symbol))
-                .is_some_and(|data| data.thread_local),
-            _ => false,
-        });
+        let has_tls_address = present.symbol_addr
+            && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
+                InstData::SymbolAddr { symbol } => symbols
+                    .data_object(func.symbol_name(*symbol))
+                    .is_some_and(|data| data.thread_local),
+                _ => false,
+            });
         let frameless = func.sig.cc == CallConv::Fast
             && !has_tls_address
             && module.files.is_empty()

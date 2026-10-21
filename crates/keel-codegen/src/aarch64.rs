@@ -770,7 +770,10 @@ impl<'a> FunctionCompiler<'a> {
         for (_, sig) in func.signatures() {
             check_call_signature(&format!("indirect call {sig}"), sig, true).map_err(err)?;
         }
-        for (_, inst) in func.layout_insts() {
+        // One walk finds which (mostly rare) instruction kinds occur, so the
+        // checks and covers below only scan functions that can match.
+        let present = crate::kinds::InstKinds::of(func);
+        for (_, inst) in func.layout_insts().filter(|_| present.high_multiply) {
             if let InstData::Binary {
                 op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
                 args,
@@ -789,11 +792,15 @@ impl<'a> FunctionCompiler<'a> {
             }
         }
 
-        let eh = ExceptionTable::new(func).map_err(err)?;
+        let eh = if present.landing_pad {
+            ExceptionTable::new(func).map_err(err)?
+        } else {
+            ExceptionTable::default()
+        };
 
         // A tail call's arguments must all go in registers: the caller's
         // frame, where stack arguments would go, is gone by the jump.
-        for (_, inst) in func.layout_insts() {
+        for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
                 InstData::ReturnCallIndirect { sig, args, .. } => (args, func.signature(*sig)),
@@ -828,7 +835,7 @@ impl<'a> FunctionCompiler<'a> {
         // arguments, copies of big structs passed by value, and a slot for
         // an `sret` address.
         let (mut outgoing, mut copies, mut needs_sret_save) = (0, 0u64, false);
-        for (_, inst) in func.layout_insts() {
+        for (_, inst) in func.layout_insts().filter(|_| present.call) {
             let (args, params) = match func.inst_data(inst) {
                 InstData::Call { func: callee, args } => (args, &func.callee(*callee).sig.params),
                 InstData::CallIndirect { sig, args, .. } => (args, &func.signature(*sig).params),
@@ -875,21 +882,22 @@ impl<'a> FunctionCompiler<'a> {
         }
         let spill_base = offset.next_multiple_of(8);
 
-        let moves_sp = func.layout_insts().any(|(_, inst)| {
-            matches!(
-                func.inst_data(inst),
-                InstData::Intrinsic {
-                    id: Intrinsic::StackAlloc | Intrinsic::StackRestore,
-                    ..
-                }
-            )
-        });
+        let moves_sp = present.intrinsic
+            && func.layout_insts().any(|(_, inst)| {
+                matches!(
+                    func.inst_data(inst),
+                    InstData::Intrinsic {
+                        id: Intrinsic::StackAlloc | Intrinsic::StackRestore,
+                        ..
+                    }
+                )
+            });
         // Callee-saved registers inline assembly clobbers: saved by the
         // prologue, and never allocated, so no value lives in one across
         // the assembly.
         let (mut asm_saved, mut asm_float_saved) = (Vec::new(), Vec::new());
         let mut has_inline_asm = false;
-        for (_, inst) in func.layout_insts() {
+        for (_, inst) in func.layout_insts().filter(|_| present.inline_asm) {
             let InstData::InlineAsm { asm, args } = func.inst_data(inst) else {
                 continue;
             };
@@ -917,12 +925,13 @@ impl<'a> FunctionCompiler<'a> {
                 }
             }
         }
-        let has_tls_getter = func.layout_insts().any(|(_, i)| match func.inst_data(i) {
-            InstData::SymbolAddr { symbol } => symbols
-                .data_object(func.symbol_name(*symbol))
-                .is_some_and(|data| data.thread_local),
-            _ => false,
-        });
+        let has_tls_getter = present.symbol_addr
+            && func.layout_insts().any(|(_, i)| match func.inst_data(i) {
+                InstData::SymbolAddr { symbol } => symbols
+                    .data_object(func.symbol_name(*symbol))
+                    .is_some_and(|data| data.thread_local),
+                _ => false,
+            });
         // A scalar integer private leaf never runs the wide-ABI staging or
         // call helpers that reserve x0-x7. Let it compute in its argument/result
         // bank directly. Respect custom pools, including forced-spill tests.
@@ -986,28 +995,65 @@ impl<'a> FunctionCompiler<'a> {
         };
         // Raw IR use counts never change while selecting this function.
         let uses = fold::use_counts(func);
-        let absolute_values = absolute::select(func, &mut selection, &uses);
-        let absolute_differences = absolute_diff::select(func, &mut selection);
-        let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
-        let packed_minmax = packed_minmax::select(func, &mut selection);
-        let extended_adds = extended_add::select(func, &mut selection, &uses);
-        selection.fuse_aarch64_selects(
-            func,
-            |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
-            &uses,
-        );
-        let packed_low_loads = packed_load::select(func, &mut selection);
-        let replicate_loads = vector::select_replicate_loads(func, &mut selection);
-        let widening_adds = vector::select_widening_adds(func, &mut selection);
-        let fused_compares = {
+        // Each cover is anchored at an instruction kind; without one it
+        // selects nothing and leaves the selection untouched.
+        let absolute_values = if present.select {
+            absolute::select(func, &mut selection, &uses)
+        } else {
+            HashMap::default()
+        };
+        let absolute_differences = if present.widen_low {
+            absolute_diff::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let packed_absolute_values = if present.vector_select {
+            crate::packed_absolute::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let packed_minmax = if present.vector_icmp {
+            packed_minmax::select(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let extended_adds = if present.ptradd {
+            extended_add::select(func, &mut selection, &uses)
+        } else {
+            HashMap::default()
+        };
+        if present.select {
+            selection.fuse_aarch64_selects(
+                func,
+                |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
+                &uses,
+            );
+        }
+        let (packed_low_loads, replicate_loads) = if present.vector_splat {
+            (
+                packed_load::select(func, &mut selection),
+                vector::select_replicate_loads(func, &mut selection),
+            )
+        } else {
+            (HashMap::default(), HashMap::default())
+        };
+        let widening_adds = if present.widen_low {
+            vector::select_widening_adds(func, &mut selection)
+        } else {
+            HashMap::default()
+        };
+        let fused_compares = if present.compare && present.brif {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(
                 func,
                 |data| folded_imm(func, data).map(|(v, _)| v).into_iter().collect(),
                 &uses,
             )
+        } else {
+            HashSet::default()
         };
-        for (_, inst) in func.layout_insts() {
+        let calls = present.call && !leaf_summaries.is_empty();
+        for (_, inst) in func.layout_insts().filter(|_| calls) {
             if let InstData::Call { func: callee, .. } = func.inst_data(inst) {
                 let decl = func.callee(*callee);
                 if let Some((sig, preserved)) = leaf_summaries.get(&decl.name) {
@@ -5036,6 +5082,7 @@ impl<'a> FunctionCompiler<'a> {
 ///   pad with the first matching filter as the selector.
 /// - a **type table** of typeinfo pointers, indexed backwards from its
 ///   end; a null entry catches everything.
+#[derive(Default)]
 struct ExceptionTable {
     /// Typeinfos in the type table, in order of first appearance; `None`
     /// catches any exception.

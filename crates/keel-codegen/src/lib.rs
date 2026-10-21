@@ -17,6 +17,7 @@ mod data;
 mod dwarf;
 mod fold;
 mod integer_division;
+mod kinds;
 mod metadata;
 mod packed_absolute;
 mod parallel_copy;
