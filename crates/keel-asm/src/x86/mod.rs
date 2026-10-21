@@ -475,13 +475,14 @@ fn assemble_items_inner<const PROFILE: bool>(
     let mut checkpoint = None;
     let (mut period, mut distance) = (1usize, 0usize);
     let mut variable_work = 0usize;
-    // Every pass defines the same symbols; size later tables from the first.
-    let mut symbol_count = 0;
+    // Every pass defines the same symbols and fixups: later passes reuse the
+    // previous pass's (cleared) tables, and size their sections from it.
+    let mut recycled = (FxHashMap::default(), Vec::new());
     let mut size_hints = Vec::new();
     loop {
         let start = PROFILE.then(std::time::Instant::now);
         let mut a = Assembler::new()?;
-        a.symbols.reserve(symbol_count);
+        (a.symbols, a.fixes) = std::mem::take(&mut recycled);
         a.leb_widths = leb_widths.clone();
         a.pref_powers = pref_powers.clone();
         a.size_hints = std::mem::take(&mut size_hints);
@@ -524,7 +525,6 @@ fn assemble_items_inner<const PROFILE: bool>(
                 .push(start.elapsed().as_secs_f64() * 1000.0);
         }
         let start = PROFILE.then(std::time::Instant::now);
-        symbol_count = a.symbols.len();
         size_hints = a.sections.iter().map(|s| s.data.len() as u64).collect();
         let mut changed = 0;
         for (index, fix) in branches {
@@ -636,6 +636,9 @@ fn assemble_items_inner<const PROFILE: bool>(
                 distance = 0;
             }
         }
+        a.symbols.clear();
+        a.fixes.clear();
+        recycled = (std::mem::take(&mut a.symbols), std::mem::take(&mut a.fixes));
         drop(a);
         if let Some(start) = start {
             profile
