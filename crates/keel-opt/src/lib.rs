@@ -340,7 +340,7 @@ pub fn optimize_with_tier(module: &mut Module, tier: OptimizationTier) -> Result
     run_passes(module, tier.pipeline())
 }
 
-const FULL_ROUND: [&str; 15] = [
+const FULL_ROUND: [&str; 16] = [
     "inline-noninterposable",
     "simplify-cfg",
     "canonicalize",
@@ -354,6 +354,7 @@ const FULL_ROUND: [&str; 15] = [
     "instcombine",
     "dce",
     "gcm",
+    "adjacent-abs",
     "loop-vectorize",
     "loop-reduce",
 ];
@@ -381,6 +382,8 @@ const FULL_EPILOGUE: [&str; 14] = [
 // helpers for subsequent rounds, while each inliner retains its growth limits.
 // Keep the measured order, including code motion and loop passes between rounds;
 // cheaper schedules did not preserve the same workload/code-size tradeoffs.
+// Convert only private abs triangles before vectorization; this moves a single
+// wrapping negation, never a memory access or a potentially trapping operation.
 // The epilogue reuses memory facts before introducing loop recurrences, then
 // unrolls before extended reductions and rotation. Keep phi cleanup late and
 // omit an extra GCM: broader schedules regressed Lua fib in app screening.
