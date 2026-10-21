@@ -4,6 +4,7 @@ mod dwarf;
 mod encode;
 mod metadata;
 mod sections;
+mod symbolic;
 use crate::Error;
 use crate::fxhash::{FxHashSet, FxHasher};
 pub use keel_asm_ir::x86::{Features, Syntax};
@@ -161,28 +162,34 @@ impl Expr {
 }
 /// Symbols by interned id, in a dense table. Layout passes declare the same
 /// names, so [`Self::clear`] keeps names and slots: a slot is visible once
-/// declared in the current pass.
-#[derive(Default)]
+/// declared in the current pass. Collection only interns names; the table
+/// grows to cover them when layout first declares a symbol.
 struct Symbols {
     names: Names,
     table: Vec<Sym>,
-    /// The pass that last declared each slot.
+    /// The pass that last declared each slot. Passes count from one, so a
+    /// zero (new) slot is undeclared.
     declared: Vec<u32>,
     pass: u32,
     len: usize,
+}
+impl Default for Symbols {
+    fn default() -> Self {
+        Self {
+            names: Names::default(),
+            table: Vec::new(),
+            declared: Vec::new(),
+            pass: 1,
+            len: 0,
+        }
+    }
 }
 impl Symbols {
     fn len(&self) -> usize {
         self.len
     }
     fn intern(&mut self, name: &str) -> SymId {
-        let id = self.names.intern(name);
-        if id as usize == self.table.len() {
-            self.table.push(Sym::default());
-            // Never the current (or a later) pass.
-            self.declared.push(self.pass.wrapping_sub(1));
-        }
-        id
+        self.names.intern(name)
     }
     fn name(&self, id: SymId) -> &str {
         self.names.name(id)
@@ -196,15 +203,19 @@ impl Symbols {
     }
     fn get(&self, id: SymId) -> Option<&Sym> {
         let i = id as usize;
-        (self.declared[i] == self.pass).then(|| &self.table[i])
+        (self.declared.get(i) == Some(&self.pass)).then(|| &self.table[i])
     }
     fn get_mut(&mut self, id: SymId) -> Option<&mut Sym> {
         let i = id as usize;
-        (self.declared[i] == self.pass).then(|| &mut self.table[i])
+        (self.declared.get(i) == Some(&self.pass)).then(|| &mut self.table[i])
     }
     /// The symbol, declared with default attributes on first use.
     fn entry(&mut self, id: SymId) -> &mut Sym {
         let i = id as usize;
+        if i >= self.table.len() {
+            self.table.resize_with(self.names.len(), Sym::default);
+            self.declared.resize(self.names.len(), 0);
+        }
         if self.declared[i] != self.pass {
             self.declared[i] = self.pass;
             self.table[i] = Sym::default();
@@ -311,22 +322,8 @@ pub fn assemble_program_object_with_features(
     for (index, item) in program.items.iter().enumerate() {
         match item {
             Item::Text(source) => items.parse(source, index + 1)?,
-            Item::X86Instruction(i) => {
-                if !items.encode(i, index + 1) {
-                    items.instruction(Ref::Borrowed(i), index + 1)
-                }
-            }
-            Item::Label(name) => {
-                let sym = items.symbols.intern(name);
-                items.push(Entry::Label {
-                    sym,
-                    line: index + 1,
-                })
-            }
-            _ => items.push(Entry::Item {
-                item: Ref::Borrowed(item),
-                line: index + 1,
-            }),
+            Item::X86Instruction(i) => items.x86_instruction(i, index + 1),
+            item => items.item(item.clone(), index + 1),
         }
     }
     assemble_items(items.finish()?)
@@ -337,7 +334,7 @@ pub fn assemble_program_object_with_features(
 /// item positions in diagnostics. Each chunk is consumed as it arrives, so a
 /// whole module's structured program never needs to be resident at once.
 pub struct ProgramAssembler {
-    items: Items<'static>,
+    items: Items,
     next_line: usize,
     error: Option<Error>,
 }
@@ -364,20 +361,8 @@ impl ProgramAssembler {
                         return;
                     }
                 }
-                Item::X86Instruction(i) => {
-                    if !items.encode(&i, line) {
-                        items.instruction(Ref::Owned(Box::new(i)), line)
-                    }
-                }
-                // Equivalent to the borrowed label item, without its box.
-                Item::Label(name) => {
-                    let sym = items.symbols.intern(&name);
-                    items.push(Entry::Label { sym, line })
-                }
-                item => items.push(Entry::Item {
-                    item: Ref::Owned(Box::new(item)),
-                    line,
-                }),
+                Item::X86Instruction(i) => items.x86_instruction(&i, line),
+                item => items.item(item, line),
             }
         }
     }
@@ -389,62 +374,79 @@ impl ProgramAssembler {
     }
 }
 
-/// Borrowed from a caller's program, or owned after parsing explicit text.
-enum Ref<'a, T> {
-    Borrowed(&'a T),
-    Owned(Box<T>),
-}
-impl<T> std::ops::Deref for Ref<'_, T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        match self {
-            Self::Borrowed(t) => t,
-            Self::Owned(t) => t,
-        }
-    }
-}
-/// One layout unit. Diagnostics use `line`.
-enum Entry<'a> {
+/// One layout unit, kept to 16 bytes. Diagnostics use `line`.
+enum Entry {
     /// Consecutive symbol-free instructions, encoded once at collection: their
     /// bytes are `encoded[previous run end..end]`. `line` is the first one's;
     /// only it can fail layout, as the section cannot change within a run.
-    Encoded {
-        end: usize,
-        line: usize,
-    },
-    /// `short` is a direct jump still assumed to fit rel8.
-    Instruction {
-        instruction: Ref<'a, x86::Instruction>,
-        line: usize,
-        short: bool,
-    },
-    Label {
-        sym: SymId,
-        line: usize,
-    },
+    Encoded { end: u32, line: u32 },
+    /// An instruction with symbolic operands: `symbolic.entries[index]`.
+    Symbolic { index: u32, line: u32 },
+    Label { sym: SymId, line: u32 },
     /// A single, in-range literal data operand, decoded once. Keep bytes rather
     /// than i128 so this variant does not increase Entry's alignment or size.
-    LiteralData {
-        bytes: [u8; 8],
-        width: u8,
-        line: usize,
-    },
-    /// Directive lines from explicit text, applied in order.
-    Text {
-        text: Box<str>,
-        line: usize,
-    },
-    Item {
-        item: Ref<'a, Item>,
-        line: usize,
-    },
+    LiteralData { bytes: [u8; 8], width: u8, line: u32 },
+    /// Directive lines from explicit text (`texts[index]`), applied in order.
+    Text { index: u32, line: u32 },
+    Align { power: u8, line: u32 },
+    /// A register-only CFI directive, packed by [`pack_cfi`].
+    Cfi { op: u8, register: u8, value: u64, line: u32 },
+    /// ELF STT_FUNC when `function`, otherwise STT_OBJECT.
+    Type { sym: SymId, function: bool, line: u32 },
+    /// `sizes[index]`: a symbol and its size expression.
+    Size { index: u32, line: u32 },
+    /// Any other shared item: `items[index]`.
+    Item { index: u32, line: u32 },
+}
+const _: () = assert!(std::mem::size_of::<Entry>() == 16);
+/// A register-only CFI directive as an operation, register and value.
+fn pack_cfi(c: &keel_asm_ir::Cfi) -> Option<(u8, u8, u64)> {
+    use keel_asm_ir::Cfi;
+    Some(match *c {
+        Cfi::Start => (0, 0, 0),
+        Cfi::End => (1, 0, 0),
+        Cfi::DefCfaOffset(n) => (2, 0, n),
+        Cfi::DefCfaRegister(r) => (3, r, 0),
+        Cfi::DefCfa { register, offset } => (4, register, offset),
+        Cfi::Offset { register, offset } => (5, register, offset as u64),
+        Cfi::Personality(_) | Cfi::Lsda(_) => return None,
+    })
+}
+fn unpack_cfi(op: u8, register: u8, value: u64) -> keel_asm_ir::Cfi {
+    use keel_asm_ir::Cfi;
+    match op {
+        0 => Cfi::Start,
+        1 => Cfi::End,
+        2 => Cfi::DefCfaOffset(value),
+        3 => Cfi::DefCfaRegister(register),
+        4 => Cfi::DefCfa {
+            register,
+            offset: value,
+        },
+        _ => Cfi::Offset {
+            register,
+            offset: value as i64,
+        },
+    }
+}
+fn line32(line: usize) -> u32 {
+    // Diagnostics only; no input has four billion items or lines.
+    u32::try_from(line).unwrap_or(u32::MAX)
+}
+fn index32(len: usize) -> u32 {
+    u32::try_from(len).expect("assembly input exceeds 4 GiB")
 }
 /// Layout input. Most instructions in ordinary assembly are symbol-free and
 /// encode identically on every relaxation pass; retaining their parsed
-/// operands for each pass would cost far more than their bytes.
-struct Items<'a> {
-    entries: Vec<Entry<'a>>,
+/// operands for each pass would cost far more than their bytes. Symbolic
+/// instructions keep a cached encoding and a compact operand record.
+struct Items {
+    entries: Vec<Entry>,
     encoded: Vec<u8>,
+    symbolic: symbolic::Cache,
+    texts: Vec<Box<str>>,
+    sizes: Vec<(SymId, Expr)>,
+    items: Vec<Item>,
     /// Names interned during collection; layout passes extend and reuse it.
     symbols: Symbols,
     features: x86::Features,
@@ -453,11 +455,15 @@ struct Items<'a> {
     unsupported: Option<Error>,
     parsed: usize,
 }
-impl<'a> Items<'a> {
+impl Items {
     fn new(features: x86::Features) -> Self {
         Self {
             entries: Vec::new(),
             encoded: Vec::new(),
+            symbolic: symbolic::Cache::default(),
+            texts: Vec::new(),
+            sizes: Vec::new(),
+            items: Vec::new(),
             symbols: Symbols::default(),
             features,
             parser: x86::SourceParser::default(),
@@ -472,25 +478,26 @@ impl<'a> Items<'a> {
             let line = first + index;
             parser
                 .parse_with(source, |_, item| match item {
-                    x86::SourceItem::Instruction(mut i) => {
-                        if !self.encode(&i, line) {
-                            i.operands.shrink_to_fit();
-                            self.instruction(Ref::Owned(Box::new(i)), line)
-                        }
-                    }
+                    x86::SourceItem::Instruction(i) => self.x86_instruction(&i, line),
                     x86::SourceItem::Label(name) => {
                         let sym = self.symbols.intern(&name);
-                        self.push(Entry::Label { sym, line })
+                        self.push(Entry::Label {
+                            sym,
+                            line: line32(line),
+                        })
                     }
                     x86::SourceItem::Text(text) => {
-                        self.push(if let Some((bytes, width)) = literal_data(text) {
+                        let line = line32(line);
+                        let entry = if let Some((bytes, width)) = literal_data(text) {
                             Entry::LiteralData { bytes, width, line }
                         } else {
+                            self.texts.push(text.into());
                             Entry::Text {
-                                text: text.into(),
+                                index: index32(self.texts.len() - 1),
                                 line,
                             }
-                        });
+                        };
+                        self.push(entry);
                     }
                 })
                 .map_err(|e| Error::new(line, e.strip_prefix("line 1: ").unwrap_or(&e)))
@@ -498,9 +505,58 @@ impl<'a> Items<'a> {
         self.parser = parser;
         result
     }
-    fn push(&mut self, entry: Entry<'a>) {
+    fn push(&mut self, entry: Entry) {
         self.parsed += 1;
         self.entries.push(entry);
+    }
+    /// A shared non-instruction item, stored compactly where common.
+    fn item(&mut self, item: Item, line: usize) {
+        let line = line32(line);
+        let entry = match item {
+            Item::Label(name) => Entry::Label {
+                sym: self.symbols.intern(&name),
+                line,
+            },
+            Item::Directive(Directive::Align(power)) => Entry::Align { power, line },
+            Item::Directive(Directive::Cfi(cfi)) if let Some((op, register, value)) = pack_cfi(&cfi) => {
+                Entry::Cfi {
+                    op,
+                    register,
+                    value,
+                    line,
+                }
+            }
+            Item::Directive(Directive::ElfType { name, function }) => Entry::Type {
+                sym: self.symbols.intern(&name),
+                function,
+                line,
+            },
+            Item::Directive(Directive::Size { name, expression }) => {
+                let e = self.symbols.expr(&expression);
+                self.sizes.push((self.symbols.intern(&name), e));
+                Entry::Size {
+                    index: index32(self.sizes.len() - 1),
+                    line,
+                }
+            }
+            item => {
+                self.items.push(item);
+                Entry::Item {
+                    index: index32(self.items.len() - 1),
+                    line,
+                }
+            }
+        };
+        self.push(entry);
+    }
+    fn x86_instruction(&mut self, i: &x86::Instruction, line: usize) {
+        if !self.encode(i, line) {
+            let index = self.symbolic.push(i, &mut self.symbols);
+            self.push(Entry::Symbolic {
+                index,
+                line: line32(line),
+            });
+        }
     }
     /// Encode a symbol-free instruction into the current run, if possible.
     /// Otherwise the caller retains it for per-pass layout.
@@ -538,23 +594,15 @@ impl<'a> Items<'a> {
         }
         self.parsed += 1;
         self.encoded.extend_from_slice(&e.bytes);
-        let end = self.encoded.len();
+        let end = index32(self.encoded.len());
         match self.entries.last_mut() {
             Some(Entry::Encoded { end: run, .. }) => *run = end,
-            _ => self.entries.push(Entry::Encoded { end, line }),
+            _ => self.entries.push(Entry::Encoded {
+                end,
+                line: line32(line),
+            }),
         }
         true
-    }
-    fn instruction(&mut self, i: Ref<'a, x86::Instruction>, line: usize) {
-        let short = matches!(i.opcode, x86::Opcode::Jmp | x86::Opcode::Jcc(_))
-            && matches!(i.operands.as_slice(), [x86::Operand::Immediate(address)]
-                if address.modifier == Modifier::None && address.expression.add.is_some()
-                    && address.expression.subtract.is_none());
-        self.push(Entry::Instruction {
-            instruction: i,
-            line,
-            short,
-        });
     }
     fn finish(self) -> Result<Self, Error> {
         match self.unsupported {
@@ -680,36 +728,60 @@ fn assemble_items_inner<const PROFILE: bool>(
         a.size_hints = std::mem::take(&mut size_hints);
         let mut branches = Vec::new();
         let mut run = 0;
-        for (index, entry) in items.entries.iter().enumerate() {
-            let fix = a.fixes.len();
-            let (result, line) = match entry {
+        for entry in &items.entries {
+            let (result, line) = match *entry {
                 Entry::Encoded { end, line } => {
-                    let bytes = &items.encoded[run..*end];
-                    run = *end;
+                    let bytes = &items.encoded[run..end as usize];
+                    run = end as usize;
                     (a.encoded(bytes), line)
                 }
-                Entry::Instruction {
-                    instruction,
-                    line,
-                    short,
-                } => {
-                    if *short {
-                        branches.push((index, fix));
+                Entry::Symbolic { index, line } => {
+                    if items.symbolic.entries[index as usize].short {
+                        branches.push((index, a.fixes.len()));
                     }
-                    (a.instruction(instruction, *line, *short), line)
+                    (a.symbolic(&items.symbolic, index, line as usize), line)
                 }
-                Entry::Label { sym, line } => (a.label(*sym), line),
+                Entry::Label { sym, line } => (a.label(sym), line),
                 Entry::LiteralData { bytes, width, line } => {
-                    (a.data_bytes(&bytes[..usize::from(*width)]), line)
+                    (a.data_bytes(&bytes[..usize::from(width)]), line)
                 }
-                Entry::Text { text, line } => (
-                    text.lines()
-                        .try_for_each(|directive| a.directive(directive, *line)),
+                Entry::Text { index, line } => (
+                    items.texts[index as usize]
+                        .lines()
+                        .try_for_each(|directive| a.directive(directive, line as usize)),
                     line,
                 ),
-                Entry::Item { item, line } => (a.item(item, *line), line),
+                Entry::Align { power, line } => (a.align(power.into(), None), line),
+                Entry::Cfi {
+                    op,
+                    register,
+                    value,
+                    line,
+                } => (
+                    metadata::shared_cfi(&mut a, &unpack_cfi(op, register, value)),
+                    line,
+                ),
+                Entry::Type {
+                    sym,
+                    function,
+                    line,
+                } => {
+                    a.symbols.entry(sym).kind = if function {
+                        SymbolKind::Text
+                    } else {
+                        SymbolKind::Data
+                    };
+                    (Ok(()), line)
+                }
+                Entry::Size { index, line } => {
+                    let (sym, e) = items.sizes[index as usize];
+                    (a.size(sym, e), line)
+                }
+                Entry::Item { index, line } => {
+                    (a.item(&items.items[index as usize], line as usize), line)
+                }
             };
-            result.map_err(|e| Error::new(*line, e))?;
+            result.map_err(|e| Error::new(line as usize, e))?;
         }
         if let Some(start) = start {
             profile
@@ -727,8 +799,8 @@ fn assemble_items_inner<const PROFILE: bool>(
                         section == Some(f.section)
                             && (-128..=127).contains(&(value - i128::from(f.offset)))
                     });
-            if !fits && let Entry::Instruction { short, .. } = &mut items.entries[index] {
-                *short = false;
+            if !fits {
+                items.symbolic.widen(index, &mut a.symbols);
                 changed += 1;
             }
         }
@@ -1012,6 +1084,36 @@ impl Assembler {
         self.debug.emit(self.current, self.offset());
         self.bytes(bytes)
     }
+    /// Lay out a symbolic instruction from its cached encoding, unless an
+    /// operand folds to a constant on this pass.
+    fn symbolic(&mut self, cache: &symbolic::Cache, index: u32, line: usize) -> Result<(), String> {
+        if let Some((bytes, fixups)) = cache.cached(index)
+            && !fixups.iter().any(|f| {
+                f.may_fold(self.aliases) && matches!(self.try_eval(&f.expr(), 0), Some((None, _)))
+            })
+        {
+            if self.sections[self.current].nobits {
+                return Err("instruction in NOBITS section".into());
+            }
+            self.debug.emit(self.current, self.offset());
+            let at = self.offset();
+            for f in fixups {
+                self.fixes.push(Fix {
+                    section: self.current,
+                    offset: at + u64::from(f.offset),
+                    width: f.width,
+                    modifier: f.modifier,
+                    expr: f.expr(),
+                    kind: f.kind.into(),
+                    line,
+                })
+            }
+            return self.bytes(bytes);
+        }
+        let short = cache.entries[index as usize].short;
+        let i = cache.instruction(index, &self.symbols);
+        self.instruction(&i, line, short)
+    }
     fn instruction(
         &mut self,
         i: &x86::Instruction,
@@ -1156,10 +1258,8 @@ impl Assembler {
             }
             Directive::Size { name, expression } => {
                 let e = self.symbols.expr(expression);
-                let e = self.capture_dot(e)?;
                 let id = self.symbols.intern(name);
-                self.symbols.entry(id).size = Some(Box::new(e));
-                Ok(())
+                self.size(id, e)
             }
 
             Directive::Section {
@@ -1307,6 +1407,11 @@ impl Assembler {
             self.bytes(NOPS[size])?;
             n -= size as u64;
         }
+        Ok(())
+    }
+    fn size(&mut self, id: SymId, e: Expr) -> Result<(), String> {
+        let e = self.capture_dot(e)?;
+        self.symbols.entry(id).size = Some(Box::new(e));
         Ok(())
     }
     fn global(&mut self, id: SymId) -> Result<(), String> {
