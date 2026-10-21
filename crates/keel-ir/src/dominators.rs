@@ -5,6 +5,67 @@
 //! intersect the dominators of each block's predecessors until nothing changes.
 
 use crate::{Block, EntityRef, Function};
+use std::cell::RefCell;
+
+/// Arrays released by dropped graphs and trees, reused by the next
+/// computation on the same thread. Passes rebuild these analyses for every
+/// function, and reuse avoids most of their allocation.
+#[derive(Default)]
+struct Pool {
+    ranges: Vec<Vec<(u32, u32)>>,
+    blocks: Vec<Vec<Block>>,
+    words: Vec<Vec<u32>>,
+    idoms: Vec<Vec<Option<Block>>>,
+}
+
+thread_local! {
+    static POOL: RefCell<Pool> = RefCell::new(Pool::default());
+}
+
+/// A cleared array from the pool, or a new one.
+fn take<T>(list: fn(&mut Pool) -> &mut Vec<Vec<T>>) -> Vec<T> {
+    POOL.try_with(|pool| list(&mut pool.borrow_mut()).pop())
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+/// `len` copies of `value` in an array from the pool.
+fn filled<T: Clone>(list: fn(&mut Pool) -> &mut Vec<Vec<T>>, len: usize, value: T) -> Vec<T> {
+    let mut v = take(list);
+    v.resize(len, value);
+    v
+}
+
+fn give<T>(list: fn(&mut Pool) -> &mut Vec<Vec<T>>, mut v: Vec<T>) {
+    if v.capacity() == 0 {
+        return;
+    }
+    v.clear();
+    let _ = POOL.try_with(|pool| {
+        let mut pool = pool.borrow_mut();
+        let list = list(&mut pool);
+        if list.len() < 8 {
+            list.push(v);
+        }
+    });
+}
+
+fn ranges(pool: &mut Pool) -> &mut Vec<Vec<(u32, u32)>> {
+    &mut pool.ranges
+}
+
+fn blocks(pool: &mut Pool) -> &mut Vec<Vec<Block>> {
+    &mut pool.blocks
+}
+
+fn words(pool: &mut Pool) -> &mut Vec<Vec<u32>> {
+    &mut pool.words
+}
+
+fn idoms(pool: &mut Pool) -> &mut Vec<Vec<Option<Block>>> {
+    &mut pool.idoms
+}
 
 /// Predecessors and successors of each block, read from branch instructions.
 /// Edge lists are packed into two arrays (no allocation per block): block
@@ -23,9 +84,10 @@ impl ControlFlowGraph {
     /// block, so this reads every edge of valid IR without visiting the body.
     pub fn compute(func: &Function) -> Self {
         let n = func.num_blocks();
-        let mut succ_range = vec![(0, 0); n];
-        let mut succs = Vec::with_capacity(2 * n);
-        let mut pred_count = vec![0u32; n + 1];
+        let mut succ_range = filled(ranges, n, (0, 0));
+        let mut succs = take(blocks);
+        succs.reserve(2 * n);
+        let mut pred_count = filled(words, n + 1, 0u32);
         for block in func.blocks() {
             let start = succs.len();
             if let Some(&term) = func.block_insts(block).last() {
@@ -49,8 +111,9 @@ impl ControlFlowGraph {
             *slot = total;
             total += count;
         }
-        let mut fill = pred_start.clone();
-        let mut preds = vec![Block::new(0); total as usize];
+        let mut fill = take(words);
+        fill.extend_from_slice(&pred_start);
+        let mut preds = filled(blocks, total as usize, Block::new(0));
         for block in func.blocks() {
             let (start, end) = succ_range[block.index()];
             for &succ in &succs[start as usize..end as usize] {
@@ -59,6 +122,7 @@ impl ControlFlowGraph {
                 *slot += 1;
             }
         }
+        give(words, fill);
         Self {
             succ_range,
             succs,
@@ -75,24 +139,28 @@ impl ControlFlowGraph {
             return Vec::new();
         };
         let n = func.num_blocks();
-        let mut order = Vec::with_capacity(n);
-        let mut visited = vec![false; n];
-        let mut stack = Vec::with_capacity(n.min(64));
-        stack.push((entry, 0usize));
-        visited[entry.index()] = true;
+        let mut order = take(blocks);
+        order.reserve(n);
+        // Visited marks, then the DFS stack as (block, next successor) pairs.
+        let mut visited = filled(words, n, 0u32);
+        let mut stack = take(ranges);
+        stack.push((entry.index() as u32, 0));
+        visited[entry.index()] = 1;
         while let Some((block, next)) = stack.last_mut() {
-            let block = *block;
-            if let Some(&succ) = self.succs(block).get(*next) {
+            let block = Block::new(*block as usize);
+            if let Some(&succ) = self.succs(block).get(*next as usize) {
                 *next += 1;
-                if !visited[succ.index()] {
-                    visited[succ.index()] = true;
-                    stack.push((succ, 0));
+                if visited[succ.index()] == 0 {
+                    visited[succ.index()] = 1;
+                    stack.push((succ.index() as u32, 0));
                 }
             } else {
                 order.push(block);
                 stack.pop();
             }
         }
+        give(words, visited);
+        give(ranges, stack);
         order.reverse();
         order
     }
@@ -105,6 +173,15 @@ impl ControlFlowGraph {
     pub fn succs(&self, block: Block) -> &[Block] {
         let (start, end) = self.succ_range[block.index()];
         &self.succs[start as usize..end as usize]
+    }
+}
+
+impl Drop for ControlFlowGraph {
+    fn drop(&mut self) {
+        give(ranges, std::mem::take(&mut self.succ_range));
+        give(blocks, std::mem::take(&mut self.succs));
+        give(words, std::mem::take(&mut self.pred_start));
+        give(blocks, std::mem::take(&mut self.preds));
     }
 }
 
@@ -126,8 +203,8 @@ impl DominatorTree {
         let n = func.num_blocks();
         let mut tree = Self {
             rpo: Vec::new(),
-            rpo_number: vec![0; n],
-            idom: vec![None; n],
+            rpo_number: filled(words, n, 0),
+            idom: filled(idoms, n, None),
         };
         let Some(entry) = func.entry_block() else {
             return tree;
@@ -235,6 +312,14 @@ impl DominatorTree {
             b = self.idom[b.index()].expect("non-entry reachable block has an idom");
         }
         a == b
+    }
+}
+
+impl Drop for DominatorTree {
+    fn drop(&mut self) {
+        give(blocks, std::mem::take(&mut self.rpo));
+        give(words, std::mem::take(&mut self.rpo_number));
+        give(idoms, std::mem::take(&mut self.idom));
     }
 }
 
