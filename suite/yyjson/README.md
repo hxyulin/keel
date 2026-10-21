@@ -40,3 +40,39 @@ Run builds and checks under `suite/fast_opt_locked.py` when sharing a host with
 the benchmark campaign. Correctness is not an upstream exhaustive test suite;
 mutable DOM, JSON5, incremental parsing, custom allocators and file APIs are not
 exercised. The workload makes no performance claim.
+
+## Native C validation
+
+`validate.py` additionally compiles the original `.c` files directly through
+Keel's own preprocessor/frontend and native object emitter. It uses a fresh
+output directory, two concurrent translation units, and retains exact argv,
+stdout, stderr, source/compiler/binary hashes and failures in `report.json`.
+Clang supplies the independent O0/O2 builds and the common system linker.
+Keel None uses baseline selection; Fast/Full use Full selection; all use Full
+allocation. The helper does not run performance measurements. Python 3.9 or
+newer, Clang, Cargo and the host SDK/libc headers are prerequisites.
+
+For example, from the repository root (create `target/yyjson-validation` first):
+
+```sh
+python3 suite/fast_opt_locked.py target/yyjson-validation/lock.jsonl \
+  cargo build --offline --locked --release -j 2 -p keel -p keel-suite \
+  --target-dir target/yyjson-validation/cargo
+python3 suite/fast_opt_locked.py target/yyjson-validation/lock.jsonl \
+  python3 suite/yyjson/validate.py --out target/yyjson-validation/native \
+  --keel target/yyjson-validation/cargo/release/keel
+python3 suite/fast_opt_locked.py target/yyjson-validation/lock.jsonl \
+  cargo test --offline --locked --release -j 2 -p keel-suite \
+  --target-dir target/yyjson-validation/cargo manifest::tests::registry_loads
+```
+
+`--archive PATH` reuses a downloaded archive after checking its hash. The
+validation directory must not already exist. Generated reports are local
+artifacts, not tracked source files.
+
+On Apple AArch64/macOS, compiler source base `0f6fdd7f` passed Clang O0/O2 and
+native Keel None/Fast/Full: all three corpus checks, eight valid edge documents,
+eleven rejection checks, and one untimed invocation of each manifest workload
+at its configured iteration count. The suite registry/schema test also passed.
+No compatibility fallback was needed. This is local correctness coverage;
+Linux and performance campaigns remain unmeasured.
