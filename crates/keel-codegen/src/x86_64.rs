@@ -91,6 +91,7 @@ use keel_ir::{
 use std::collections::HashSet;
 use std::fmt::Write;
 mod output;
+mod packed_load;
 mod vector;
 use output::*;
 
@@ -408,6 +409,7 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
+    packed_low_loads: std::collections::HashMap<Inst, Value>,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` and `iconst` results folded into every use, which
@@ -601,6 +603,7 @@ impl<'a> FunctionCompiler<'a> {
             selection.fuse_compares(func, |data| folds(func, data))
         };
         selection.fuse_x86_selects(func, |data| folds(func, data));
+        let packed_low_loads = packed_load::select(func, &mut selection);
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
         let input = crate::regalloc::AllocationInput {
@@ -651,6 +654,7 @@ impl<'a> FunctionCompiler<'a> {
             allocation_index: None,
             folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
             fused_compares,
+            packed_low_loads,
             selection,
             stack_slot_offsets,
             outgoing,
@@ -994,6 +998,13 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&addr) = self.packed_low_loads.get(&inst) {
+            let at = self.mem(addr, S0, Type::I64);
+            let d = self.def_freg(result);
+            self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&at)]);
+            self.def_done(result, d);
             return;
         }
         if let Some(matched) = self.selection.matches.get(&inst).cloned() {
