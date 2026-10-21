@@ -563,7 +563,8 @@ pub fn run_with_report(module: &mut Module) -> InlineReport {
 // Build the graph from every definition, including definitions that cannot
 // become templates. A cycle can pass through a noinline, public, tail-calling,
 // or exception-handling function. External and indirect calls add no edges.
-fn recursive_definitions(module: &Module) -> Vec<bool> {
+// `sites` holds each function's direct call instructions in layout order.
+fn recursive_definitions(module: &Module, sites: &[Vec<Inst>]) -> Vec<bool> {
     let definitions: FxHashMap<_, _> = module
         .functions
         .iter()
@@ -573,9 +574,11 @@ fn recursive_definitions(module: &Module) -> Vec<bool> {
     let graph: Vec<Vec<usize>> = module
         .functions
         .iter()
-        .map(|f| {
-            f.layout_insts()
-                .filter_map(|(_, i)| {
+        .zip(sites)
+        .map(|(f, calls)| {
+            calls
+                .iter()
+                .filter_map(|&i| {
                     let reference = match f.inst_data(i) {
                         InstData::Call { func, .. }
                         | InstData::ReturnCall { func, .. }
@@ -662,7 +665,27 @@ fn run_observed_policy(
     admit_noninterposable: bool,
     cheap_reserve: bool,
 ) -> InlineReport {
-    let recursive = recursive_definitions(module);
+    // Freeze original sites and caller-size decisions before either phase.
+    // The ledgers span both phases: priority changes order, never capacity.
+    let original_sites: Vec<Vec<_>> = module
+        .functions
+        .iter()
+        .map(|caller| {
+            caller
+                .layout_insts()
+                .filter_map(|(_, i)| {
+                    matches!(
+                        caller.inst_data(i),
+                        InstData::Call { .. }
+                            | InstData::Invoke { .. }
+                            | InstData::ReturnCall { .. }
+                    )
+                    .then_some(i)
+                })
+                .collect()
+        })
+        .collect();
+    let recursive = recursive_definitions(module, &original_sites);
     // Use the entire structural candidate set for edge checks, including
     // candidates outside an SCC or without legal binding. Binding changes must
     // not turn a formerly opaque small wrapper into a second expansion level.
@@ -725,34 +748,19 @@ fn run_observed_policy(
         if let Some(reason) = reason {
             rejected.insert(f.name.clone(), reason);
         } else {
-            templates.insert(f.name.clone(), f.clone());
+            templates.insert(f.name.clone(), index);
         }
     }
+    // A template is copied only just before its first change as a caller;
+    // until then the module's own definition is the pass-entry body.
+    let mut frozen: Vec<Option<Box<Function>>> = Vec::new();
+    frozen.resize_with(module.functions.len(), || None);
     let mut report = InlineReport::default();
     let mut module_growth = 0;
     let mut module_reserve_sites = 0;
-    // Freeze original sites and caller-size decisions before either phase.
-    // The ledgers span both phases: priority changes order, never capacity.
-    let original_sites: Vec<Vec<_>> = module
-        .functions
-        .iter()
-        .map(|caller| {
-            caller
-                .layout_insts()
-                .filter_map(|(_, i)| {
-                    matches!(
-                        caller.inst_data(i),
-                        InstData::Call { .. }
-                            | InstData::Invoke { .. }
-                            | InstData::ReturnCall { .. }
-                    )
-                    .then_some(i)
-                })
-                .collect()
-        })
-        .collect();
     let tiny_templates: FxHashSet<_> = templates
         .values()
+        .map(|&index| &module.functions[index])
         .filter(|f| admit_noninterposable && tiny_priority_leaf(f))
         .map(|f| f.name.as_str())
         .collect();
@@ -761,6 +769,10 @@ fn run_observed_policy(
         .iter()
         .zip(&original_sites)
         .map(|(caller, calls)| {
+            // Only a tiny template can be a priority site.
+            if tiny_templates.is_empty() {
+                return FxHashSet::default();
+            }
             calls
                 .iter()
                 .copied()
@@ -770,7 +782,8 @@ fn run_observed_policy(
                     };
                     let decl = caller.callee(*func);
                     admit_noninterposable
-                        && templates.get(&decl.name).is_some_and(|f| {
+                        && templates.get(&decl.name).is_some_and(|&index| {
+                            let f = &module.functions[index];
                             (decl.attrs.alwaysinline || f.attrs.alwaysinline)
                                 && tiny_templates.contains(f.name.as_str())
                         })
@@ -825,7 +838,7 @@ fn run_observed_policy(
         }
         let (index, call, retry) = schedule[cursor];
         cursor += 1;
-        let caller = &mut module.functions[index];
+        let caller = &module.functions[index];
         let large_scc_caller = large_scc_callers[index];
         let (mut growth, mut reserve_sites, mut count, mut stack_growth) = ledgers[index];
         let reference = match caller.inst_data(call) {
@@ -838,7 +851,7 @@ fn run_observed_policy(
         let requested = decl.attrs.alwaysinline
             || templates
                 .get(&decl.name)
-                .is_some_and(|f| f.attrs.alwaysinline);
+                .is_some_and(|&t| template(&frozen, &module.functions, t).attrs.alwaysinline);
         let reason = if caller.sig.returns_twice || caller.personality.is_some() {
             Some((
                 "unsupported caller",
@@ -862,7 +875,8 @@ fn run_observed_policy(
                 "recursive wrapper caller size",
                 "recursive_wrapper_caller_size",
             ))
-        } else if let Some(callee) = templates.get(&decl.name) {
+        } else if let Some(&t) = templates.get(&decl.name) {
+            let callee = template(&frozen, &module.functions, t);
             if decl.sig != callee.sig {
                 Some(("ABI signature mismatch", "abi_signature_mismatch"))
             } else if callee.name == caller.name {
@@ -906,7 +920,8 @@ fn run_observed_policy(
             }
             continue;
         }
-        let callee = &templates[&decl.name];
+        let callee_index = templates[&decl.name];
+        let callee = template(&frozen, &module.functions, callee_index);
         // Bound net layout growth before cleanup. The entry jump replaces
         // the removed call; each cloned return becomes one jump. The
         // continuation only receives moved instructions and parameters.
@@ -990,6 +1005,14 @@ fn run_observed_policy(
             ));
         }
         let before = (use_reserve || use_cheap).then(|| caller.layout_insts().count());
+        if templates.get(&caller.name) == Some(&index) && frozen[index].is_none() {
+            frozen[index] = Some(Box::new(caller.clone()));
+        }
+        // A recursive call was rejected above, so the callee is another function.
+        let (caller, callee) = match frozen[callee_index].as_deref() {
+            Some(callee) => (&mut module.functions[index], callee),
+            None => two_functions(&mut module.functions, index, callee_index),
+        };
         inline_call(caller, call, callee);
         if let Some(before) = before {
             // Fail compilation before codegen on an accounting violation.
@@ -1031,6 +1054,30 @@ fn run_observed_policy(
         ledgers[index] = (growth, reserve_sites, count, stack_growth);
     }
     report
+}
+
+/// The pass-entry body of template `index`.
+fn template<'a>(
+    frozen: &'a [Option<Box<Function>>],
+    functions: &'a [Function],
+    index: usize,
+) -> &'a Function {
+    frozen[index].as_deref().unwrap_or(&functions[index])
+}
+
+fn two_functions(
+    functions: &mut [Function],
+    caller: usize,
+    callee: usize,
+) -> (&mut Function, &Function) {
+    assert_ne!(caller, callee);
+    if caller < callee {
+        let (low, high) = functions.split_at_mut(callee);
+        (&mut low[caller], &high[0])
+    } else {
+        let (low, high) = functions.split_at_mut(caller);
+        (&mut high[0], &low[callee])
+    }
 }
 
 fn inline_call(caller: &mut Function, call: Inst, callee: &Function) {
