@@ -254,7 +254,7 @@ impl Debug {
 fn address(a: &mut Assembler, b: &mut Vec<u8>, section: usize, offset: u64, width: u8, kind: u32) {
     let name = format!(".Lkeel.line.{}", a.symbols.len());
     a.symbols.insert(
-        name.clone(),
+        &name,
         Sym {
             section: Some(section),
             value: offset,

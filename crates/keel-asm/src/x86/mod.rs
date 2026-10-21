@@ -60,6 +60,58 @@ impl Default for Sym {
         }
     }
 }
+/// Symbols by name. The hash index holds only names and positions in a
+/// dense table, keeping its power-of-two (often half-empty) buckets small.
+#[derive(Default)]
+struct Symbols {
+    index: FxHashMap<Box<str>, u32>,
+    table: Vec<Sym>,
+}
+impl Symbols {
+    fn len(&self) -> usize {
+        self.table.len()
+    }
+    fn get(&self, name: &str) -> Option<&Sym> {
+        self.index.get(name).map(|&i| &self.table[i as usize])
+    }
+    fn get_mut(&mut self, name: &str) -> Option<&mut Sym> {
+        self.index.get(name).map(|&i| &mut self.table[i as usize])
+    }
+    /// The named symbol, declared with default attributes on first use.
+    fn entry(&mut self, name: &str) -> &mut Sym {
+        let i = match self.index.get(name) {
+            Some(&i) => i,
+            None => {
+                let i = self.table.len() as u32;
+                self.index.insert(name.into(), i);
+                self.table.push(Sym::default());
+                i
+            }
+        };
+        &mut self.table[i as usize]
+    }
+    fn insert(&mut self, name: &str, sym: Sym) {
+        *self.entry(name) = sym;
+    }
+    fn iter(&self) -> impl Iterator<Item = (&str, &Sym)> {
+        self.index
+            .iter()
+            .map(|(name, &i)| (&**name, &self.table[i as usize]))
+    }
+    fn values(&self) -> impl Iterator<Item = &Sym> {
+        self.table.iter()
+    }
+    fn clear(&mut self) {
+        self.index.clear();
+        self.table.clear();
+    }
+}
+impl std::ops::Index<&str> for Symbols {
+    type Output = Sym;
+    fn index(&self, name: &str) -> &Sym {
+        self.get(name).expect("no such symbol")
+    }
+}
 enum AlignFill {
     Default,
     Byte(u8),
@@ -76,7 +128,7 @@ struct Fix {
 #[derive(Default)]
 struct Assembler {
     sections: Vec<Section>,
-    symbols: FxHashMap<String, Sym>,
+    symbols: Symbols,
     fixes: Vec<Fix>,
     current: usize,
     cfi: Option<metadata::Frame>,
@@ -477,7 +529,7 @@ fn assemble_items_inner<const PROFILE: bool>(
     let mut variable_work = 0usize;
     // Every pass defines the same symbols and fixups: later passes reuse the
     // previous pass's (cleared) tables, and size their sections from it.
-    let mut recycled = (FxHashMap::default(), Vec::new());
+    let mut recycled = (Symbols::default(), Vec::new());
     let mut size_hints = Vec::new();
     loop {
         let start = PROFILE.then(std::time::Instant::now);
@@ -806,7 +858,7 @@ impl Assembler {
     }
     fn label(&mut self, name: &str) -> Result<(), String> {
         let value = self.offset();
-        let sym = self.symbols.entry(name.into()).or_default();
+        let sym = self.symbols.entry(name);
         if sym.section.is_some() || sym.alias.is_some() || sym.common.is_some() {
             return Err(format!("duplicate symbol `{name}`"));
         }
@@ -935,7 +987,7 @@ impl Assembler {
                 group,
             } => self.section_metadata(name, Some(*flags), *nobits, *entry_size, group.clone()),
             Directive::ElfType { name, function } => {
-                self.symbols.entry(name.clone()).or_default().kind = if *function {
+                self.symbols.entry(name).kind = if *function {
                     SymbolKind::Text
                 } else {
                     SymbolKind::Data
@@ -944,7 +996,7 @@ impl Assembler {
             }
             Directive::Size { name, expression } => {
                 let e = self.capture_dot(expression.clone())?;
-                self.symbols.entry(name.clone()).or_default().size = Some(Box::new(e));
+                self.symbols.entry(name).size = Some(Box::new(e));
                 Ok(())
             }
 
@@ -1093,7 +1145,7 @@ impl Assembler {
         Ok(())
     }
     fn global(&mut self, name: &str) -> Result<(), String> {
-        let s = self.symbols.entry(name.into()).or_default();
+        let s = self.symbols.entry(name);
         if s.weak {
             return Err("weak symbol changed binding to global".into());
         }
@@ -1102,7 +1154,7 @@ impl Assembler {
         Ok(())
     }
     fn set(&mut self, name: &str, e: Expression) -> Result<(), String> {
-        let sym = self.symbols.entry(name.into()).or_default();
+        let sym = self.symbols.entry(name);
         if sym.section.is_some() || sym.alias.is_some() {
             return Err(format!("duplicate symbol `{name}`"));
         }
@@ -1167,7 +1219,7 @@ impl Assembler {
                         self.global(&name)?;
                         continue;
                     }
-                    let s = self.symbols.entry(name).or_default();
+                    let s = self.symbols.entry(&name);
                     match op {
                         ".local" => {
                             if s.weak || s.global || s.common.is_some() {
@@ -1195,13 +1247,13 @@ impl Assembler {
                     "@tls_object" => SymbolKind::Tls,
                     _ => return Err("unsupported ELF symbol type".into()),
                 };
-                self.symbols.entry(name).or_default().kind = kind;
+                self.symbols.entry(&name).kind = kind;
                 Ok(())
             }
             ".size" if parts.len() == 2 => {
                 let name = x86::symbol(parts[0])?;
                 let expr = self.capture_dot(x86::address(parts[1])?.expression)?;
-                self.symbols.entry(name).or_default().size = Some(Box::new(expr));
+                self.symbols.entry(&name).size = Some(Box::new(expr));
                 Ok(())
             }
             ".set" | ".equ" if parts.len() == 2 => {
@@ -1220,7 +1272,7 @@ impl Assembler {
                 if !align.is_power_of_two() {
                     return Err("common alignment must be a power of two".into());
                 }
-                let sym = self.symbols.entry(name.clone()).or_default();
+                let sym = self.symbols.entry(&name);
                 if sym.section.is_some() || sym.common.is_some() {
                     return Err("duplicate common symbol".into());
                 }
@@ -1479,7 +1531,7 @@ impl Assembler {
         for f in &self.fixes {
             if let Some(n) = &f.address.expression.add {
                 let section = self.sections.iter().position(|s| s.name == *n);
-                let sym = self.symbols.entry(n.clone()).or_default();
+                let sym = self.symbols.entry(n);
                 if sym.section.is_none()
                     && sym.alias.is_none()
                     && sym.common.is_none()
@@ -1531,7 +1583,7 @@ impl Assembler {
             .cloned()
             .collect();
         for signature in groups.keys() {
-            self.symbols.entry(signature.clone()).or_default();
+            self.symbols.entry(signature);
         }
         let mut object = Object::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
         for file in &self.source_files {
@@ -1635,10 +1687,7 @@ impl Assembler {
         entries.sort_unstable_by_key(|(name, _)| *name);
         for (name, s) in entries {
             if s.kind == SymbolKind::Section {
-                symbols.insert(
-                    name.as_str(),
-                    object.section_symbol(sections[s.section.unwrap()]),
-                );
+                symbols.insert(name, object.section_symbol(sections[s.section.unwrap()]));
                 continue;
             }
             let (section, value) = if s.alias.is_some() {
@@ -1714,7 +1763,7 @@ impl Assembler {
             } else {
                 object.add_symbol(symbol)
             };
-            symbols.insert(name.as_str(), id);
+            symbols.insert(name, id);
         }
         for (signature, members) in &groups {
             object.add_comdat(Comdat {

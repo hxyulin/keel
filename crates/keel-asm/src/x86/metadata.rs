@@ -174,7 +174,7 @@ fn u32_at(bytes: &mut [u8], at: usize, n: usize) -> Result<(), String> {
 fn symbol(a: &mut Assembler, section: usize, offset: u64) -> String {
     let name = format!(".Lkeel.metadata.{}", a.symbols.len());
     a.symbols.insert(
-        name.clone(),
+        &name,
         Sym {
             section: Some(section),
             value: offset,
