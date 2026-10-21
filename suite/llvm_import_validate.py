@@ -55,8 +55,20 @@ def main():
             'poison': 'define i32 @f() { ret i32 poison }',
             'undef': 'define i32 @f() { ret i32 undef }',
             'freeze': 'define i32 @f() { %v = freeze i32 poison\nret i32 %v }',
-            'alloca': 'define void @f() { %p = alloca i32\nret void }',
-            'cfg': 'define i32 @f() { br label %b\nb: ret i32 1 }',
+            'dynamic-alloca': 'define void @f(i64 %n) { %p = alloca i32, i64 %n\nret void }',
+            'loop-alloca': 'define void @f() { br label %b\nb: %p = alloca i32\nret void }',
+            'zero-alloca': 'define void @f() { %p = alloca i32, i64 0\nret void }',
+            'large-alloca': 'define void @f() { %p = alloca i64, i64 536870912\nret void }',
+            'aligned-alloca': 'define void @f() { %p = alloca i32, align 32\nret void }',
+            'opaque-alloca': '%S = type opaque\ndefine void @f() { %p = alloca %S\nret void }',
+            'float-alloca': 'define void @f() { %p = alloca double\nret void }',
+            'address-space': 'define ptr addrspace(1) @f(ptr addrspace(1) %p) { ret ptr addrspace(1) %p }',
+            'gep-wide-index': 'define ptr @f(ptr %p, i128 %i) { %q = getelementptr i64, ptr %p, i128 %i\nret ptr %q }',
+            'gep-i1': 'define ptr @f(ptr %p) { %q = getelementptr i8, ptr %p, i1 true\nret ptr %q }',
+            'phi-undef': 'define i32 @f(i32 %x) { br label %b\nb: %p = phi i32 [ undef, %0 ]\nret i32 %p }',
+            'bad-phi': 'define i32 @f(i32 %x) { br label %b\nb: %p = phi i32 [ %x, %b ]\nret i32 %p }',
+            'duplicate-phi': 'define i32 @f(i32 %x) { %c = icmp eq i32 %x, 0\nbr i1 %c, label %b, label %b\nb: %p = phi i32 [ 1, %0 ], [ 2, %0 ]\nret i32 %p }',
+            'late-failure': 'define i32 @good() { ret i32 7 }\ndefine i32 @bad() { ret i32 poison }',
             'global': '@g = global i32 0\ndefine void @f() { ret void }',
             'atomic': 'define i32 @f(ptr %p) { %v = load atomic i32, ptr %p monotonic, align 4\nret i32 %v }',
             'abi-byval': 'define void @f(ptr byval(i32) %p) { ret void }',
@@ -82,8 +94,16 @@ def main():
             'noext-i8-return': 'define noext i8 @f(i8 %x) { ret i8 %x }',
             'noext-i16-return': 'define noext i16 @f(i16 %x) { ret i16 %x }',
         }
+        headers = {
+            'wrong-target': HEADER.replace('arm64-apple-macosx11.0.0', 'x86_64-unknown-linux-gnu'),
+            'big-endian': HEADER.replace('e-m:o', 'E-m:o'),
+            'pointer-index32': HEADER.replace('e-m:o', 'e-m:o-p:64:64:64:32'),
+            'missing-layout': 'target triple = "arm64-apple-macosx11.0.0"\n',
+            'missing-target': HEADER.split('target triple')[0],
+        }
+        cases.update({name: 'define i32 @f() { ret i32 1 }' for name in headers})
         for name, body in cases.items():
-            text = HEADER + body + '\n'
+            text = headers.get(name, HEADER) + body + '\n'
             source = out / f'reject-{name}.ll'
             source.write_text(text)
             dest = out / 'preserved.keel'
@@ -136,7 +156,37 @@ def main():
             run(['clang', out/'boolean-driver.o', obj, '-o', exe])
             run([exe])
             checks.append(dict(kind='native', language='handwritten-i1', tier=tier, inputs=65536, exports=3))
-        print(json.dumps({'checks':len(checks), 'native_builds':9, 'rejection_cases':len(cases)}))
+        # Handwritten hard CFG/PHI cases plus untouched compiler-emitted CFG/GEP.
+        run(['clang', '-O1', '-S', '-emit-llvm', FIXTURES/'cfg.c', '-o', out/'cfg-clang.ll'])
+        run(['clang', '-O1', '-c', FIXTURES/'cfg.c', '-o', out/'cfg-clang.reference.o'])
+        run(['rustc', '--edition', '2024', '--crate-type', 'lib', '-C', 'opt-level=1', '-C', 'panic=abort', '--emit', f'llvm-ir={out}/cfg-rust.ll,obj={out}/cfg-rust.reference.o', FIXTURES/'cfg.rs'])
+        run(['clang', '-c', FIXTURES/'cfg_memory.ll', '-o', out/'cfg-memory.reference.o'])
+        for name, source, driver, inputs in [
+            ('cfg-memory', FIXTURES/'cfg_memory.ll', 'cfg_memory_driver.c', 4096),
+            ('cfg-clang', out/'cfg-clang.ll', 'cfg_compiler_driver.c', 8192),
+            ('cfg-rust', out/'cfg-rust.ll', 'cfg_compiler_driver.c', 8192),
+        ]:
+            text = import_(source)
+            run(['clang', '-O2', '-c', FIXTURES/driver, '-o', out/f'{name}.driver.o'])
+            run(['clang', out/f'{name}.driver.o', out/f'{name}.reference.o', '-o', out/f'{name}.reference'])
+            expected = run([out/f'{name}.reference'])
+            for tier in ['none', 'fast', 'full']:
+                obj, exe = out/f'{name}.{tier}.o', out/f'{name}.{tier}'
+                run([args.keel, 'compile', '--opt-tier', tier, '--emit-object', text, '-o', obj])
+                run(['clang', out/f'{name}.driver.o', obj, '-o', exe])
+                actual = run([exe])
+                assert actual == expected, (name, tier)
+                checks.append(dict(kind='native', language=name, tier=tier, inputs=inputs, checksum=actual.decode().strip()))
+        # A failing downstream verifier must also leave the destination untouched.
+        dest = out/'verifier-preserved.keel'
+        dest.write_text('sentinel\n')
+        cmd = [sys.executable, str(TOOL), '--libllvm', args.libllvm, '--keel', '/usr/bin/false', str(FIXTURES/'cfg_memory.ll'), '-o', str(dest)]
+        commands.append(cmd)
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        assert result.returncode == 1 and not result.stdout and dest.read_text() == 'sentinel\n'
+        assert b'Keel verification failed' in result.stderr
+        checks.append(dict(kind='output-preservation', case='downstream-verifier-failure'))
+        print(json.dumps({'checks':len(checks), 'native_builds':18, 'rejection_cases':len(cases)}))
     finally:
         (out/'commands.json').write_text(json.dumps(commands, indent=2))
         (out/'checks.json').write_text(json.dumps(checks, indent=2))

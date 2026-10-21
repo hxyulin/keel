@@ -73,6 +73,17 @@ class LLVM:
             'GetNSW': (C.c_int, [P]), 'GetExact': (C.c_int, [P]),
             'CreateTargetData': (P, [C.c_char_p]), 'DisposeTargetData': (None, [P]),
             'ByteOrder': (U, [P]), 'PointerSize': (U, [P]),
+            'CountIncoming': (U, [P]), 'GetIncomingValue': (P, [P, U]),
+            'GetIncomingBlock': (P, [P, U]), 'GetNumSuccessors': (U, [P]),
+            'GetSuccessor': (P, [P, U]), 'GetCondition': (P, [P]),
+            'GetSwitchCaseValue': (P, [P, U]),
+            'GetGEPSourceElementType': (P, [P]), 'GetAllocatedType': (P, [P]),
+            'GetElementType': (P, [P]), 'GetArrayLength2': (C.c_uint64, [P]),
+            'IsOpaqueStruct': (C.c_int, [P]), 'CountStructElementTypes': (U, [P]),
+            'StructGetTypeAtIndex': (P, [P, U]),
+            'ABISizeOfType': (C.c_ulonglong, [P, P]),
+            'ABIAlignmentOfType': (U, [P, P]),
+            'OffsetOfElement': (C.c_ulonglong, [P, P, U]),
         }
         for name, (result, args) in specs.items():
             f = getattr(self.lib, 'LLVM' + name)
@@ -216,12 +227,88 @@ class Importer:
         if l.IsAConstantPointerNull(value):
             zero = self.emit('iconst.i64 0')
             return self.emit(f'inttoptr.ptr {zero}')
-        raise Unsupported('unsupported operand (including undef, poison, constant expressions, globals or forward references): ' + l.printed(value)[:160])
+        raise Unsupported('unsupported operand (including undef, poison, constant expressions or globals): ' + l.printed(value)[:160])
+
+    def layout_type(self, ty):
+        """Validate before asking LLVM for a size (unsized types can abort LLVM)."""
+        l = self.l
+        kind = l.GetTypeKind(ty)
+        if kind in (8, 12):
+            self.type(ty)
+        elif kind == 11:
+            self.layout_type(l.GetElementType(ty))
+        elif kind == 10 and not l.IsOpaqueStruct(ty):
+            for i in range(l.CountStructElementTypes(ty)):
+                self.layout_type(l.StructGetTypeAtIndex(ty, i))
+        else:
+            raise Unsupported('unsupported/unsized memory layout type')
+
+    def edge(self, target):
+        args = []
+        for phi in self.phis[target]:
+            incoming = [self.l.GetIncomingValue(phi, i)
+                        for i in range(self.l.CountIncoming(phi))
+                        if self.l.GetIncomingBlock(phi, i) == self.block]
+            # LLVM verifies one equal incoming value per duplicate predecessor edge.
+            if not incoming or any(v != incoming[0] for v in incoming):
+                raise Unsupported('inconsistent PHI incoming values for predecessor')
+            args.append(self.value(incoming[0]))
+        return self.blocks[target] + ('(' + ', '.join(args) + ')' if args else '')
 
     def instruction(self, inst):
         l = self.l
         op = l.GetInstructionOpcode(inst)
         operands = lambda: [l.GetOperand(inst, i) for i in range(l.GetNumOperands(inst))]
+        if op in (70, 71):  # LLVM 23 split unconditional/conditional branches.
+            if l.GetNumSuccessors(inst) == 1:
+                text = 'jump ' + self.edge(l.GetSuccessor(inst, 0))
+            else:
+                cond = self.value(l.GetCondition(inst))
+                yes, no = (self.edge(l.GetSuccessor(inst, i)) for i in range(2))
+                text = f'brif {cond}, {yes}, {no}'
+            self.lines.append('    ' + text)
+            return None
+        if op == 3:
+            cond = self.value(l.GetOperand(inst, 0))
+            default = self.edge(l.GetSuccessor(inst, 0))
+            cases = []
+            for i in range(1, l.GetNumSuccessors(inst)):
+                value = l.GetSwitchCaseValue(inst, i)
+                n = l.ConstIntGetZExtValue(value) if self.width(value) == 1 else l.ConstIntGetSExtValue(value)
+                cases.append(f'{n}: {self.edge(l.GetSuccessor(inst, i))}')
+            self.lines.append(f'    switch {cond}, {default}, [' + ', '.join(cases) + ']')
+            return None
+        if op == 26:
+            return self.emit('stack_addr ' + self.slots[inst])
+        if op == 29:
+            if re.search(r'\binrange\b', l.printed(inst)):
+                raise Unsupported('unsupported GEP flags')
+            ty = l.GetGEPSourceElementType(inst)
+            self.layout_type(ty)
+            addr = self.value(l.GetOperand(inst, 0))
+            for i in range(1, l.GetNumOperands(inst)):
+                index = l.GetOperand(inst, i)
+                if i > 1 and l.GetTypeKind(ty) == 10:
+                    if not l.IsAConstantInt(index):
+                        raise Unsupported('nonconstant struct GEP index')
+                    field = l.ConstIntGetZExtValue(index)
+                    offset = self.emit(f'iconst.i64 {l.OffsetOfElement(self.td, ty, field):#x}')
+                    ty = l.StructGetTypeAtIndex(ty, field)
+                else:
+                    if i > 1:
+                        if l.GetTypeKind(ty) != 11:
+                            raise Unsupported('GEP indexes unsupported layout')
+                        ty = l.GetElementType(ty)
+                    width = self.width(index)
+                    if width not in (8, 16, 32, 64):
+                        raise Unsupported('GEP index must be i8/i16/i32/i64')
+                    offset = self.value(index)
+                    if width < 64:
+                        offset = self.emit(f'sext.i64 {offset}')
+                    stride = self.emit(f'iconst.i64 {l.ABISizeOfType(self.td, ty):#x}')
+                    offset = self.emit(f'imul {offset}, {stride}')
+                addr = self.emit(f'ptradd {addr}, {offset}')
+            return addr
         if op in self.BINARY:
             if op in (8, 10, 12, 20) and (l.GetNUW(inst) or l.GetNSW(inst)):
                 raise Unsupported('nuw/nsw arithmetic is not in the initial subset')
@@ -328,6 +415,14 @@ class Importer:
         raise Unsupported(f'unsupported instruction opcode {op}: ' + l.printed(inst).strip()[:180])
 
     def translate(self, module):
+        # The target data lifetime covers all GEP/alloca layout queries.
+        self.td = self.l.CreateTargetData(self.l.GetDataLayoutStr(module))
+        try:
+            return self.translate_module(module)
+        finally:
+            self.l.DisposeTargetData(self.td)
+
+    def translate_module(self, module):
         l = self.l
         target = l.GetTarget(module).decode()
         if not re.fullmatch(r'(?:arm64|aarch64)-apple-(?:darwin|macosx)[0-9.]*', target):
@@ -364,21 +459,69 @@ class Importer:
             if not blocks:
                 output.append('decl ' + signature + ' cc(c)')
                 continue
-            if len(blocks) != 1:
-                raise Unsupported(f'{name}: multiple blocks/PHIs are not in the initial subset')
             local = ' local' if l.GetLinkage(fn) in (8, 9) else ''
             self.lines = ['func ' + signature + ' cc(c)' + local + ' {']
             self.values = {l.GetParam(fn, i): f'v{i}' for i in range(l.CountParams(fn))}
             self.next_value = len(params)
-            entry_params = ', '.join(f'v{i}: {self.type(l.TypeOf(l.GetParam(fn,i)))}' for i in range(len(params)))
-            self.lines.append('block0' + ('(' + entry_params + ')' if entry_params else '') + ':')
-            for inst in sequence(l.GetFirstInstruction, l.GetNextInstruction, blocks[0]):
-                try:
-                    value = self.instruction(inst)
-                    if value is not None:
-                        self.values[inst] = value
-                except Unsupported as e:
-                    raise Unsupported(f'{name}: {e}') from e
+            self.blocks = {block: f'block{i}' for i, block in enumerate(blocks)}
+            instructions = {block: list(sequence(l.GetFirstInstruction, l.GetNextInstruction, block))
+                            for block in blocks}
+            self.phis = {block: [v for v in instructions[block] if l.GetInstructionOpcode(v) == 44]
+                         for block in blocks}
+            # Reserve names for all results before translating any edge or instruction.
+            for block in blocks:
+                for inst in instructions[block]:
+                    if l.GetTypeKind(l.TypeOf(inst)) != 0:
+                        self.type(l.TypeOf(inst))
+                        self.values[inst] = f'v{self.next_value}'
+                        self.next_value += 1
+            self.slots = {}
+            for block in blocks:
+                for inst in instructions[block]:
+                    if l.GetInstructionOpcode(inst) != 26:
+                        continue
+                    count = l.GetOperand(inst, 0)
+                    if block != blocks[0] or not l.IsAConstantInt(count) or self.width(count) > 64:
+                        raise Unsupported(f'{name}: only constant entry-block alloca supported')
+                    if re.search(r'\b(?:inalloca|swifterror)\b', l.printed(inst)):
+                        raise Unsupported(f'{name}: special alloca ABI')
+                    self.type(l.TypeOf(inst))
+                    ty = l.GetAllocatedType(inst)
+                    self.layout_type(ty)
+                    size = l.ABISizeOfType(self.td, ty) * l.ConstIntGetZExtValue(count)
+                    align = max(l.GetAlignment(inst), l.ABIAlignmentOfType(self.td, ty))
+                    if not 0 < size <= 0xffffffff or align > 16:
+                        raise Unsupported(f'{name}: alloca size/alignment exceeds fixed stack slot contract')
+                    slot = f'ss{len(self.slots)}'
+                    self.slots[inst] = slot
+                    self.lines.append(f'    {slot} = stack_slot {size}, align {align}')
+            aliases = {}
+            for block in blocks:
+                self.block = block
+                parameters = []
+                if block == blocks[0]:
+                    parameters += [f'v{i}: {self.type(l.TypeOf(l.GetParam(fn, i)))}' for i in range(len(params))]
+                parameters += [f'{self.values[v]}: {self.type(l.TypeOf(v))}' for v in self.phis[block]]
+                self.lines.append(self.blocks[block] + ('(' + ', '.join(parameters) + ')' if parameters else '') + ':')
+                for inst in instructions[block]:
+                    if l.GetInstructionOpcode(inst) == 44:
+                        continue
+                    try:
+                        value = self.instruction(inst)
+                        if value is not None:
+                            aliases[self.values[inst]] = value
+                    except Unsupported as e:
+                        raise Unsupported(f'{name}: {e}') from e
+            # Resolve aliases after every block: LLVM block order need not be dominance order.
+            def resolve(match):
+                value, path = match.group(), []
+                while value in aliases:
+                    path.append(value)
+                    value = aliases[value]
+                for alias in path:
+                    aliases[alias] = value
+                return value
+            self.lines = [re.sub(r'(?<![A-Za-z0-9_.$@])v[0-9]+\b', resolve, line) for line in self.lines]
             self.lines.append('}')
             output.append('\n'.join(self.lines))
         return '\n\n'.join(output) + '\n'
