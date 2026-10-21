@@ -366,11 +366,13 @@ extending its lowest destination-lane-count integer lanes. The destination has
 wider integer lanes; all higher source lanes are ignored. For example,
 `swiden_low.i64x2` on i16x8 observes only its first two lanes and sign-extends
 each to i64. These operations do not saturate or move arithmetic across an
-extension. NEON emits `sshll`/`ushll` chains, shared x86 legalization uses exact
-scalar lanes, and the diagnostic Cranelift bridge extracts/extends/inserts the
-same lanes.
+extension. NEON emits `sshll`/`ushll` chains. Baseline SSE2 uses low unpack
+chains with zero lanes for unsigned widening and signed comparison masks for
+signed widening. Both backends keep vector-to-vector bitcasts in registers,
+preserving every bit, including floating NaN payloads and signed zero. The
+diagnostic Cranelift bridge extracts/extends/inserts the same low lanes.
 
-Full ARM reduction discovery can extend a contiguous i8/i16/i32 load directly
+Full ARM and SSE2 reduction discovery can extend a contiguous i8/i16/i32 load directly
 into an i32/i64 accumulator expression. For i32-to-i64 reductions it also keeps
 source-width wrapping arithmetic and selects before explicit extension, and
 widens canonical i32 predicates for i64 selects. Bounded nested ternaries can
@@ -379,7 +381,12 @@ Its grouped read is exactly the number
 of output lanes times the source element width, never an unconditional 16-byte
 read. It uses a packed scalar read, splat and bitcast before widening. All
 streams share one element width; original first-fault, address overflow, scalar
-tail and hidden-effect restrictions remain. Fast and Portable/SSE2 widening
-eligibility stay unchanged. This is a foundation for mixed-width reductions;
+tail and hidden-effect restrictions remain. Fast and Portable widening
+eligibility stay unchanged. ARM additionally covers an adjacent, ordinary,
+single-use scalar load and splat with an exact-width `ld1r`, and a one-step
+low-lane widening followed by a single-use adjacent packed add with
+`saddw`/`uaddw`. These covers preserve custom allocation constraints and
+separate source lines; shared values, volatile reads, and unsupported address
+selection retain their original instructions. This is a foundation for mixed-width reductions;
 compound narrowing, packed division and the full `k_narrow` expression remain
 outside this subset.
