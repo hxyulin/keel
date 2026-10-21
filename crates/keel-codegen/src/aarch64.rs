@@ -1214,14 +1214,14 @@ impl<'a> FunctionCompiler<'a> {
         let entry_profile =
             crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
         if !func.local {
-            out.directive(Directive::Global(format!("_{name}")));
+            out.directive(Directive::Global(["_", name].concat()));
         }
         if func.weak_odr {
-            out.directive(Directive::WeakDefinition(format!("_{name}")));
+            out.directive(Directive::WeakDefinition(["_", name].concat()));
         }
         out.align(2);
-        out.label(format!("_{name}"));
-        out.label(format!("L{name}_begin"));
+        out.label(["_", name].concat());
+        out.label(["L", name, "_begin"].concat());
         let start = self.out.begin_function(out);
         self.allocation_comment();
 
@@ -1244,10 +1244,11 @@ impl<'a> FunctionCompiler<'a> {
         // 155 is an indirect, pc-relative 4-byte pointer (through the GOT,
         // as the personality may be in a dylib), 16 a pc-relative one.
         if let Some(personality) = &func.personality {
+            self.out.directive(Directive::Cfi(Cfi::Personality(
+                ["_", personality.as_str()].concat(),
+            )));
             self.out
-                .directive(Directive::Cfi(Cfi::Personality(format!("_{personality}"))));
-            self.out
-                .directive(Directive::Cfi(Cfi::Lsda(format!("L{name}_lsda"))));
+                .directive(Directive::Cfi(Cfi::Lsda(["L", name, "_lsda"].concat())));
         }
         if self.frameless {
             // The AArch64 CIE starts at CFA = sp. Keep LR and FP untouched;
@@ -1451,12 +1452,12 @@ impl<'a> FunctionCompiler<'a> {
         {
             backend_scope!(LoweringFinish);
             if self.uses_trap {
-                self.out.label(format!("L{name}_trap"));
+                self.out.label(["L", name, "_trap"].concat());
                 self.native(Opcode::BRK_EX_exception, [(FieldId::imm16, 1)], |out| {
                     out.write_str("brk\t#1")
                 });
             }
-            self.out.label(format!("L{name}_end"));
+            self.out.label(["L", name, "_end"].concat());
             {
                 backend_scope!(Relaxation);
                 self.out.relax(name, start);
@@ -1777,7 +1778,7 @@ impl<'a> FunctionCompiler<'a> {
             InstData::Call { func: callee, args } => {
                 let decl = func.callee(callee);
                 let sret = self.move_args(&args, &decl.sig.params);
-                self.out.branch(true, format!("_{}", decl.name));
+                self.out.branch(true, ["_", decl.name.as_str()].concat());
                 self.call_result(result, sret);
             }
             // Only the call itself can throw, so the call-site entry
@@ -1791,7 +1792,7 @@ impl<'a> FunctionCompiler<'a> {
                 let sret = self.move_args(&args, &decl.sig.params);
                 let site = format!("L{}_{inst}", func.name);
                 self.out.label(format!("{site}_begin"));
-                self.out.branch(true, format!("_{}", decl.name));
+                self.out.branch(true, ["_", decl.name.as_str()].concat());
                 self.out.label(format!("{site}_end"));
                 let pad = self.label(dests[1].block);
                 self.eh.sites.push((site, pad, dests[1].block));
@@ -1823,7 +1824,7 @@ impl<'a> FunctionCompiler<'a> {
                 let decl = func.callee(callee);
                 self.move_args(&args, &decl.sig.params);
                 self.epilogue();
-                self.out.branch(false, format!("_{}", decl.name));
+                self.out.branch(false, ["_", decl.name.as_str()].concat());
             }
             InstData::ReturnCallIndirect { sig, callee, args } => {
                 self.move_args(&args, &func.signature(sig).params);
@@ -1858,14 +1859,14 @@ impl<'a> FunctionCompiler<'a> {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: 0,
                         kind: PageKind::ThreadLocal,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: 0,
                         base: 0,
                         load: true,
                         kind: PageKind::ThreadLocal,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                     self.mach(
                         "ldr",
@@ -1877,27 +1878,27 @@ impl<'a> FunctionCompiler<'a> {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Direct,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: d,
                         base: d,
                         load: false,
                         kind: PageKind::Direct,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                 } else {
                     self.out.symbolic(Symbolic::PageAddress {
                         register: d,
                         kind: PageKind::Got,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                     self.out.symbolic(Symbolic::PageOffset {
                         register: d,
                         base: d,
                         load: true,
                         kind: PageKind::Got,
-                        target: format!("_{name}"),
+                        target: ["_", name].concat(),
                     });
                 }
                 self.def_done(result, d);
@@ -5360,7 +5361,7 @@ impl ExceptionTable {
                     out.label(here.clone());
                     out.directive(Directive::Integer {
                         width: 4,
-                        expression: Expression::difference(format!("_{name}"), here),
+                        expression: Expression::difference(["_", name].concat(), here),
                         got: true,
                     });
                 }
