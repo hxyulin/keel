@@ -61,7 +61,7 @@ fn binary(func: &Function, value: Value) -> Option<(BinaryOp, [Value; 2])> {
 #[derive(Clone, Copy)]
 enum Uses<'a> {
     /// The worklist's user lists. Also enables reciprocal division expansion.
-    Users(&'a [Vec<Inst>]),
+    Users(&'a Users),
     /// Fast keeps no use information: every value may be shared.
     Unknown,
 }
@@ -69,8 +69,73 @@ enum Uses<'a> {
 impl Uses<'_> {
     fn single(self, value: Value) -> bool {
         match self {
-            Uses::Users(users) => users.get(value.index()).is_some_and(|u| u.len() == 1),
+            Uses::Users(users) => users.len.get(value.index()).is_some_and(|&n| n == 1),
             Uses::Unknown => false,
+        }
+    }
+}
+
+const NIL: u32 = u32::MAX;
+
+/// The users of each value, in insertion order, as linked lists threaded
+/// through one node array instead of a vector per value. Only values below
+/// the last `resize` have lists.
+#[derive(Default)]
+struct Users {
+    head: Vec<u32>,
+    tail: Vec<u32>,
+    len: Vec<u32>,
+    /// (user, next node)
+    nodes: Vec<(Inst, u32)>,
+}
+
+impl Users {
+    fn resize(&mut self, values: usize) {
+        self.head.resize(values, NIL);
+        self.tail.resize(values, NIL);
+        self.len.resize(values, 0);
+    }
+
+    fn push(&mut self, value: Value, user: Inst) {
+        let v = value.index();
+        let node = u32::try_from(self.nodes.len()).expect("user list overflow");
+        self.nodes.push((user, NIL));
+        match self.tail[v] {
+            NIL => self.head[v] = node,
+            last => self.nodes[last as usize].1 = node,
+        }
+        self.tail[v] = node;
+        self.len[v] += 1;
+    }
+
+    /// Unlinks every occurrence of `user` from `value`'s list.
+    fn remove(&mut self, value: Value, user: Inst) {
+        let v = value.index();
+        let (mut prev, mut node) = (NIL, self.head[v]);
+        while node != NIL {
+            let (inst, next) = self.nodes[node as usize];
+            if inst == user {
+                match prev {
+                    NIL => self.head[v] = next,
+                    prev => self.nodes[prev as usize].1 = next,
+                }
+                if next == NIL {
+                    self.tail[v] = prev;
+                }
+                self.len[v] -= 1;
+            } else {
+                prev = node;
+            }
+            node = next;
+        }
+    }
+
+    fn for_each(&self, value: Value, mut f: impl FnMut(Inst)) {
+        let mut node = self.head[value.index()];
+        while node != NIL {
+            let (inst, next) = self.nodes[node as usize];
+            f(inst);
+            node = next;
         }
     }
 }
@@ -948,6 +1013,19 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
 /// division preserves zero-divisor traps and signed MIN/-1 overflow traps;
 /// introducing a signed division for a standalone remainder would not.
 fn reuse_quotients(func: &mut Function) -> bool {
+    // Only a remainder can be rewritten; most functions have none.
+    let remainder = func.layout_insts().any(|(_, inst)| {
+        matches!(
+            func.inst_data(inst),
+            InstData::Binary {
+                op: BinaryOp::Srem | BinaryOp::Urem,
+                ..
+            }
+        )
+    });
+    if !remainder {
+        return false;
+    }
     let mut quotients = keel_ir::fxhash::FxHashMap::default();
     let mut changed = false;
     for block in func.blocks().collect::<Vec<_>>() {
@@ -997,17 +1075,20 @@ pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Qu
 
 pub fn run(func: &mut Function) -> bool {
     let reused_quotients = reuse_quotients(func);
-    let mut users: Vec<Vec<Inst>> = vec![Vec::new(); func.num_values()];
+    let mut users = Users::default();
+    users.resize(func.num_values());
     let mut work: Vec<Inst> = func.layout_insts().map(|(_, i)| i).collect();
+    users.nodes.reserve(2 * work.len());
     for &inst in &work {
         func.inst_data(inst)
-            .for_each_operand(|v| users[func.resolve(v).index()].push(inst));
+            .for_each_operand(|v| users.push(func.resolve(v), inst));
     }
     // Start with definitions first within the usual layout; dependency
     // notifications make the final result independent of layout order.
     work.reverse();
     let mut queued = vec![true; func.num_insts()];
     let mut changed = reused_quotients;
+    let mut waiting = Vec::new();
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
         if func.is_removed(inst) {
@@ -1017,12 +1098,11 @@ pub fn run(func: &mut Function) -> bool {
             if let Some(data) = simplify_branch(func, inst) {
                 // A terminator has no result users to notify, but its new
                 // condition must notify it if that producer changes later.
-                func.inst_data(inst).for_each_operand(|v| {
-                    users[func.resolve(v).index()].retain(|&user| user != inst);
-                });
+                func.inst_data(inst)
+                    .for_each_operand(|v| users.remove(func.resolve(v), inst));
                 *func.inst_data_mut(inst) = data;
                 func.inst_data(inst)
-                    .for_each_operand(|v| users[func.resolve(v).index()].push(inst));
+                    .for_each_operand(|v| users.push(func.resolve(v), inst));
                 changed = true;
             }
             continue;
@@ -1031,15 +1111,14 @@ pub fn run(func: &mut Function) -> bool {
             continue;
         };
         let result = func.first_result(inst);
-        let waiting: Vec<_> = func
-            .inst_results(inst)
-            .iter()
-            .flat_map(|result| users[result.index()].iter().copied())
-            .collect();
+        waiting.clear();
+        for &result in func.inst_results(inst) {
+            users.for_each(result, |user| waiting.push(user));
+        }
         match fold {
             Fold::Multi(constants) => {
                 const_fold::replace_with_constants(func, inst, &constants);
-                users.resize_with(func.num_values(), Vec::new);
+                users.resize(func.num_values());
                 queued.resize(func.num_insts(), false);
             }
             Fold::Value(value) => {
@@ -1049,7 +1128,9 @@ pub fn run(func: &mut Function) -> bool {
                 }
                 func.replace_all_uses(result, value);
                 func.remove_inst(inst);
-                users[value.index()].extend(waiting.iter().copied());
+                for &user in &waiting {
+                    users.push(value, user);
+                }
             }
             Fold::Data(data) => {
                 if *func.inst_data(inst) == data {
@@ -1057,9 +1138,9 @@ pub fn run(func: &mut Function) -> bool {
                 }
                 *func.inst_data_mut(inst) = data;
                 // Strength reduction can create constants with fresh values.
-                users.resize_with(func.num_values(), Vec::new);
+                users.resize(func.num_values());
                 func.inst_data(inst)
-                    .for_each_operand(|v| users[func.resolve(v).index()].push(inst));
+                    .for_each_operand(|v| users.push(func.resolve(v), inst));
                 if queued.len() < func.num_insts() {
                     queued.resize(func.num_insts(), false);
                 }
@@ -1068,7 +1149,7 @@ pub fn run(func: &mut Function) -> bool {
                 work.push(inst);
             }
         }
-        for user in waiting {
+        for &user in &waiting {
             if !queued[user.index()] {
                 queued[user.index()] = true;
                 work.push(user);
