@@ -7,15 +7,15 @@
 
 use crate::data::PTR_BYTES;
 use crate::dominators::{ControlFlowGraph, DominatorTree};
+use crate::fxhash::{FxHashMap, FxHashSet};
 use crate::{
-    ArgExt, AsmOperand, BinaryOp, BlockCall, CallConv, Clause, ConvertOp, EntityRef, Function,
-    InlineAsm, Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature, Type,
-    UnaryOp, Value, ValueDef,
+    ArgExt, AsmOperand, BinaryOp, Block, BlockCall, CallConv, Clause, ConvertOp, EntityRef,
+    Function, InlineAsm, Inst, InstData, Intrinsic, Ordering, PhysReg, Purpose, RmwOp, Signature,
+    Type, UnaryOp, Value, ValueDef,
 };
 use crate::{
     DataInit, DataItem, DataObject, DebugScope, DebugType, DebugTypeData, FunctionAttrs, Module,
 };
-use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,13 +37,16 @@ impl fmt::Display for VerifierError {
 /// `function_attrs` take the first `decl`, else the first function; and
 /// `data_object` takes the first data object.
 struct Names<'m> {
-    functions: HashMap<&'m str, (&'m Signature, FunctionAttrs)>,
-    data: HashMap<&'m str, &'m DataObject>,
+    functions: FxHashMap<&'m str, (&'m Signature, FunctionAttrs)>,
+    data: FxHashMap<&'m str, &'m DataObject>,
 }
 
 impl<'m> Names<'m> {
     fn new(module: &'m Module) -> Self {
-        let mut functions = HashMap::with_capacity(module.decls.len() + module.functions.len());
+        let mut functions = FxHashMap::with_capacity_and_hasher(
+            module.decls.len() + module.functions.len(),
+            Default::default(),
+        );
         for decl in &module.decls {
             functions
                 .entry(decl.name.as_str())
@@ -54,7 +57,7 @@ impl<'m> Names<'m> {
                 .entry(func.name.as_str())
                 .or_insert((&func.sig, func.attrs));
         }
-        let mut data = HashMap::with_capacity(module.data.len());
+        let mut data = FxHashMap::with_capacity_and_hasher(module.data.len(), Default::default());
         for object in &module.data {
             data.entry(object.name.as_str()).or_insert(object);
         }
@@ -84,7 +87,7 @@ impl<'m> Names<'m> {
 pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
     let lookup = Names::new(module);
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     let names = module
         .decls
         .iter()
@@ -153,6 +156,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     errors.extend(check_debug_info(module, &lookup));
+    let mut scratch = Scratch::default();
     for func in &module.functions {
         if func
             .personality
@@ -173,9 +177,16 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
                 message: format!("personality @{personality} is not a declared function"),
             });
         }
-        for (_, inst) in func.layout_insts() {
+        // An instruction can have a bad location only if the table has one.
+        let bad_file = |loc: &crate::SourceLoc| loc.file.index() >= module.files.len();
+        let suspects = func
+            .locs()
+            .iter()
+            .any(bad_file)
+            .then(|| func.layout_insts());
+        for (_, inst) in suspects.into_iter().flatten() {
             if let Some(loc) = func.inst_loc(inst)
-                && loc.file.index() >= module.files.len()
+                && bad_file(&loc)
             {
                 errors.push(VerifierError {
                     location: format!("@{} {inst}", func.name),
@@ -194,7 +205,7 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
                 });
             }
         }
-        if let Err(func_errors) = verify(func) {
+        if let Err(func_errors) = verify_with(func, &mut scratch) {
             errors.extend(func_errors.into_iter().map(|e| VerifierError {
                 location: format!("@{} {}", func.name, e.location),
                 message: e.message,
@@ -304,7 +315,13 @@ fn check_debug_info(module: &Module, lookup: &Names<'_>) -> Vec<VerifierError> {
                 });
             }
         }
-        for (_, inst) in func.layout_insts() {
+        let bad_scope = |loc: &crate::SourceLoc| loc.scope.is_some_and(|s| s.index() >= scopes);
+        let suspects = func
+            .locs()
+            .iter()
+            .any(bad_scope)
+            .then(|| func.layout_insts());
+        for (_, inst) in suspects.into_iter().flatten() {
             if let Some(scope) = func.inst_loc(inst).and_then(|loc| loc.scope)
                 && scope.index() >= scopes
             {
@@ -439,15 +456,20 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
 /// Check handles before building a CFG, resolving operands or formatting an
 /// instruction: each of those otherwise assumes in-range references. Passes
 /// can invalidate handles through `inst_data_mut`; report errors, not panics.
-fn check_references(func: &Function) -> Result<(), Vec<VerifierError>> {
+/// Fills `inserted` with whether each block is in the layout, and returns
+/// whether any instruction branches to the entry block.
+fn check_references(func: &Function, inserted: &mut Vec<bool>) -> Result<bool, Vec<VerifierError>> {
     let mut errors = Vec::new();
     let callees = func.callees().count();
     let signatures = func.signatures().count();
     let symbols = func.data_symbols().count();
-    let mut inserted = vec![false; func.num_blocks()];
+    inserted.clear();
+    inserted.resize(func.num_blocks(), false);
     for block in func.blocks() {
         inserted[block.index()] = true;
     }
+    let entry = func.entry_block();
+    let mut entry_is_target = false;
     for (_, inst) in func.layout_insts() {
         let mut bad = |kind: &str, index: usize| {
             errors.push(VerifierError {
@@ -465,6 +487,7 @@ fn check_references(func: &Function) -> Result<(), Vec<VerifierError>> {
             if inserted.get(dest.block.index()) != Some(&true) {
                 bad("block", dest.block.index());
             }
+            entry_is_target |= Some(dest.block) == entry;
         }
         let mut callee = |reference: crate::FuncRef| {
             if reference.index() >= callees {
@@ -509,22 +532,37 @@ fn check_references(func: &Function) -> Result<(), Vec<VerifierError>> {
         }
     }
     if errors.is_empty() {
-        Ok(())
+        Ok(entry_is_target)
     } else {
         Err(errors)
     }
 }
 
+/// Buffers for verifying a function, reused across a module's functions.
+#[derive(Default)]
+struct Scratch {
+    /// Whether each block is in the layout.
+    inserted: Vec<bool>,
+    /// For each instruction, the number of the block visit that reached it
+    /// (from 1), so a use in the same block can tell if its definition came
+    /// first.
+    visited: Vec<u32>,
+    operands: Vec<Value>,
+    cases: Vec<u64>,
+}
+
 /// Verifies one function on its own; calls are checked against the
 /// signatures in its callee table.
 pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
-    check_references(func)?;
-    let cfg = ControlFlowGraph::compute(func);
-    let domtree = DominatorTree::compute(func, &cfg);
+    verify_with(func, &mut Scratch::default())
+}
+
+fn verify_with(func: &Function, scratch: &mut Scratch) -> Result<(), Vec<VerifierError>> {
+    let entry_is_target = check_references(func, &mut scratch.inserted)?;
     let mut v = Verifier {
         func,
-        cfg,
-        domtree,
+        dom: None,
+        scratch,
         errors: Vec::new(),
     };
     if func.sig.cc == CallConv::Fast && !func.local {
@@ -558,7 +596,7 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
             );
         }
     }
-    v.run();
+    v.run(entry_is_target);
     if v.errors.is_empty() {
         Ok(())
     } else {
@@ -568,70 +606,33 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
 
 struct Verifier<'a> {
     func: &'a Function,
-    cfg: ControlFlowGraph,
-    domtree: DominatorTree,
+    /// Built on first need: most uses are in their definition's block or
+    /// read an entry block value, which need no dominator tree.
+    dom: Option<(ControlFlowGraph, DominatorTree)>,
+    scratch: &'a mut Scratch,
     errors: Vec<VerifierError>,
 }
 
-// Per-verification positions: compact arenas retain direct indexing, while
-// heavily pruned arenas allocate only for instructions still in the layout.
-enum InstPositions {
-    Dense(Vec<usize>),
-    Sparse(HashMap<Inst, usize>),
-}
-
-impl InstPositions {
-    fn new(func: &Function) -> Self {
-        // Counting slice lengths visits blocks, not historical instructions.
-        let live = func.blocks().fold(0usize, |count, block| {
-            count.saturating_add(func.block_insts(block).len())
-        });
-        // A small allowance avoids hashing tiny functions. Otherwise dense
-        // storage is bounded by four slots per live instruction. This is a
-        // memory bound, not a benchmark-tuned crossover.
-        let mut positions = if func.num_insts() <= 1024.max(live.saturating_mul(4)) {
-            Self::Dense(vec![usize::MAX; func.num_insts()])
-        } else {
-            Self::Sparse(HashMap::with_capacity(live))
-        };
-        for block in func.blocks() {
-            for (i, &inst) in func.block_insts(block).iter().enumerate() {
-                match &mut positions {
-                    Self::Dense(slots) => slots[inst.index()] = i,
-                    Self::Sparse(slots) => {
-                        slots.insert(inst, i);
-                    }
-                }
-            }
-        }
-        positions
-    }
-
-    fn get(&self, inst: Inst) -> Option<usize> {
-        match self {
-            Self::Dense(slots) => slots
-                .get(inst.index())
-                .copied()
-                .filter(|&i| i != usize::MAX),
-            Self::Sparse(slots) => slots.get(&inst).copied(),
-        }
-    }
-}
-
 impl Verifier<'_> {
-    fn run(&mut self) {
+    fn dom(&mut self) -> &(ControlFlowGraph, DominatorTree) {
+        let func = self.func;
+        self.dom.get_or_insert_with(|| {
+            let cfg = ControlFlowGraph::compute(func);
+            let domtree = DominatorTree::compute(func, &cfg);
+            (cfg, domtree)
+        })
+    }
+
+    fn run(&mut self, entry_is_target: bool) {
         let func = self.func;
         let Some(entry) = func.entry_block() else {
             self.error("function".into(), "function has no blocks".into());
             return;
         };
 
-        let param_tys: Vec<Type> = func
-            .block_params(entry)
-            .iter()
-            .map(|&p| func.value_type(p))
-            .collect();
-        if param_tys != func.sig.param_types() {
+        let param_tys = || func.block_params(entry).iter().map(|&p| func.value_type(p));
+        if !param_tys().eq(func.sig.params.iter().map(|p| p.ty)) {
+            let param_tys: Vec<Type> = param_tys().collect();
             self.error(
                 entry.to_string(),
                 format!(
@@ -669,18 +670,18 @@ impl Verifier<'_> {
                 self.error(sig_ref.to_string(), message);
             }
         }
-        if !self.cfg.preds(entry).is_empty() {
+        if entry_is_target {
             self.error(
                 entry.to_string(),
                 "the entry block cannot be a branch target".into(),
             );
         }
 
-        // Position of each live instruction within its block, for same-block dominance.
-        let position = InstPositions::new(func);
-
-        let mut operands = Vec::new();
-        for block in func.blocks() {
+        self.scratch.visited.clear();
+        self.scratch.visited.resize(func.num_insts(), 0);
+        let mut operands = std::mem::take(&mut self.scratch.operands);
+        for (visit, block) in func.blocks().enumerate() {
+            let visit = u32::try_from(visit + 1).expect("block count overflow");
             let insts = func.block_insts(block);
             match insts.last() {
                 None => self.error(block.to_string(), "block is empty".into()),
@@ -707,16 +708,31 @@ impl Verifier<'_> {
                     }
                 });
                 for &value in &operands {
-                    if !func.is_value_defined(value) {
+                    if !self.is_defined(value) {
                         self.inst_error(
                             inst,
                             format!("uses {value}, whose definition was removed"),
                         );
-                    } else if self.domtree.is_reachable(block) {
-                        self.check_dominance(inst, value, &position);
+                    } else {
+                        self.check_dominance(inst, block, visit, value);
                     }
                 }
+                self.scratch.visited[inst.index()] = visit;
             }
+        }
+        self.scratch.operands = operands;
+    }
+
+    /// [`Function::is_value_defined`] for a resolved value, with the
+    /// layout's blocks already known.
+    fn is_defined(&self, value: Value) -> bool {
+        match self.func.value_def(value) {
+            ValueDef::Result(inst, _) => !self.func.is_removed(inst),
+            ValueDef::Param(block, n) => {
+                self.scratch.inserted[block.index()]
+                    && self.func.block_params(block).get(n as usize) == Some(&value)
+            }
+            ValueDef::Alias(_) => unreachable!("resolved"),
         }
     }
 
@@ -1202,11 +1218,21 @@ impl Verifier<'_> {
                 }
                 let bits = 8 * t.bytes().unwrap();
                 let mask = u64::MAX >> (64 - bits);
-                let mut seen = HashSet::new();
+                let fits = |case: i64| {
+                    bits == 64 || (-(1i64 << (bits - 1))..(1i64 << bits)).contains(&case)
+                };
+                // Sorting finds whether there is any error at all; the
+                // loop below reports them in order.
+                let sorted = &mut self.scratch.cases;
+                sorted.clear();
+                sorted.extend(cases.iter().map(|&case| case as u64 & mask));
+                sorted.sort_unstable();
+                if cases.iter().all(|&case| fits(case)) && sorted.windows(2).all(|w| w[0] != w[1]) {
+                    return;
+                }
+                let mut seen = FxHashSet::default();
                 for &case in cases {
-                    let fits =
-                        bits == 64 || (-(1i64 << (bits - 1))..(1i64 << bits)).contains(&case);
-                    if !fits {
+                    if !fits(case) {
                         self.inst_error(inst, format!("case {case} does not fit in {t}"));
                     } else if !seen.insert(case as u64 & mask) {
                         self.inst_error(
@@ -1278,7 +1304,7 @@ impl Verifier<'_> {
                 }
                 // Only unwind edges lead here: the exception arrives in
                 // registers that nothing else sets.
-                for pred in self.cfg.preds(block).to_vec() {
+                for pred in self.dom().0.preds(block).to_vec() {
                     let term = *func.block_insts(pred).last().expect("a terminator");
                     let unwind = matches!(func.inst_data(term), InstData::Invoke { dests, .. } if dests[1].block == block && dests[0].block != block);
                     if !unwind {
@@ -1354,8 +1380,9 @@ impl Verifier<'_> {
                 self.check_tail_returns(inst, sig);
             }
             InstData::Return { args } => {
-                let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
-                if got != func.sig.return_types() {
+                let returns = func.sig.returns.iter().map(|r| r.ty);
+                if !args.iter().map(|&a| ty(a)).eq(returns) {
+                    let got: Vec<Type> = args.iter().map(|&a| ty(a)).collect();
                     self.inst_error(
                         inst,
                         format!(
@@ -1399,38 +1426,57 @@ impl Verifier<'_> {
         }
     }
 
-    fn check_dominance(&mut self, inst: Inst, value: Value, position: &InstPositions) {
+    /// Checks that defined, resolved `value` dominates its use by `inst`, the
+    /// `visit`th block in the layout, if that block is reachable.
+    fn check_dominance(&mut self, inst: Inst, use_block: Block, visit: u32, value: Value) {
         let func = self.func;
-        let value = func.resolve(value);
-        let use_block = func.inst_block(inst);
-        let ok = match func.value_def(value) {
-            ValueDef::Param(def_block, _) => self.domtree.dominates(def_block, use_block),
+        let entry = func.entry_block();
+        // A definition in the entry block dominates every reachable block,
+        // and one in the use's own block does if it came first. Only the
+        // rest need the dominator tree.
+        let (def_block, earlier) = match func.value_def(value) {
+            ValueDef::Param(def_block, _) => (def_block, true),
             // An invoke's results exist only once it returns normally.
             ValueDef::Result(def_inst, _)
                 if let InstData::Invoke { dests, .. } = func.inst_data(def_inst) =>
             {
-                self.domtree.dominates(dests[0].block, use_block)
-                    && func.inst_block(def_inst) != use_block
-            }
-            ValueDef::Result(def_inst, _) => {
+                let normal = dests[0].block;
                 let def_block = func.inst_block(def_inst);
-                if def_block == use_block {
-                    position
-                        .get(def_inst)
-                        .zip(position.get(inst))
-                        .is_some_and(|(def, use_)| def < use_)
-                } else {
-                    self.domtree.dominates(def_block, use_block)
+                let (_, domtree) = self.dom();
+                let ok = !domtree.is_reachable(use_block)
+                    || domtree.dominates(normal, use_block) && def_block != use_block;
+                if !ok {
+                    self.dominance_error(inst, value);
                 }
+                return;
             }
+            ValueDef::Result(def_inst, _) => (
+                func.inst_block(def_inst),
+                self.scratch.visited[def_inst.index()] == visit,
+            ),
             ValueDef::Alias(_) => unreachable!("resolved values are never aliases"),
         };
-        if !ok {
-            self.inst_error(
-                inst,
-                format!("use of {value} is not dominated by its definition"),
-            );
+        let ok = if def_block == use_block {
+            earlier
+        } else {
+            Some(def_block) == entry
+        };
+        if ok {
+            return;
         }
+        let (_, domtree) = self.dom();
+        let ok = !domtree.is_reachable(use_block)
+            || def_block != use_block && domtree.dominates(def_block, use_block);
+        if !ok {
+            self.dominance_error(inst, value);
+        }
+    }
+
+    fn dominance_error(&mut self, inst: Inst, value: Value) {
+        self.inst_error(
+            inst,
+            format!("use of {value} is not dominated by its definition"),
+        );
     }
 
     fn inst_error(&mut self, inst: Inst, message: String) {

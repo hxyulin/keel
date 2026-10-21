@@ -778,6 +778,12 @@ impl Function {
         }
     }
 
+    /// Every location an instruction has been given, including removed
+    /// ones, possibly repeated.
+    pub(crate) fn locs(&self) -> &[SourceLoc] {
+        &self.locs
+    }
+
     pub fn set_inst_loc(&mut self, inst: Inst, loc: Option<SourceLoc>) {
         let index = match loc {
             None => 0,
