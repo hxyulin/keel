@@ -87,7 +87,10 @@ impl<'m> Names<'m> {
 pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
     let mut errors = Vec::new();
     let lookup = Names::new(module);
-    let mut seen = FxHashSet::default();
+    let mut seen = FxHashSet::with_capacity_and_hasher(
+        module.decls.len() + module.data.len() + module.functions.len(),
+        Default::default(),
+    );
     let names = module
         .decls
         .iter()
@@ -478,11 +481,16 @@ fn check_references(func: &Function, inserted: &mut Vec<bool>) -> Result<bool, V
             })
         };
         let data = func.inst_data(inst);
-        data.for_each_operand(|value| {
-            if value.index() >= func.num_values() {
-                bad("value", value.index());
-            }
-        });
+        let values = func.num_values();
+        let mut out_of_range = false;
+        data.for_each_operand(|value| out_of_range |= value.index() >= values);
+        if out_of_range {
+            data.for_each_operand(|value| {
+                if value.index() >= values {
+                    bad("value", value.index());
+                }
+            });
+        }
         for dest in data.branch_dests() {
             if inserted.get(dest.block.index()) != Some(&true) {
                 bad("block", dest.block.index());
