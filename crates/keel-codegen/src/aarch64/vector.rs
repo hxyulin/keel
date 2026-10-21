@@ -471,6 +471,22 @@ pub(super) struct WideningAdd {
     signed: bool,
 }
 
+fn preserves_fusion_boundaries(
+    func: &Function,
+    selection: &crate::select::Selection,
+    producer: Inst,
+    consumer: Inst,
+) -> bool {
+    !selection
+        .constraints()
+        .keys()
+        .any(|&(inst, _, _)| inst == producer || inst == consumer)
+        && !matches!(
+            (func.inst_loc(producer), func.inst_loc(consumer)),
+            (Some(a), Some(b)) if a.file != b.file || a.line != b.line
+        )
+}
+
 /// SADDW/UADDW have exactly the same low-lane extension followed by modular
 /// addition as this adjacent pair. Only a single doubling is covered: chained
 /// extensions and shared widened values keep their original materialization.
@@ -492,6 +508,7 @@ pub(super) fn select_widening_adds(
             && producer_block == block
             && !selection.covered(producer)
             && !selection.covered(inst)
+            && preserves_fusion_boundaries(func, selection, producer, inst)
             && let InstData::Convert {
                 op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
                 ty,
@@ -558,6 +575,7 @@ pub(super) fn select_replicate_loads(
             && load_block == block
             && !selection.covered(load)
             && !selection.covered(inst)
+            && preserves_fusion_boundaries(func, selection, load, inst)
             && let InstData::VectorSplat { ty, arg } = *func.inst_data(inst)
             && let InstData::Load {
                 ty: scalar,
