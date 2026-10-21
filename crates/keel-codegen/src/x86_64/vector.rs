@@ -90,17 +90,17 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 
-// SSE2 handles equality and signed ordering at every integer width.
-// i64 ordering uses a dword recipe; unsigned ordering still uses lane legalization.
+// SSE2 handles equality and ordering at every integer width. Unsigned ordering
+// biases the sign bit; i64 ordering uses a lexicographic dword recipe.
 pub(super) fn packed_compare(cond: IntCC, shape: VectorType) -> Option<Opcode> {
     use VectorType::*;
     Some(match (cond, shape) {
         (IntCC::Eq | IntCC::Ne, I8x16) => Opcode::Pcmpeqb,
         (IntCC::Eq | IntCC::Ne, I16x8) => Opcode::Pcmpeqw,
         (IntCC::Eq | IntCC::Ne, I32x4 | I64x2) => Opcode::Pcmpeqd,
-        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I8x16) => Opcode::Pcmpgtb,
-        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I16x8) => Opcode::Pcmpgtw,
-        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I32x4 | I64x2) => Opcode::Pcmpgtd,
+        (_, I8x16) => Opcode::Pcmpgtb,
+        (_, I16x8) => Opcode::Pcmpgtw,
+        (_, I32x4 | I64x2) => Opcode::Pcmpgtd,
         _ => return None,
     })
 }
@@ -155,42 +155,67 @@ impl FunctionCompiler<'_> {
     }
     pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
         let shape = self.ty(args[0]).vector().unwrap();
-        let swap = matches!(cond, IntCC::Slt | IntCC::Sge);
+        let unsigned = matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge);
+        let swap = matches!(cond, IntCC::Slt | IntCC::Sge | IntCC::Ult | IntCC::Uge);
         let lhs = args[usize::from(swap)];
         let rhs = args[usize::from(!swap)];
         let d = self.def_freg(result);
         let dst;
-        if shape == VectorType::I64x2 && !matches!(cond, IntCC::Eq | IntCC::Ne) {
+        if unsigned || (shape == VectorType::I64x2 && !matches!(cond, IntCC::Eq | IntCC::Ne)) {
             // Capture rhs first: the result may alias it. lhs can then be
             // computed directly in the result register, including a spill's FS0.
             self.vector_stage(rhs, FS1);
             self.vector_stage(lhs, d);
             dst = d;
-            // Compare signed high dwords, breaking ties by UNSIGNED low dwords.
-            // Bias just the low dwords before pcmpgtd. Three reserved registers
-            // suffice even when every operand and the result is spilled.
+            // Bias each unsigned lane before signed comparison. For i64 compare
+            // high dwords, breaking ties by unsigned low dwords: signed i64
+            // biases only low dwords, unsigned i64 biases BOTH dwords.
+            // Three reserved registers suffice even with all values spilled.
             self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
-            self.emit(Opcode::Psrlq, [asm_arg(&xmm(FS2)), asm_arg(&63i64)]);
-            self.emit(Opcode::Psllq, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+            match shape {
+                VectorType::I8x16 => {
+                    self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
+                    self.emit(Opcode::Psrlw, [asm_arg(&xmm(FS2)), asm_arg(&8i64)]);
+                    self.emit(Opcode::Punpcklbw, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS2))]);
+                }
+                VectorType::I16x8 => {
+                    self.emit(Opcode::Psllw, [asm_arg(&xmm(FS2)), asm_arg(&15i64)]);
+                }
+                VectorType::I32x4 | VectorType::I64x2 if unsigned => {
+                    self.emit(Opcode::Pslld, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+                }
+                VectorType::I64x2 => {
+                    self.emit(Opcode::Psrlq, [asm_arg(&xmm(FS2)), asm_arg(&63i64)]);
+                    self.emit(Opcode::Psllq, [asm_arg(&xmm(FS2)), asm_arg(&31i64)]);
+                }
+                _ => unreachable!(),
+            }
             self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS2))]);
             self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
-            self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(dst))]);
-            self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS1))]);
-            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
-            self.emit(
-                Opcode::Pshufd,
-                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xa0i64)],
-            );
-            self.emit(
-                Opcode::Pshufd,
-                [asm_arg(&xmm(dst)), asm_arg(&xmm(dst)), asm_arg(&0xf5i64)],
-            );
-            self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
-            self.emit(
-                Opcode::Pshufd,
-                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xf5i64)],
-            );
-            self.emit(Opcode::Orps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+            if shape != VectorType::I64x2 {
+                self.emit(
+                    packed_compare(cond, shape).unwrap(),
+                    [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))],
+                );
+            } else {
+                self.emit(Opcode::Movaps, [asm_arg(&xmm(FS2)), asm_arg(&xmm(dst))]);
+                self.emit(Opcode::Pcmpgtd, [asm_arg(&xmm(FS2)), asm_arg(&xmm(FS1))]);
+                self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xa0i64)],
+                );
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(dst)), asm_arg(&xmm(dst)), asm_arg(&0xf5i64)],
+                );
+                self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2)), asm_arg(&0xf5i64)],
+                );
+                self.emit(Opcode::Orps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
+            }
         } else {
             let a = self.use_freg(lhs, FS0);
             let b = self.use_freg(rhs, FS1);
@@ -212,7 +237,10 @@ impl FunctionCompiler<'_> {
                 self.emit(Opcode::Andps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
             }
         }
-        if matches!(cond, IntCC::Ne | IntCC::Sle | IntCC::Sge) {
+        if matches!(
+            cond,
+            IntCC::Ne | IntCC::Sle | IntCC::Sge | IntCC::Ule | IntCC::Uge
+        ) {
             self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
             self.emit(Opcode::Xorps, [asm_arg(&xmm(dst)), asm_arg(&xmm(FS1))]);
         }
