@@ -454,30 +454,7 @@ struct Interval {
 #[derive(Clone, Debug)]
 enum Ranges {
     One((u32, u32)),
-    Many(Vec<(u32, u32)>),
-}
-
-impl Default for Ranges {
-    fn default() -> Self {
-        Self::Many(Vec::new())
-    }
-}
-
-impl Ranges {
-    fn push(&mut self, range: (u32, u32)) {
-        match self {
-            Self::Many(list) if list.is_empty() => *self = Self::One(range),
-            Self::One(first) => *self = Self::Many(vec![*first, range]),
-            Self::Many(list) => list.push(range),
-        }
-    }
-
-    fn last_mut(&mut self) -> Option<&mut (u32, u32)> {
-        match self {
-            Self::One(range) => Some(range),
-            Self::Many(list) => list.last_mut(),
-        }
-    }
+    Many(Box<[(u32, u32)]>),
 }
 
 impl std::ops::Deref for Ranges {
@@ -491,12 +468,19 @@ impl std::ops::Deref for Ranges {
     }
 }
 
-impl From<Vec<(u32, u32)>> for Ranges {
-    fn from(list: Vec<(u32, u32)>) -> Self {
+impl From<&[(u32, u32)]> for Ranges {
+    fn from(list: &[(u32, u32)]) -> Self {
         match *list {
             [range] => Self::One(range),
-            _ => Self::Many(list),
+            _ => Self::Many(list.into()),
         }
+    }
+}
+
+#[cfg(test)]
+impl From<Vec<(u32, u32)>> for Ranges {
+    fn from(list: Vec<(u32, u32)>) -> Self {
+        Self::from(&list[..])
     }
 }
 
@@ -637,7 +621,13 @@ fn build_fast_intervals(
 ) -> Vec<FastInterval> {
     profiling::scope!("contiguous-live-intervals");
     backend_scope!(Intervals);
-    let live = liveness(func, cfg, order, selection);
+    let live = with_scratch(|scratch| {
+        compute_liveness(func, cfg, order, selection, scratch);
+        Liveness {
+            live_in: std::mem::take(&mut scratch.live_in),
+            live_out: std::mem::take(&mut scratch.live_out),
+        }
+    });
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
     let mut endpoints: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
     let mut open: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
@@ -869,6 +859,60 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
     count
 }
 
+/// Arrays for allocating one function, kept per thread so that each
+/// function reuses the buffers of the last rather than allocating, zeroing
+/// and growing its own.
+#[derive(Default)]
+struct Scratch {
+    /// Each walked instruction's operands, in walk order, recorded by
+    /// liveness for the interval walk, with the end of each instruction's.
+    operands: Vec<Value>,
+    operand_ends: Vec<u32>,
+    exposed: Vec<(u32, u32)>,
+    /// Per value: the blocks defining and using it last seen, and the block
+    /// holding its definition.
+    stamps: Vec<(u32, u32)>,
+    def_block: Vec<u32>,
+    reachable: Vec<bool>,
+    start: Vec<u32>,
+    fill: Vec<u32>,
+    use_blocks: Vec<u32>,
+    in_entries: Vec<(u32, Value)>,
+    out_entries: Vec<(u32, Value)>,
+    marks: Vec<(u32, u32)>,
+    stack: Vec<u32>,
+    live_in: BlockSets,
+    live_out: BlockSets,
+    open: Vec<Option<(u32, u32)>>,
+    touched: Vec<Value>,
+    calls: Vec<u32>,
+    preserved_calls: Vec<(u32, u64)>,
+    twice: Vec<u32>,
+    /// Closed ranges with the index of the value's next, and each value's
+    /// first and last range.
+    pieces: Vec<((u32, u32), u32)>,
+    chains: Vec<(u32, u32)>,
+    list: Vec<(u32, u32)>,
+}
+
+thread_local! {
+    static SCRATCH: std::cell::RefCell<Scratch> = std::cell::RefCell::default();
+}
+
+/// Runs `f` with this thread's scratch arrays.
+fn with_scratch<R>(f: impl FnOnce(&mut Scratch) -> R) -> R {
+    let mut scratch = SCRATCH.try_with(|cell| cell.take()).unwrap_or_default();
+    let result = f(&mut scratch);
+    let _ = SCRATCH.try_with(|cell| cell.replace(scratch));
+    result
+}
+
+/// `len` copies of `value` in `list`, reusing its storage.
+fn refill<T: Clone>(list: &mut Vec<T>, len: usize, value: T) {
+    list.clear();
+    list.resize(len, value);
+}
+
 /// Live-in and live-out sets, indexed by block.
 struct Liveness {
     live_in: BlockSets,
@@ -876,36 +920,35 @@ struct Liveness {
 }
 
 /// Sorted value sets for every block, packed into one array.
+#[derive(Default)]
 struct BlockSets {
     start: Vec<u32>,
     values: Vec<Value>,
 }
 
 impl BlockSets {
-    fn empty(blocks: usize) -> Self {
-        Self {
-            start: vec![0; blocks + 1],
-            values: Vec::new(),
-        }
-    }
-
     /// Groups `(block, value)` entries by block, keeping their order.
-    fn from_entries(blocks: usize, entries: &[(u32, Value)]) -> Self {
-        let mut start = vec![0u32; blocks + 1];
+    fn fill(&mut self, blocks: usize, entries: &[(u32, Value)]) {
+        let start = &mut self.start;
+        refill(start, blocks + 1, 0);
         for &(b, _) in entries {
             start[b as usize + 1] += 1;
         }
         for b in 0..blocks {
             start[b + 1] += start[b];
         }
-        let mut fill = start.clone();
-        let mut values = vec![Value::new(0); entries.len()];
-        for &(b, v) in entries {
-            let slot = &mut fill[b as usize];
+        let values = &mut self.values;
+        refill(values, entries.len(), Value::new(0));
+        // Fill each block's run from its end down, walking the entries
+        // backwards, so the starts are left as they are.
+        for &(b, v) in entries.iter().rev() {
+            let slot = &mut start[b as usize + 1];
+            *slot -= 1;
             values[*slot as usize] = v;
-            *slot += 1;
         }
-        Self { start, values }
+        // Each start now holds the previous block's: shift them back up.
+        start.rotate_left(1);
+        start[blocks] = entries.len() as u32;
     }
 }
 
@@ -934,40 +977,74 @@ impl std::ops::Index<usize> for BlockSets {
 /// live into exactly the blocks from which a use is reachable without passing
 /// its definition. Every set entry is produced once, and visiting values in
 /// increasing order leaves each set sorted without merging.
+#[cfg(test)]
 fn liveness(
     func: &Function,
     cfg: &ControlFlowGraph,
     order: &[Block],
     selection: &crate::select::Selection,
 ) -> Liveness {
+    let mut scratch = Scratch::default();
+    compute_liveness(func, cfg, order, selection, &mut scratch);
+    Liveness {
+        live_in: scratch.live_in,
+        live_out: scratch.live_out,
+    }
+}
+
+/// [`liveness`] into `scratch.live_in` and `scratch.live_out`, also recording
+/// every walked instruction's operands in `scratch.operands`.
+fn compute_liveness(
+    func: &Function,
+    cfg: &ControlFlowGraph,
+    order: &[Block],
+    selection: &crate::select::Selection,
+    scratch: &mut Scratch,
+) {
     profiling::scope!("liveness");
     backend_scope!(Liveness);
     let n = func.num_blocks();
+    let operands = &mut scratch.operands;
+    let operand_ends = &mut scratch.operand_ends;
+    operands.clear();
+    operand_ends.clear();
     // In verified SSA, every operand in the only reachable block is defined
     // there (parameters included). Even a self edge introduces no live-in
     // value: edge arguments are explicit reads and parameters are definitions.
-    // The exact fixed point is empty, so avoid the use/def walk.
+    // The exact fixed point is empty, so only record the operands.
     if order.len() <= 1 {
-        return Liveness {
-            live_in: BlockSets::empty(n),
-            live_out: BlockSets::empty(n),
-        };
+        for &block in order {
+            for &inst in func.block_insts(block) {
+                if selection.covered(inst) {
+                    continue;
+                }
+                selection.for_each_operand(func, inst, |v| operands.push(v));
+                operand_ends.push(operands.len() as u32);
+            }
+        }
+        scratch.live_in.fill(n, &[]);
+        scratch.live_out.fill(n, &[]);
+        return;
     }
     let num_values = func.num_values();
     // Upward-exposed uses as (value, block) occurrences, at most one per pair.
-    let mut exposed: Vec<(u32, u32)> = Vec::new();
-    // Block stamps avoid trees and clearing a value-sized set per block.
-    let mut defined = vec![0u32; num_values];
-    let mut used = vec![0u32; num_values];
+    let exposed = &mut scratch.exposed;
+    exposed.clear();
+    // Block stamps (defined, used) avoid trees and clearing a value-sized
+    // set per block.
+    let stamps = &mut scratch.stamps;
+    refill(stamps, num_values, (0, 0));
     // The reachable block holding each value's (non-covered) definition.
-    let mut def_block = vec![u32::MAX; num_values];
-    let mut reachable = vec![false; n];
+    let def_block = &mut scratch.def_block;
+    refill(def_block, num_values, u32::MAX);
+    let reachable = &mut scratch.reachable;
+    refill(reachable, n, false);
     for &block in order {
         let b = block.index() as u32;
         let stamp = b + 1;
         reachable[block.index()] = true;
         for &param in func.block_params(block) {
-            defined[param.index()] = stamp;
+            stamps[param.index()].0 = stamp;
             def_block[param.index()] = b;
         }
         for &inst in func.block_insts(block) {
@@ -975,45 +1052,50 @@ fn liveness(
                 continue;
             }
             selection.for_each_operand(func, inst, |v| {
+                operands.push(v);
                 let i = v.index();
-                if defined[i] != stamp && used[i] != stamp {
+                let (defined, used) = &mut stamps[i];
+                if *defined != stamp && *used != stamp {
                     exposed.push((i as u32, b));
-                    used[i] = stamp;
+                    *used = stamp;
                 }
             });
+            operand_ends.push(operands.len() as u32);
             for &v in func.inst_results(inst) {
-                defined[v.index()] = stamp;
+                stamps[v.index()].0 = stamp;
                 def_block[v.index()] = b;
             }
         }
     }
-    drop(defined);
-    drop(used);
     // Group the use blocks by value (a counting sort keeps block order).
-    let mut start = vec![0u32; num_values + 1];
-    for &(v, _) in &exposed {
+    let start = &mut scratch.start;
+    refill(start, num_values + 1, 0);
+    for &(v, _) in exposed.iter() {
         start[v as usize + 1] += 1;
     }
     for i in 0..num_values {
         start[i + 1] += start[i];
     }
-    let mut fill = start.clone();
-    let mut use_blocks = vec![0u32; exposed.len()];
-    for &(v, b) in &exposed {
+    let fill = &mut scratch.fill;
+    fill.clear();
+    fill.extend_from_slice(start);
+    let use_blocks = &mut scratch.use_blocks;
+    refill(use_blocks, exposed.len(), 0);
+    for &(v, b) in exposed.iter() {
         let slot = &mut fill[v as usize];
         use_blocks[*slot as usize] = b;
         *slot += 1;
     }
-    drop(exposed);
-    drop(fill);
 
     // (block, value) entries, produced in increasing value order.
-    let mut live_in = Vec::new();
-    let mut live_out = Vec::new();
+    let live_in = &mut scratch.in_entries;
+    let live_out = &mut scratch.out_entries;
+    live_in.clear();
+    live_out.clear();
     // The last value entered into each block's live-in and live-out set.
-    let mut in_mark = vec![u32::MAX; n];
-    let mut out_mark = vec![u32::MAX; n];
-    let mut stack = Vec::new();
+    let marks = &mut scratch.marks;
+    refill(marks, n, (u32::MAX, u32::MAX));
+    let stack = &mut scratch.stack;
     for v in 0..num_values {
         let blocks = &use_blocks[start[v] as usize..start[v + 1] as usize];
         if blocks.is_empty() {
@@ -1022,8 +1104,8 @@ fn liveness(
         let value = Value::new(v);
         let mark = v as u32;
         for &b in blocks {
-            if in_mark[b as usize] != mark {
-                in_mark[b as usize] = mark;
+            if marks[b as usize].0 != mark {
+                marks[b as usize].0 = mark;
                 live_in.push((b, value));
                 stack.push(b);
             }
@@ -1034,22 +1116,21 @@ fn liveness(
                 if !reachable[p] {
                     continue;
                 }
-                if out_mark[p] != mark {
-                    out_mark[p] = mark;
+                let (in_mark, out_mark) = &mut marks[p];
+                if *out_mark != mark {
+                    *out_mark = mark;
                     live_out.push((p as u32, value));
                 }
-                if def_block[v] != p as u32 && in_mark[p] != mark {
-                    in_mark[p] = mark;
+                if def_block[v] != p as u32 && *in_mark != mark {
+                    *in_mark = mark;
                     live_in.push((p as u32, value));
                     stack.push(p as u32);
                 }
             }
         }
     }
-    Liveness {
-        live_in: BlockSets::from_entries(n, &live_in),
-        live_out: BlockSets::from_entries(n, &live_out),
-    }
+    scratch.live_in.fill(n, live_in);
+    scratch.live_out.fill(n, live_out);
 }
 
 /// Numbers the program points (see the module docs) and builds one interval
@@ -1064,15 +1145,44 @@ fn build_intervals(
 ) -> Vec<Interval> {
     profiling::scope!("live-intervals");
     backend_scope!(Intervals);
-    let live = liveness(func, cfg, order, selection);
+    with_scratch(|scratch| {
+        compute_liveness(func, cfg, order, selection, scratch);
+        intervals_from_liveness(func, order, is_call, returns_twice, selection, scratch)
+    })
+}
+
+fn intervals_from_liveness(
+    func: &Function,
+    order: &[Block],
+    is_call: &dyn Fn(&InstData) -> bool,
+    returns_twice: &dyn Fn(&InstData) -> bool,
+    selection: &crate::select::Selection,
+    scratch: &mut Scratch,
+) -> Vec<Interval> {
+    let Scratch {
+        operands,
+        operand_ends,
+        live_in,
+        live_out,
+        open,
+        touched,
+        calls,
+        preserved_calls,
+        twice,
+        pieces,
+        chains,
+        list,
+        ..
+    } = scratch;
     let is_alias = |v: Value| matches!(func.value_def(v), ValueDef::Alias(_));
 
     // Each value's ranges, built block by block: `open` is the range in
     // the current block, from the first point to the last seen there.
-    let mut ranges: Vec<Ranges> = Vec::new();
-    ranges.resize_with(func.num_values(), Ranges::default);
-    let mut open: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
-    let mut touched: Vec<Value> = Vec::new();
+    // Closed ranges are chained per value through `pieces`.
+    refill(open, func.num_values(), None);
+    refill(chains, func.num_values(), (u32::MAX, u32::MAX));
+    pieces.clear();
+    touched.clear();
     fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
         let range = &mut open[v.index()];
         *range = Some(match *range {
@@ -1085,22 +1195,25 @@ fn build_intervals(
     }
     // Read points of calls, and of calls that return twice, in increasing
     // order.
-    let mut calls = Vec::new();
-    let mut preserved_calls = Vec::new();
-    let mut twice = Vec::new();
+    calls.clear();
+    preserved_calls.clear();
+    twice.clear();
 
     // Slot `k` owns the read point 2k and the write point 2k + 1.
     let mut slot = 0u32;
+    // The walked instruction, indexing the operands liveness recorded.
+    let mut walked = 0;
+    let mut first_operand = 0;
     for &block in order {
         let header = 2 * slot + 1;
         slot += 1;
         for &param in func.block_params(block) {
             if !is_alias(param) {
-                extend(&mut open, param, header, &mut touched);
+                extend(open, param, header, touched);
             }
         }
-        for &v in &live.live_in[block.index()] {
-            extend(&mut open, v, header, &mut touched);
+        for &v in &live_in[block.index()] {
+            extend(open, v, header, touched);
         }
 
         for &inst in func.block_insts(block) {
@@ -1110,11 +1223,16 @@ fn build_intervals(
             if selection.covered(inst) {
                 continue;
             }
-            selection.for_each_operand(func, inst, |v| extend(&mut open, v, read, &mut touched));
+            let last_operand = operand_ends[walked] as usize;
+            walked += 1;
+            for &v in &operands[first_operand..last_operand] {
+                extend(open, v, read, touched);
+            }
+            first_operand = last_operand;
             for &result in func.inst_results(inst) {
                 // An alias's instruction is dead; its result goes nowhere.
                 if !is_alias(result) {
-                    extend(&mut open, result, write, &mut touched);
+                    extend(open, result, write, touched);
                 }
             }
             if is_call(data) {
@@ -1138,8 +1256,8 @@ fn build_intervals(
         // The terminator's write point: values live out survive the
         // block-argument copies on the way out.
         let end = 2 * slot - 1;
-        for &v in &live.live_out[block.index()] {
-            extend(&mut open, v, end, &mut touched);
+        for &v in &live_out[block.index()] {
+            extend(open, v, end, touched);
         }
 
         // Close this block's ranges. Live out of the previous block and
@@ -1147,10 +1265,18 @@ fn build_intervals(
         // between them is a read point no instruction owns.
         for v in touched.drain(..) {
             let (from, to) = open[v.index()].take().unwrap();
-            let list = &mut ranges[v.index()];
-            match list.last_mut() {
-                Some(last) if last.1 + 2 >= from => last.1 = to,
-                _ => list.push((from, to)),
+            let (first, last) = &mut chains[v.index()];
+            match pieces.get_mut(*last as usize) {
+                Some(((_, last_to), _)) if *last_to + 2 >= from => *last_to = to,
+                _ => {
+                    let index = pieces.len() as u32;
+                    pieces.push(((from, to), u32::MAX));
+                    match pieces.get_mut(*last as usize) {
+                        Some((_, next)) => *next = index,
+                        None => *first = index,
+                    }
+                    *last = index;
+                }
             }
         }
     }
@@ -1163,26 +1289,35 @@ fn build_intervals(
         })
     };
     let mut intervals = Vec::new();
-    for (i, mut list) in ranges.into_iter().enumerate() {
-        if list.is_empty() {
+    for (i, &(first, _)) in chains.iter().enumerate() {
+        if first == u32::MAX {
             continue;
         }
-        let crosses_call = crosses(&calls, &list);
-        let preserved_gprs = if selection.preserved_call_gprs.is_empty() || crosses(&twice, &list) {
+        list.clear();
+        let mut next = first;
+        while let Some(&(range, after)) = pieces.get(next as usize) {
+            list.push(range);
+            next = after;
+        }
+        let crosses_call = crosses(calls, list);
+        let crosses_twice = crosses(twice, list);
+        let preserved_gprs = if selection.preserved_call_gprs.is_empty() || crosses_twice {
             0
         } else {
-            call_preserves(&preserved_calls, &list)
+            call_preserves(preserved_calls, list)
         };
-        if crosses(&twice, &list) {
-            list = Ranges::One((0, slot * 2));
-        }
+        let ranges = if crosses_twice {
+            Ranges::One((0, slot * 2))
+        } else {
+            Ranges::from(&list[..])
+        };
         let value = Value::new(i);
         let ty = func.value_type(value);
-        let high_ranges = (ty == Type::I128).then(|| list.clone());
+        let high_ranges = (ty == Type::I128).then(|| ranges.clone());
         intervals.push(Interval {
             value,
             half: 0,
-            ranges: list,
+            ranges,
             crosses_call,
             preserved_gprs,
             float: ty.is_float() || ty.is_vector(),
