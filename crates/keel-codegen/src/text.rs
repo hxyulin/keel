@@ -2,8 +2,50 @@
 //! exactly what the corresponding `Display` would.
 use std::fmt::{self, Write};
 
-/// `prefix` followed by the decimal text of `n` in one `write_str`.
+/// The decimal text of 0 through 999, back to back.
+const SMALL: &str = {
+    const BYTES: [u8; 2890] = {
+        let mut bytes = [0u8; 2890];
+        let (mut n, mut i) = (0, 0);
+        while n < 1000 {
+            if n >= 100 {
+                bytes[i] = b'0' + (n / 100) as u8;
+                i += 1;
+            }
+            if n >= 10 {
+                bytes[i] = b'0' + (n / 10 % 10) as u8;
+                i += 1;
+            }
+            bytes[i] = b'0' + (n % 10) as u8;
+            i += 1;
+            n += 1;
+        }
+        bytes
+    };
+    match std::str::from_utf8(&BYTES) {
+        Ok(text) => text,
+        Err(_) => panic!("ASCII digits"),
+    }
+};
+
+/// The decimal text of `n < 1000`, without validating a digit buffer.
+fn small(n: usize) -> &'static str {
+    let (start, len) = match n {
+        0..10 => (n, 1),
+        10..100 => (10 + 2 * (n - 10), 2),
+        _ => (190 + 3 * (n - 100), 3),
+    };
+    &SMALL[start..start + len]
+}
+
+/// `prefix` followed by the decimal text of `n`.
 pub(crate) fn write_decimal<W: Write + ?Sized>(out: &mut W, prefix: &str, n: i128) -> fmt::Result {
+    if (0..1000).contains(&n) {
+        if !prefix.is_empty() {
+            out.write_str(prefix)?;
+        }
+        return out.write_str(small(n as usize));
+    }
     let mut buf = [0u8; 64];
     let mut i = buf.len();
     let mut magnitude = n.unsigned_abs();

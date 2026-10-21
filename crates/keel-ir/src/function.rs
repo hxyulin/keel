@@ -1361,6 +1361,12 @@ fn write_decimal(
     negative: bool,
     mut n: u64,
 ) -> fmt::Result {
+    if !negative && n < 1000 {
+        if !prefix.is_empty() {
+            f.write_str(prefix)?;
+        }
+        return f.write_str(small_decimal(n as usize));
+    }
     let mut buf = [0u8; 32];
     let mut i = buf.len();
     loop {
@@ -1378,6 +1384,42 @@ fn write_decimal(
     i -= prefix.len();
     buf[i..i + prefix.len()].copy_from_slice(prefix.as_bytes());
     f.write_str(std::str::from_utf8(&buf[i..]).expect("ASCII digits"))
+}
+
+/// The decimal text of 0 through 999, back to back.
+const SMALL_DECIMALS: &str = {
+    const BYTES: [u8; 2890] = {
+        let mut bytes = [0u8; 2890];
+        let (mut n, mut i) = (0, 0);
+        while n < 1000 {
+            if n >= 100 {
+                bytes[i] = b'0' + (n / 100) as u8;
+                i += 1;
+            }
+            if n >= 10 {
+                bytes[i] = b'0' + (n / 10 % 10) as u8;
+                i += 1;
+            }
+            bytes[i] = b'0' + (n % 10) as u8;
+            i += 1;
+            n += 1;
+        }
+        bytes
+    };
+    match std::str::from_utf8(&BYTES) {
+        Ok(text) => text,
+        Err(_) => panic!("ASCII digits"),
+    }
+};
+
+/// The decimal text of `n < 1000`, without validating a digit buffer.
+fn small_decimal(n: usize) -> &'static str {
+    let (start, len) = match n {
+        0..10 => (n, 1),
+        10..100 => (10 + 2 * (n - 10), 2),
+        _ => (190 + 3 * (n - 100), 3),
+    };
+    &SMALL_DECIMALS[start..start + len]
 }
 
 fn write_value(f: &mut fmt::Formatter<'_>, value: Value) -> fmt::Result {
