@@ -100,6 +100,7 @@ pub mod x86_features;
 pub trait InstructionSelector {
     /// EXPERIMENTAL: replicate bounded AArch64 switch tails after allocation.
     /// Disabled by default, including for all built-in selection tiers.
+    #[cfg(feature = "experimental-dispatch")]
     fn experimental_aarch64_dispatch_tails(&self) -> bool {
         false
     }
@@ -122,7 +123,10 @@ pub trait InstructionSelector {
 /// Explicit opt-in to bounded AArch64 dispatch-tail replication. Selection and
 /// allocation policy are unchanged; Fast allocation ignores this experiment.
 /// The wrapped selector still owns target validation and instruction planning.
+/// Requires the `experimental-dispatch` Cargo feature; absent from normal builds.
+#[cfg(feature = "experimental-dispatch")]
 pub struct ExperimentalDispatchTails<'a>(pub &'a dyn InstructionSelector);
+#[cfg(feature = "experimental-dispatch")]
 impl InstructionSelector for ExperimentalDispatchTails<'_> {
     fn experimental_aarch64_dispatch_tails(&self) -> bool {
         true

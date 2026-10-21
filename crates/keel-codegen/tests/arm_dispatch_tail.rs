@@ -1,4 +1,5 @@
 //! Experimental allocated tails preserve SSA homes, edge copies and bounds.
+#![cfg(feature = "experimental-dispatch")]
 use keel_codegen::{
     CodegenPipeline, ExperimentalDispatchTails, SelectionTier,
     regalloc::{

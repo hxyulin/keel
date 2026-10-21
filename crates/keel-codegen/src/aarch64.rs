@@ -116,6 +116,7 @@ use std::fmt::Write;
 mod absolute;
 mod absolute_diff;
 mod constant_plan;
+#[cfg(feature = "experimental-dispatch")]
 mod dispatch_tail;
 mod extended_add;
 mod native;
@@ -590,6 +591,7 @@ struct FunctionCompiler<'a> {
     func: &'a Function,
     module: &'a Module,
     alloc: Allocation,
+    #[cfg(feature = "experimental-dispatch")]
     dispatch_tails: HashMap<Inst, Inst>,
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
@@ -973,6 +975,7 @@ impl<'a> FunctionCompiler<'a> {
             };
             folded_values
         };
+        #[cfg(feature = "experimental-dispatch")]
         let dispatch_tails = dispatch_tail::plan(
             func,
             module,
@@ -982,6 +985,7 @@ impl<'a> FunctionCompiler<'a> {
                 && pipeline.allocator.name() != "fast",
         );
         Ok(Self {
+            #[cfg(feature = "experimental-dispatch")]
             dispatch_tails,
             func,
             module,
@@ -2072,9 +2076,12 @@ impl<'a> FunctionCompiler<'a> {
             }
             InstData::Jump { dest } => {
                 self.block_args(&dest, 0);
+                #[cfg(feature = "experimental-dispatch")]
                 if !self.emit_dispatch_tail(inst) {
                     self.branch_unless_next(dest.block);
                 }
+                #[cfg(not(feature = "experimental-dispatch"))]
+                self.branch_unless_next(dest.block);
             }
             InstData::Brif {
                 cond,
