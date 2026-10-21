@@ -4070,11 +4070,11 @@ impl<'a> FunctionCompiler<'a> {
 
     fn emit<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
         debug_assert!(self.features.contains(opcode.required_features()));
-        self.out.instruction(opcode, Vec::from(operands), false);
+        self.out.instruction(opcode, operands, false);
     }
     fn emit_locked<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {
         debug_assert!(self.features.contains(opcode.required_features()));
-        self.out.instruction(opcode, Vec::from(operands), true);
+        self.out.instruction(opcode, operands, true);
     }
 }
 

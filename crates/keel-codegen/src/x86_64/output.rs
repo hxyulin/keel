@@ -18,15 +18,38 @@ impl Output {
             Self::Text(String::new())
         }
     }
-    pub(super) fn instruction(&mut self, opcode: Opcode, operands: Vec<Operand>, lock: bool) {
-        let i = Instruction {
-            opcode,
-            operands,
-            lock,
-        };
+    pub(super) fn instruction<const N: usize>(
+        &mut self,
+        opcode: Opcode,
+        operands: [Operand; N],
+        lock: bool,
+    ) {
         match self {
-            Self::Text(s) => writeln!(s, "\t{i}").unwrap(),
-            Self::Structured(p) => p.x86_instruction(i),
+            // Text only formats the instruction: reuse one operand list
+            // instead of allocating one for every instruction.
+            Self::Text(s) => {
+                thread_local! {
+                    static SCRATCH: std::cell::RefCell<Instruction> =
+                        const { std::cell::RefCell::new(Instruction {
+                            opcode: Opcode::Nop,
+                            operands: Vec::new(),
+                            lock: false,
+                        }) };
+                }
+                SCRATCH.with(|scratch| {
+                    let mut i = scratch.borrow_mut();
+                    i.opcode = opcode;
+                    i.lock = lock;
+                    i.operands.clear();
+                    i.operands.extend(operands);
+                    writeln!(s, "\t{}", *i).unwrap();
+                });
+            }
+            Self::Structured(p) => p.x86_instruction(Instruction {
+                opcode,
+                operands: Vec::from(operands),
+                lock,
+            }),
         }
     }
     /// Continue `module`'s text in place instead of building the function in
