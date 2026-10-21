@@ -15,6 +15,13 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('gcc-O2', configs)
         self.assertIn('gcc-O2', compiler_configurations(True))
 
+    def test_frozen_full_uses_distinct_compiler_and_identical_flags(self):
+        configs = compiler_configurations(include_baseline=True)
+        self.assertEqual(configs['baseline-full'][0], 'baseline-keel')
+        self.assertEqual(configs['baseline-full'][1], configs['keel-full'][1])
+        self.assertIsNot(configs['baseline-full'][1], configs['keel-full'][1])
+        self.assertNotIn('baseline-full', compiler_configurations())
+
     def test_canonical_path_switches_inodes_without_mutating_retained_binaries(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

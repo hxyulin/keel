@@ -24,13 +24,15 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def compiler_configurations(include_gcc=False):
+def compiler_configurations(include_gcc=False, include_baseline=False):
     result = {f'keel-{tier}': ('keel', ['cc', *([] if tier == 'none' else ['-O']),
                                        '--opt-tier', tier, '--emit-object'])
               for tier in ('none', 'fast', 'full')}
     result['clang-O2'] = ('clang', ['-std=c11', '-O2', '-c'])
     if include_gcc:
         result['gcc-O2'] = ('gcc', ['-std=c11', '-O2', '-c'])
+    if include_baseline:
+        result['baseline-full'] = ('baseline-keel', list(result['keel-full'][1]))
     return result
 
 
@@ -51,6 +53,7 @@ def canonical_runtime(binary, output):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--keel', required=True, type=Path)
+    ap.add_argument('--baseline-keel', type=Path, help='optional frozen Keel Full; interleaved with current configurations')
     ap.add_argument('--clang', required=True, type=Path)
     ap.add_argument('--gcc', type=Path, help='optional actual GCC, never auto-selected')
     ap.add_argument('--output', required=True, type=Path, help='new evidence directory')
@@ -87,12 +90,14 @@ def main():
         args.target_elements = 32768
     lengths = LENGTHS[:-1] if args.smoke else LENGTHS
     compilers = {'keel': args.keel.resolve(), 'clang': args.clang.resolve()}
+    if args.baseline_keel:
+        compilers['baseline-keel'] = args.baseline_keel.resolve()
     if args.gcc:
         compilers['gcc'] = args.gcc.resolve()
     for path in compilers.values():
         if not path.is_file():
             ap.error(f'missing compiler: {path}')
-    configurations = compiler_configurations(args.gcc is not None)
+    configurations = compiler_configurations(args.gcc is not None, args.baseline_keel is not None)
     report = {'schema': 1, 'corpus': 'runtime-kernels-v2', 'label': args.label,
               'host': {'uname': list(platform.uname()), 'machine': platform.machine(),
                        'affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
@@ -138,8 +143,8 @@ def main():
 
     try:
         for name, path in compilers.items():
-            version, _ = run([path, '--version'], check=name != 'keel')
-            if name == 'keel' and not version.strip():
+            version, _ = run([path, '--version'], check=not name.endswith('keel'))
+            if name.endswith('keel') and not version.strip():
                 version = 'CLI has no --version; executable SHA-256 is authoritative'
             report['compilers'][name] = dict(path=str(path), sha256=sha(path), version=version)
         report['checkout_commit'] = run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], check=False)[0].strip() or None
@@ -167,7 +172,7 @@ def main():
                     run([compilers['clang'], driver, obj, '-o', binary])
                     binaries[config] = binary
                     asm_flags = [x for x in flags if x not in ('--emit-object', '-c')]
-                    if family != 'keel':
+                    if not family.endswith('keel'):
                         asm_flags.append('-S')
                     run([compilers[family], *asm_flags, source, '-o', directory / 'kernels.s'])
                     report['compile'][-1]['assembly'] = str(directory / 'kernels.s')

@@ -58,6 +58,13 @@ point's environment marker. Other native validation commands must use the
 shared wrapper directly. Output directories are never reused. No build cache,
 Cargo target, baseline checkout, or remote host is touched.
 
+For an optimization experiment, add `--baseline-keel /absolute/path/to/frozen-keel`.
+This adds `baseline-full` using the same Full flags as the current compiler.
+Both compilers are hashed, freshly build objects, pass all oracle checks, and
+participate in the same randomized compile/runtime rounds. This reduces drift
+between separate campaigns; internal layout and physical code pages remain
+uncontrolled. Inspect unchanged-function controls before attributing small gains.
+
 Configurations are Keel None (`--opt-tier none`, baseline selection), Fast and
 Full (`-O --opt-tier fast|full`, including all selection passes), and Clang `-O2`.
 All Keel configurations use the default Full allocator.
