@@ -155,6 +155,8 @@ struct Fix {
 struct Assembler {
     sections: Vec<Section>,
     symbols: Symbols,
+    /// Aliases declared so far in this pass.
+    aliases: usize,
     fixes: Vec<Fix>,
     current: usize,
     cfi: Option<metadata::Frame>,
@@ -918,8 +920,10 @@ impl Assembler {
                 x86::Operand::Memory(memory) => &memory.displacement,
                 _ => continue,
             };
+            // Only a difference or an alias (none yet, usually) is absolute.
             if address.modifier == Modifier::None
                 && address.expression.add.is_some()
+                && (self.aliases != 0 || address.expression.subtract.is_some())
                 && let Some((None, value)) = self.try_eval(&address.expression, 0)
             {
                 if matches!(
@@ -1185,6 +1189,7 @@ impl Assembler {
             return Err(format!("duplicate symbol `{name}`"));
         }
         sym.alias = Some(Box::new(e));
+        self.aliases += 1;
         Ok(())
     }
     fn leb(&mut self, n: i128, signed: bool) -> Result<(), String> {
