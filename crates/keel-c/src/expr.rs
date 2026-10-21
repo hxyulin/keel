@@ -1729,6 +1729,37 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// An integer constant that is a whole initializer for an object of
+    /// integer type `ty`, already converted: what `convert_for_assign`
+    /// gives, without the descent through every level of expression
+    /// syntax. Long tables of numbers are mostly these.
+    pub(crate) fn lone_int_initializer(&mut self, ty: Ty<'a>) -> Option<Expr<'a>> {
+        let Tok::Int {
+            value,
+            decimal,
+            unsigned,
+            longs,
+        } = self.peek()
+        else {
+            return None;
+        };
+        if !matches!(ty, Ty::Int(_)) || !matches!(self.peek_at(1), Tok::Punct("," | "}" | ";")) {
+            return None;
+        }
+        let lit = mk(
+            ExprKind::Int(value as i64),
+            int_literal_type(value, decimal, unsigned, longs),
+            self.loc(),
+        );
+        let e = if lit.ty == ty {
+            lit
+        } else {
+            fold_int_cast(&lit, ty)?
+        };
+        self.advance();
+        Some(e)
+    }
+
     pub(crate) fn rvalue(&mut self, e: Expr<'a>) -> Expr<'a> {
         match e.ty {
             Ty::Atomic(&ty) => {
@@ -1764,12 +1795,8 @@ impl<'a> Parser<'a> {
         if e.ty == ty {
             return e;
         }
-        if let ExprKind::Int(v) = e.kind
-            && let Ty::Int(_) = ty
-            && e.ty.is_integer()
-            && fits_i64(v, &e.ty, &ty)
-        {
-            return mk(ExprKind::Int(normalize(v, &ty)), ty, e.loc);
+        if let Some(folded) = fold_int_cast(&e, ty) {
+            return folded;
         }
         let loc = e.loc;
         let sugar = if e.ty.is_ptr() && ty.is_ptr() {
@@ -1804,6 +1831,18 @@ impl<'a> Parser<'a> {
         }
         Ok(self.cast(e, *ty))
     }
+}
+
+/// An integer constant converted to integer type `ty`, if it fits.
+fn fold_int_cast<'a>(e: &Expr<'a>, ty: Ty<'a>) -> Option<Expr<'a>> {
+    if let ExprKind::Int(v) = e.kind
+        && let Ty::Int(_) = ty
+        && e.ty.is_integer()
+        && fits_i64(v, &e.ty, &ty)
+    {
+        return Some(mk(ExprKind::Int(normalize(v, &ty)), ty, e.loc));
+    }
+    None
 }
 
 pub(crate) fn checked_memory_intrinsic(name: &str) -> Option<Intrinsic> {

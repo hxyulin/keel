@@ -59,6 +59,14 @@ impl<'a> Parser<'a> {
             }
             return self.init_list(slot, items);
         }
+        if let Some(expr) = self.lone_int_initializer(slot.ty) {
+            items.push(InitItem::Expr {
+                offset: slot.offset,
+                expr: self.node(expr),
+                bits: slot.bits,
+            });
+            return Ok(1);
+        }
         let e = self.assign()?;
         self.init_with(slot, e, items)?;
         Ok(1)
