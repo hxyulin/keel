@@ -6,20 +6,23 @@
 //! magnitude may be 4294967295. No load, address, or loop instruction moves.
 use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::{
-    BlockCall, Function, InsertPoint, InstData as D, IntCC, Type, UnaryOp, Value, ValueDef,
+    BlockCall, EntityRef, Function, InsertPoint, InstData as D, IntCC, Type, UnaryOp, Value,
+    ValueDef,
 };
 
 pub fn run(f: &mut Function) -> bool {
     let mut changed = false;
     let heads: Vec<_> = f.blocks().collect();
+    // Only this pass removes blocks: the arms it converts.
+    let mut removed = vec![false; f.num_blocks()];
     for head in heads {
-        if !f.is_block_inserted(head) {
+        if removed[head.index()] {
             continue;
         }
         let Some(&term) = f.block_insts(head).last() else {
             continue;
         };
-        let D::Brif { cond, dests } = f.inst_data(term).clone() else {
+        let D::Brif { cond, .. } = *f.inst_data(term) else {
             continue;
         };
         let Some(cmp) = defining_inst(f, cond) else {
@@ -43,6 +46,9 @@ pub fn run(f: &mut Function) -> bool {
         {
             continue;
         }
+        let D::Brif { dests, .. } = f.inst_data(term).clone() else {
+            unreachable!("checked above");
+        };
         let arm = dests[0].block;
         let join = dests[1].block;
         if arm == head
@@ -110,6 +116,7 @@ pub fn run(f: &mut Function) -> bool {
             dest: BlockCall { block: join, args },
         };
         f.remove_block(arm);
+        removed[arm.index()] = true;
         changed = true;
     }
     changed

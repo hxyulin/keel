@@ -42,11 +42,23 @@ fn replacement(
 }
 
 pub fn run(func: &mut Function) -> bool {
+    // Only parameters of blocks other than the entry are candidates.
+    if func
+        .blocks()
+        .skip(1)
+        .all(|b| func.block_params(b).is_empty())
+    {
+        return false;
+    }
     let cfg = ControlFlowGraph::compute(func);
     let dom = DominatorTree::compute(func, &cfg);
     let mut incoming = vec![Vec::new(); func.num_blocks()];
     let mut users: Vec<Vec<Block>> = vec![Vec::new(); func.num_values()];
-    for (_, inst) in func.layout_insts() {
+    // Only terminators branch.
+    for block in func.blocks() {
+        let Some(&inst) = func.block_insts(block).last() else {
+            continue;
+        };
         for (edge, dest) in func.inst_data(inst).branch_dests().iter().enumerate() {
             incoming[dest.block.index()].push((inst, edge));
             for &arg in &dest.args {
