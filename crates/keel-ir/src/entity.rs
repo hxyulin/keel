@@ -36,7 +36,7 @@ macro_rules! entity {
 
         impl ::std::fmt::Display for $name {
             fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                write!(f, concat!($prefix, "{}"), self.0)
+                $crate::entity::write_handle(f, $prefix, self.0)
             }
         }
 
@@ -46,6 +46,31 @@ macro_rules! entity {
             }
         }
     };
+}
+
+/// Writes `<prefix><index>` in one piece. Printing IR and assembly comments
+/// formats many handles; this skips the general formatting machinery.
+#[doc(hidden)]
+pub fn write_handle(f: &mut fmt::Formatter<'_>, prefix: &str, index: u32) -> fmt::Result {
+    let mut buf = [0u8; 24];
+    let mut digits = [0u8; 10];
+    if prefix.len() > buf.len() - digits.len() {
+        return write!(f, "{prefix}{index}");
+    }
+    buf[..prefix.len()].copy_from_slice(prefix.as_bytes());
+    let mut start = digits.len();
+    let mut n = index;
+    loop {
+        start -= 1;
+        digits[start] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    let end = prefix.len() + digits.len() - start;
+    buf[prefix.len()..end].copy_from_slice(&digits[start..]);
+    f.write_str(std::str::from_utf8(&buf[..end]).expect("ASCII"))
 }
 
 /// Append-only storage addressed by `K`. Entities are never removed;
@@ -145,5 +170,13 @@ mod tests {
         assert_eq!(arena[a], "a");
         assert_eq!(arena.keys().collect::<Vec<_>>(), vec![a, b]);
         assert_eq!(arena[b], "c");
+    }
+
+    #[test]
+    fn handles_print_their_index() {
+        let max = Thing::new(u32::MAX as usize);
+        assert_eq!(format!("{max} {:?}", Thing::new(10)), "t4294967295 t10");
+        entity!(Long, "fifteen_letters");
+        assert_eq!(Long::new(7).to_string(), "fifteen_letters7");
     }
 }
