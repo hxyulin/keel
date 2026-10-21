@@ -1,0 +1,512 @@
+{
+  "host": "MacHost ARM",
+  "date": "2026-10-21",
+  "linuxhost_used": false,
+  "route": "native C with common Clang-preprocessed inputs for performance; separate native Keel C preprocessing correctness",
+  "runtime": [
+    {
+      "app": "yyjson",
+      "workload": "api",
+      "tiers": {
+        "none": {
+          "median": 3.1136505689598697,
+          "bootstrap95": [
+            3.0981892312581127,
+            3.1287896836726827
+          ],
+          "pairs": 11
+        },
+        "fast": {
+          "median": 3.0013286045855834,
+          "bootstrap95": [
+            2.9779140852411694,
+            3.0246358434007115
+          ],
+          "pairs": 11
+        },
+        "full": {
+          "median": 1.7916973208675901,
+          "bootstrap95": [
+            1.7792848976644817,
+            1.8031134293979403
+          ],
+          "pairs": 11
+        }
+      },
+      "control": {
+        "median": 1.002317791729253,
+        "bootstrap95": [
+          0.9948767838766156,
+          1.0071730633463896
+        ],
+        "pairs": 11
+      },
+      "rounds": 11
+    },
+    {
+      "app": "yyjson",
+      "workload": "config",
+      "tiers": {
+        "none": {
+          "median": 2.918269361960825,
+          "bootstrap95": [
+            2.8550519207744673,
+            3.1189191202727966
+          ],
+          "pairs": 11
+        },
+        "fast": {
+          "median": 2.758219763753615,
+          "bootstrap95": [
+            2.730575281788778,
+            2.7951455135864425
+          ],
+          "pairs": 11
+        },
+        "full": {
+          "median": 1.720983581131499,
+          "bootstrap95": [
+            1.695297055012556,
+            1.7422051686724094
+          ],
+          "pairs": 11
+        }
+      },
+      "control": {
+        "median": 0.9928591212852479,
+        "bootstrap95": [
+          0.9837652432785556,
+          1.0091345361577817
+        ],
+        "pairs": 11
+      },
+      "rounds": 11
+    },
+    {
+      "app": "yyjson",
+      "workload": "telemetry",
+      "tiers": {
+        "none": {
+          "median": 3.589389354030389,
+          "bootstrap95": [
+            3.560627310977942,
+            3.617211297715115
+          ],
+          "pairs": 11
+        },
+        "fast": {
+          "median": 3.438233278116517,
+          "bootstrap95": [
+            3.38182480717013,
+            3.471016862250393
+          ],
+          "pairs": 11
+        },
+        "full": {
+          "median": 1.4958041388751329,
+          "bootstrap95": [
+            1.4740532959326786,
+            1.5214174987341533
+          ],
+          "pairs": 11
+        }
+      },
+      "control": {
+        "median": 0.9971233966950683,
+        "bootstrap95": [
+          0.9946671737677106,
+          1.0039394362143281
+        ],
+        "pairs": 11
+      },
+      "rounds": 11
+    },
+    {
+      "app": "lz4",
+      "workload": "compress",
+      "tiers": {
+        "none": {
+          "median": 5.070759287380021,
+          "bootstrap95": [
+            5.036371514396537,
+            5.112326481495086
+          ],
+          "pairs": 7
+        },
+        "fast": {
+          "median": 4.995637804529371,
+          "bootstrap95": [
+            4.943548925883457,
+            5.03812852207957
+          ],
+          "pairs": 7
+        },
+        "full": {
+          "median": 1.5944451405421207,
+          "bootstrap95": [
+            1.5884105200001044,
+            1.5990654886704754
+          ],
+          "pairs": 7
+        }
+      },
+      "control": {
+        "median": 0.9964721881134361,
+        "bootstrap95": [
+          0.9919811082474563,
+          1.0145808869364
+        ],
+        "pairs": 7
+      },
+      "rounds": 7
+    },
+    {
+      "app": "lz4",
+      "workload": "decompress",
+      "tiers": {
+        "none": {
+          "median": 6.087876956355771,
+          "bootstrap95": [
+            6.019009331162325,
+            6.25835081514077
+          ],
+          "pairs": 7
+        },
+        "fast": {
+          "median": 6.103516908817635,
+          "bootstrap95": [
+            5.95259408291418,
+            6.215059903980791
+          ],
+          "pairs": 7
+        },
+        "full": {
+          "median": 1.4067788522712814,
+          "bootstrap95": [
+            1.3926994614228458,
+            1.4872891137356206
+          ],
+          "pairs": 7
+        }
+      },
+      "control": {
+        "median": 0.9994681841046276,
+        "bootstrap95": [
+          0.9943713955450029,
+          1.0246871697601951
+        ],
+        "pairs": 7
+      },
+      "rounds": 7
+    }
+  ],
+  "compile": [
+    {
+      "app": "yyjson",
+      "boundary": "assembly",
+      "tiers": {
+        "none": {
+          "median": 0.04409497756628665,
+          "bootstrap95": [
+            0.04345464354701589,
+            0.04421143595142151
+          ],
+          "pairs": 3
+        },
+        "fast": {
+          "median": 0.04361248829622536,
+          "bootstrap95": [
+            0.04322050096319429,
+            0.043954865500206795
+          ],
+          "pairs": 3
+        },
+        "full": {
+          "median": 0.13826599138137163,
+          "bootstrap95": [
+            0.1361952457704611,
+            0.13834452413120987
+          ],
+          "pairs": 3
+        }
+      },
+      "rounds": 3
+    },
+    {
+      "app": "yyjson",
+      "boundary": "object",
+      "tiers": {
+        "none": {
+          "median": 0.0460963573099903,
+          "bootstrap95": [
+            0.046023792286156905,
+            0.046892563772135035
+          ],
+          "pairs": 3
+        },
+        "fast": {
+          "median": 0.04572974285114797,
+          "bootstrap95": [
+            0.04567438337185517,
+            0.04638556270475719
+          ],
+          "pairs": 3
+        },
+        "full": {
+          "median": 0.14020903213539004,
+          "bootstrap95": [
+            0.13955795358715384,
+            0.1404187374670175
+          ],
+          "pairs": 3
+        }
+      },
+      "rounds": 3
+    },
+    {
+      "app": "lz4",
+      "boundary": "assembly",
+      "tiers": {
+        "none": {
+          "median": 0.025390972346095435,
+          "bootstrap95": [
+            0.02535952197030619,
+            0.026013510538854197
+          ],
+          "pairs": 3
+        },
+        "fast": {
+          "median": 0.02696041935428159,
+          "bootstrap95": [
+            0.026444932549335956,
+            0.02721784455858695
+          ],
+          "pairs": 3
+        },
+        "full": {
+          "median": 0.1445659255749376,
+          "bootstrap95": [
+            0.1442535195001474,
+            0.1481954870313513
+          ],
+          "pairs": 3
+        }
+      },
+      "rounds": 3
+    },
+    {
+      "app": "lz4",
+      "boundary": "object",
+      "tiers": {
+        "none": {
+          "median": 0.027068574322735836,
+          "bootstrap95": [
+            0.026447156952043162,
+            0.027649709713611255
+          ],
+          "pairs": 3
+        },
+        "fast": {
+          "median": 0.027659398771911856,
+          "bootstrap95": [
+            0.0274624533849298,
+            0.028984356668986314
+          ],
+          "pairs": 3
+        },
+        "full": {
+          "median": 0.14775791887835937,
+          "bootstrap95": [
+            0.14638950298930323,
+            0.15473326118448294
+          ],
+          "pairs": 3
+        }
+      },
+      "rounds": 3
+    }
+  ],
+  "gates": {
+    "yyjson": {
+      "clang-O2": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-none": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-fast": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-full": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      }
+    },
+    "lz4": {
+      "clang-O2": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-none": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-fast": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      },
+      "keel-full": {
+        "suite_test_passed": true,
+        "commands": 1,
+        "benchmark_outputs_passed": true
+      }
+    }
+  },
+  "sources": {
+    "yyjson": {
+      "driver.i": "ce91b573badf33fa7a41fed425647f0987b0ce62cc80eba19e411c9e4ead8b01",
+      "yyjson.i": "eb789ce79fdec3bf9089f5bb37c58a4bf9c4205be9380d354910ded2944d30e8"
+    },
+    "lz4": {
+      "driver.i": "e618f9f18e0c2231079b6cbbfd89ea833d20ca4183f13e2c44f5d596d00cd131",
+      "lz4.i": "b1db4c7bd7425a1d14bd5e70434f2e7a23ae46b304f357fa7d8685ac18f0619a"
+    }
+  },
+  "compiler_sha256": {
+    "target/ordered-real-apps-20261021/keel-frozen": "3f3bf7e28b63de9f057ae7af70f4a6353868bbd4432ccf567435f7449e2b44d3",
+    "/usr/bin/clang": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2"
+  },
+  "cpp_pilot": {
+    "status": "blocked",
+    "exit_code": 1,
+    "blocker": "llvm-import: supported types are scalar i8/i16/i32/i64/f32/f64 and address-space-zero pointers; i1 is internal only\n",
+    "references": [
+      {
+        "kind": "source",
+        "status": "passed",
+        "stdout": "target/application-expansion-20261021/pugixml-final/command-0009.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      },
+      {
+        "kind": "ir",
+        "status": "passed",
+        "stdout": "target/application-expansion-20261021/pugixml-final/command-0010.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      }
+    ],
+    "reduced_case": {
+      "source": "pilot/reduced_bool.cpp",
+      "ir_sha256": "dbe921587de60a71423ec8900c1278372c760ab51d3816bb51b648b4bc5bed7d",
+      "native_reference": "passed",
+      "diagnostic": "llvm-import: supported types are scalar i8/i16/i32/i64/f32/f64 and address-space-zero pointers; i1 is internal only\n",
+      "status": "rejected"
+    },
+    "tiers": [],
+    "ir_preparation": "Clang -O1 already optimized input, default exceptions/RTTI, untouched IR"
+  },
+  "parallel_cpp_audit": {
+    "status": "passed",
+    "profiles": {
+      "passed": 14
+    },
+    "revision": "dbce88eb0b6bf76c2512494e2b129ab517b3565e",
+    "evidence": "target/frontend-odr-final-2/cpp-coverage/report.json"
+  },
+  "native_correctness": {
+    "yyjson": "passed",
+    "yyjson_configurations": [
+      [
+        "clang-O0",
+        "passed"
+      ],
+      [
+        "clang-O2",
+        "passed"
+      ],
+      [
+        "keel-none",
+        "passed"
+      ],
+      [
+        "keel-fast",
+        "passed"
+      ],
+      [
+        "keel-full",
+        "passed"
+      ]
+    ],
+    "lz4": true,
+    "lz4_configurations": {
+      "clang-O2": {
+        "status": "passed",
+        "output": "lz4-1.10.0 test cases=174 checks=1892 decoded-fnv64=940216100f67edb1\n",
+        "binary": "target/application-expansion-20261021/lz4-native-reviewed/clang-O2/lz4-workload",
+        "sha256": "6995aca93a62d1b6c053a8246ea7a1c5d8425602d4c822aeaf67d214c35f1b7f"
+      },
+      "keel-none": {
+        "status": "passed",
+        "output": "lz4-1.10.0 test cases=174 checks=1892 decoded-fnv64=940216100f67edb1\n",
+        "binary": "target/application-expansion-20261021/lz4-native-reviewed/keel-none/lz4-workload",
+        "sha256": "7684dc00baa9b67bcd3b9a9ccb55576ca20818632d90ff64f677eee826c5ecd3"
+      },
+      "keel-fast": {
+        "status": "passed",
+        "output": "lz4-1.10.0 test cases=174 checks=1892 decoded-fnv64=940216100f67edb1\n",
+        "binary": "target/application-expansion-20261021/lz4-native-reviewed/keel-fast/lz4-workload",
+        "sha256": "1f0d35876cdcc146feef73c8b2bcf7d31e142083c340f07048f2741a350eb0c2"
+      },
+      "keel-full": {
+        "status": "passed",
+        "output": "lz4-1.10.0 test cases=174 checks=1892 decoded-fnv64=940216100f67edb1\n",
+        "binary": "target/application-expansion-20261021/lz4-native-reviewed/keel-full/lz4-workload",
+        "sha256": "2a0d0edaf255655b6dabdb66ee3ec354f114b2a7ecc55ab7780702069c0ac4c1"
+      }
+    }
+  },
+  "policy": "Keep transformations that improve legitimate workloads when correctness holds and regression/cost gates pass. A lack of activation in Lua/QuickJS/SQLite alone is not a removal criterion.",
+  "limits": [
+    "Single ARM host and ordinary ASLR/page backing. No new x86 native measurements; LinuxHost remains unused.",
+    "Runtime includes process startup, input preparation/loading and driver work; no LTO/PGO/CPU tuning.",
+    "Three paired compile rounds, excluding preprocessing, linking and compiler construction. This is not an end-to-end build speed claim.",
+    "Libraries use unmodified pinned upstream source with deterministic custom drivers, not exhaustive upstream or whole-CLI validation.",
+    "Pugixml has no Keel runtime or performance result: both native Clang references pass but import is blocked."
+  ],
+  "artifacts": {
+    "target/application-expansion-20261021/yyjson-final/report.json": "145c9588e40ecb20afc725540c3644a71b6549098efed4acaaafdf4ee0752091",
+    "target/application-expansion-20261021/yyjson-final/commands.jsonl.gz": "9008266614d5b1d7dca6584bb4bdfba7b645d8b8ff86156b4abe666ecb1e4be1",
+    "target/application-expansion-20261021/lz4-benchmark/report.json": "01c84649b0cf55dc1302e09df810360323313e5283014ce2c4acdf0254dc4f41",
+    "target/application-expansion-20261021/lz4-benchmark/commands.jsonl.gz": "76a5bbe3c5fce8cad96f40fbf15a18b7a4e6b849d7484af150c791a7b0157311",
+    "target/application-expansion-20261021/pugixml-final/report.json": "fc332faea644f4d22e30a28de565e0ef3e11580845b14ef73f97433c0fd6bef1",
+    "target/application-expansion-20261021/yyjson-native-reviewed/report.json": "bd8d739682e9dc985cb60d38fd647eb6dbc43f7043ff10b0a7cacbe6d7335d64",
+    "target/application-expansion-20261021/lz4-native-reviewed/validation.json": "cdf16e04dc6912d3baa961ba6cee5af27459088e15bda2596eddf387faef3ec2",
+    "target/application-expansion-20261021/harness-tests-reviewed.log": "cfe792ef7afc5ab5d8e4736bdfae8a763d3ebc4397f9b7b20fdd2bd5e7c2527f",
+    "target/application-expansion-20261021/yyjson-failure-tests.log": "6843a5ee06dd30019a084e9447d0be53c3d0141bd642fb9a7d105d1f253586a3",
+    "target/application-expansion-20261021/lz4-failure-tests.log": "4687c0974bd1e2f0aeee06efca16e42b5bab5b47e829bb882c2c64802f71c472",
+    "target/application-expansion-20261021/registry-tests.log": "44cc04b1778e71fc77fe0cb3ceb10c34606f57f485f3dc025477b4b3d2f0eba9",
+    "target/frontend-odr-final-2/cpp-coverage/report.json": "556609673e6d39620f0f6e5624e8d51b4ec4a5ee48601a66686e923fea742022",
+    "target/application-expansion-20261021/review-r1.json": "dc08f8199ddcfe516314f10524f0180e415271ad36e1ba657bfb9912394ffa23",
+    "target/application-expansion-20261021/review-r2.json": "ea645de7f8beaba13562cb0cd303cee3de6bf7f06015d00920289b66488efd30",
+    "target/application-expansion-20261021/review-r3.json": "e2d807afeaa441fdb6adaa320be3428bdd69b230a3d671c25c1e9a52745dbe28"
+  },
+  "review": {
+    "rounds": 3,
+    "final_findings": [],
+    "prior_findings_resolved": [
+      "Separate yyjson parse rejection from internal failure",
+      "Preserve launch and timeout command evidence",
+      "Keep failed blocker-reduction validation distinct from unsupported input",
+      "Require validated Clang correctness oracle before candidates/timing"
+    ]
+  }
+}

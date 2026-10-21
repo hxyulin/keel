@@ -89,11 +89,22 @@ small deterministic workload before choosing a large external project.
 
 ## Runtime optimization comparisons require a different milestone
 
-`suite/llvm_import.py` is a narrow scalar importer, not a C++/Rust frontend:
-it rejects general CFGs, aggregates and much ordinary compiler-generated IR.
-The Cranelift bridge also lacks aggregate ABI, exceptions, TLS and variadics;
-the LLVM exporter rejects additional operations, including integer division.
-Consequently, a whole Cargo/C++ application through those bridges is currently
-a feature project, not another suite configuration. Track those unsupported
-features with reduced cases while continuing Keel runtime optimization on its
-supported C workloads.
+`suite/llvm_import.py` now covers scalar CFGs, indirect calls, scalar floating
+point, globals, bounded aggregate-return transport, exported ODR definitions,
+Itanium RTTI and exception paths on Apple AArch64. All fourteen required C++
+profiles pass in the integrated frontend harness, including virtual dispatch
+and user-defined catches. It remains an LLVM importer, not a C++/Rust frontend
+or a general C++ application compatibility claim.
+
+The pinned [pugixml 1.15 pilot](workload-pilots/pugixml/README.md) exercises a
+complete unmodified XML/XPath implementation and a separate driver. Both
+Clang references pass; untouched Clang O1 IR is rejected at an `i1` ABI return.
+A small independent C++ reproducer preserves the blocker. Keel None/Fast/Full
+are not reached, and the workload is not included in performance aggregates.
+Fixing that blocker may reveal additional unsupported features. Keep imported
+IR production, import cost and Keel compilation separate in future timings.
+
+The native-C [yyjson](yyjson/README.md) and [LZ4](lz4/README.md) workloads
+provide additional current runtime coverage without requiring the importer.
+See [application expansion evidence](../docs/application-expansion-20261021.html)
+for the route distinction, pinned source identities and initial ARM results.

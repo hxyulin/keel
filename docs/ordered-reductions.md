@@ -13,6 +13,11 @@ identical application IR, objects, and executables compared with the same
 scalar-cleanup pipeline. Kernel speedups therefore do not establish a benefit
 for these applications, and neither pass is promoted into Full.
 
+This applicability result is not a requirement that every optimization benefit
+these three applications. Improvements on other legitimate workloads are still
+useful. Profile inclusion should consider correctness, compilation cost and
+regression checks; lack of a hit in one corpus alone is not a removal criterion.
+
 Recheck applicability with a frozen compiler and prepared application sources:
 
 ```sh

@@ -8,6 +8,12 @@ Real programs that keel must build correctly and that measure how fast its
 code is. Each directory here with a `suite.toml` is one program; the
 `keel-suite` tool (`crates/keel-suite`) finds them by scanning.
 
+The native-C registry now includes pinned [yyjson](yyjson/README.md) JSON
+parsing/traversal/roundtrips and [LZ4](lz4/README.md) block compression and
+decompression, alongside Lua, QuickJS and SQLite. These use unmodified upstream
+library code with deterministic drivers. They are not exhaustive upstream
+test suites or full command-line application builds.
+
 ```sh
 cargo suite list                    # suites, benchmarks, configurations
 cargo suite test                    # test keel and keel -O, with selection off and on
@@ -152,6 +158,32 @@ cross-host absolute times are not interchangeable. Runtime includes process
 startup and uses ordinary ASLR/page backing, not a physical-page selection
 protocol. Run under a per-host exclusive performance lock and avoid concurrent
 builds or profiling on that host.
+
+The platform runner discovers native-C application manifests instead of fixing
+their source counts or treating every new application as SQLite. Select new
+workloads explicitly; its default remains Lua/QuickJS/SQLite:
+
+```sh
+python3 suite/fast_opt_locked.py target/new-apps-lock.jsonl \
+  python3 suite/benchmark_platforms.py --root . --work target/new-apps-run \
+  --keel /absolute/path/to/keel --apps yyjson lz4 \
+  --configs keel-none keel-fast keel-full clang-O2
+```
+
+`--checks-only` performs preparation, builds and correctness checks without
+measurement rounds. `--candidate-configs FILE.json` adds explicitly named Keel
+binaries/flag lists for controlled comparisons. Preparation commands expand
+`{defines}` and `{libs}` as argument lists, preserving macro quoting. Generic
+test commands support `{suite}`, `{work}`, `{gen}` and `{bin}`. A failed
+configuration gives a failing exit code; an invalid Clang O2 correctness
+reference aborts before timing. Download/parse/link/test failures are preserved,
+not turned into successful benchmark results.
+
+C++ library pilots use a separate LLVM-import route. The pinned
+[pugixml pilot](workload-pilots/pugixml/README.md) currently stops on `i1` ABI
+returns before any Keel tier runs. Its successful Clang reference executions
+do not qualify it for performance aggregation. The fourteen passing C++
+feature profiles likewise do not establish complete application compatibility.
 
 
 ## A suite
