@@ -4,6 +4,7 @@
 //! anchors the parameter. An unanchored cycle is not a copy. Every edge is
 //! considered, including both arms of one branch and unreachable predecessors.
 
+use crate::scratch::Scratch;
 use keel_ir::dominators::DominatorTree;
 use keel_ir::{Block, EntityRef, Function, Inst, Value, ValueDef};
 
@@ -54,7 +55,7 @@ pub fn run(func: &mut Function) -> bool {
     let dom = &analysis.dom;
     // Every edge into each block, in layout and branch order, packed by
     // destination; and the blocks each value is passed to, as lists.
-    let mut incoming_start = vec![0u32; func.num_blocks() + 1];
+    let mut incoming_start = Scratch::filled(func.num_blocks() + 1, 0u32);
     let mut users = UserLists::new(func.num_values());
     // Only terminators branch.
     for block in func.blocks() {
@@ -71,8 +72,10 @@ pub fn run(func: &mut Function) -> bool {
     for i in 1..incoming_start.len() {
         incoming_start[i] += incoming_start[i - 1];
     }
-    let mut fill = incoming_start.clone();
-    let mut incoming_edges = vec![(Inst::new(0), 0); *incoming_start.last().unwrap() as usize];
+    let mut fill: Scratch<u32> = Scratch::new();
+    fill.extend_from_slice(&incoming_start);
+    let mut incoming_edges =
+        Scratch::filled(*incoming_start.last().unwrap() as usize, (Inst::new(0), 0));
     for block in func.blocks() {
         let Some(&inst) = func.block_insts(block).last() else {
             continue;
@@ -89,8 +92,9 @@ pub fn run(func: &mut Function) -> bool {
         &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
     };
     // The entry's parameters are ABI arguments and must remain in place.
-    let mut work: Vec<_> = dom.rpo().iter().copied().skip(1).rev().collect();
-    let mut queued = vec![false; func.num_blocks()];
+    let mut work: Scratch<Block> = Scratch::new();
+    work.extend(dom.rpo().iter().copied().skip(1).rev());
+    let mut queued = Scratch::filled(func.num_blocks(), false);
     for &block in &work {
         queued[block.index()] = true;
     }
@@ -136,8 +140,8 @@ const NIL: u32 = u32::MAX;
 /// For each value, the blocks it is passed to, in insertion order: linked
 /// lists threaded through one node array instead of a vector per value.
 struct UserLists {
-    head: Vec<u32>,
-    tail: Vec<u32>,
+    head: Scratch<u32>,
+    tail: Scratch<u32>,
     /// (user, next node)
     nodes: Vec<(Block, u32)>,
 }
@@ -145,8 +149,8 @@ struct UserLists {
 impl UserLists {
     fn new(values: usize) -> Self {
         Self {
-            head: vec![NIL; values],
-            tail: vec![NIL; values],
+            head: Scratch::filled(values, NIL),
+            tail: Scratch::filled(values, NIL),
             nodes: Vec::new(),
         }
     }

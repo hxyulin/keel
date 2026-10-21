@@ -11,12 +11,13 @@
 //! and nothing else reads `v3`) dies, parameter and all, which plain
 //! "remove instructions with no uses" cannot see.
 
+use crate::scratch::Scratch;
 use keel_ir::{Block, EntityRef, Function, Inst, InstData, Value, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
     // Every branch into each block: (branch instruction, destination index),
     // packed by destination block. Only terminators branch.
-    let mut incoming_start = vec![0u32; func.num_blocks() + 1];
+    let mut incoming_start = Scratch::filled(func.num_blocks() + 1, 0u32);
     for block in func.blocks() {
         if let Some(&term) = func.block_insts(block).last() {
             for dest in func.inst_data(term).branch_dests() {
@@ -27,8 +28,12 @@ pub fn run(func: &mut Function) -> bool {
     for i in 1..incoming_start.len() {
         incoming_start[i] += incoming_start[i - 1];
     }
-    let mut fill = incoming_start.clone();
-    let mut incoming_edges = vec![(Inst::new(0), 0usize); *incoming_start.last().unwrap() as usize];
+    let mut fill: Scratch<u32> = Scratch::new();
+    fill.extend_from_slice(&incoming_start);
+    let mut incoming_edges = Scratch::filled(
+        *incoming_start.last().unwrap() as usize,
+        (Inst::new(0), 0usize),
+    );
     for block in func.blocks() {
         if let Some(&term) = func.block_insts(block).last() {
             for (i, dest) in func.inst_data(term).branch_dests().iter().enumerate() {
@@ -43,9 +48,10 @@ pub fn run(func: &mut Function) -> bool {
         &incoming_edges[incoming_start[b] as usize..incoming_start[b + 1] as usize]
     };
 
-    let mut live_value = vec![false; func.num_values()];
-    let mut live_inst = vec![false; func.num_insts()];
-    let mut worklist: Vec<Value> = Vec::new();
+    drop(fill);
+    let mut live_value = Scratch::filled(func.num_values(), false);
+    let mut live_inst = Scratch::filled(func.num_insts(), false);
+    let mut worklist: Scratch<Value> = Scratch::new();
 
     // Roots: the operands of pinned instructions, minus branch arguments.
     for block in func.blocks() {
@@ -89,7 +95,7 @@ pub fn run(func: &mut Function) -> bool {
     }
 
     let mut changed = false;
-    let mut dead_insts: Vec<Inst> = Vec::new();
+    let mut dead_insts: Scratch<Inst> = Scratch::new();
     for block in func.blocks() {
         for &inst in func.block_insts(block) {
             if !live_inst[inst.index()] {
@@ -97,13 +103,14 @@ pub fn run(func: &mut Function) -> bool {
             }
         }
     }
-    for inst in dead_insts {
+    for &inst in dead_insts.iter() {
         func.remove_inst(inst);
         changed = true;
     }
 
-    let blocks: Vec<Block> = func.blocks().skip(1).collect();
-    for block in blocks {
+    let mut blocks: Scratch<Block> = Scratch::new();
+    blocks.extend(func.blocks().skip(1));
+    for &block in blocks.iter() {
         // Back to front, so earlier indices stay valid.
         for n in (0..func.block_params(block).len()).rev() {
             let param = func.block_params(block)[n];

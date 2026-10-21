@@ -10,6 +10,7 @@
 //!    that predecessor: its parameters become the jump's arguments.
 
 use crate::const_fold::constant;
+use crate::scratch::Scratch;
 use keel_ir::{Block, BlockCall, EntityRef, Function, InstData, ValueDef};
 
 pub fn run(func: &mut Function) -> bool {
@@ -26,8 +27,9 @@ pub fn run(func: &mut Function) -> bool {
 
 pub(crate) fn fold_branches(func: &mut Function) -> bool {
     let mut changed = false;
-    let blocks: Vec<Block> = func.blocks().collect();
-    for block in blocks {
+    let mut blocks: Scratch<Block> = Scratch::new();
+    blocks.extend(func.blocks());
+    for &block in &blocks {
         let Some(&term) = func.block_insts(block).last() else {
             continue;
         };
@@ -98,8 +100,8 @@ pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
     // their uses are in that block's jump. Resolve aliases before checking.
     // Only a jump-only block can forward, and one without parameters has
     // nothing to escape, so the use scan is skipped when no block has both.
-    let mut escaping = vec![false; func.num_blocks()];
-    let mut forwarding = vec![false; func.num_blocks()];
+    let mut escaping = Scratch::filled(func.num_blocks(), false);
+    let mut forwarding = Scratch::filled(func.num_blocks(), false);
     let mut any = false;
     for block in func.blocks() {
         if let [only] = func.block_insts(block)
@@ -123,8 +125,9 @@ pub(crate) fn skip_forwarding_blocks(func: &mut Function) -> bool {
         }
     }
     let mut changed = false;
-    let blocks: Vec<Block> = func.blocks().collect();
-    for block in blocks {
+    let mut blocks: Scratch<Block> = Scratch::new();
+    blocks.extend(func.blocks());
+    for &block in &blocks {
         let Some(&term) = func.block_insts(block).last() else {
             continue;
         };
@@ -153,9 +156,10 @@ fn remove_unreachable(func: &mut Function) -> bool {
     let Some(entry) = func.entry_block() else {
         return false;
     };
-    let mut reachable = vec![false; func.num_blocks()];
+    let mut reachable = Scratch::filled(func.num_blocks(), false);
     reachable[entry.index()] = true;
-    let mut stack = vec![entry];
+    let mut stack: Scratch<Block> = Scratch::new();
+    stack.push(entry);
     while let Some(block) = stack.pop() {
         if let Some(&term) = func.block_insts(block).last() {
             for dest in func.inst_data(term).branch_dests() {
@@ -165,10 +169,8 @@ fn remove_unreachable(func: &mut Function) -> bool {
             }
         }
     }
-    let dead: Vec<Block> = func
-        .blocks()
-        .filter(|&b| !reachable[b.index()])
-        .collect();
+    let mut dead: Scratch<Block> = Scratch::new();
+    dead.extend(func.blocks().filter(|&b| !reachable[b.index()]));
     func.remove_blocks(&dead);
     !dead.is_empty()
 }
@@ -183,7 +185,7 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
     // Count branch edges, not unique predecessors: duplicate brif/switch
     // destinations must still prevent a merge. Block indices remain stable
     // when blocks leave the layout, so this census lasts for this invocation.
-    let mut edges = vec![0u32; func.num_blocks()];
+    let mut edges = Scratch::filled(func.num_blocks(), 0u32);
     for block in func.blocks() {
         if let Some(&term) = func.block_insts(block).last() {
             for dest in func.inst_data(term).branch_dests() {
@@ -194,13 +196,14 @@ pub(crate) fn merge_small_blocks(func: &mut Function, max_insts: usize) -> bool 
     let mut changed = false;
     // Merged blocks leave the layout together at the end; until then they
     // are empty, which is all the walk below observes of them.
-    let mut merged = Vec::new();
+    let mut merged: Scratch<Block> = Scratch::new();
     // Only the absorbing predecessor acquires a new terminator. Incoming
     // counts for every surviving block stay unchanged, so earlier rejected
     // predecessors cannot become candidates. Retry pred before advancing to
     // preserve the old first-eligible-layout order without restarting a scan.
-    let blocks: Vec<Block> = func.blocks().collect();
-    for pred in blocks {
+    let mut blocks: Scratch<Block> = Scratch::new();
+    blocks.extend(func.blocks());
+    for &pred in &blocks {
         loop {
             // A block consumed from later in the snapshot has no instructions.
             let Some(&term) = func.block_insts(pred).last() else {

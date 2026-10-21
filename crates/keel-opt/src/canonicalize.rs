@@ -4,7 +4,8 @@
 //! operand pairs by value ID. Comparisons reverse their predicate on a swap.
 //! Floating-point operand order and noncommutative operations are preserved.
 
-use keel_ir::{BinaryOp, Function, InstData, Type, Value, ValueDef};
+use crate::scratch::Scratch;
+use keel_ir::{BinaryOp, Block, Function, InstData, Type, Value, ValueDef};
 
 fn literal(func: &Function, value: Value) -> bool {
     match func.value_def(func.resolve(value)) {
@@ -122,7 +123,9 @@ pub(crate) fn needs_normalize(func: &Function, data: &InstData) -> bool {
 
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
-    for block in func.blocks().collect::<Vec<_>>() {
+    let mut blocks: Scratch<Block> = Scratch::new();
+    blocks.extend(func.blocks());
+    for &block in &blocks {
         // Normalizing rewrites payloads in place; the layout does not change.
         for i in 0..func.block_insts(block).len() {
             let inst = func.block_insts(block)[i];

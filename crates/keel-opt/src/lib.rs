@@ -48,6 +48,7 @@ mod memory_forward;
 mod phi_simplify;
 mod run_balance_predicate;
 mod sccp;
+mod scratch;
 mod sign_extend_idiom;
 mod simplify_cfg;
 mod small_memory;
@@ -641,6 +642,7 @@ struct ClearAnalyses;
 impl Drop for ClearAnalyses {
     fn drop(&mut self) {
         analysis::clear();
+        scratch::clear();
     }
 }
 

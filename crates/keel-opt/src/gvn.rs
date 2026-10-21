@@ -31,7 +31,7 @@ pub fn run(func: &mut Function) -> bool {
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
     let mut table: FxHashMap<InstData, Inst> =
         FxHashMap::with_capacity_and_hasher(layout, Default::default());
-    let mut open = vec![false; func.num_blocks()];
+    let mut open = crate::scratch::Scratch::filled(func.num_blocks(), false);
     // (block, whether its instructions were visited)
     let mut stack = vec![(entry, false)];
     let mut changed = false;

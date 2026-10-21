@@ -37,6 +37,7 @@
 //! trap, so running one on a path that did not run it before (hoisting out
 //! of a loop that runs zero times) is harmless.
 
+use crate::scratch::Scratch;
 use keel_ir::{BinaryOp, Block, EntityRef, Function, InsertPoint, Inst, InstData, Value, ValueDef};
 
 /// No instruction or block, in the dense per-instruction arrays below.
@@ -48,19 +49,21 @@ pub fn run(func: &mut Function) -> bool {
     let loops = analysis.loops(func);
 
     // Depth of each block in the dominator tree; the entry is 0.
-    let mut dom_depth = vec![0u32; func.num_blocks()];
+    let mut dom_depth = Scratch::filled(func.num_blocks(), 0u32);
     for &block in &domtree.rpo()[1..] {
         let idom = domtree.idom(block).expect("reachable non-entry block");
         dom_depth[block.index()] = dom_depth[idom.index()] + 1;
     }
 
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
-    let mut floating: Vec<Inst> = Vec::with_capacity(layout);
+    let mut floating: Scratch<Inst> = Scratch::new();
+    floating.reserve(layout);
     // Who uses each value, among reachable instructions: (value, user) pairs
     // in layout order, then packed by value with `user_start`.
-    let mut uses: Vec<(u32, Inst)> = Vec::with_capacity(2 * layout);
-    let mut last_user = vec![NONE; func.num_values()];
-    let mut user_start = vec![0u32; func.num_values() + 1];
+    let mut uses: Scratch<(u32, Inst)> = Scratch::new();
+    uses.reserve(2 * layout);
+    let mut last_user = Scratch::filled(func.num_values(), NONE);
+    let mut user_start = Scratch::filled(func.num_values() + 1, 0u32);
     for &block in domtree.rpo() {
         for &inst in func.block_insts(block) {
             let data = func.inst_data(inst);
@@ -82,14 +85,17 @@ pub fn run(func: &mut Function) -> bool {
     for v in 1..user_start.len() {
         user_start[v] += user_start[v - 1];
     }
-    let mut fill = user_start.clone();
-    let mut user_list = vec![Inst::new(0); uses.len()];
+    let mut fill: Scratch<u32> = Scratch::new();
+    fill.extend_from_slice(&user_start);
+    let mut user_list = Scratch::filled(uses.len(), Inst::new(0));
     for &(v, inst) in &uses {
         let slot = &mut fill[v as usize];
         user_list[*slot as usize] = inst;
         *slot += 1;
     }
     drop(uses);
+    drop(fill);
+    drop(last_user);
     let users = |value: Value| {
         let v = value.index();
         &user_list[user_start[v] as usize..user_start[v + 1] as usize]
@@ -99,8 +105,9 @@ pub fn run(func: &mut Function) -> bool {
     // definitions before uses within a block.
     // Placement never changes an operand count, so record which floating
     // instructions have none (in `floating` order) while visiting operands.
-    let mut early = vec![NONE; func.num_insts()];
-    let mut leaf = Vec::with_capacity(floating.len());
+    let mut early = Scratch::filled(func.num_insts(), NONE);
+    let mut leaf: Scratch<bool> = Scratch::new();
+    leaf.reserve(floating.len());
     for &inst in &floating {
         let mut block = func.entry_block().expect("reachable code has an entry");
         let mut operands = 0;
@@ -126,13 +133,13 @@ pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     // Generation markers avoid allocating or clearing a membership set for
     // every instruction. Each producer is its own unique generation.
-    let mut membership = vec![NONE; func.num_insts()];
+    let mut membership = Scratch::filled(func.num_insts(), NONE);
     let mut groups = Groups {
         slot: vec![(NONE, 0); func.num_blocks()],
         blocks: Vec::new(),
         members: Vec::new(),
     };
-    let mut inst_users: Vec<Inst> = Vec::new();
+    let mut inst_users: Scratch<Inst> = Scratch::new();
     for (&inst, &leaf) in floating.iter().zip(&leaf).rev() {
         // The users of all its results (`*_overflow` has two).
         inst_users.clear();

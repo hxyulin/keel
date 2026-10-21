@@ -16,6 +16,7 @@
 mod constant_division;
 
 use crate::const_fold::{self, constant_data as constant};
+use crate::scratch::Scratch;
 use keel_ir::{
     BinaryOp, ConvertOp, EntityRef, Function, InsertPoint, Inst, InstData, IntCC, Type, UnaryOp,
     Value, ValueDef,
@@ -1162,16 +1163,17 @@ fn run_from(func: &mut Function, canonical: bool) -> bool {
     let mut canonical = canonical && !reused_quotients;
     let mut lazy = LazyUsers::new(func);
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
-    let mut work: Vec<Inst> = Vec::with_capacity(layout);
+    let mut work: Scratch<Inst> = Scratch::new();
+    work.reserve(layout);
     for block in func.blocks() {
         work.extend_from_slice(func.block_insts(block));
     }
     // Start with definitions first within the usual layout; dependency
     // notifications make the final result independent of layout order.
     work.reverse();
-    let mut queued = vec![true; func.num_insts()];
+    let mut queued = Scratch::filled(func.num_insts(), true);
     let mut changed = reused_quotients;
-    let mut waiting = Vec::new();
+    let mut waiting: Scratch<Inst> = Scratch::new();
     while let Some(inst) = work.pop() {
         queued[inst.index()] = false;
         if func.is_removed(inst) {
