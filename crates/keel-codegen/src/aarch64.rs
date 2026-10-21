@@ -311,7 +311,11 @@ const COND_BRANCH_RANGE: usize = 1 << 20;
 fn relax_branches(out: &mut String, name: &str) {
     // An upper bound on the size: every line that is not a label, a
     // comment or a directive is one instruction; data in the code is
-    // jump table entries, four bytes each.
+    // jump table entries, four bytes each. Each counted line takes at least
+    // one byte of text, so short functions need no line scan at all.
+    if out.len().saturating_mul(4) < COND_BRANCH_RANGE {
+        return;
+    }
     let size: usize = out
         .lines()
         .filter(|l| l.starts_with('\t') && !l.starts_with("\t;"))
@@ -1424,13 +1428,17 @@ impl<'a> FunctionCompiler<'a> {
         let mut line = String::from("\t; regalloc:");
         for value in (0..self.func.num_values()).map(Value::new) {
             if let Some(loc) = self.alloc.loc(value) {
-                write!(line, " {value}={}", self.loc_name(loc)).unwrap();
+                crate::text::write_decimal(&mut line, " v", value.index() as i128).unwrap();
+                line.push('=');
+                self.write_loc_name(&mut line, loc);
             }
             if let Some(hi) = self.alloc.hi_loc(value) {
-                write!(line, ":{}", self.loc_name(hi)).unwrap();
+                line.push(':');
+                self.write_loc_name(&mut line, hi);
             }
         }
-        writeln!(self.out, "{line}").unwrap();
+        line.push('\n');
+        self.out.push_str(&line);
     }
 
     fn selected(&mut self, result: Option<Value>, matched: crate::select::Match) {
@@ -4852,17 +4860,21 @@ impl<'a> FunctionCompiler<'a> {
         Address::offset(self.base, self.spill_base + 8 * index as usize)
     }
 
-    fn loc_name(&self, loc: Loc) -> String {
+    fn write_loc_name(&self, out: &mut String, loc: Loc) {
         match loc {
-            Loc::Reg(r) => format!("x{r}"),
-            Loc::FReg(r) => format!("d{r}"),
-            Loc::Stack(s) => self.slot(s).to_string(),
-            Loc::Remat(value) => format!("remat({value})"),
+            Loc::Reg(r) => crate::text::write_class(out, 'x', r.into()),
+            Loc::FReg(r) => crate::text::write_class(out, 'd', r.into()),
+            Loc::Stack(s) => self.slot(s).write_to(out),
+            Loc::Remat(value) => {
+                crate::text::write_decimal(out, "remat(v", value.index() as i128).unwrap();
+                out.write_str(")")
+            }
         }
+        .unwrap();
     }
 
     fn label(&self, block: Block) -> String {
-        format!("L{}_{block}", self.func.name)
+        crate::text::block_label("L", &self.func.name, block)
     }
 
     fn conditional(&mut self, condition: &str, target: String) {
@@ -4907,9 +4919,11 @@ impl<'a> FunctionCompiler<'a> {
             let instruction = native::lower(op, &args);
             self.out.native(|| instruction, |_| unreachable!());
         } else {
-            write!(self.out, "\t{op}").unwrap();
+            self.out.push_str("\t");
+            self.out.push_str(op);
             for (i, a) in args.iter().enumerate() {
-                write!(self.out, "{}{a}", if i == 0 { "\t" } else { ", " }).unwrap();
+                self.out.push_str(if i == 0 { "\t" } else { ", " });
+                a.write_to(&mut self.out).unwrap();
             }
             self.out.push_str("\n");
         }

@@ -24,6 +24,7 @@ pub mod regalloc;
 pub mod select;
 mod stack_frame;
 mod sysv;
+mod text;
 pub mod tuning;
 mod vector;
 pub mod x86_64;

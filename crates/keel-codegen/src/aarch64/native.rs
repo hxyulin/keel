@@ -97,15 +97,24 @@ impl From<&str> for Reg {
         }
     }
 }
-impl fmt::Display for Reg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Reg {
+    /// The `Display` text, written without entering `fmt::write`.
+    pub fn write_to<W: fmt::Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
         match (self.class, self.number) {
             ('p', _) => f.write_str("sp"),
             ('x', 31) => f.write_str("xzr"),
             ('w', 31) => f.write_str("wzr"),
-            ('v', n) => write!(f, "v{n}.8b"),
-            (class, n) => write!(f, "{class}{n}"),
+            ('v', n) => {
+                crate::text::write_decimal(f, "v", n.into())?;
+                f.write_str(".8b")
+            }
+            (class, n) => crate::text::write_class(f, class, n.into()),
         }
+    }
+}
+impl fmt::Display for Reg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_to(f)
     }
 }
 
@@ -147,23 +156,32 @@ impl Address {
         }
     }
 }
-impl fmt::Display for Address {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}", self.base)?;
+impl Address {
+    /// The `Display` text, written without entering `fmt::write`.
+    pub fn write_to<W: fmt::Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
+        f.write_str("[")?;
+        self.base.write_to(f)?;
         match self.offset {
-            Offset::Immediate(Some(n)) => write!(f, ", #{n}")?,
+            Offset::Immediate(Some(n)) => crate::text::write_decimal(f, ", #", n)?,
             Offset::Immediate(None) => {}
             Offset::Index { reg, extend, shift } => {
-                write!(f, ", {reg}")?;
+                f.write_str(", ")?;
+                reg.write_to(f)?;
                 if !extend.is_empty() {
-                    write!(f, ", {extend}")?;
+                    f.write_str(", ")?;
+                    f.write_str(extend)?;
                 }
                 if let Some(s) = shift {
-                    write!(f, " #{s}")?;
+                    crate::text::write_decimal(f, " #", s.into())?;
                 }
             }
         }
         f.write_str(if self.pre { "]!" } else { "]" })
+    }
+}
+impl fmt::Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_to(f)
     }
 }
 
@@ -247,19 +265,28 @@ pub(super) fn condition_name(n: u32) -> &'static str {
         "nv",
     ][n as usize]
 }
-impl fmt::Display for Arg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Arg {
+    /// The `Display` text, written without entering `fmt::write`.
+    pub fn write_to<W: fmt::Write + ?Sized>(&self, f: &mut W) -> fmt::Result {
         match self {
-            Self::Reg(r) => r.fmt(f),
-            Self::Imm(n) => write!(f, "#{n}"),
-            Self::Memory(a) => a.fmt(f),
-            Self::Modifier(kind, Some(n)) => write!(f, "{kind} #{n}"),
+            Self::Reg(r) => r.write_to(f),
+            Self::Imm(n) => crate::text::write_decimal(f, "#", *n),
+            Self::Memory(a) => a.write_to(f),
+            Self::Modifier(kind, Some(n)) => {
+                f.write_str(kind)?;
+                crate::text::write_decimal(f, " #", (*n).into())
+            }
             Self::Modifier(kind, None) => f.write_str(kind),
             Self::Cond(n) => f.write_str(condition_name(*n)),
             Self::Barrier(9) => f.write_str("ishld"),
             Self::Barrier(11) => f.write_str("ish"),
-            Self::Barrier(n) => write!(f, "#{n}"),
+            Self::Barrier(n) => crate::text::write_decimal(f, "#", (*n).into()),
         }
+    }
+}
+impl fmt::Display for Arg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_to(f)
     }
 }
 

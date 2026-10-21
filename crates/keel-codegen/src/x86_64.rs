@@ -4061,7 +4061,7 @@ impl<'a> FunctionCompiler<'a> {
     }
 
     fn label(&self, block: Block) -> String {
-        format!(".L{}_{block}", self.func.name)
+        crate::text::block_label(".L", &self.func.name, block)
     }
 
     fn emit<const N: usize>(&mut self, opcode: Opcode, operands: [AsmOperand; N]) {

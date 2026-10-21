@@ -1039,30 +1039,50 @@ impl Function {
     }
 
     fn write_inst(&self, f: &mut fmt::Formatter<'_>, inst: Inst) -> fmt::Result {
+        use fmt::Display;
+        // Codegen prints every instruction as an assembly comment. Write the
+        // pieces directly rather than nesting `write!`, which re-enters
+        // `fmt::write` for every operand.
         let results = self.inst_results(inst);
         if !results.is_empty() {
-            write_list(f, results)?;
+            write_values(f, results.iter().copied())?;
             f.write_str(" = ")?;
         }
         // Operands are printed resolved, so aliases never show up in text.
         let v = |value: Value| self.resolve(value);
         match self.inst_data(inst) {
-            InstData::Iconst { ty, imm } => write!(f, "iconst.{ty} {imm}"),
+            InstData::Iconst { ty, imm } => {
+                f.write_str("iconst.")?;
+                ty.fmt(f)?;
+                f.write_str(" ")?;
+                write_decimal(f, "", imm.is_negative(), imm.unsigned_abs())
+            }
             InstData::Fconst { ty, bits } => {
                 write!(f, "fconst.{ty} {}", crate::inst::float_text(*ty, *bits))
             }
-            InstData::StackAddr { slot } => write!(f, "stack_addr {slot}"),
-            InstData::Call { func, args } => {
-                write!(f, "call @{}(", self.callees[*func].name)?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+            InstData::StackAddr { slot } => {
+                f.write_str("stack_addr ")?;
+                write_decimal(f, "ss", false, crate::EntityRef::index(*slot) as u64)
+            }
+            InstData::Call { func, args: a } => {
+                f.write_str("call @")?;
+                f.write_str(&self.callees[*func].name)?;
+                f.write_str("(")?;
+                self.write_args(f, a)?;
                 f.write_str(")")
             }
             InstData::SymbolAddr { symbol } => {
                 write!(f, "symbol_addr @{}", self.symbol_name(*symbol))
             }
-            InstData::Invoke { func, args, dests } => {
-                write!(f, "invoke @{}(", self.callees[*func].name)?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+            InstData::Invoke {
+                func,
+                args: a,
+                dests,
+            } => {
+                f.write_str("invoke @")?;
+                f.write_str(&self.callees[*func].name)?;
+                f.write_str("(")?;
+                self.write_args(f, a)?;
                 f.write_str("), ")?;
                 self.write_block_call(f, &dests[0])?;
                 f.write_str(", ")?;
@@ -1085,33 +1105,47 @@ impl Function {
             InstData::EhTypeid { typeinfo } => {
                 write!(f, "eh_typeid @{}", self.data_symbols[*typeinfo])
             }
-            InstData::ReturnCall { func, args } => {
-                write!(f, "return_call @{}(", self.callees[*func].name)?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+            InstData::ReturnCall { func, args: a } => {
+                f.write_str("return_call @")?;
+                f.write_str(&self.callees[*func].name)?;
+                f.write_str("(")?;
+                self.write_args(f, a)?;
                 f.write_str(")")
             }
-            InstData::ReturnCallIndirect { sig, callee, args } => {
-                write!(f, "return_call_indirect {}(", v(*callee))?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+            InstData::ReturnCallIndirect {
+                sig,
+                callee,
+                args: a,
+            } => {
+                f.write_str("return_call_indirect ")?;
+                write_value(f, v(*callee))?;
+                f.write_str("(")?;
+                self.write_args(f, a)?;
                 write!(f, ") : {}", self.signatures[*sig])
             }
-            InstData::CallIndirect { sig, callee, args } => {
-                write!(f, "call_indirect {}(", v(*callee))?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+            InstData::CallIndirect {
+                sig,
+                callee,
+                args: a,
+            } => {
+                f.write_str("call_indirect ")?;
+                write_value(f, v(*callee))?;
+                f.write_str("(")?;
+                self.write_args(f, a)?;
                 write!(f, ") : {}", self.signatures[*sig])
             }
-            InstData::Intrinsic { id, args } => {
+            InstData::Intrinsic { id, args: a } => {
                 write!(f, "intrinsic {id}(")?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+                self.write_args(f, a)?;
                 f.write_str(")")
             }
-            InstData::InlineAsm { asm, args } => {
+            InstData::InlineAsm { asm, args: a } => {
                 f.write_str("asm ")?;
                 crate::data::write_quoted(f, asm.template.as_bytes())?;
                 f.write_str(", ")?;
                 crate::data::write_quoted(f, asm.constraints().as_bytes())?;
                 f.write_str("(")?;
-                write_list(f, args.iter().map(|&a| v(a)))?;
+                self.write_args(f, a)?;
                 f.write_str(")")?;
                 match &asm.outputs[..] {
                     [] => Ok(()),
@@ -1124,47 +1158,119 @@ impl Function {
                 }
             }
             InstData::Trap => f.write_str("trap"),
-            InstData::VectorSplat { ty, arg } => write!(f, "vsplat.{ty} {}", v(*arg)),
-            InstData::VectorUnary { op, arg } => write!(f, "v{op} {}", v(*arg)),
-            InstData::VectorBinary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
-            InstData::VectorExtract { arg, lane } => write!(f, "vextract {}, {lane}", v(*arg)),
-            InstData::VectorInsert { args, lane } => {
-                write!(f, "vinsert {}, {}, {lane}", v(args[0]), v(args[1]))
+            InstData::VectorSplat { ty, arg } => {
+                f.write_str("vsplat.")?;
+                ty.fmt(f)?;
+                f.write_str(" ")?;
+                write_value(f, v(*arg))
             }
-            InstData::VectorShuffle { args, lanes } => {
-                write!(f, "vshuffle {}, {}, [", v(args[0]), v(args[1]))?;
+            InstData::VectorUnary { op, arg } => {
+                f.write_str("v")?;
+                op.fmt(f)?;
+                f.write_str(" ")?;
+                write_value(f, v(*arg))
+            }
+            InstData::VectorBinary { op, args: a } => {
+                op.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
+            }
+            InstData::VectorExtract { arg, lane } => {
+                f.write_str("vextract ")?;
+                write_value(f, v(*arg))?;
+                f.write_str(", ")?;
+                write_decimal(f, "", false, u64::from(*lane))
+            }
+            InstData::VectorInsert { args: a, lane } => {
+                f.write_str("vinsert ")?;
+                self.write_args(f, a)?;
+                f.write_str(", ")?;
+                write_decimal(f, "", false, u64::from(*lane))
+            }
+            InstData::VectorShuffle { args: a, lanes } => {
+                f.write_str("vshuffle ")?;
+                self.write_args(f, a)?;
+                f.write_str(", [")?;
                 write_list(f, lanes.iter())?;
                 f.write_str("]")
             }
-            InstData::VectorIcmp { cond, args } => {
-                write!(f, "vicmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            InstData::VectorIcmp { cond, args: a } => {
+                f.write_str("vicmp.")?;
+                cond.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
             }
-            InstData::VectorFcmp { cond, args } => {
-                write!(f, "vfcmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            InstData::VectorFcmp { cond, args: a } => {
+                f.write_str("vfcmp.")?;
+                cond.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
             }
-            InstData::VectorSelect { args } => {
-                write!(f, "vselect {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            InstData::VectorSelect { args: a } => {
+                f.write_str("vselect ")?;
+                self.write_args(f, a)
             }
-            InstData::Unary { op, arg } => write!(f, "{op} {}", v(*arg)),
-            InstData::Binary { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
-            InstData::Overflow { op, args } => write!(f, "{op} {}, {}", v(args[0]), v(args[1])),
-            InstData::Fma { args } => {
-                write!(f, "fma {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            InstData::Unary { op, arg } => {
+                op.fmt(f)?;
+                f.write_str(" ")?;
+                write_value(f, v(*arg))
             }
-            InstData::Select { args } => {
-                write!(f, "select {}, {}, {}", v(args[0]), v(args[1]), v(args[2]))
+            InstData::Binary { op, args: a } => {
+                op.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
             }
-            InstData::Convert { op, ty, arg } => write!(f, "{op}.{ty} {}", v(*arg)),
-            InstData::Icmp { cond, args } => {
-                write!(f, "icmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            InstData::Overflow { op, args: a } => {
+                op.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
             }
-            InstData::Fcmp { cond, args } => {
-                write!(f, "fcmp.{cond} {}, {}", v(args[0]), v(args[1]))
+            InstData::Fma { args: a } => {
+                f.write_str("fma ")?;
+                self.write_args(f, a)
             }
-            InstData::Load { ty, addr, flags } => write!(f, "load.{ty} {flags}{}", v(*addr)),
-            InstData::VaArg { ty, list } => write!(f, "va_arg.{ty} {}", v(*list)),
+            InstData::Select { args: a } => {
+                f.write_str("select ")?;
+                self.write_args(f, a)
+            }
+            InstData::Convert { op, ty, arg } => {
+                op.fmt(f)?;
+                f.write_str(".")?;
+                ty.fmt(f)?;
+                f.write_str(" ")?;
+                write_value(f, v(*arg))
+            }
+            InstData::Icmp { cond, args: a } => {
+                f.write_str("icmp.")?;
+                cond.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
+            }
+            InstData::Fcmp { cond, args: a } => {
+                f.write_str("fcmp.")?;
+                cond.fmt(f)?;
+                f.write_str(" ")?;
+                self.write_args(f, a)
+            }
+            InstData::Load { ty, addr, flags } => {
+                f.write_str("load.")?;
+                ty.fmt(f)?;
+                f.write_str(" ")?;
+                flags.fmt(f)?;
+                write_value(f, v(*addr))
+            }
+            InstData::VaArg { ty, list } => {
+                f.write_str("va_arg.")?;
+                ty.fmt(f)?;
+                f.write_str(" ")?;
+                write_value(f, v(*list))
+            }
             InstData::Store { value, addr, flags } => {
-                write!(f, "store {flags}{}, {}", v(*value), v(*addr))
+                f.write_str("store ")?;
+                flags.fmt(f)?;
+                write_value(f, v(*value))?;
+                f.write_str(", ")?;
+                write_value(f, v(*addr))
             }
             InstData::AtomicLoad { ty, ordering, addr } => {
                 write!(f, "atomic_load.{ty} {ordering} {}", v(*addr))
@@ -1174,20 +1280,19 @@ impl Function {
                 value,
                 addr,
             } => write!(f, "atomic_store {ordering} {}, {}", v(*value), v(*addr)),
-            InstData::AtomicRmw { op, ordering, args } => {
-                write!(
-                    f,
-                    "atomic_rmw.{op} {ordering} {}, {}",
-                    v(args[0]),
-                    v(args[1])
-                )
+            InstData::AtomicRmw {
+                op,
+                ordering,
+                args: a,
+            } => {
+                write!(f, "atomic_rmw.{op} {ordering} {}, {}", v(a[0]), v(a[1]))
             }
-            InstData::AtomicCas { ordering, args } => write!(
+            InstData::AtomicCas { ordering, args: a } => write!(
                 f,
                 "atomic_cas {ordering} {}, {}, {}",
-                v(args[0]),
-                v(args[1]),
-                v(args[2])
+                v(a[0]),
+                v(a[1]),
+                v(a[2])
             ),
             InstData::Fence { ordering } => write!(f, "fence {ordering}"),
             InstData::Jump { dest } => {
@@ -1195,13 +1300,17 @@ impl Function {
                 self.write_block_call(f, dest)
             }
             InstData::Brif { cond, dests } => {
-                write!(f, "brif {}, ", v(*cond))?;
+                f.write_str("brif ")?;
+                write_value(f, v(*cond))?;
+                f.write_str(", ")?;
                 self.write_block_call(f, &dests[0])?;
                 f.write_str(", ")?;
                 self.write_block_call(f, &dests[1])
             }
             InstData::Switch { arg, dests, cases } => {
-                write!(f, "switch {}, ", v(*arg))?;
+                f.write_str("switch ")?;
+                write_value(f, v(*arg))?;
+                f.write_str(", ")?;
                 self.write_block_call(f, &dests[0])?;
                 f.write_str(", [")?;
                 for (i, (case, dest)) in cases.iter().zip(&dests[1..]).enumerate() {
@@ -1213,26 +1322,79 @@ impl Function {
                 }
                 f.write_str("]")
             }
-            InstData::Return { args } => {
+            InstData::Return { args: a } => {
                 f.write_str("return")?;
-                if !args.is_empty() {
+                if !a.is_empty() {
                     f.write_str(" ")?;
-                    write_list(f, args.iter().map(|&a| v(a)))?;
+                    self.write_args(f, a)?;
                 }
                 Ok(())
             }
         }
     }
 
+    fn write_args(&self, f: &mut fmt::Formatter<'_>, args: &[Value]) -> fmt::Result {
+        write_values(f, args.iter().map(|&a| self.resolve(a)))
+    }
+
     fn write_block_call(&self, f: &mut fmt::Formatter<'_>, call: &BlockCall) -> fmt::Result {
-        write!(f, "{}", call.block)?;
+        write_decimal(
+            f,
+            "block",
+            false,
+            crate::EntityRef::index(call.block) as u64,
+        )?;
         if !call.args.is_empty() {
             f.write_str("(")?;
-            write_list(f, call.args.iter().map(|&a| self.resolve(a)))?;
+            self.write_args(f, &call.args)?;
             f.write_str(")")?;
         }
         Ok(())
     }
+}
+
+/// `prefix`, an optional minus sign and the decimal digits of `n` in a single
+/// `write_str`, exactly as `Display` prints entities and integers.
+fn write_decimal(
+    f: &mut fmt::Formatter<'_>,
+    prefix: &str,
+    negative: bool,
+    mut n: u64,
+) -> fmt::Result {
+    let mut buf = [0u8; 32];
+    let mut i = buf.len();
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    if negative {
+        i -= 1;
+        buf[i] = b'-';
+    }
+    i -= prefix.len();
+    buf[i..i + prefix.len()].copy_from_slice(prefix.as_bytes());
+    f.write_str(std::str::from_utf8(&buf[i..]).expect("ASCII digits"))
+}
+
+fn write_value(f: &mut fmt::Formatter<'_>, value: Value) -> fmt::Result {
+    write_decimal(f, "v", false, crate::EntityRef::index(value) as u64)
+}
+
+fn write_values(
+    f: &mut fmt::Formatter<'_>,
+    values: impl IntoIterator<Item = Value>,
+) -> fmt::Result {
+    for (i, value) in values.into_iter().enumerate() {
+        if i > 0 {
+            f.write_str(", ")?;
+        }
+        write_value(f, value)?;
+    }
+    Ok(())
 }
 
 fn write_list<T: fmt::Display>(
