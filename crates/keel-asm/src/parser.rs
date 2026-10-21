@@ -1831,9 +1831,29 @@ fn assemble_pass(
     if result.subsections_via_symbols {
         atoms.rebase(&mut result, &mut labels, &globals, &prefix)?;
     }
+    // A compact program's assembly goes straight to the Mach-O writer, which
+    // drops temporary `L` labels that are neither global nor a relocation's
+    // symbol, then orders the remaining (far fewer) symbols itself. Omit
+    // those labels and skip sorting; other assemblies keep every symbol in
+    // name order, as does a pass whose symbol locations seed another pass.
+    let compact = matches!(source, program::Input::Compact(_)) && !symbolic_leb;
     // Label names are unique; dedupe the other (mostly repeated) references
     // here so that only distinct names are sorted.
-    let mut names = BumpVec::from_iter_in(labels.keys().copied(), &arena);
+    let mut names = if compact {
+        let relocated: FxHashSet<&str> = result
+            .relocations
+            .iter()
+            .flat_map(|r| std::iter::once(r.symbol.as_str()).chain(r.subtract_symbol.as_deref()))
+            .collect();
+        BumpVec::from_iter_in(
+            labels.keys().copied().filter(|name| {
+                !name.starts_with('L') || globals.contains_key(name) || relocated.contains(name)
+            }),
+            &arena,
+        )
+    } else {
+        BumpVec::from_iter_in(labels.keys().copied(), &arena)
+    };
     let mut others = FxHashSet::default();
     let mut add = |name| {
         if !labels.contains_key(name) && others.insert(name) {
@@ -1860,7 +1880,9 @@ fn assemble_pass(
             add(name.as_str());
         }
     }
-    names.sort_unstable_by(|a, b| name_order(a, b));
+    if !compact {
+        names.sort_unstable_by(|a, b| name_order(a, b));
+    }
     for name in common.keys() {
         if labels.contains_key(name) {
             return Err(Error::new(
