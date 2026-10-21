@@ -1,7 +1,8 @@
 """Independent unbounded-integer reference; modulo 2**64 only at output."""
 MASK = (1 << 64) - 1
 CASES = ('positive32', 'balance32', 'positive64', 'balance64', 'sensor_mix',
-         'clamped', 'unsigned_high', 'adjacent', 'buckets', 'run_balance')
+         'clamped', 'unsigned_high', 'adjacent', 'buckets', 'run_balance',
+         'widen32', 'widen_u32')
 LENGTHS = (0, 1, 3, 4, 7, 8, 15, 16, 17, 31, 33, 257, 4096, 65536, 1048576)
 
 
@@ -50,5 +51,7 @@ def reference(a, b, u):
         sum(abs(y - x) for x, y in zip(a, a[1:])),
         sum(((x % 8) + 1) * (z if y < 0 else 1) for x, y, z in zip(a, b, u)),
         run_total,
+        sum(a),
+        sum(x % (1 << 32) for x in a),
     )
     return dict(zip(CASES, (x & MASK for x in values)))

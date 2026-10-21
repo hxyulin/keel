@@ -70,3 +70,15 @@ U rk_run_balance(const S *a, const I *b, const U *u, U n) {
     }
     return sum;
 }
+
+/* Direct signed/unsigned widening isolates mixed-width reduction coverage. */
+U rk_widen32(const S *a, const I *b, const U *u, U n) {
+    U sum = 0;
+    for (U i = 0; i < n; ++i) sum += (U)(I)a[i];
+    return sum;
+}
+U rk_widen_u32(const S *a, const I *b, const U *u, U n) {
+    U sum = 0;
+    for (U i = 0; i < n; ++i) sum += (W)a[i];
+    return sum;
+}

@@ -9,7 +9,7 @@ class OracleTests(unittest.TestCase):
 
     def test_hand_computed(self):
         self.assertEqual(reference([-2, 3], [-5, 7], [MASK, 2]), dict(zip(CASES, (
-            3, 5, 7, 8, 65538, 257, MASK + 3 & MASK, 5, 7 * MASK + 4 & MASK, 3))))
+            3, 5, 7, 8, 65538, 257, MASK + 3 & MASK, 5, 7 * MASK + 4 & MASK, 3, 1, (1 << 32) + 1))))
 
     def test_extremes(self):
         r = reference([-(1 << 31), (1 << 31) - 1], [-(1 << 63), (1 << 63) - 1], [0, MASK])

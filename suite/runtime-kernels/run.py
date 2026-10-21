@@ -93,7 +93,7 @@ def main():
         if not path.is_file():
             ap.error(f'missing compiler: {path}')
     configurations = compiler_configurations(args.gcc is not None)
-    report = {'schema': 1, 'corpus': 'runtime-kernels-v1', 'label': args.label,
+    report = {'schema': 1, 'corpus': 'runtime-kernels-v2', 'label': args.label,
               'host': {'uname': list(platform.uname()), 'machine': platform.machine(),
                        'affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
                        'load_before': os.getloadavg(), 'settings': {}},

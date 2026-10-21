@@ -11,7 +11,7 @@ typedef unsigned long long U;
 typedef long long I;
 typedef int S;
 _Static_assert(sizeof(U) == 8 && sizeof(I) == 8 && sizeof(S) == 4, "integer widths");
-#define CASES(X) X(positive32) X(balance32) X(positive64) X(balance64) X(sensor_mix) X(clamped) X(unsigned_high) X(adjacent) X(buckets) X(run_balance)
+#define CASES(X) X(positive32) X(balance32) X(positive64) X(balance64) X(sensor_mix) X(clamped) X(unsigned_high) X(adjacent) X(buckets) X(run_balance) X(widen32) X(widen_u32)
 #define DECL(x) extern U rk_##x(const S *, const I *, const U *, U);
 CASES(DECL)
 typedef U (*Kernel)(const S *, const I *, const U *, U);

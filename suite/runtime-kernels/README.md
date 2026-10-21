@@ -5,7 +5,7 @@ This standalone collection complements the fixed 21 kernels in
 corpus, its 795-line oracle, or the four Lua workloads. It is intentionally
 separate from the download/build `suite.toml` programs.
 
-Ten ordinary C workloads use no Keel annotations, `restrict`, alignment promises,
+Twelve ordinary C workloads (corpus `runtime-kernels-v2`) use no Keel annotations, `restrict`, alignment promises,
 or signed-overflow assumptions:
 
 | Case | Work |
@@ -18,6 +18,7 @@ or signed-overflow assumptions:
 | adjacent | Widened signed differences and absolute distances |
 | buckets | Eight stack counters indexed by input, conditional contributions |
 | run_balance | Stateful conditional accumulation with saturating debit |
+| widen32 / widen_u32 | Direct signed/unsigned i32-to-i64 wrapping sums |
 
 Totals and weighted products use unsigned 64-bit modular arithmetic. Signed
 subtraction/negation is widened or range-safe. Inputs mix xorshift64 samples
@@ -112,6 +113,10 @@ Short/empty cases include substantial call, sink, checksum, and clock overhead.
 Repeated inputs measure warm steady-state access, not cold-cache behavior.
 None/Fast/Full share one source file, so compile measurements describe the
 collection, not individual kernels. CLI startup can dominate this small file.
-There is no claim that these ten integer cases represent whole applications,
+There is no claim that these twelve integer cases represent whole applications,
 all C semantics, floating point, or allocator quality. Run a longer campaign
 with host-specific affinity and inspect raw variation before comparing speed.
+
+The v2 cohort adds the two direct widening sums to the original ten-case v1
+collection. Compare matching case/length/configuration cells across versions;
+do not attribute a changed corpus mean to compiler changes.
