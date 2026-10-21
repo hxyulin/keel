@@ -580,6 +580,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
+    widening_adds: HashMap<Inst, vector::WideningAdd>,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` results only used as the address of loads and stores
@@ -869,6 +870,7 @@ impl<'a> FunctionCompiler<'a> {
                 })
         };
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
+        let widening_adds = vector::select_widening_adds(func, &mut selection);
         let fused_compares = {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(func, |data| {
@@ -952,6 +954,7 @@ impl<'a> FunctionCompiler<'a> {
             has_inline_asm,
             selection,
             replicate_loads,
+            widening_adds,
             stack_slot_offsets,
             copy_base,
             sret_save,
@@ -1381,6 +1384,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some(&addr) = self.replicate_loads.get(&inst) {
             self.vector_replicate_load(addr, result);
+            return;
+        }
+        if let Some(&add) = self.widening_adds.get(&inst) {
+            self.vector_widening_add(add, result);
             return;
         }
         if let Some(matched) = self.selection.matches.get(&inst).cloned() {

@@ -115,6 +115,44 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_widening_add(&mut self, add: WideningAdd, result: Option<Value>) {
+        let source_shape = self.ty(add.source).vector().unwrap();
+        let destination = self.ty(add.accumulator).vector().unwrap();
+        let accumulator = self.use_freg(add.accumulator, FS0);
+        let source = self.use_freg(add.source, FS1);
+        let d = self.def_freg(result);
+        let bytes = source_shape.lane_type().bytes().unwrap();
+        let (opcode, name) = if add.signed {
+            (Opcode::SADDW_asimddiff_W, "saddw")
+        } else {
+            (Opcode::UADDW_asimddiff_W, "uaddw")
+        };
+        let narrow = match bytes {
+            1 => "8b",
+            2 => "4h",
+            4 => "2s",
+            _ => unreachable!(),
+        };
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, 0),
+                (FieldId::size, bytes.trailing_zeros()),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, accumulator.into()),
+                (FieldId::Rm, source.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "{name}\tv{d}.{}, v{accumulator}.{}, v{source}.{narrow}",
+                    arrangement(destination),
+                    arrangement(destination)
+                )
+            },
+        );
+        self.def_done(result, d);
+    }
     pub(super) fn vector_replicate_load(&mut self, addr: Value, result: Option<Value>) {
         let shape = self.ty(result.unwrap()).vector().unwrap();
         let base = self.use_reg(addr, S0);
@@ -123,7 +161,10 @@ impl FunctionCompiler<'_> {
             Opcode::LD1R_asisdlso_R1,
             [
                 (FieldId::Q, 1),
-                (FieldId::size, shape.lane_type().bytes().unwrap().trailing_zeros()),
+                (
+                    FieldId::size,
+                    shape.lane_type().bytes().unwrap().trailing_zeros(),
+                ),
                 (FieldId::Rn, base.into()),
                 (FieldId::Rt, d.into()),
             ],
@@ -423,6 +464,79 @@ impl FunctionCompiler<'_> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct WideningAdd {
+    accumulator: Value,
+    source: Value,
+    signed: bool,
+}
+
+/// SADDW/UADDW have exactly the same low-lane extension followed by modular
+/// addition as this adjacent pair. Only a single doubling is covered: chained
+/// extensions and shared widened values keep their original materialization.
+pub(super) fn select_widening_adds(
+    func: &Function,
+    selection: &mut crate::select::Selection,
+) -> HashMap<Inst, WideningAdd> {
+    let mut uses = vec![0u8; func.num_values()];
+    for (_, inst) in func.layout_insts() {
+        func.inst_data(inst).for_each_operand(|v| {
+            let count = &mut uses[func.resolve(v).index()];
+            *count = count.saturating_add(1);
+        });
+    }
+    let mut selected = HashMap::new();
+    let mut previous = None;
+    for (block, inst) in func.layout_insts() {
+        if let Some((producer_block, producer)) = previous
+            && producer_block == block
+            && !selection.covered(producer)
+            && !selection.covered(inst)
+            && let InstData::Convert {
+                op: op @ (ConvertOp::SwidenLow | ConvertOp::UwidenLow),
+                ty,
+                arg,
+            } = *func.inst_data(producer)
+            && let InstData::VectorBinary { op: V::Iadd, args } = *func.inst_data(inst)
+            && uses[func.first_result(producer).index()] == 1
+            && func
+                .value_type(func.resolve(arg))
+                .vector()
+                .unwrap()
+                .lane_type()
+                .bytes()
+                .unwrap()
+                * 2
+                == ty.vector().unwrap().lane_type().bytes().unwrap()
+        {
+            let value = func.first_result(producer);
+            let args = args.map(|v| func.resolve(v));
+            let accumulator = if args[0] == value {
+                Some(args[1])
+            } else if args[1] == value {
+                Some(args[0])
+            } else {
+                None
+            };
+            if let Some(accumulator) = accumulator {
+                let source = func.resolve(arg);
+                selection.cover(producer);
+                selection.set_operands(inst, vec![accumulator, source]);
+                selected.insert(
+                    inst,
+                    WideningAdd {
+                        accumulator,
+                        source,
+                        signed: op == ConvertOp::SwidenLow,
+                    },
+                );
+            }
+        }
+        previous = Some((block, inst));
+    }
+    selected
+}
+
 /// Preserve the complete splat, including lanes unused by widening. Moving an
 /// ordinary load across its immediately following pure splat preserves the
 /// first fault and memory order. Shared scalar results remain materialized.
@@ -445,14 +559,20 @@ pub(super) fn select_replicate_loads(
             && !selection.covered(load)
             && !selection.covered(inst)
             && let InstData::VectorSplat { ty, arg } = *func.inst_data(inst)
-            && let InstData::Load { ty: scalar, addr, flags } = *func.inst_data(load)
+            && let InstData::Load {
+                ty: scalar,
+                addr,
+                flags,
+            } = *func.inst_data(load)
             && !flags.volatile
             && scalar.is_int()
             && ty.vector().is_some_and(|s| s.lane_type() == scalar)
             && func.resolve(arg) == func.first_result(load)
             && uses[func.resolve(arg).index()] == 1
             && !selection.addresses.contains_key(&func.resolve(addr))
-            && !selection.indexed_addresses.contains_key(&func.resolve(addr))
+            && !selection
+                .indexed_addresses
+                .contains_key(&func.resolve(addr))
             && !matches!(func.value_def(func.resolve(addr)), keel_ir::ValueDef::Result(i, _) if selection.covered(i))
         {
             selection.cover(load);
