@@ -69,10 +69,11 @@ impl crate::Pass for LoopReduce {
         "unrolled read-only wrapping i32/i64 sum loops with independent vector accumulators"
     }
     fn run(&self, f: &mut Function) -> bool {
-        run_candidates(f, VectorTarget::Portable, true)
+        self.run_for_target(f, VectorTarget::Portable)
     }
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
-        run_candidates(f, target, true)
+        let changed = run_candidates(f, target, true);
+        normalize_conditional_loop(f, target) || changed
     }
 }
 
@@ -215,6 +216,7 @@ struct Analyze<'a> {
     allowed: HashSet<Inst>,
     affine: bool,
     casts: bool,
+    conditional: bool,
 }
 impl Analyze<'_> {
     fn index(&mut self, v: Value) -> Option<Option<Value>> {
@@ -345,6 +347,38 @@ impl Analyze<'_> {
                     self.expression(arg, depth + 1)?;
                 }
             }
+            D::Select { args } if self.conditional => {
+                // Only lane-wise integer predicates of the contribution width.
+                // Never turn a carried accumulator or a potentially trapping
+                // instruction in an arm into an unconditional vector operation.
+                let mask = self.f.resolve(args[0]);
+                let compare = def(self.f, mask)?;
+                let D::Icmp {
+                    cond,
+                    args: operands,
+                } = *self.f.inst_data(compare)
+                else {
+                    return None;
+                };
+                if self.f.inst_block(compare) != self.c.body
+                    || !matches!(self.c.shape.lane_type(), Type::I32 | Type::I64)
+                    || self.c.shape.lane_type() == Type::I64
+                        && self.target != VectorTarget::Aarch64Neon
+                        && !matches!(cond, IntCC::Eq | IntCC::Ne)
+                    || self.target != VectorTarget::Aarch64Neon
+                        && matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge)
+                {
+                    return None;
+                }
+                for operand in operands {
+                    self.expression(operand, depth + 1)?;
+                }
+                for arm in &args[1..] {
+                    self.expression(*arm, depth + 1)?;
+                }
+                self.allowed.insert(compare);
+                self.c.vectors.insert(mask);
+            }
             D::Convert {
                 op: ConvertOp::Uext | ConvertOp::Sext,
                 arg,
@@ -401,6 +435,7 @@ fn analyze(
     affine: bool,
     casts: bool,
     multi: bool,
+    conditional: bool,
 ) -> Option<Candidate> {
     let params = f.block_params(header);
     if !(1..=if multi { 5 } else { 2 }).contains(&params.len())
@@ -621,6 +656,7 @@ fn analyze(
         allowed: HashSet::from([back, step, root]),
         affine,
         casts,
+        conditional,
     };
     if let Output::Store(store) = output {
         let D::Store { addr, .. } = *f.inst_data(store) else {
@@ -910,6 +946,13 @@ fn reduce_body(
                 }
                 D::Binary { op, args } => D::VectorBinary {
                     op: target.binary(op, c.shape.lane_type()).unwrap(),
+                    args: args.map(|v| mapping[&f.resolve(v)]),
+                },
+                D::Icmp { cond, args } => D::VectorIcmp {
+                    cond,
+                    args: args.map(|v| mapping[&f.resolve(v)]),
+                },
+                D::Select { args } => D::VectorSelect {
                     args: args.map(|v| mapping[&f.resolve(v)]),
                 },
                 D::Convert { .. } if c.casts.contains_key(&result.unwrap()) => {
@@ -1298,7 +1341,16 @@ fn run_candidates_with_budget(
         if f.block_params(header).len() != if reductions { 2 } else { 1 } {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, false, false, false) {
+        if let Some(c) = analyze(
+            f,
+            header,
+            target,
+            &mut analysis,
+            false,
+            false,
+            false,
+            reductions && !fast,
+        ) {
             if fast && (c.addresses.len() != 1 || c.vectors.len() > 8) {
                 continue;
             }
@@ -1322,11 +1374,68 @@ fn run_extended(f: &mut Function, target: VectorTarget, casts: bool, multi: bool
         if !(2..=if multi { 5 } else { 2 }).contains(&f.block_params(header).len()) {
             continue;
         }
-        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts, multi) {
+        if let Some(c) = analyze(f, header, target, &mut analysis, true, casts, multi, true) {
             transform(f, c, target);
             analysis = None;
             changed = true;
         }
     }
     changed
+}
+
+/// C conditional expressions initially have diamond CFGs. Normalize only a
+/// bounded private trial and publish it only after a reduction vectorizes.
+/// Rejected candidates do not leave extra selects or change unrelated layouts.
+fn normalize_conditional_loop(f: &mut Function, target: VectorTarget) -> bool {
+    if f.layout_insts().take(257).count() > 256 || f.blocks().take(17).count() > 16 {
+        return false;
+    }
+    if !f.blocks().any(|b| Some(b) != f.entry_block() && f.block_params(b).len() >= 2) {
+        return false;
+    }
+    let mut trial = f.clone();
+    crate::Pass::run(&crate::load_reuse::LoadReuse, &mut trial);
+    // A C ternary often skips one arm and enters the join directly. Give
+    // that edge an empty block so the existing, guarded diamond converter
+    // can validate and normalize it without speculating memory operations.
+    for head in trial.blocks().collect::<Vec<_>>() {
+        let Some(&term) = trial.block_insts(head).last() else {
+            continue;
+        };
+        let D::Brif { cond, mut dests } = trial.inst_data(term).clone() else {
+            continue;
+        };
+        for direct in 0..2 {
+            let arm = dests[1 - direct].block;
+            let Some(&last) = trial.block_insts(arm).last() else {
+                continue;
+            };
+            if !matches!(trial.inst_data(last), D::Jump { dest } if dest.block == dests[direct].block)
+            {
+                continue;
+            }
+            let bridge = trial.create_block();
+            trial.append_inst(
+                bridge,
+                D::Jump {
+                    dest: dests[direct].clone(),
+                },
+            );
+            dests[direct] = BlockCall {
+                block: bridge,
+                args: vec![],
+            };
+            *trial.inst_data_mut(term) = D::Brif { cond, dests };
+            break;
+        }
+    }
+    if !crate::if_convert::run(&mut trial) {
+        return false;
+    }
+    crate::simplify_cfg::run(&mut trial);
+    if !run_candidates(&mut trial, target, true) {
+        return false;
+    }
+    *f = trial;
+    true
 }

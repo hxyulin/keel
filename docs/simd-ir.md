@@ -332,3 +332,18 @@ normalized by comparison with zero: a nonzero mask selects the entire true lane,
 including masks with only one bit set. Float arms are selected bitwise, preserving
 NaN payloads and signed zero. Sources are captured before publishing the result,
 including spilled operands and results; allocated inputs may remain live.
+
+Full's integer reduction discovery also accepts same-width integer comparisons
+and selects in independent wrapping i32/i64 contributions. Predicates must use
+packed operations on the selected target: NEON admits all integer predicates;
+SSE2 admits signed i32 ordering and i32/i64 equality. Fast keeps its previous
+eligibility rules. Floating comparisons/reassociation, coupled recurrences,
+induction-as-data and multiple potentially faulting streams remain excluded.
+
+A bounded trial (256 instructions, 16 blocks) handles C ternary diamonds. Existing
+successful-load reuse removes a duplicate dominated read before the guarded
+if-converter runs. Empty edge blocks adapt triangle CFGs to that converter;
+only nontrapping arm operations may be speculated. The trial replaces the
+original function only when a reduction actually vectorizes, so rejected
+candidates retain their original CFG. Scalar tails, zero-trip behavior, access
+widths, memory effects and first-fault restrictions remain unchanged.

@@ -1,0 +1,28 @@
+func @k_cond32(ptr, i64, i32, i32) -> i32 cc(c) {
+block0(v0: ptr, v1: i64, v2: i32, v3: i32):
+    v4 = iconst.i64 0
+    jump block1(v4, v3)
+block1(v5: i64, v8: i32):
+    v7 = icmp.ugt v1, v5
+    brif v7, block2, block4
+block2:
+    v25 = iconst.i64 2
+    v11 = shl v5, v25
+    v12 = ptradd v0, v11
+    v13 = load.i32 v12
+    v15 = icmp.sgt v2, v13
+    brif v15, block5, block6
+block4:
+    return v8
+block5:
+    v19 = load.i32 v12
+    jump block7(v19)
+block6:
+    v20 = iconst.i32 0
+    jump block7(v20)
+block7(v21: i32):
+    v22 = iadd v8, v21
+    v23 = iconst.i64 1
+    v24 = iadd v5, v23
+    jump block1(v24, v22)
+}

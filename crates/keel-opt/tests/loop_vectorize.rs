@@ -493,3 +493,93 @@ fn accepts_commuted_element_size_multiplication() {
     let source = kernel(Type::I32, Type::I64, "iadd", false).replace("imul v5,v10", "imul v10,v5");
     assert_eq!(packed(&optimize(&source, VectorTarget::Portable)), 1);
 }
+
+#[test]
+fn conditional_reductions_use_packed_predicates_only_where_available() {
+    let source = include_str!("conditional_reduce/loops.keel");
+    for target in [
+        VectorTarget::Portable,
+        VectorTarget::Aarch64Neon,
+        VectorTarget::X86Sse2,
+    ] {
+        for predicate in [
+            "eq", "ne", "slt", "sle", "sgt", "sge", "ult", "ule", "ugt", "uge",
+        ] {
+            let source = source.replace("icmp.slt v11", &format!("icmp.{predicate} v11"));
+            let mut m = keel_ir::parse(&source).unwrap();
+            keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
+            keel_ir::verify_module(&m).unwrap();
+            for (index, f) in m.functions.iter().enumerate() {
+                let supported = target == VectorTarget::Aarch64Neon
+                    || (index == 0 && !predicate.starts_with('u'))
+                    || matches!(predicate, "eq" | "ne");
+                assert_eq!(
+                    f.layout_insts()
+                        .any(|(_, i)| matches!(f.inst_data(i), InstData::VectorSelect { .. })),
+                    supported,
+                    "{target:?} {index} {predicate}"
+                );
+            }
+            let text = m.to_string();
+            keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
+            assert_eq!(text, m.to_string());
+        }
+    }
+}
+
+#[test]
+fn conditional_reductions_reject_coupled_values_fault_reordering_and_traps() {
+    let source = include_str!("conditional_reduce/loops.keel");
+    for rejected in [
+        source.replace("select v12, v11, v13", "select v12, v11, v6"),
+        source
+            .replace(
+                "v14 = select",
+                "v18 = load.i32 v10\n v19 = icmp.ne v18, v13\n v14 = select",
+            )
+            .replace("select v12,", "select v19,"),
+        source
+            .replace("v14 = select", "v18 = sdiv v11, v2\n v14 = select")
+            .replace("select v12, v11,", "select v12, v18,"),
+        source
+            .replace("load.i32 v10", "load.i32 volatile v10")
+            .replace("load.i64 v10", "load.i64 volatile v10"),
+    ] {
+        let mut m = keel_ir::parse(&rejected).unwrap();
+        // The mixed-width second-read mutation only needs the i32 function.
+        if rejected.contains("v18 = load.i32") {
+            m.functions.truncate(1);
+        }
+        keel_ir::verify_module(&m).unwrap();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], VectorTarget::Aarch64Neon)
+            .unwrap();
+        assert!(m.functions.iter().all(|f| {
+            !f.layout_insts()
+                .any(|(_, i)| f.inst_data(i).is_vector_instruction())
+        }));
+    }
+}
+
+#[test]
+fn bounded_c_diamond_normalization_commits_only_successful_vectorization() {
+    let source = include_str!("conditional_reduce/triangle.keel");
+    let mut m = keel_ir::parse(source).unwrap();
+    keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::Aarch64Neon).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert!(
+        m.functions[0]
+            .layout_insts()
+            .any(|(_, i)| matches!(m.functions[0].inst_data(i), InstData::VectorSelect { .. }))
+    );
+    for rejected in [
+        source.replace("load.i32 v12", "load.i32 volatile v12"),
+        source
+            .replace("i32", "i64")
+            .replace("iconst.i64 2", "iconst.i64 3"),
+    ] {
+        let mut m = keel_ir::parse(&rejected).unwrap();
+        let before = m.to_string();
+        keel_opt::run_passes_for_target(&mut m, &["loop-reduce"], VectorTarget::X86Sse2).unwrap();
+        assert_eq!(before, m.to_string());
+    }
+}
