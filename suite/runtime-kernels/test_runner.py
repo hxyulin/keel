@@ -22,6 +22,12 @@ class RunnerTests(unittest.TestCase):
         self.assertIsNot(configs['baseline-full'][1], configs['keel-full'][1])
         self.assertNotIn('baseline-full', compiler_configurations())
 
+    def test_experimental_full_pipeline_does_not_change_frozen_or_fast_flags(self):
+        configs = compiler_configurations(include_baseline=True, full_passes='adjacent-diff,dce')
+        self.assertEqual(configs['keel-full'][1][-2:], ['-p', 'adjacent-diff,dce'])
+        for name in ['baseline-full', 'keel-fast', 'keel-none', 'clang-O2']:
+            self.assertNotIn('-p', configs[name][1])
+
     def test_canonical_path_switches_inodes_without_mutating_retained_binaries(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

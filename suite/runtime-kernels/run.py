@@ -24,7 +24,7 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def compiler_configurations(include_gcc=False, include_baseline=False):
+def compiler_configurations(include_gcc=False, include_baseline=False, full_passes=None):
     result = {f'keel-{tier}': ('keel', ['cc', *([] if tier == 'none' else ['-O']),
                                        '--opt-tier', tier, '--emit-object'])
               for tier in ('none', 'fast', 'full')}
@@ -33,6 +33,8 @@ def compiler_configurations(include_gcc=False, include_baseline=False):
         result['gcc-O2'] = ('gcc', ['-std=c11', '-O2', '-c'])
     if include_baseline:
         result['baseline-full'] = ('baseline-keel', list(result['keel-full'][1]))
+    if full_passes is not None:
+        result['keel-full'][1].extend(['-p', full_passes])
     return result
 
 
@@ -54,6 +56,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--keel', required=True, type=Path)
     ap.add_argument('--baseline-keel', type=Path, help='optional frozen Keel Full; interleaved with current configurations')
+    ap.add_argument('--full-passes', help='experimental current-Full pipeline; frozen baseline keeps its default pipeline')
     ap.add_argument('--clang', required=True, type=Path)
     ap.add_argument('--gcc', type=Path, help='optional actual GCC, never auto-selected')
     ap.add_argument('--output', required=True, type=Path, help='new evidence directory')
@@ -97,7 +100,7 @@ def main():
     for path in compilers.values():
         if not path.is_file():
             ap.error(f'missing compiler: {path}')
-    configurations = compiler_configurations(args.gcc is not None, args.baseline_keel is not None)
+    configurations = compiler_configurations(args.gcc is not None, args.baseline_keel is not None, args.full_passes)
     report = {'schema': 1, 'corpus': 'runtime-kernels-v2', 'label': args.label,
               'host': {'uname': list(platform.uname()), 'machine': platform.machine(),
                        'affinity': sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else None,
