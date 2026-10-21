@@ -1233,6 +1233,7 @@ mod att;
 pub use att::{SourceParser, Syntax};
 
 mod format;
+pub use format::{write_expression, write_instruction};
 
 mod features;
 pub use features::Features;

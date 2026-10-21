@@ -164,14 +164,25 @@ pub enum Directive {
     Cfi(Cfi),
 }
 fn quoted(f: &mut fmt::Formatter<'_>, s: &[u8]) -> fmt::Result {
+    // Write runs of printable ASCII whole; they are always valid UTF-8.
+    let run = |f: &mut fmt::Formatter<'_>, run: &[u8]| match std::str::from_utf8(run) {
+        Ok(s) => f.write_str(s),
+        Err(_) => Err(fmt::Error),
+    };
     f.write_str("\"")?;
-    for &b in s {
+    let mut start = 0;
+    for (i, &b) in s.iter().enumerate() {
+        if matches!(b, b' '..=b'~') && b != b'"' && b != b'\\' {
+            continue;
+        }
+        run(f, &s[start..i])?;
+        start = i + 1;
         match b {
             b'"' | b'\\' => write!(f, "\\{}", b as char)?,
-            b' '..=b'~' => write!(f, "{}", b as char)?,
             _ => write!(f, "\\{b:03o}")?,
         }
     }
+    run(f, &s[start..])?;
     f.write_str("\"")
 }
 impl fmt::Display for Directive {

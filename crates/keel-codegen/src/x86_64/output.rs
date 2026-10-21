@@ -25,25 +25,11 @@ impl Output {
         lock: bool,
     ) {
         match self {
-            // Text only formats the instruction: reuse one operand list
-            // instead of allocating one for every instruction.
+            // Text only formats the instruction, straight from its parts.
             Self::Text(s) => {
-                thread_local! {
-                    static SCRATCH: std::cell::RefCell<Instruction> =
-                        const { std::cell::RefCell::new(Instruction {
-                            opcode: Opcode::Nop,
-                            operands: Vec::new(),
-                            lock: false,
-                        }) };
-                }
-                SCRATCH.with(|scratch| {
-                    let mut i = scratch.borrow_mut();
-                    i.opcode = opcode;
-                    i.lock = lock;
-                    i.operands.clear();
-                    i.operands.extend(operands);
-                    writeln!(s, "\t{}", *i).unwrap();
-                });
+                s.push('\t');
+                keel_asm_ir::x86::write_instruction(s, opcode, &operands, lock).unwrap();
+                s.push('\n');
             }
             Self::Structured(p) => p.x86_instruction(Instruction {
                 opcode,
@@ -130,32 +116,22 @@ impl Sink for Output {
                     width,
                     expression,
                     got: false,
-                } => writeln!(
-                    s,
-                    "\t{} {}",
-                    match width {
-                        1 => ".byte",
-                        2 => ".short",
-                        4 => ".long",
-                        8 => ".quad",
+                } => {
+                    s.push_str(match width {
+                        1 => "\t.byte ",
+                        2 => "\t.short ",
+                        4 => "\t.long ",
+                        8 => "\t.quad ",
                         _ => unreachable!(),
-                    },
-                    Address {
-                        expression: expression.clone(),
-                        modifier: Modifier::None
-                    }
-                )
-                .unwrap(),
-                Directive::Size { name, expression } => writeln!(
-                    s,
-                    "\t.size {}, {}",
-                    crate::data::asm_string(name),
-                    Address {
-                        expression: expression.clone(),
-                        modifier: Modifier::None
-                    }
-                )
-                .unwrap(),
+                    });
+                    keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
+                    s.push('\n');
+                }
+                Directive::Size { name, expression } => {
+                    write!(s, "\t.size {}, ", crate::data::asm_string(name)).unwrap();
+                    keel_asm_ir::x86::write_expression(s, expression, Modifier::None).unwrap();
+                    s.push('\n');
+                }
                 _ => writeln!(s, "\t{d}").unwrap(),
             },
             Self::Structured(p) => p.directive(d),
