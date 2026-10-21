@@ -115,6 +115,22 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
     })
 }
 impl FunctionCompiler<'_> {
+    pub(super) fn vector_replicate_load(&mut self, addr: Value, result: Option<Value>) {
+        let shape = self.ty(result.unwrap()).vector().unwrap();
+        let base = self.use_reg(addr, S0);
+        let d = self.def_freg(result);
+        self.native(
+            Opcode::LD1R_asisdlso_R1,
+            [
+                (FieldId::Q, 1),
+                (FieldId::size, shape.lane_type().bytes().unwrap().trailing_zeros()),
+                (FieldId::Rn, base.into()),
+                (FieldId::Rt, d.into()),
+            ],
+            |out| write!(out, "ld1r\t{{v{d}.{}}}, [x{base}]", arrangement(shape)),
+        );
+        self.def_done(result, d);
+    }
     pub(super) fn vector_widen(
         &mut self,
         op: ConvertOp,
@@ -405,4 +421,45 @@ impl FunctionCompiler<'_> {
             [Reg::q(register).into(), at.into()],
         );
     }
+}
+
+/// Preserve the complete splat, including lanes unused by widening. Moving an
+/// ordinary load across its immediately following pure splat preserves the
+/// first fault and memory order. Shared scalar results remain materialized.
+pub(super) fn select_replicate_loads(
+    func: &Function,
+    selection: &mut crate::select::Selection,
+) -> HashMap<Inst, Value> {
+    let mut uses = vec![0u8; func.num_values()];
+    for (_, inst) in func.layout_insts() {
+        func.inst_data(inst).for_each_operand(|v| {
+            let count = &mut uses[func.resolve(v).index()];
+            *count = count.saturating_add(1);
+        });
+    }
+    let mut selected = HashMap::new();
+    let mut previous = None;
+    for (block, inst) in func.layout_insts() {
+        if let Some((load_block, load)) = previous
+            && load_block == block
+            && !selection.covered(load)
+            && !selection.covered(inst)
+            && let InstData::VectorSplat { ty, arg } = *func.inst_data(inst)
+            && let InstData::Load { ty: scalar, addr, flags } = *func.inst_data(load)
+            && !flags.volatile
+            && scalar.is_int()
+            && ty.vector().is_some_and(|s| s.lane_type() == scalar)
+            && func.resolve(arg) == func.first_result(load)
+            && uses[func.resolve(arg).index()] == 1
+            && !selection.addresses.contains_key(&func.resolve(addr))
+            && !selection.indexed_addresses.contains_key(&func.resolve(addr))
+            && !matches!(func.value_def(func.resolve(addr)), keel_ir::ValueDef::Result(i, _) if selection.covered(i))
+        {
+            selection.cover(load);
+            selection.set_operands(inst, vec![func.resolve(addr)]);
+            selected.insert(inst, func.resolve(addr));
+        }
+        previous = Some((block, inst));
+    }
+    selected
 }

@@ -111,7 +111,7 @@ use keel_ir::{
     Intrinsic, Layout, Module, Ordering, OverflowOp, PhysReg, Purpose, RmwOp, Signature,
     SourceFile, SourceLoc, Type, UnaryOp, Value, ValueDef,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 mod constant_plan;
 mod native;
@@ -579,6 +579,7 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
+    replicate_loads: HashMap<Inst, Value>,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` results only used as the address of loads and stores
@@ -867,6 +868,7 @@ impl<'a> FunctionCompiler<'a> {
                         .collect()
                 })
         };
+        let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let fused_compares = {
             backend_scope!(CompareFusion);
             selection.fuse_aarch64_compares(func, |data| {
@@ -949,6 +951,7 @@ impl<'a> FunctionCompiler<'a> {
             fused_compares,
             has_inline_asm,
             selection,
+            replicate_loads,
             stack_slot_offsets,
             copy_base,
             sret_save,
@@ -1374,6 +1377,10 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&addr) = self.replicate_loads.get(&inst) {
+            self.vector_replicate_load(addr, result);
             return;
         }
         if let Some(matched) = self.selection.matches.get(&inst).cloned() {
