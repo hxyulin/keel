@@ -12,7 +12,7 @@
 
 use crate::inst::{BlockCall, Clause, InstData, Symbol};
 use crate::layout::Layout;
-use crate::{Arena, Block, DataRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value};
+use crate::{Arena, Block, DataRef, EntityRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -280,32 +280,45 @@ struct BlockData {
     insts: Vec<Inst>,
 }
 
+/// Kept small: there is one per instruction ever created.
 #[derive(Clone)]
 struct InstNode {
     data: InstData,
     results: ResultRange,
-    /// `None` once removed.
-    block: Option<Block>,
-    loc: Option<SourceLoc>,
+    /// The containing block's index, or [`NO_BLOCK`] once removed.
+    block: u32,
+    /// One more than the location's index in [`Function::locs`]; 0 for none.
+    loc: u32,
 }
 
-/// Append-only pool offsets use usize, with checked addition and no narrowing.
+const NO_BLOCK: u32 = u32::MAX;
+
+/// Append-only pool offsets, checked on creation so that they fit `u32`.
 #[derive(Copy, Clone)]
 struct ResultRange {
-    start: usize,
-    end: usize,
+    start: u32,
+    len: u32,
 }
 
 impl ResultRange {
     fn new(start: usize, len: usize) -> Self {
+        let end = start.checked_add(len).expect("result pool range overflow");
+        u32::try_from(end).expect("result pool range overflow");
         Self {
-            start,
-            end: start.checked_add(len).expect("result pool range overflow"),
+            start: start as u32,
+            len: len as u32,
         }
     }
 
     fn as_range(self) -> std::ops::Range<usize> {
-        self.start..self.end
+        let start = self.start as usize;
+        start..start + self.len as usize
+    }
+}
+
+impl InstNode {
+    fn block(&self) -> Option<Block> {
+        (self.block != NO_BLOCK).then(|| Block::new(self.block as usize))
     }
 }
 
@@ -336,6 +349,9 @@ pub struct Function {
     insts: Arena<Inst, InstNode>,
     values: Arena<Value, ValueData>,
     result_pool: Vec<Value>,
+    /// Instruction locations, shared by runs of instructions with the same
+    /// one; see [`InstNode::loc`].
+    locs: Vec<SourceLoc>,
     stack_slots: Arena<StackSlot, StackSlotData>,
     /// Functions this one calls. Keeping their signatures here makes a
     /// function self-contained: result types and verification of calls need
@@ -374,14 +390,15 @@ pub struct Function {
 impl fmt::Debug for Function {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct Nodes<'a>(&'a Function);
-        struct Node<'a>(&'a InstNode, &'a [Value]);
+        struct Node<'a>(&'a Function, Inst);
         impl fmt::Debug for Node<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                let (func, inst) = (self.0, self.1);
                 f.debug_struct("InstNode")
-                    .field("data", &self.0.data)
-                    .field("results", &self.1)
-                    .field("block", &self.0.block)
-                    .field("loc", &self.0.loc)
+                    .field("data", func.inst_data(inst))
+                    .field("results", &func.inst_results(inst))
+                    .field("block", &func.insts[inst].block())
+                    .field("loc", &func.inst_loc(inst))
                     .finish()
             }
         }
@@ -392,7 +409,7 @@ impl fmt::Debug for Function {
                         self.0
                             .insts
                             .iter()
-                            .map(|(i, n)| (i, Node(n, self.0.inst_results(i)))),
+                            .map(|(i, _)| (i, Node(self.0, i))),
                     )
                     .finish()
             }
@@ -432,6 +449,7 @@ impl Function {
             insts: Arena::new(),
             values: Arena::new(),
             result_pool: Vec::new(),
+            locs: Vec::new(),
             stack_slots: Arena::new(),
             callees: Arena::new(),
             data_symbols: Arena::new(),
@@ -673,8 +691,8 @@ impl Function {
         let inst = self.insts.push(InstNode {
             data,
             results,
-            block: None,
-            loc: None,
+            block: NO_BLOCK,
+            loc: 0,
         });
         for (n, &ty) in result_tys.iter().enumerate() {
             let value = self.values.push(ValueData {
@@ -688,7 +706,7 @@ impl Function {
 
     /// Puts an instruction that is not in the layout at `at`.
     fn place(&mut self, inst: Inst, at: InsertPoint) {
-        debug_assert!(self.insts[inst].block.is_none());
+        debug_assert!(self.is_removed(inst));
         let (block, index) = match at {
             InsertPoint::End(block) => (block, self.blocks[block].insts.len()),
             InsertPoint::Before(before) => {
@@ -697,7 +715,7 @@ impl Function {
             }
         };
         self.blocks[block].insts.insert(index, inst);
-        self.insts[inst].block = Some(block);
+        self.insts[inst].block = block.index() as u32;
     }
 
     /// Index of `inst` within its block.
@@ -716,7 +734,7 @@ impl Function {
         let block = self.inst_block(inst);
         let index = self.position(inst);
         self.blocks[block].insts.remove(index);
-        self.insts[inst].block = None;
+        self.insts[inst].block = NO_BLOCK;
     }
 
     /// Moves `inst` to `at`, keeping its results.
@@ -727,7 +745,7 @@ impl Function {
 
     /// Whether `inst` has been removed from the layout.
     pub fn is_removed(&self, inst: Inst) -> bool {
-        self.insts[inst].block.is_none()
+        self.insts[inst].block == NO_BLOCK
     }
 
     /// Mutable access to an instruction, for rewriting operands or
@@ -742,11 +760,25 @@ impl Function {
 
     /// The source location `inst` was compiled from, if known.
     pub fn inst_loc(&self, inst: Inst) -> Option<SourceLoc> {
-        self.insts[inst].loc
+        match self.insts[inst].loc {
+            0 => None,
+            n => Some(self.locs[n as usize - 1]),
+        }
     }
 
     pub fn set_inst_loc(&mut self, inst: Inst, loc: Option<SourceLoc>) {
-        self.insts[inst].loc = loc;
+        let index = match loc {
+            None => 0,
+            Some(loc) => {
+                // Instructions mostly come in runs from one source line.
+                if self.locs.last() != Some(&loc) {
+                    self.locs.push(loc);
+                    u32::try_from(self.locs.len()).expect("location index overflow");
+                }
+                self.locs.len() as u32
+            }
+        };
+        self.insts[inst].loc = index;
     }
 
     /// Takes `block` and its instructions out of the layout. Nothing may
@@ -758,7 +790,7 @@ impl Function {
             "cannot remove the entry block"
         );
         for inst in std::mem::take(&mut self.blocks[block].insts) {
-            self.insts[inst].block = None;
+            self.insts[inst].block = NO_BLOCK;
         }
         self.layout.retain(|&b| b != block);
     }
@@ -839,7 +871,7 @@ impl Function {
 
     /// The block containing `inst`. Panics if it was removed.
     pub fn inst_block(&self, inst: Inst) -> Block {
-        self.insts[inst].block.expect("instruction was removed")
+        self.insts[inst].block().expect("instruction was removed")
     }
 
     /// Every instruction in the layout, block by block.
@@ -1336,9 +1368,8 @@ mod result_pool_range_tests {
     #[test]
     fn range_overflow_is_checked() {
         assert!(std::panic::catch_unwind(|| ResultRange::new(usize::MAX, 1)).is_err());
-        assert_eq!(
-            ResultRange::new(usize::MAX, 0).as_range(),
-            usize::MAX..usize::MAX
-        );
+        assert!(std::panic::catch_unwind(|| ResultRange::new(u32::MAX as usize, 1)).is_err());
+        let max = u32::MAX as usize;
+        assert_eq!(ResultRange::new(max, 0).as_range(), max..max);
     }
 }
