@@ -1,4 +1,4 @@
-//! Body-proven no-memory leaves and bounded successful-load availability.
+//! Bounded transitive no-memory summaries and successful-load availability.
 //!
 //! The summary is deliberately not a general capture analysis: accepted bodies
 //! cannot persist any operand, but may return it (or a value derived from it).
@@ -6,8 +6,8 @@
 //! reads disappear; there is no speculation, load motion, or store forwarding.
 use keel_ir::dominators::ControlFlowGraph;
 use keel_ir::{
-    BinaryOp, ConvertOp, EntityRef, Function, InstData, Intrinsic, Module, Signature, Type, Value,
-    ValueDef,
+    BinaryOp, ConvertOp, EntityRef, Function, InstData, Intrinsic, Module, Purpose, Signature,
+    Type, Value, ValueDef,
 };
 use std::collections::HashMap;
 
@@ -17,7 +17,7 @@ impl crate::Pass for CallLoadReuse {
         "call-load-reuse"
     }
     fn description(&self) -> &'static str {
-        "reuse successful loads across body-proven no-memory direct leaves (opt-in)"
+        "reuse successful loads across bounded no-memory direct call chains (opt-in)"
     }
     fn run(&self, _: &mut Function) -> bool {
         false
@@ -27,6 +27,8 @@ impl crate::Pass for CallLoadReuse {
     }
 }
 
+// Leaves have depth zero; at most eight contained call edges may follow.
+const MAX_CALL_DEPTH: usize = 8;
 const MAX_INSTS: usize = 50_000;
 const MAX_VALUES: usize = 100_000;
 const MAX_FACTS: usize = 128;
@@ -73,7 +75,8 @@ fn eligible_caller(f: &Function) -> bool {
 }
 
 // Whitelist excludes division, floating environment effects, frame observers,
-// stack lifetime operations, nonlocal control, calls, assembly and all memory.
+// stack lifetime operations, nonlocal control, assembly and all memory.
+// Ordinary direct calls are checked separately against completed summaries.
 fn scalar(data: &InstData) -> bool {
     matches!(
         data,
@@ -100,11 +103,13 @@ fn scalar(data: &InstData) -> bool {
     )
 }
 
-fn leaf(f: &Function) -> bool {
+fn summary_candidate(f: &Function) -> bool {
     !f.weak_odr
         && (f.local || f.attrs.noninterposable)
         && !f.sig.returns_twice
         && !f.sig.variadic
+        // ABI aggregate copies are memory operations even without an IR load.
+        && f.sig.params.iter().chain(&f.sig.returns).all(|p| p.purpose == Purpose::Normal)
         && !f.attrs.noreturn
         && f.debug_vars.is_empty()
         && f.debug_loc.is_none()
@@ -116,7 +121,7 @@ fn leaf(f: &Function) -> bool {
                 && insts.iter().all(|&i| {
                     f.inst_loc(i).is_none()
                         && (scalar(f.inst_data(i))
-                            || matches!(f.inst_data(i), InstData::Return { .. }))
+                            || matches!(f.inst_data(i), InstData::Return { .. } | InstData::Call { .. }))
                 })
         })
 }
@@ -128,12 +133,36 @@ fn run(module: &mut Module) -> bool {
     for f in &module.functions {
         *counts.entry(f.name.clone()).or_insert(0usize) += 1;
     }
-    let summaries: HashMap<String, Signature> = module
+    let candidates: Vec<&Function> = module
         .functions
         .iter()
-        .filter(|f| counts[&f.name] == 1 && leaf(f))
-        .map(|f| (f.name.clone(), f.sig.clone()))
+        .filter(|f| counts[&f.name] == 1 && summary_candidate(f))
         .collect();
+    let mut summaries = HashMap::<String, Signature>::new();
+    // Synchronous bottom-up rounds: each round may use only earlier proofs.
+    // This rejects recursion (including SCCs with an outgoing pure leaf), makes
+    // the depth limit independent of module order, and avoids recursive DFS or
+    // unbounded fixed-point work. Each body has at most 128 instructions.
+    for _ in 0..=MAX_CALL_DEPTH {
+        let proven: Vec<_> = candidates
+            .iter()
+            .filter(|f| !summaries.contains_key(&f.name))
+            .filter(|f| {
+                f.layout_insts().all(|(_, i)| match f.inst_data(i) {
+                    InstData::Call { func, .. } => {
+                        let decl = f.callee(*func);
+                        !decl.attrs.noreturn && summaries.get(&decl.name) == Some(&decl.sig)
+                    }
+                    _ => true,
+                })
+            })
+            .map(|f| (f.name.clone(), f.sig.clone()))
+            .collect();
+        if proven.is_empty() {
+            break;
+        }
+        summaries.extend(proven);
+    }
     let mut changed = false;
     for f in &mut module.functions {
         if f.num_values() > MAX_VALUES
@@ -197,7 +226,7 @@ fn run(module: &mut Module) -> bool {
                     InstData::Call { func, .. }
                         if {
                             let decl = f.callee(*func);
-                            !decl.sig.returns_twice && summaries.get(&decl.name) == Some(&decl.sig)
+                            !decl.attrs.noreturn && summaries.get(&decl.name) == Some(&decl.sig)
                         } => {}
                     InstData::Jump { .. }
                     | InstData::Brif { .. }
