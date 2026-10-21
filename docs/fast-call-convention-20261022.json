@@ -1,0 +1,83 @@
+{
+  "commits": [
+    "82bc3129",
+    "87c9afab"
+  ],
+  "convention": "cc(fast)",
+  "transport": "Target C locations and save rules; narrow values do not require C ABI extensions",
+  "closure": "Local definitions; contained direct calls; no function addresses or indirect signatures",
+  "compiler_sha256": "7f417e5ed2a3fb77111184be10c40709df1132e3c6e1fe5dac80c9e412e4e4b5",
+  "validators": [
+    {
+      "name": "Fast convention",
+      "checks": 54,
+      "evidence": "target/fastcc-20261022/release-final-fast/report.json",
+      "sha256": "aa2eae6781519fb930a5543e336c9622490da7a0a9b1b1f88422d5f087d020c4"
+    },
+    {
+      "name": "Memory intrinsics",
+      "checks": 11,
+      "evidence": "target/fastcc-20261022/release-final-memory/report.json",
+      "sha256": "0cbc3a5578125d4f3bbea0eead045b9f9e9c61cc71ca2c2ec5d48e6e5fa8d055"
+    },
+    {
+      "name": "Boolean ABI",
+      "checks": 15,
+      "evidence": "target/fastcc-20261022/release-final-bool/report.json",
+      "sha256": "b7a890fab8f688850d56a1ca8fd997a8a3edeef60b7d62b0a4cc527d9c582643"
+    },
+    {
+      "name": "Aggregate ABI",
+      "checks": 30,
+      "evidence": "target/fastcc-20261022/release-final-aggregate/report.json",
+      "sha256": "97354fe43c4dd61e933c76042bec6ab166615a0436d98ddb7ea93fa4854fe025"
+    },
+    {
+      "name": "Call ABI",
+      "checks": 38,
+      "evidence": "target/fastcc-20261022/release-final-calls/checks.json",
+      "sha256": "ee440d69d4b73abdef4a48d6dd6f63b0a96b030b6387034e958798f304bb06dd"
+    },
+    {
+      "name": "Scalar importer",
+      "checks": 65,
+      "evidence": "target/fastcc-20261022/release-final-scalar/checks.json",
+      "sha256": "d7dc507977e027e68dd7dbdde7c1bfac91554ed2b78b70f90d88cbc5d84f407a"
+    }
+  ],
+  "broad_tests": {
+    "passed": 931,
+    "ignored": 2,
+    "binaries": 138,
+    "final_focused_tests": 3
+  },
+  "native": {
+    "arm_configurations": 24,
+    "oracle_patterns_each": 516,
+    "x86_emission_configurations": 24,
+    "forced_spill_configurations": 8,
+    "x86_native": false
+  },
+  "pugixml": {
+    "status": "blocked",
+    "blocker": "llvm-import: @_ZNK4pugi8xml_node5beginEv: aggregate ABI supports only exact [2 x i64] parameters; aggregate returns unsupported\n",
+    "tiers": [],
+    "references": [
+      {
+        "kind": "source",
+        "status": "passed",
+        "stdout": "target/fastcc-20261022/pugixml-final/command-0009.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      },
+      {
+        "kind": "ir",
+        "status": "passed",
+        "stdout": "target/fastcc-20261022/pugixml-final/command-0010.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      }
+    ],
+    "evidence": "target/fastcc-20261022/pugixml-final/report.json"
+  },
+  "performance_claim": false,
+  "linuxhost_used": false
+}

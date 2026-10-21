@@ -97,3 +97,11 @@ independent oracle. The full module next rejects a private `fastcc` helper
 a closed direct-call proof and consistent rewriting of definitions and calls,
 not an assumption that fastcc is the platform C ABI. Evidence is retained at
 `target/llvm-memory-20261022/pugixml/report.json`.
+
+The subsequent private-fastcc implementation clears that convention gate by
+translating proven contained definitions and calls to Keel `cc(fast)`. The next
+untouched-module blocker is the two-word aggregate return of `xml_node::begin()`;
+aggregate parameters are supported, but aggregate results are not yet imported.
+Both native references still pass. No Keel application tier executes.
+See `docs/fast-call-convention-20261022.html` and the final pilot evidence at
+`target/fastcc-20261022/pugixml-final/report.json`.

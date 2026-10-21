@@ -1,0 +1,22 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;font:15px/1.5 var(--font-sans,system-ui);color:var(--foreground,#222)}h2{font-size:24px;margin:0 0 8px}h3{font-size:17px;margin:23px 0 8px}p{margin:8px 0}.muted{color:var(--muted-foreground,#666)}.cards{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0}.card{padding:16px;border-radius:12px;background:var(--secondary,#eee)}.num{font-size:25px;font-weight:700}.ok{color:var(--success,#18734a)}.warn{color:var(--warning,#956000)}table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:9px 4px;vertical-align:top;border-bottom:1px solid var(--border,#ddd)}code{font:13px var(--font-mono,monospace);overflow-wrap:anywhere}.path{border-left:3px solid var(--border,#ccc);padding:6px 14px;margin:8px 0}a{color:var(--primary,#326ec4)}@media(max-width:420px){.cards{grid-template-columns:1fr}h2{font-size:21px}table{font-size:13px}}
+</style></head><body>
+<h2>Keel now has a private fast convention</h2><p class="muted">Implemented on ARM and x86 · <code>cc(fast)</code> is distinct from the Fast optimization profile.</p>
+<div class="cards"><div class="card"><div class="num ok">24 ARM runs</div>516 independent oracle patterns per configuration.</div><div class="card"><div class="num ok">24 x86 emissions</div>Both object routes; native x86 execution remains untested.</div></div>
+<h3>Our contract, independent of LLVM register choices</h3>
+<table><thead><tr><th>Rule</th><th>Keel fast, version 1</th></tr></thead><tbody>
+<tr><td>Visibility</td><td>Local definitions and contained direct calls.</td></tr>
+<tr><td>Registers and stack</td><td>Initially reuse the target's proven C placements and preservation.</td></tr>
+<tr><td>Narrow integers</td><td>May cross private calls without mandatory C extension; explicit extensions still apply.</td></tr>
+<tr><td>Function pointers</td><td>Rejected, including addresses in global data.</td></tr>
+<tr><td>Variadics / returns-twice</td><td>Rejected; at most one result.</td></tr>
+</tbody></table>
+<p>This establishes an internal contract we can tune at both ends later. It does <strong>not yet claim a call-speed improvement</strong> or enable a new register assignment. Existing C calls and optimization defaults remain unchanged.</p>
+<h3>LLVM import bridge</h3><div class="path"><code>LLVM private fastcc</code> → prove every use is a matching direct call/invoke → <code>Keel cc(fast) local</code></div>
+<p>Exported functions, external fast declarations, address escapes and mismatched call types/conventions fail closed. Private booleans use our canonical i8 transport. <a href="https://llvm.org/docs/LangRef.html#calling-conventions">LLVM convention reference</a>.</p>
+<h3>Validation</h3><p><strong>931 broad tests passed</strong>, 2 ignored; final focused IR/codegen tests also passed. Native tests cover 12 integer + 10 floating-point arguments, stack overflow arguments, recursion, a C callback with live values, unextended byte returns and private boolean returns.</p>
+<p>Both selectors, both allocators, None/Fast/Full and both object routes pass. Eight empty-pool codegen configurations additionally check spills and object parity.</p>
+<table><thead><tr><th>Importer regression gate</th><th>Checks passed</th></tr></thead><tbody><tr><td>Fast convention</td><td>54</td></tr><tr><td>Memory intrinsics</td><td>11</td></tr><tr><td>Boolean ABI</td><td>15</td></tr><tr><td>Aggregate ABI</td><td>30</td></tr><tr><td>Call ABI</td><td>38</td></tr><tr><td>Scalar importer</td><td>65</td></tr></tbody></table>
+<h3>Pugixml advanced to its next blocker</h3><div class="path ok">The previous private fastcc signature rejection is cleared. Both native references match the independent XML/XPath oracle.</div><div class="path warn"><strong>Remaining: two-word aggregate returns</strong> in <code>xml_node::begin()</code>. Full application import remains blocked; no Keel application tier ran.</div>
+<p class="muted">No performance measurements, remote execution, LinuxHost use, or Cranelift-bridge validation in this stage.</p>
+</body></html>
