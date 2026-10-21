@@ -70,12 +70,20 @@ fn exact_loads_and_shared_volatile_rejections() {
                 let text = compile(&source(), sel, alloc, spill).0;
                 assert_eq!(direct_loads(&text), 6, "{text}");
                 assert!(!text.contains("punpcklqdq\t"), "{text}");
+                // Larger widening ratios observe fewer than eight bytes and
+                // deliberately retain their existing lowering.
+                let skipped = source()
+                    .replace("widen_low.i32x4", "widen_low.i64x2")
+                    .replace("widen_low.i16x8", "widen_low.i32x4");
+                assert_eq!(direct_loads(&compile(&skipped, sel, alloc, spill).0), 2);
+
                 for src in [
                     source().replace("load.i64 ", "load.i64 volatile "),
                     source().replace(" store v7,v1", " store v5,v1\n store v7,v1"),
                     source().replace(" store v7,v1", " store v4,v1\n store v7,v1"),
                     source().replace(" store v7,v1", " store v6,v1\n store v7,v1"),
                     source().replace(" v6 = bitcast", " fence seq_cst\n v6 = bitcast"),
+                    source().replace(" v7 = ", " fence seq_cst\n v7 = "),
                     source().replace(" v5 = vsplat", " store v1,v1\n v5 = vsplat"),
                 ] {
                     assert!(direct_loads(&compile(&src, sel, alloc, spill).0) == 0);
@@ -236,9 +244,19 @@ typedef void (*Fn)(const void*,void*,uint64_t);
         fs::write(dir.join("oracle.keel"), &ir).unwrap();
         fs::write(
             dir.join("run_native.py"),
-            include_str!("x86_widen/run_native.py"),
+            include_str!("x86_widen/run_native.py").replace(
+                "target/packed-widen-20261021/lock.jsonl",
+                "target/clang-gap-round2-20261021/lock.jsonl",
+            ),
         )
         .unwrap();
+    }
+    if let Some(dir) = &evidence {
+        let control = ir.replace("load.i64 align", "load.i64 volatile align");
+        let (text, obj) = compile(&control, SelectionTier::Full, AllocationTier::Full, false);
+        assert_eq!(direct_loads(&text), 0);
+        fs::write(dir.join("control.s"), text).unwrap();
+        fs::write(dir.join("control.o"), obj).unwrap();
     }
     for sel in [
         SelectionTier::Baseline,
