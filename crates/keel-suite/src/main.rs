@@ -10,6 +10,7 @@
 //! ```
 
 mod build;
+mod frontends;
 mod manifest;
 mod report;
 mod run;
@@ -32,7 +33,7 @@ struct Cli {
     /// When to color the output.
     #[arg(long, value_enum, default_value_t = Color::Auto, global = true)]
     color: Color,
-    /// Parallel compile jobs (default: one per CPU).
+    /// Parallel compile jobs (default: two for frontend checks, one per CPU otherwise).
     #[arg(short, long, global = true)]
     jobs: Option<usize>,
     #[command(subcommand)]
@@ -50,6 +51,8 @@ enum Color {
 enum Command {
     /// List the suites, their benchmarks and the configurations.
     List,
+    /// Check C frontend compatibility and LLVM-imported C++/Rust correctness.
+    TestFrontends(frontends::Options),
     /// Build suites with keel and run their test suites.
     Test {
         /// Suites to test (default: all).
@@ -122,6 +125,7 @@ fn run(cli: Cli) -> Result<bool> {
         .jobs
         .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()));
     match cli.command {
+        Command::TestFrontends(options) => frontends::run(&root, options, cli.jobs.unwrap_or(2)),
         Command::List => {
             list(&root)?;
             Ok(true)

@@ -12,6 +12,7 @@ code is. Each directory here with a `suite.toml` is one program; the
 cargo suite list                    # suites, benchmarks, configurations
 cargo suite test                    # test keel and keel -O, with selection off and on
 cargo suite test sqlite -c keel-g   # one suite, another configuration
+cargo suite test-frontends --out target/frontend-check-1
 cargo suite run                     # build every configuration, time everything
 cargo suite run lua/fib -n 10 -c clang-O0,keel
 cargo suite show                    # the latest run on this host again
@@ -23,6 +24,41 @@ Sources are downloaded (and checked against their SHA-256) into
 runs once per suite: every configuration compiles the same preprocessed
 files, so the only difference between them is the compiler. clang builds
 are cached; keel builds are redone each time.
+
+## Frontend correctness checks
+
+`cargo suite test-frontends --out target/frontend-check-1` runs the C attribute
+and preprocessing regression tests, the representative C CLI compatibility
+check, the LLVM importer's native/rejection validation, and all 13 C++ profiles
+with an independent Rust C ABI boundary. Nine C++ profiles must pass at
+None/Fast/Full; four runtime-feature probes may report explicit unsupported
+features. This command adds no application downloads or performance runs.
+
+The output directory must be new. It contains `report.json`, per-stage command
+logs, and the child runners' detailed artifacts under `llvm-import/` and
+`cpp-coverage/`. Any failed build, test, native comparison or required profile
+makes the command fail. Expected C++ probe rejections remain visible in
+`cpp-coverage/report.json`. Existing artifacts are never overwritten.
+
+Keel and targeted Rust tests build offline and locked in the output directory's
+private `target/`, using two jobs by default (`cargo suite -j 4 test-frontends ...`
+overrides this). `--keel /path/to/keel` selects an existing frozen binary for
+native checks; the Rust regression tests still build from the current source.
+Python 3, Cargo and Clang are required. Apple AArch64 additionally requires
+Clang++, rustc and an LLVM 23 shared library. The library is discovered from
+`rustc --print sysroot`; `--libllvm /path/to/libLLVM.dylib` overrides discovery.
+Missing or incompatible prerequisites on that supported host are failures.
+
+LLVM import currently supports only Apple AArch64. Other hosts still run the C
+checks and report both LLVM stages as skipped (`passed_with_skips`), with reasons.
+Use `--require-llvm` to make such an incomplete run fail. The runner acquires the
+shared suite lock itself, so invoke this command directly without nesting it
+inside `fast_opt_locked.py` or another lock wrapper.
+
+See [C compatibility](../docs/c-frontend-coverage.md),
+[LLVM import](llvm_import_README.md), and [C++ profiles](cpp_coverage_README.md)
+for semantic boundaries and standalone runner commands. This targeted command
+does not replace the full workspace or application suites.
 
 ## Configurations
 
