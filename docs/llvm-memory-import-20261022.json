@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-22",
+  "implementation_commit": "83765eb5",
+  "validators": [
+    {
+      "name": "Memory intrinsics",
+      "status": "passed",
+      "checks": 11,
+      "evidence": "target/llvm-memory-20261022/native-final/report.json",
+      "sha256": "7f17fc9fe085ca9eee8db3229b5c2c4d1262e2696936f7ebd954c4c752e0f714"
+    },
+    {
+      "name": "Boolean ABI",
+      "status": "passed",
+      "checks": 15,
+      "evidence": "target/llvm-memory-20261022/boolean-regression/report.json",
+      "sha256": "0b16cf16efc68565abb9caf520077626d379cdbcb33b19054e8097627a78aa78"
+    },
+    {
+      "name": "Aggregate ABI",
+      "status": "passed",
+      "checks": 30,
+      "evidence": "target/llvm-memory-20261022/aggregate-regression/report.json",
+      "sha256": "83485171669eabee5c8ca98d1179ba21ca3e39b4203390bbe02c4bbb317896e5"
+    },
+    {
+      "name": "Calls",
+      "status": "passed",
+      "checks": 38,
+      "evidence": "target/llvm-memory-20261022/calls-regression/checks.json",
+      "sha256": "3ca4d06bde49cb4aa2b1115a28e572515689443e3476114510507bf02c7cfee7"
+    },
+    {
+      "name": "Scalar importer",
+      "status": "passed",
+      "checks": 65,
+      "evidence": "target/llvm-memory-20261022/scalar-regression/checks.json",
+      "sha256": "ddb6f33e6e58fe134e6c57191bf230a96f01f3640dcaed8b34af0bc6166729f6"
+    }
+  ],
+  "pugixml": {
+    "status": "blocked",
+    "blocker": "llvm-import: @_ZN4pugi4impl12_GLOBAL__N_113strcpy_insituIPcmEEbRT_RT0_mPKcm: @_ZN4pugi4impl12_GLOBAL__N_113strcpy_insituIPcmEEbRT_RT0_mPKcm: non-C calling convention\n",
+    "references": [
+      {
+        "kind": "source",
+        "status": "passed",
+        "stdout": "target/llvm-memory-20261022/pugixml-final/command-0009.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      },
+      {
+        "kind": "ir",
+        "status": "passed",
+        "stdout": "target/llvm-memory-20261022/pugixml-final/command-0010.stdout",
+        "sha256": "d368fb19a3aac820cd6757bbe79afa0e7ec70d177a2f9d985b7a624beeb5226f"
+      }
+    ],
+    "tiers": [],
+    "evidence": "target/llvm-memory-20261022/pugixml-final/report.json",
+    "sha256": "59cfac9cff07bf059ee5e419970e611b9aae100417ee439e9c707006bd5d4fe0"
+  },
+  "limits": [
+    "Apple ARM native execution only",
+    "No performance measurements",
+    "No default optimizer schedule changes"
+  ],
+  "semantics_reference": "https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic"
+}

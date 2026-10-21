@@ -88,3 +88,12 @@ Initial artifacts are retained outside the worktree at
 the official API evidence, `lock.jsonl` records the private build and runs,
 and `evidence.tar.gz` preserves the final run plus provenance. The private
 `target/` also remains there for the integrating agent.
+
+Follow-up (2026-10-22): explicit zero-extended booleans, bounded two-word
+aggregate transport and nonvolatile memory intrinsics now pass the earlier
+signature gates. Both untouched source and LLVM references still match the
+independent oracle. The full module next rejects a private `fastcc` helper
+(`strcpy_insitu`); no Keel tier executes yet. Supporting that convention needs
+a closed direct-call proof and consistent rewriting of definitions and calls,
+not an assumption that fastcc is the platform C ABI. Evidence is retained at
+`target/llvm-memory-20261022/pugixml/report.json`.
