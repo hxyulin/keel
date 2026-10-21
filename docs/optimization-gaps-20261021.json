@@ -1,0 +1,447 @@
+{
+  "scope": "Source audit at e32045f4 plus retained original-C optimization reports and new frozen-compiler pass screen. No production optimization edits; no new runtime campaign.",
+  "measured_compiler_source": "1ac952c2",
+  "source_audit_head": "6a923bc6c8aead62ded4f2060a5e3d65890bb619",
+  "runtime_context": [
+    {
+      "app": "lua",
+      "name": "fib",
+      "old": 1.4742365363128795,
+      "new": 1.4616809831916284,
+      "relative": 1.0040911876503649,
+      "bootstrap95": [
+        0.9790643771259923,
+        1.0191151263556717
+      ],
+      "paired_ratios": [
+        1.0040911876503649,
+        0.9862293489524215,
+        1.028518677882596,
+        0.9790643771259923,
+        0.953595297565634,
+        1.0191151263556717,
+        1.0134214695500392
+      ],
+      "control": 0.9980843409148386
+    },
+    {
+      "app": "lua",
+      "name": "sort",
+      "old": 1.2050567738558782,
+      "new": 1.204964690072085,
+      "relative": 1.0042221817113732,
+      "bootstrap95": [
+        0.9947478974312527,
+        1.0129866719907237
+      ],
+      "paired_ratios": [
+        0.9995601798722563,
+        1.0129866719907237,
+        1.027860906461841,
+        0.9947478974312527,
+        1.0054058675301702,
+        1.0042221817113732,
+        0.982069395743032
+      ],
+      "control": 1.0168182340441247
+    },
+    {
+      "app": "lua",
+      "name": "string",
+      "old": 1.293422921834912,
+      "new": 1.298828425387559,
+      "relative": 1.0033654858575118,
+      "bootstrap95": [
+        0.9959354894912837,
+        1.0086301912642133
+      ],
+      "paired_ratios": [
+        1.0122512224983062,
+        0.9945833687379362,
+        0.9967565025502092,
+        1.0086301912642133,
+        1.0058881992913744,
+        0.9959354894912837,
+        1.0033654858575118
+      ],
+      "control": 1.0070631593798065
+    },
+    {
+      "app": "lua",
+      "name": "float",
+      "old": 1.3899273809562305,
+      "new": 1.3980550849704458,
+      "relative": 0.9985504753024894,
+      "bootstrap95": [
+        0.9922571322811111,
+        1.0263904736875495
+      ],
+      "paired_ratios": [
+        1.0263904736875495,
+        0.9918836806183157,
+        0.9978572811674447,
+        1.055548521160906,
+        1.0031789358458802,
+        0.9985504753024894,
+        0.9922571322811111
+      ],
+      "control": 0.9998801383717105
+    },
+    {
+      "app": "quickjs",
+      "name": "fib",
+      "old": 1.8998310279195656,
+      "new": 1.8765692982651316,
+      "relative": 0.9890410772766439,
+      "bootstrap95": [
+        0.966251376673363,
+        0.9959597736107652
+      ],
+      "paired_ratios": [
+        0.9721662161859143,
+        0.9890410772766439,
+        1.0007532825945802,
+        0.9945294838386801,
+        0.9959597736107652,
+        0.9629782339952431,
+        0.966251376673363
+      ],
+      "control": 0.9923485357127798
+    },
+    {
+      "app": "quickjs",
+      "name": "sort",
+      "old": 2.0287878012657847,
+      "new": 2.0521466995790534,
+      "relative": 1.0103716378725827,
+      "bootstrap95": [
+        1.0099375458931483,
+        1.0132634083597636
+      ],
+      "paired_ratios": [
+        1.0097823000567567,
+        1.0141075660913577,
+        1.0099375458931483,
+        1.0102485219575241,
+        1.0103716378725827,
+        1.012894718394219,
+        1.0132634083597636
+      ],
+      "control": 1.0092677904551974
+    },
+    {
+      "app": "quickjs",
+      "name": "string",
+      "old": 2.026262712662945,
+      "new": 1.8018273834311138,
+      "relative": 0.9019541012774149,
+      "bootstrap95": [
+        0.88551958013291,
+        0.909507353460086
+      ],
+      "paired_ratios": [
+        0.8903882977229135,
+        0.88551958013291,
+        0.8821606018259779,
+        0.9056227880079575,
+        0.909507353460086,
+        0.9019541012774149,
+        0.9493030659247924
+      ],
+      "control": 1.023078198033988
+    },
+    {
+      "app": "sqlite",
+      "name": "queries",
+      "old": 1.4794258447646245,
+      "new": 1.4739339072607005,
+      "relative": 0.9992029824131342,
+      "bootstrap95": [
+        0.993729827960811,
+        1.0085579973494856
+      ],
+      "paired_ratios": [
+        0.9880490258951736,
+        1.005407333273462,
+        0.9992029824131342,
+        0.9962877912918997,
+        0.993729827960811,
+        1.0195429725783387,
+        1.0085579973494856
+      ],
+      "control": 1.0021572253661124
+    }
+  ],
+  "features": [
+    {
+      "rank": 1,
+      "name": "Scalar replacement across calls and large CFGs",
+      "status": "Limited",
+      "evidence": "Stack promotion rejects >256 blocks or >8192 instructions. Exact Full VM event: 956 blocks, 9159 instructions, unchanged. Escaping slot addresses remain conservative; aggregate-return only proves a narrow leaf-constructor pattern.",
+      "files": [
+        "crates/keel-opt/src/stack_promote.rs:15",
+        "crates/keel-opt/src/stack_promote.rs:107",
+        "crates/keel-opt/src/aggregate_return.rs"
+      ],
+      "next": "Bounded per-slot or region-based promotion, then direct aggregate-result field forwarding; preserve capture, initialization, alignment, debug, exception and frame-observer proofs. Merely raising the function cap does not prove accesses promotable."
+    },
+    {
+      "rank": 2,
+      "name": "Call memory/capture summaries and global memory optimization",
+      "status": "Missing general infrastructure",
+      "evidence": "All Call/CallIndirect/Invoke instructions are memory barriers in InstData::memory_effects. FunctionAttrs lacks readonly/readnone or capture summaries. load-reuse is bounded to unique-predecessor chains, 8 edges and 128 facts; no join/loop fixed point. Alias facts recognize constant ptradd paths and restricted roots.",
+      "files": [
+        "crates/keel-ir/src/inst.rs:557",
+        "crates/keel-ir/src/function.rs:167",
+        "crates/keel-opt/src/load_reuse.rs:1",
+        "crates/keel-opt/src/memory_alias.rs:1",
+        "crates/keel-opt/src/gvn.rs:1"
+      ],
+      "next": "Infer conservative summaries only for legally bound direct callees. Add join-aware memory availability and precise invalidation. Build a MemorySSA-like layer if multiple consumers justify it; MemorySSA alone is not an optimization or a source of alias proofs."
+    },
+    {
+      "rank": 3,
+      "name": "Inlining profitability and specialization",
+      "status": "Present; budget policy gap",
+      "evidence": "QuickJS sorting regression traced to the shared module budget rejecting cheap helpers in all three rounds. Constructor priority also provides real benefits. No general function-specialization framework found in the audited optimizer.",
+      "files": [
+        "crates/keel-opt/src/inline.rs:128",
+        "crates/keel-opt/src/inline.rs:634"
+      ],
+      "next": "Retain tiny constructor priority; reserve bounded capacity for profitable cheap call sites. Longer term specialize small wrappers for constant arguments, with binding and code-growth limits."
+    },
+    {
+      "rank": 4,
+      "name": "General loop optimization and SLP vectorization",
+      "status": "Pattern-based coverage",
+      "evidence": "GCM hoists pure computations. loop-memory recognizes small unrotated two-block loops; Full does not schedule it. Loop vectorizer supports bounded shapes plus specialized reductions; no SLP vectorizer found.",
+      "files": [
+        "crates/keel-opt/src/gcm.rs:1",
+        "crates/keel-opt/src/loop_memory.rs:1",
+        "crates/keel-opt/src/loop_vectorize.rs:1",
+        "crates/keel-opt/src/lib.rs:381"
+      ],
+      "next": "Broader loop facts, guarded invariant memory motion, then SLP packing of adjacent scalar work. Important across general programs; not yet demonstrated to dominate these interpreter workloads."
+    },
+    {
+      "rank": 5,
+      "name": "Machine scheduling, hot-path layout and allocation",
+      "status": "Backend maturity gap",
+      "evidence": "Default Fast/Full have one location per SSA value and no interval splitting. Layout follows allocation order. Dedicated target-latency machine scheduling is not present in the audited codegen path. Bounded dispatch-tail replication exists as an explicit experiment.",
+      "files": [
+        "crates/keel-codegen/src/regalloc.rs:1",
+        "crates/keel-codegen/src/aarch64.rs:1224",
+        "crates/keel-codegen/src/aarch64/dispatch_tail.rs:1"
+      ],
+      "next": "Use exact hot-path evidence to prioritize layout and dependency scheduling. Existing experimental allocator directions stay parked; this audit does not justify changing the default allocator."
+    }
+  ],
+  "exact_vm_events": [
+    {
+      "pipeline_index": 48,
+      "pass": "load-reuse",
+      "target": "aarch64-neon",
+      "scope": "function",
+      "function": "JS_CallInternal",
+      "changed": true,
+      "pass_ns": 885541,
+      "verification_enabled": false,
+      "verification_ns": 0,
+      "restoration_ns": 0,
+      "restoration_verification_ns": 0,
+      "restoration_changed": null,
+      "before": {
+        "functions": 1,
+        "blocks": 956,
+        "instructions": 9180,
+        "block_parameters": 313,
+        "stack_declarations": 876,
+        "stack_declaration_bytes": 13468
+      },
+      "after": {
+        "functions": 1,
+        "blocks": 956,
+        "instructions": 9159,
+        "block_parameters": 313,
+        "stack_declarations": 876,
+        "stack_declaration_bytes": 13468
+      },
+      "inline_sites": []
+    },
+    {
+      "pipeline_index": 49,
+      "pass": "stack-promote",
+      "target": "aarch64-neon",
+      "scope": "function",
+      "function": "JS_CallInternal",
+      "changed": false,
+      "pass_ns": 166,
+      "verification_enabled": false,
+      "verification_ns": 0,
+      "restoration_ns": 0,
+      "restoration_verification_ns": 0,
+      "restoration_changed": null,
+      "before": {
+        "functions": 1,
+        "blocks": 956,
+        "instructions": 9159,
+        "block_parameters": 313,
+        "stack_declarations": 876,
+        "stack_declaration_bytes": 13468
+      },
+      "after": {
+        "functions": 1,
+        "blocks": 956,
+        "instructions": 9159,
+        "block_parameters": 313,
+        "stack_declarations": 876,
+        "stack_declaration_bytes": 13468
+      },
+      "inline_sites": []
+    }
+  ],
+  "extra_pass_screen": [
+    {
+      "application": "quickjs",
+      "returncode": 0,
+      "verification": "--verify-each passed",
+      "before_instructions": 144094,
+      "after_instructions": 144029,
+      "passes": [
+        {
+          "pass": "sccp",
+          "changed_functions": 320,
+          "instruction_delta": 4,
+          "block_delta": 0
+        },
+        {
+          "pass": "branch-ranges",
+          "changed_functions": 6,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "loop-memory",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "instcombine",
+          "changed_functions": 2,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "simplify-cfg",
+          "changed_functions": 9,
+          "instruction_delta": -46,
+          "block_delta": -13
+        },
+        {
+          "pass": "dce",
+          "changed_functions": 10,
+          "instruction_delta": -23,
+          "block_delta": 0
+        }
+      ]
+    },
+    {
+      "application": "lua-vm",
+      "returncode": 0,
+      "verification": "--verify-each passed",
+      "before_instructions": 8466,
+      "after_instructions": 8466,
+      "passes": [
+        {
+          "pass": "sccp",
+          "changed_functions": 1,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "branch-ranges",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "loop-memory",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "instcombine",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "simplify-cfg",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        },
+        {
+          "pass": "dce",
+          "changed_functions": 0,
+          "instruction_delta": 0,
+          "block_delta": 0
+        }
+      ]
+    }
+  ],
+  "screen_commands": [
+    {
+      "label": "quickjs",
+      "command": [
+        "target/arm-real-round2-20261021/keel-1ac952c2",
+        "cc",
+        "-O",
+        "-p",
+        "inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,load-reuse,stack-promote,phi-simplify,dce,simplify-cfg,loop-strength-reduce,canonicalize,instcombine,dce,loop-unroll,loop-reduce-multi,loop-rotate,phi-simplify,dce,sccp,branch-ranges,loop-memory,instcombine,simplify-cfg,dce",
+        "--emit-ir",
+        "--verify-each",
+        "--opt-report",
+        "target/optimization-feature-audit-20261021/quickjs-screen.json",
+        "target/suite/quickjs/pre/quickjs.i",
+        "-o",
+        "target/optimization-feature-audit-20261021/quickjs-screen.keel"
+      ],
+      "source_sha256": "877a28259c32f1eb9692ecf441eb440abb74477e41b9cc0ce3004cf36b2d6755",
+      "compiler_sha256": "79f99c3d2eaa7fe8b4701265e37657313e44d3749596c54c6d20241ef6b32294"
+    },
+    {
+      "label": "lua-vm",
+      "command": [
+        "target/arm-real-round2-20261021/keel-1ac952c2",
+        "cc",
+        "-O",
+        "-p",
+        "inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,inline-noninterposable,simplify-cfg,canonicalize,instcombine,call-contracts,simplify-cfg,gvn,small-memory,stack-forward,canonicalize,instcombine,dce,gcm,adjacent-abs,loop-vectorize,loop-reduce,load-reuse,stack-promote,phi-simplify,dce,simplify-cfg,loop-strength-reduce,canonicalize,instcombine,dce,loop-unroll,loop-reduce-multi,loop-rotate,phi-simplify,dce,sccp,branch-ranges,loop-memory,instcombine,simplify-cfg,dce",
+        "--emit-ir",
+        "--verify-each",
+        "--opt-report",
+        "target/optimization-feature-audit-20261021/lua-vm-screen.json",
+        "target/suite/lua/pre/lvm.i",
+        "-o",
+        "target/optimization-feature-audit-20261021/lua-vm-screen.keel"
+      ],
+      "source_sha256": "1642463467c055deb286d79cdef886f516814fcd009c935f58e588c7d7639a1b",
+      "compiler_sha256": "79f99c3d2eaa7fe8b4701265e37657313e44d3749596c54c6d20241ef6b32294"
+    }
+  ],
+  "llvm_sources": [
+    "https://llvm.org/docs/Passes.html",
+    "https://llvm.org/docs/MemorySSA.html",
+    "https://llvm.org/docs/Vectorizers.html",
+    "https://llvm.org/docs/CodeGenerator.html"
+  ],
+  "limits": [
+    "Engineering priority, not measured speedup attribution.",
+    "LLVM facilities are documented capabilities, not proof every listed pass runs for every workload.",
+    "Existing Clang comparison uses O2 without PGO/LTO; missing those features cannot explain this baseline gap.",
+    "Large-function and capture/observer gates are independent; no automatic benefit inferred from removing a cap."
+  ]
+}
