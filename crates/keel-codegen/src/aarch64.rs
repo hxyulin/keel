@@ -114,6 +114,7 @@ use keel_ir::{
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 mod constant_plan;
+mod absolute;
 mod native;
 mod output;
 mod packed_load;
@@ -582,6 +583,7 @@ struct FunctionCompiler<'a> {
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
+    absolute_values: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
     /// Offset from `sp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
@@ -871,6 +873,7 @@ impl<'a> FunctionCompiler<'a> {
                         .collect()
                 })
         };
+        let absolute_values = absolute::select(func, &mut selection);
         let packed_low_loads = packed_load::select(func, &mut selection);
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let widening_adds = vector::select_widening_adds(func, &mut selection);
@@ -958,6 +961,7 @@ impl<'a> FunctionCompiler<'a> {
             selection,
             replicate_loads,
             packed_low_loads,
+            absolute_values,
             widening_adds,
             stack_slot_offsets,
             copy_base,
@@ -1384,6 +1388,19 @@ impl<'a> FunctionCompiler<'a> {
         let func = self.func;
         let result = func.inst_results(inst).first().copied();
         if self.selection.covered(inst) {
+            return;
+        }
+        if let Some(&value) = self.absolute_values.get(&inst) {
+            let ty = self.ty(value);
+            let source = self.use_reg(value, S0);
+            let d = self.def_reg(result);
+            self.mach("cmp", [reg(source, ty).into(), Arg::imm(0)]);
+            self.native(
+                if ty == Type::I64 { Opcode::CSNEG_64_condsel } else { Opcode::CSNEG_32_condsel },
+                [(FieldId::Rd, d.into()), (FieldId::Rn, source.into()), (FieldId::Rm, source.into()), (FieldId::cond, 10)],
+                |out| write!(out, "csneg\t{}, {}, {}, ge", reg(d, ty), reg(source, ty), reg(source, ty)),
+            );
+            self.def_done(result, d);
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
