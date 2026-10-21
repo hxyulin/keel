@@ -1,0 +1,1216 @@
+{
+  "status": "passed",
+  "commits": [
+    "fdd3e125",
+    "4b635dc9",
+    "68e41f57",
+    "324a1fa7"
+  ],
+  "frozen": {
+    "source_commit": "4b635dc9",
+    "compiler_sha256": "86b3fbb4c4e7805e47c2a19b2a8a4f6623fd504735b48aeafdb1b4cf2428fc37",
+    "probe_commands": [
+      [
+        "target/private-leaf-clobbers-20261022/keel-frozen",
+        "compile",
+        "--regalloc",
+        "fast",
+        "crates/keel-codegen/tests/private_leaf_calls/pressure.keel",
+        "-o",
+        "target/private-leaf-clobbers-20261022/pressure-fast.s"
+      ],
+      [
+        "target/private-leaf-clobbers-20261022/keel-frozen",
+        "compile",
+        "--regalloc",
+        "full",
+        "crates/keel-codegen/tests/private_leaf_calls/pressure.keel",
+        "-o",
+        "target/private-leaf-clobbers-20261022/pressure-full.s"
+      ]
+    ]
+  },
+  "rows": [
+    {
+      "app": "yyjson",
+      "bench": "api",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0083277200692795,
+            "ci95": [
+              0.986509981277295,
+              1.0157343417701412
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5610287786018545,
+            "ci95": [
+              0.5476982653244779,
+              0.5671502624241072
+            ]
+          },
+          "identical-control": {
+            "median": 0.5712050529239061,
+            "ci95": [
+              0.5523080276825697,
+              0.5815737680322858
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.9800820299938703,
+            "ci95": [
+              0.96996284384355,
+              1.0047970207654497
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9719875894382151,
+            "ci95": [
+              0.9487471346077361,
+              1.0177708322103431
+            ]
+          },
+          "clang-O2": {
+            "median": 0.551263016422859,
+            "ci95": [
+              0.5392881375942004,
+              0.5574313192994552
+            ]
+          },
+          "identical-control": {
+            "median": 0.5596423045451704,
+            "ci95": [
+              0.5403242658594951,
+              0.5715419817065203
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "yyjson",
+      "bench": "config",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.9853687728845038,
+            "ci95": [
+              0.9579280852673777,
+              1.0420610904990295
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5841115667046038,
+            "ci95": [
+              0.5650454196299933,
+              0.5928179250507195
+            ]
+          },
+          "identical-control": {
+            "median": 0.5873036293666475,
+            "ci95": [
+              0.5674751244376918,
+              0.5948747252826816
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.9965316161297035,
+            "ci95": [
+              0.9772394552937602,
+              1.0045184785604133
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9979863519792264,
+            "ci95": [
+              0.9624392927184409,
+              1.0445639518019783
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5829353716043981,
+            "ci95": [
+              0.5765920108733669,
+              0.5916961802429117
+            ]
+          },
+          "identical-control": {
+            "median": 0.5838111285173683,
+            "ci95": [
+              0.5757599709402855,
+              0.5927640585319547
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "yyjson",
+      "bench": "telemetry",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0149348764664663,
+            "ci95": [
+              1.0031608753991057,
+              1.0302080670722356
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6695215397332255,
+            "ci95": [
+              0.6602977175588784,
+              0.6759348089642598
+            ]
+          },
+          "identical-control": {
+            "median": 0.6800468565946086,
+            "ci95": [
+              0.6611973854103481,
+              0.6885690915597362
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.0146604255274927,
+            "ci95": [
+              0.9984991076570044,
+              1.0371247421312586
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9953529210952863,
+            "ci95": [
+              0.9842970131335748,
+              1.021863339391831
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6720522281624527,
+            "ci95": [
+              0.6575056077122581,
+              0.6840660734591508
+            ]
+          },
+          "identical-control": {
+            "median": 0.678177379674986,
+            "ci95": [
+              0.6623625917237566,
+              0.6949149518226845
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lz4",
+      "bench": "compress",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0086844627676688,
+            "ci95": [
+              0.9798631755351589,
+              1.0269569530363793
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.631055736253028,
+            "ci95": [
+              0.6194934366648589,
+              0.6639294274013131
+            ]
+          },
+          "identical-control": {
+            "median": 0.6350790569607673,
+            "ci95": [
+              0.6263974286604387,
+              0.6380780254452927
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.0106283109153793,
+            "ci95": [
+              0.9700070166780949,
+              1.0434464245771753
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0105853718507452,
+            "ci95": [
+              1.0019271122134437,
+              1.0214893920431996
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6458589644324968,
+            "ci95": [
+              0.623746162828967,
+              0.6612821933736657
+            ]
+          },
+          "identical-control": {
+            "median": 0.644623212596923,
+            "ci95": [
+              0.6173063033141156,
+              0.6500490946834667
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lz4",
+      "bench": "decompress",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.006655309086283,
+            "ci95": [
+              0.9682879216958566,
+              1.0230375140461578
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.7210780530755957,
+            "ci95": [
+              0.7012539699923338,
+              0.7313005783885069
+            ]
+          },
+          "identical-control": {
+            "median": 0.7188187055087066,
+            "ci95": [
+              0.7111050012372494,
+              0.7472224412851215
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.024095014552947,
+            "ci95": [
+              0.9600226940624311,
+              1.046013604077881
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0078329514289197,
+            "ci95": [
+              0.9914640806228898,
+              1.0358002729728977
+            ]
+          },
+          "clang-O2": {
+            "median": 0.7172110553476133,
+            "ci95": [
+              0.7065950911878147,
+              0.7468928442104676
+            ]
+          },
+          "identical-control": {
+            "median": 0.7244491775151553,
+            "ci95": [
+              0.7116364979682305,
+              0.7466864873864427
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lua",
+      "bench": "fib",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0144199589488831,
+            "ci95": [
+              0.9802189491975553,
+              1.057438825909192
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6905295134840762,
+            "ci95": [
+              0.6652754007923726,
+              0.7181354254729263
+            ]
+          },
+          "identical-control": {
+            "median": 0.6791125448845434,
+            "ci95": [
+              0.6706947495590856,
+              0.7025212282505088
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.9874465515838651,
+            "ci95": [
+              0.9820960782869211,
+              1.0185135325519883
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9683884430511084,
+            "ci95": [
+              0.9277892639978629,
+              1.0187961421344727
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6820301298988221,
+            "ci95": [
+              0.6432513795664879,
+              0.7201920362629127
+            ]
+          },
+          "identical-control": {
+            "median": 0.6766607772917481,
+            "ci95": [
+              0.6477142112839385,
+              0.6918772408034968
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lua",
+      "bench": "sort",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.9548449928617724,
+            "ci95": [
+              0.9480236015891457,
+              1.026961186416867
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.8431469162910018,
+            "ci95": [
+              0.8093299905733796,
+              0.8504660886029964
+            ]
+          },
+          "identical-control": {
+            "median": 0.8556249682758761,
+            "ci95": [
+              0.8345994978548966,
+              0.8725755359935856
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.970561286452448,
+            "ci95": [
+              0.9524938199188697,
+              1.0309130202801982
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0038480849282332,
+            "ci95": [
+              0.9854717402202842,
+              1.0192266811084312
+            ]
+          },
+          "clang-O2": {
+            "median": 0.8378795036382389,
+            "ci95": [
+              0.8048751183037033,
+              0.8570247127664141
+            ]
+          },
+          "identical-control": {
+            "median": 0.8596109479979444,
+            "ci95": [
+              0.837811107603703,
+              0.8708974361324405
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lua",
+      "bench": "string",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.9904724840380447,
+            "ci95": [
+              0.9638301810886548,
+              1.026616024542417
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.777656591481787,
+            "ci95": [
+              0.7603275436878068,
+              0.7970443715026562
+            ]
+          },
+          "identical-control": {
+            "median": 0.7715027940564597,
+            "ci95": [
+              0.757218984312747,
+              0.7940541408138516
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.0112645003290939,
+            "ci95": [
+              1.002854551774401,
+              1.0254905359579884
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0065388011206469,
+            "ci95": [
+              0.9802250469050036,
+              1.0427348725473202
+            ]
+          },
+          "clang-O2": {
+            "median": 0.7768416472177704,
+            "ci95": [
+              0.7650186675359476,
+              0.8108896468043447
+            ]
+          },
+          "identical-control": {
+            "median": 0.7788308184607645,
+            "ci95": [
+              0.7621702886559463,
+              0.804472867630364
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "lua",
+      "bench": "float",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.9616724015038296,
+            "ci95": [
+              0.9475303425408512,
+              0.9946214996963778
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.7519506196191881,
+            "ci95": [
+              0.716058337232846,
+              0.7638045185393723
+            ]
+          },
+          "identical-control": {
+            "median": 0.7192222187032286,
+            "ci95": [
+              0.670312373291764,
+              0.7587418529874301
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.989439101672607,
+            "ci95": [
+              0.9553825479460802,
+              1.0611624459577675
+            ]
+          },
+          "previous-fast": {
+            "median": 1.029501258218565,
+            "ci95": [
+              0.9984442315531535,
+              1.0687067984590708
+            ]
+          },
+          "clang-O2": {
+            "median": 0.7793241443032056,
+            "ci95": [
+              0.72782547249222,
+              0.7948959581895255
+            ]
+          },
+          "identical-control": {
+            "median": 0.7404401790937218,
+            "ci95": [
+              0.7163673904281426,
+              0.7628297532518661
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "quickjs",
+      "bench": "fib",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.999483457665394,
+            "ci95": [
+              0.9859631704488692,
+              1.022655661799721
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5496762252766514,
+            "ci95": [
+              0.5445072992439225,
+              0.5580362550091571
+            ]
+          },
+          "identical-control": {
+            "median": 0.5552222011756938,
+            "ci95": [
+              0.5326424763916604,
+              0.5631804065418097
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.020876161395192,
+            "ci95": [
+              0.9788629855003259,
+              1.0273630095419652
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0152658808315562,
+            "ci95": [
+              1.0073399092298554,
+              1.0214037596777912
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5578125722090431,
+            "ci95": [
+              0.5352946868605348,
+              0.5665551699778147
+            ]
+          },
+          "identical-control": {
+            "median": 0.5608966478141247,
+            "ci95": [
+              0.5264542198762333,
+              0.5727727654555491
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "quickjs",
+      "bench": "sort",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0083795404082123,
+            "ci95": [
+              0.986387613018773,
+              1.010052838270316
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.499480436645462,
+            "ci95": [
+              0.4884807189449502,
+              0.5024991613095796
+            ]
+          },
+          "identical-control": {
+            "median": 0.4922554274642566,
+            "ci95": [
+              0.4802642401460504,
+              0.5049589461031626
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 1.0076498887491943,
+            "ci95": [
+              0.994256336996986,
+              1.0139984627933913
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0039063545723332,
+            "ci95": [
+              0.9835640036647958,
+              1.0184279848673012
+            ]
+          },
+          "clang-O2": {
+            "median": 0.49619090088692114,
+            "ci95": [
+              0.4923774831533869,
+              0.500335002051752
+            ]
+          },
+          "identical-control": {
+            "median": 0.4982697273564337,
+            "ci95": [
+              0.48339679833123805,
+              0.5013267030324149
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "quickjs",
+      "bench": "string",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 0.9766894085314074,
+            "ci95": [
+              0.966185046940233,
+              0.9908051854579442
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5669310049705699,
+            "ci95": [
+              0.5585531680430377,
+              0.5775696948421313
+            ]
+          },
+          "identical-control": {
+            "median": 0.5470564091093549,
+            "ci95": [
+              0.5269379849353661,
+              0.5935362765032215
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.9695957726587743,
+            "ci95": [
+              0.9585589631823893,
+              0.9852066590284813
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9958591409065027,
+            "ci95": [
+              0.9721332059445897,
+              1.0003459159057473
+            ]
+          },
+          "clang-O2": {
+            "median": 0.5527029129883516,
+            "ci95": [
+              0.542638945721523,
+              0.5809891152888094
+            ]
+          },
+          "identical-control": {
+            "median": 0.547243789005244,
+            "ci95": [
+              0.5338565718315698,
+              0.5819605608258581
+            ]
+          }
+        }
+      }
+    },
+    {
+      "app": "sqlite",
+      "bench": "queries",
+      "rounds": 7,
+      "ratios": {
+        "previous-fast": {
+          "leaf-clobbers": {
+            "median": 1.0016164047551923,
+            "ci95": [
+              0.9894933212352779,
+              1.0354452560157734
+            ]
+          },
+          "previous-fast": {
+            "median": 1.0,
+            "ci95": [
+              1.0,
+              1.0
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6996743047328616,
+            "ci95": [
+              0.6808582138772858,
+              0.7079225084359296
+            ]
+          },
+          "identical-control": {
+            "median": 0.69444066302755,
+            "ci95": [
+              0.6730511003772812,
+              0.714492665432389
+            ]
+          }
+        },
+        "keel-full": {
+          "leaf-clobbers": {
+            "median": 0.9813949495462158,
+            "ci95": [
+              0.9613776416278115,
+              0.9980567991539953
+            ]
+          },
+          "previous-fast": {
+            "median": 0.9766971657807636,
+            "ci95": [
+              0.9618170018374066,
+              0.9853719122719021
+            ]
+          },
+          "clang-O2": {
+            "median": 0.6790659055941197,
+            "ci95": [
+              0.6660585786490194,
+              0.6894394076221335
+            ]
+          },
+          "identical-control": {
+            "median": 0.667924836467139,
+            "ci95": [
+              0.6612771623409045,
+              0.6978429612989577
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "probe": {
+    "fast": {
+      "instructions": 52,
+      "stp": 4,
+      "spill_home_references": 0
+    },
+    "full": {
+      "instructions": 52,
+      "stp": 4,
+      "spill_home_references": 0
+    }
+  },
+  "checks": {
+    "isolated-tests": {
+      "passed": 885,
+      "failed": 0,
+      "ignored": 2,
+      "test_binaries": 130
+    },
+    "experimental-tests": {
+      "passed": 123,
+      "failed": 0,
+      "ignored": 0,
+      "test_binaries": 1
+    }
+  },
+  "default_object_identity": {
+    "yyjson": {
+      "total": 2,
+      "equal": 2
+    },
+    "lz4": {
+      "total": 2,
+      "equal": 2
+    },
+    "lua": {
+      "total": 33,
+      "equal": 33
+    },
+    "quickjs": {
+      "total": 9,
+      "equal": 9
+    },
+    "sqlite": {
+      "total": 2,
+      "equal": 2
+    }
+  },
+  "method": "Seven interleaved measured runtime rounds, two warmups. Medians of paired elapsed-time ratios; 5000 bootstrap percentile intervals, seed19. One compile round per boundary is a screen only. Shared Clang-preprocessed native C, common Clang link; includes process startup. Lock serializes compiler/native workloads. ARM macOS only; no native x86 execution or new unwind test.",
+  "campaign": "target/private-leaf-clobbers-20261022/apps/report.json",
+  "repeat": {
+    "status": "passed",
+    "selection": "Repeat the largest screen regression with interval above parity, then up to two largest gains with intervals below parity (all >=1%). Fallback to one >=3% uncertain effect. Exploratory follow-up, 31 interleaved rounds and two warmups.",
+    "workloads": {
+      "yyjson/telemetry": {
+        "binary_sha256": {
+          "previous-fast": "b7f0c48d28ca86bd82f1e4118142ce9c191d6ae95d81c8c22a93c2ccd268720a",
+          "leaf-clobbers": "8d8a0beb7b42effbb60c4a65f009e761f09f3cddbe1f885f93c7113a8d6fffdc",
+          "identical-control": "b7f0c48d28ca86bd82f1e4118142ce9c191d6ae95d81c8c22a93c2ccd268720a"
+        },
+        "stdin_sha256": null,
+        "argv": {
+          "previous-fast": [
+            "target/private-leaf-clobbers-20261022/apps/yyjson/previous-fast/yyjson-workload",
+            "target/suite/yyjson/gen/corpus/telemetry.json",
+            "40"
+          ],
+          "leaf-clobbers": [
+            "target/private-leaf-clobbers-20261022/apps/yyjson/leaf-clobbers/yyjson-workload",
+            "target/suite/yyjson/gen/corpus/telemetry.json",
+            "40"
+          ],
+          "identical-control": [
+            "target/private-leaf-clobbers-20261022/yyjson-previous-identical-control",
+            "target/suite/yyjson/gen/corpus/telemetry.json",
+            "40"
+          ]
+        },
+        "ratios": {
+          "leaf-clobbers": {
+            "median": 1.0028267540221312,
+            "ci95": [
+              0.9971933556664098,
+              1.0109180998901988
+            ]
+          },
+          "identical-control": {
+            "median": 0.9999140225062845,
+            "ci95": [
+              0.9934253250970225,
+              1.0054378895696898
+            ]
+          }
+        }
+      },
+      "lua/float": {
+        "binary_sha256": {
+          "previous-fast": "3b8ec3d3fb273d46369839778c86d5c75ab6a501d07d43ceb69b669db619036a",
+          "leaf-clobbers": "686b467c0dacb4ba8b0b2f0bb556354c02034f5d5d4348fc98c5217e57771511",
+          "identical-control": "3b8ec3d3fb273d46369839778c86d5c75ab6a501d07d43ceb69b669db619036a"
+        },
+        "stdin_sha256": null,
+        "argv": {
+          "previous-fast": [
+            "target/private-leaf-clobbers-20261022/apps/lua/previous-fast/lua",
+            "suite/lua/bench.lua",
+            "float"
+          ],
+          "leaf-clobbers": [
+            "target/private-leaf-clobbers-20261022/apps/lua/leaf-clobbers/lua",
+            "suite/lua/bench.lua",
+            "float"
+          ],
+          "identical-control": [
+            "target/private-leaf-clobbers-20261022/lua-previous-identical-control",
+            "suite/lua/bench.lua",
+            "float"
+          ]
+        },
+        "ratios": {
+          "leaf-clobbers": {
+            "median": 1.012087402984173,
+            "ci95": [
+              0.9736428515243976,
+              1.0350750902488264
+            ]
+          },
+          "identical-control": {
+            "median": 0.9990026469974862,
+            "ci95": [
+              0.988075624991226,
+              1.016654528058496
+            ]
+          }
+        }
+      },
+      "quickjs/string": {
+        "binary_sha256": {
+          "previous-fast": "55de91300c2b62ea90a63142efab8291dfbee53dfc6300e808eaf2895265fa79",
+          "leaf-clobbers": "fc051d355d296451835f2b292c8bbc54436e72a367408cddcb1c6ffffe3f5715",
+          "identical-control": "55de91300c2b62ea90a63142efab8291dfbee53dfc6300e808eaf2895265fa79"
+        },
+        "stdin_sha256": null,
+        "argv": {
+          "previous-fast": [
+            "target/private-leaf-clobbers-20261022/apps/quickjs/previous-fast/qjs",
+            "--stack-size",
+            "4194304",
+            "suite/quickjs/bench.js",
+            "string"
+          ],
+          "leaf-clobbers": [
+            "target/private-leaf-clobbers-20261022/apps/quickjs/leaf-clobbers/qjs",
+            "--stack-size",
+            "4194304",
+            "suite/quickjs/bench.js",
+            "string"
+          ],
+          "identical-control": [
+            "target/private-leaf-clobbers-20261022/quickjs-previous-identical-control",
+            "--stack-size",
+            "4194304",
+            "suite/quickjs/bench.js",
+            "string"
+          ]
+        },
+        "ratios": {
+          "leaf-clobbers": {
+            "median": 0.992528424434797,
+            "ci95": [
+              0.9866655716781163,
+              1.0030169415786774
+            ]
+          },
+          "identical-control": {
+            "median": 0.9957046437285694,
+            "ci95": [
+              0.983115312037512,
+              1.0022555340475403
+            ]
+          }
+        }
+      }
+    },
+    "raw_report": {
+      "path": "target/private-leaf-clobbers-20261022/repeat.json",
+      "sha256": "669c3164da0b080b4b4651270da2737db5f74b9338426a6aca7a2eb856ac9b3f"
+    }
+  },
+  "synthetic": {
+    "status": "passed",
+    "method": "Synthetic raw-IR caller with twelve integers live across a known leaf. Same Clang-O2 driver, no LTO. 2,000,000 calls per run; 31 interleaved measured rounds, 2 warmups. Internal CLOCK_MONOTONIC interval excludes startup and independent C oracle; CLI wall time also retained. Each run checks unsigned C oracle and cross-config checksum. This is not an application-suite speedup.",
+    "ratios": {
+      "leaf-clobbers": {
+        "median": 0.848677517802645,
+        "ci95": [
+          0.8482517482517482,
+          0.8504132231404958
+        ]
+      },
+      "identical-control": {
+        "median": 0.9999364191251272,
+        "ci95": [
+          0.99683303775019,
+          1.0062969087902303
+        ]
+      }
+    },
+    "binary_sha256": {
+      "previous-fast": "bc43aefef05b69b5ea04a9670b18a2eb404a1a5a35b201d60f9e3607c2aa3e54",
+      "leaf-clobbers": "f4ae1e83caea21e11c833905472384c0dc39eabe34eaaa4a3ef0cbb9ca89498a",
+      "identical-control": "bc43aefef05b69b5ea04a9670b18a2eb404a1a5a35b201d60f9e3607c2aa3e54"
+    },
+    "raw_report": {
+      "path": "target/private-leaf-clobbers-20261022/probe-bench.json",
+      "sha256": "89df5126cea7d0448da01d36634dcf51be76a7c2fd6bd5a3c2f413bc868c0aad"
+    }
+  },
+  "static": [
+    {
+      "app": "yyjson",
+      "functions": 330,
+      "changed_functions": 12,
+      "instructions_before": 71470,
+      "instructions_after": 71359,
+      "saved_gprs_before": 638,
+      "saved_gprs_after": 632
+    },
+    {
+      "app": "lz4",
+      "functions": 98,
+      "changed_functions": 2,
+      "instructions_before": 32119,
+      "instructions_after": 32119,
+      "saved_gprs_before": 307,
+      "saved_gprs_after": 306
+    },
+    {
+      "app": "lua",
+      "functions": 1107,
+      "changed_functions": 10,
+      "instructions_before": 90256,
+      "instructions_after": 90230,
+      "saved_gprs_before": 3415,
+      "saved_gprs_after": 3402
+    },
+    {
+      "app": "quickjs",
+      "functions": 2015,
+      "changed_functions": 151,
+      "instructions_before": 264923,
+      "instructions_after": 264464,
+      "saved_gprs_before": 7761,
+      "saved_gprs_after": 7603
+    },
+    {
+      "app": "sqlite",
+      "functions": 3009,
+      "changed_functions": 270,
+      "instructions_before": 349411,
+      "instructions_after": 348377,
+      "saved_gprs_before": 10152,
+      "saved_gprs_after": 9934
+    }
+  ],
+  "importer": {
+    "status": "passed",
+    "checks": 54,
+    "raw_report": {
+      "path": "target/private-leaf-clobbers-20261022/importer/report.json",
+      "sha256": "50abd40996921f913ebde1c605881a1ac48c6e4a48f57df8371357184debea23"
+    }
+  },
+  "placement": {
+    "leaf_preparation": "crates/keel-codegen/src/aarch64.rs:244",
+    "caller_allocation_input": "crates/keel-codegen/src/aarch64.rs:972",
+    "reason": "Physical register summaries require finalized callee selection/allocation. Consume before caller allocation; preserve original function emission order. Existing IR optimizations do not consume CallConv::Fast except classification."
+  },
+  "native_oracle": {
+    "configurations": 28,
+    "inputs_per_configuration": 10000,
+    "exported_functions": 4,
+    "checks": 1120000
+  },
+  "profile_fix_gate": {
+    "passed": 123,
+    "failed": 0,
+    "log": "target/private-leaf-clobbers-20261022/profile-final-tests.log"
+  },
+  "promotion": {
+    "status": "passed",
+    "source_commit": "324a1fa759e98cffc17d8ea078a840cf7173bf45",
+    "compiler_sha256": "7853c79a50aae5e67fd81f279c98843cff84c5cdb93b928da3738fb3ca45c0af",
+    "objects_equal": 48,
+    "raw_report": {
+      "path": "target/private-leaf-clobbers-20261022/promotion-identity.json",
+      "sha256": "a5e909aa43aba419d121730ee962f742f63821974eb7d507d0f6c12c2569e69b"
+    },
+    "tests": {
+      "passed": 959,
+      "failed": 0,
+      "ignored": 3,
+      "test_binaries": 151
+    }
+  },
+  "evidence_packet": {
+    "path": "target/private-leaf-clobbers-20261022/evidence.tar.gz",
+    "sha256": "2b0a804b033096661f269d0cf5ba4ae215b871d7f300ba9fc9844dabcfb546ec",
+    "files": 290
+  }
+}
