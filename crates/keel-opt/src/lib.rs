@@ -287,6 +287,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &BUILTINS[19],
     &BUILTINS[20],
     &AggregateReturn,
+    &inline::InlineCheapReserve,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
