@@ -565,6 +565,13 @@ fn assemble_pass(
                     D::Global(name) => {
                         globals.insert(name.as_str(), line);
                     }
+                    D::WeakDefinition(name) => {
+                        symbol(name).map_err(err)?;
+                        if name.starts_with('L') {
+                            return Err(err("weak definition requires a non-local symbol".into()));
+                        }
+                        weak_definitions.insert(name.as_str(), line);
+                    }
                     D::PrivateExtern(name) => {
                         if name.starts_with('L') {
                             return Err(err("private extern requires a non-local symbol".into()));

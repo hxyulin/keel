@@ -218,6 +218,7 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<Output, CodegenError> {
+    crate::validate_odr(module, crate::Target::Aarch64AppleDarwin)?;
     backend_scope!(Module);
     pipeline.validate_target(crate::Target::Aarch64AppleDarwin)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));
@@ -1038,6 +1039,9 @@ impl<'a> FunctionCompiler<'a> {
             crate::backend_profile::scope(crate::backend_profile::Stage::LoweringEntry);
         if !func.local {
             out.directive(Directive::Global(format!("_{name}")));
+        }
+        if func.weak_odr {
+            out.directive(Directive::WeakDefinition(format!("_{name}")));
         }
         out.align(2);
         out.label(format!("_{name}"));

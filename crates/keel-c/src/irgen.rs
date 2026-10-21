@@ -148,6 +148,8 @@ impl<'p> Gen<'p> {
                     name: global.symbol.to_owned(),
                     thread_local: global.thread_local,
                     local: false,
+                    weak_odr: false,
+                    hidden: false,
                     init: None,
                 }),
             }
@@ -202,6 +204,8 @@ impl<'p> Gen<'p> {
                 name: name.clone(),
                 thread_local: false,
                 local: true,
+                weak_odr: false,
+                hidden: false,
                 init: Some(DataInit {
                     constant: true,
                     align: if s.wide { 4 } else { 1 },
@@ -222,6 +226,8 @@ impl<'p> Gen<'p> {
             name: name.clone(),
             thread_local: false,
             local: true,
+            weak_odr: false,
+            hidden: false,
             init: Some(DataInit {
                 constant: true,
                 align: 8,
@@ -684,6 +690,8 @@ impl<'p> Gen<'p> {
             name: global.symbol.to_owned(),
             thread_local: global.thread_local,
             local: global.internal,
+            weak_odr: false,
+            hidden: false,
             init: Some(DataInit {
                 constant: global.is_const && !global.thread_local,
                 align,
@@ -3247,6 +3255,8 @@ mod alignment_tests {
         DataObject {
             name: name.into(),
             local: true,
+            weak_odr: false,
+            hidden: false,
             thread_local: false,
             init: align.map(|align| DataInit {
                 align,

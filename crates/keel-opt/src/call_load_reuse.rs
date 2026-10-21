@@ -101,7 +101,8 @@ fn scalar(data: &InstData) -> bool {
 }
 
 fn leaf(f: &Function) -> bool {
-    (f.local || f.attrs.noninterposable)
+    !f.weak_odr
+        && (f.local || f.attrs.noninterposable)
         && !f.sig.returns_twice
         && !f.sig.variadic
         && !f.attrs.noreturn

@@ -7,6 +7,8 @@
 //! decl data @environ
 //! data @count = thread_local align 8 { i64 0 }
 //! data @hidden = local align 4 { i32 1 }
+//! data @name = weak_odr hidden const align 1 { b"Name\0" }
+//! data @rtti = weak_odr hidden const align 8 { rtti_name @name }
 //! decl data thread_local @errno_value
 //! ```
 //!
@@ -17,7 +19,7 @@ use crate::Type;
 use std::fmt;
 
 /// A named data object: defined here (`init` is `Some`) or elsewhere.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct DataObject {
     pub name: String,
     /// Each thread has its own copy, initialized from `init`;
@@ -26,6 +28,11 @@ pub struct DataObject {
     /// Visible only within its module, like C's `static`. Only for
     /// definitions.
     pub local: bool,
+    /// ODR definition coalesced by the linker across translation units.
+    pub weak_odr: bool,
+    /// Hidden weak ODR data, exported within a link but not from its image.
+    /// Other hidden linkage is deliberately unsupported.
+    pub hidden: bool,
     pub init: Option<DataInit>,
 }
 
@@ -50,6 +57,11 @@ pub enum DataItem {
     },
     /// `n` zero bytes.
     Zero(u32),
+    /// Apple RTTI type-name pointer: symbol address plus 2^63, modulo 2^64.
+    /// This is a tagged address, not an in-bounds pointer offset.
+    RttiName {
+        symbol: String,
+    },
     /// The address of `symbol` plus `addend` bytes: 8 bytes, filled in by
     /// the linker.
     Ptr {
@@ -67,7 +79,7 @@ impl DataItem {
             DataItem::Bytes(bytes) => bytes.len() as u64,
             DataItem::Int { ty, .. } => ty.bytes().map_or(PTR_BYTES, u64::from),
             DataItem::Zero(n) => u64::from(*n),
-            DataItem::Ptr { .. } => PTR_BYTES,
+            DataItem::Ptr { .. } | DataItem::RttiName { .. } => PTR_BYTES,
         }
     }
 }
@@ -81,7 +93,7 @@ impl DataInit {
     pub fn has_relocations(&self) -> bool {
         self.items
             .iter()
-            .any(|item| matches!(item, DataItem::Ptr { .. }))
+            .any(|item| matches!(item, DataItem::Ptr { .. } | DataItem::RttiName { .. }))
     }
 
     /// Whether every byte is zero, so the object needs no space in the file.
@@ -90,7 +102,7 @@ impl DataInit {
             DataItem::Bytes(bytes) => bytes.iter().all(|&b| b == 0),
             DataItem::Int { value, .. } => *value == 0,
             DataItem::Zero(_) => true,
-            DataItem::Ptr { .. } => false,
+            DataItem::Ptr { .. } | DataItem::RttiName { .. } => false,
         })
     }
 }
@@ -106,7 +118,13 @@ impl fmt::Display for DataObject {
             return write!(f, "decl data {thread_local}@{}", self.name);
         };
         let local = if self.local { "local " } else { "" };
-        write!(f, "data @{} = {local}{thread_local}", self.name)?;
+        let weak_odr = if self.weak_odr { "weak_odr " } else { "" };
+        let hidden = if self.hidden { "hidden " } else { "" };
+        write!(
+            f,
+            "data @{} = {local}{weak_odr}{hidden}{thread_local}",
+            self.name
+        )?;
         if init.constant {
             f.write_str("const ")?;
         }
@@ -146,6 +164,7 @@ impl fmt::Display for DataItem {
             }
             DataItem::Int { ty, value } => write!(f, "{ty} {value}"),
             DataItem::Zero(n) => write!(f, "zero {n}"),
+            DataItem::RttiName { symbol } => write!(f, "rtti_name @{symbol}"),
             DataItem::Ptr { symbol, addend: 0 } => write!(f, "ptr @{symbol}"),
             DataItem::Ptr { symbol, addend } => write!(f, "ptr @{symbol} + {addend}"),
         }

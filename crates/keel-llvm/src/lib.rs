@@ -90,6 +90,19 @@ fn attrs(a: FunctionAttrs) -> String {
 /// Verify and translate the complete module in memory. Errors never return
 /// partial LLVM text. The caller must not publish output until this succeeds.
 pub fn export(module: &Module, target: TargetProfile) -> ExportResult<String> {
+    if module.functions.iter().any(|f| f.weak_odr)
+        || module.data.iter().any(|d| {
+            d.weak_odr
+                || d.hidden
+                || d.init.as_ref().is_some_and(|i| {
+                    i.items
+                        .iter()
+                        .any(|i| matches!(i, DataItem::RttiName { .. }))
+                })
+        })
+    {
+        return Err("weak_odr is unsupported by this exporter".into());
+    }
     verify_module(module).map_err(|e| format!("invalid Keel IR: {e:?}"))?;
     if !module.files.is_empty()
         || !module.debug_types.is_empty()
@@ -223,6 +236,9 @@ fn emit_data(m: &Module, d: &DataObject, out: &mut String) -> ExportResult<()> {
             ),
             DataItem::Zero(n) => (format!("[{n} x i8]"), "zeroinitializer".into()),
             DataItem::Int { ty: t, value } => (ty(*t)?, value.to_string()),
+            DataItem::RttiName { .. } => {
+                return Err("rtti_name is unsupported by this exporter".into());
+            }
             DataItem::Ptr { symbol: s, addend } => {
                 if !m.has_symbol(s) {
                     return Err(format!("unknown relocation symbol @{s}"));

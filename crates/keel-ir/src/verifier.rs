@@ -113,6 +113,18 @@ pub fn verify_module(module: &Module) -> Result<(), Vec<VerifierError>> {
         }
     }
     for data in &module.data {
+        if data.hidden && !data.weak_odr {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "hidden data requires weak_odr linkage".into(),
+            });
+        }
+        if data.weak_odr && (data.local || data.init.is_none() || data.thread_local) {
+            errors.push(VerifierError {
+                location: format!("@{}", data.name),
+                message: "weak_odr requires a nonlocal, non-thread-local definition".into(),
+            });
+        }
         if data.thread_local && data.init.as_ref().is_some_and(|init| init.constant) {
             errors.push(VerifierError {
                 location: format!("@{}", data.name),
@@ -353,7 +365,15 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
                 }
                 _ => errors.push(format!("data integers must be i8 to i64, got {ty}")),
             },
-            DataItem::Ptr { symbol, addend } => {
+            DataItem::Ptr { symbol, .. } | DataItem::RttiName { symbol } => {
+                let addend = match item {
+                    DataItem::Ptr { addend, .. } => *addend,
+                    _ => 0,
+                };
+                if matches!(item, DataItem::RttiName { .. }) && lookup.data_object(symbol).is_none()
+                {
+                    errors.push(format!("rtti_name requires a data symbol, got @{symbol}"));
+                }
                 if !lookup.has_symbol(symbol) {
                     errors.push(format!("points to @{symbol}, which is not declared"));
                 } else if lookup.data_object(symbol).is_some_and(|d| d.thread_local) {
@@ -362,7 +382,7 @@ fn check_data(lookup: &Names<'_>, init: &DataInit) -> Vec<String> {
                     ));
                 } else if let Some(target) =
                     lookup.data_object(symbol).and_then(|d| d.init.as_ref())
-                    && u64::from(*addend) > target.size()
+                    && u64::from(addend) > target.size()
                 {
                     errors.push(format!(
                         "@{symbol} + {addend} is past the end of @{symbol} ({} bytes)",
@@ -482,6 +502,9 @@ pub fn verify(func: &Function) -> Result<(), Vec<VerifierError>> {
         domtree,
         errors: Vec::new(),
     };
+    if func.weak_odr && func.local {
+        v.error("linkage".into(), "weak_odr cannot be local".into());
+    }
     if let Err(message) = func.attrs.validate(func.sig.returns_twice) {
         v.error("attributes".into(), message.into());
     }
@@ -1515,6 +1538,8 @@ mod name_tests {
             name: name.into(),
             thread_local,
             local: false,
+            weak_odr: false,
+            hidden: false,
             init: init.map(|n| DataInit {
                 constant: false,
                 align: 8,

@@ -437,7 +437,7 @@ fn profitability_reason(f: &Function, full: bool) -> Option<&'static str> {
 }
 
 fn eligibility_reason(f: &Function, admit_noninterposable: bool) -> Option<&'static str> {
-    if !f.local && !(admit_noninterposable && f.attrs.noninterposable) {
+    if f.weak_odr || (!f.local && !(admit_noninterposable && f.attrs.noninterposable)) {
         return Some("public_definition");
     }
     if f.attrs.noinline {

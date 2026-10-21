@@ -136,6 +136,8 @@ fn split(m: &keel_ir::Module, native_names: &[&str]) -> (keel_ir::Module, keel_i
                     name: data.into(),
                     thread_local: false,
                     local: false,
+                    weak_odr: false,
+                    hidden: false,
                     init: None,
                 });
             }

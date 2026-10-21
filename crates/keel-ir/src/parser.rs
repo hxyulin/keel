@@ -128,6 +128,8 @@ fn parse_module(src: &str, ir_path: Option<&str>) -> Result<Module, ParseError> 
                     name,
                     thread_local,
                     local: false,
+                    weak_odr: false,
+                    hidden: false,
                     init: None,
                 });
             }
@@ -483,6 +485,7 @@ struct ParsedFunction {
     name: String,
     sig: Signature,
     local: bool,
+    weak_odr: bool,
     personality: Option<String>,
     slots: Vec<StackSlotData>,
     debug_return: Option<DebugType>,
@@ -827,6 +830,7 @@ impl Parser {
             self.expect(Tok::Punct(')'))?;
         }
         let local = self.eat(&Tok::Ident("local".into()));
+        let weak_odr = self.eat(&Tok::Ident("weak_odr".into()));
         let personality = if self.eat(&Tok::Ident("personality".into())) {
             Some(self.global("a personality function like `@__gxx_personality_v0`")?)
         } else {
@@ -908,6 +912,7 @@ impl Parser {
             name,
             sig,
             local,
+            weak_odr,
             personality,
             slots,
             debug_return,
@@ -1079,13 +1084,15 @@ impl Parser {
     }
 
     /// Everything after `data`:
-    /// `@name = [local] [thread_local] [const] align <n> { item, ... }`, where an item is
+    /// `@name = [local] [weak_odr] [hidden] [thread_local] [const] align <n> { item, ... }`, where an item is
     /// `b"..."`, `<int type> <n>`, `zero <n>` or `ptr @sym [+ <n>]`. Items
     /// may continue over several lines.
     fn data_definition(&mut self) -> Result<DataObject, ParseError> {
         let name = self.global("a data name like `@msg`")?;
         self.expect(Tok::Punct('='))?;
         let local = self.eat(&Tok::Ident("local".into()));
+        let weak_odr = self.eat(&Tok::Ident("weak_odr".into()));
+        let hidden = self.eat(&Tok::Ident("hidden".into()));
         let thread_local = self.eat(&Tok::Ident("thread_local".into()));
         let constant = self.eat(&Tok::Ident("const".into()));
         let (kw, kw_loc) = self.ident("`align`")?;
@@ -1112,6 +1119,8 @@ impl Parser {
             name,
             thread_local,
             local,
+            weak_odr,
+            hidden,
             init: Some(DataInit {
                 constant,
                 align,
@@ -1128,6 +1137,9 @@ impl Parser {
         let (kw, loc) = self.ident("a data item like `i32 7`, `b\"..\"`, `zero 8` or `ptr @f`")?;
         match kw.as_str() {
             "zero" => Ok(DataItem::Zero(self.u32("a byte count")?)),
+            "rtti_name" => Ok(DataItem::RttiName {
+                symbol: self.global("an RTTI type-name data symbol")?,
+            }),
             "ptr" => {
                 let symbol = self.global("a symbol like `@main`")?;
                 let addend = if self.eat(&Tok::Punct('+')) {
@@ -1949,6 +1961,7 @@ fn build(
         name,
         sig,
         local,
+        weak_odr,
         personality,
         slots,
         debug_return,
@@ -2106,6 +2119,7 @@ fn build(
     func.restrict_params = restrict_params.clone();
     func.personality = personality.clone();
     func.local = *local;
+    func.weak_odr = *weak_odr;
     func.attrs = *attrs;
     // Slots and callees were numbered in declaration order, which is
     // creation order.

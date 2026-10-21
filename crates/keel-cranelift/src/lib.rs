@@ -311,6 +311,20 @@ impl Compiled {
 
 /// Module-level features this bridge rejects before translating any body.
 fn check_module(module: &k::Module) -> Result<()> {
+    if module.functions.iter().any(|f| f.weak_odr)
+        || module.data.iter().any(|d| {
+            d.weak_odr
+                || d.hidden
+                || d.init.as_ref().is_some_and(|i| {
+                    i.items
+                        .iter()
+                        .any(|i| matches!(i, k::DataItem::RttiName { .. }))
+                })
+        })
+    {
+        return Err("weak_odr is unsupported by this exporter".into());
+    }
+
     if !module.files.is_empty()
         || !module.debug_types.is_empty()
         || !module.debug_globals.is_empty()
@@ -505,6 +519,9 @@ fn translate_into(module: &k::Module, mut object: ObjectModule) -> Result<Transl
                             let fill = if *value < 0 { 0xff } else { 0 };
                             bytes.extend_from_slice(&[fill; 8]);
                         }
+                    }
+                    k::DataItem::RttiName { .. } => {
+                        return Err("rtti_name is unsupported by this exporter".into());
                     }
                     k::DataItem::Ptr { symbol, addend } => {
                         let offset = bytes.len() as u32;

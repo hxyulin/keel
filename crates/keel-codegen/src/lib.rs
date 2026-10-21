@@ -207,6 +207,52 @@ impl InstructionSelector for SelectionTier {
     }
 }
 
+pub(crate) fn validate_odr(module: &Module, target: Target) -> Result<(), CodegenError> {
+    for data in &module.data {
+        let tagged = data.init.as_ref().is_some_and(|init| {
+            init.items
+                .iter()
+                .any(|i| matches!(i, keel_ir::DataItem::RttiName { .. }))
+        });
+        if (data.hidden
+            && (!data.weak_odr || data.local || data.thread_local || data.init.is_none()))
+            || ((data.hidden || tagged) && target != Target::Aarch64AppleDarwin)
+        {
+            return Err(CodegenError {
+                func: data.name.clone(),
+                message: "hidden weak_odr data and rtti_name require AArch64 Mach-O definitions"
+                    .into(),
+            });
+        }
+    }
+    for (name, invalid) in module
+        .functions
+        .iter()
+        .filter(|f| f.weak_odr)
+        .map(|f| (&f.name, f.local))
+        .chain(
+            module
+                .data
+                .iter()
+                .filter(|d| d.weak_odr)
+                .map(|d| (&d.name, d.local || d.thread_local || d.init.is_none())),
+        )
+    {
+        let message = if invalid {
+            "weak_odr requires a nonlocal, non-thread-local definition"
+        } else if target != Target::Aarch64AppleDarwin {
+            "weak_odr is supported only by the AArch64 Mach-O backend"
+        } else {
+            continue;
+        };
+        return Err(CodegenError {
+            func: name.clone(),
+            message: message.into(),
+        });
+    }
+    Ok(())
+}
+
 pub fn compile_with_pipeline(
     module: &Module,
     target: Target,

@@ -60,7 +60,13 @@ pub(crate) fn emit_macho(out: &mut impl Sink, data: &DataObject, init: &DataInit
     if !data.local {
         out.directive(Directive::Global(name.clone()));
     }
-    if !init.constant && init.is_zero() {
+    if data.hidden {
+        out.directive(Directive::PrivateExtern(name.clone()));
+    }
+    if data.weak_odr {
+        out.directive(Directive::WeakDefinition(name.clone()));
+    }
+    if !data.weak_odr && !init.constant && init.is_zero() {
         out.directive(Directive::ZeroFill {
             symbol: name,
             size: init.size(),
@@ -93,6 +99,11 @@ fn emit_macho_items(out: &mut impl Sink, init: &DataInit) {
             DataItem::Ptr { symbol, addend } => out.integer(
                 8,
                 Expression::symbol(Format::MachO.symbol(symbol)).with_addend(i128::from(*addend)),
+            ),
+            DataItem::RttiName { symbol } => out.integer(
+                8,
+                // Signed spelling encodes exactly the same modulo-2^64 addition.
+                Expression::symbol(Format::MachO.symbol(symbol)).with_addend(i128::from(i64::MIN)),
             ),
         }
     }
@@ -154,6 +165,7 @@ fn emit_elf_items(out: &mut impl Sink, init: &DataInit) {
                 8,
                 Expression::symbol(symbol).with_addend(i128::from(*addend)),
             ),
+            DataItem::RttiName { .. } => unreachable!("RTTI tagging is rejected for ELF"),
         }
     }
 }

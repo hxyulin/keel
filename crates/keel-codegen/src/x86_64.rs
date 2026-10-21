@@ -179,6 +179,7 @@ fn compile_output(
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
 ) -> Result<Output, CodegenError> {
+    crate::validate_odr(module, crate::Target::X86_64LinuxGnu)?;
     validate_vector_abi(module)?;
     pipeline.validate_target(crate::Target::X86_64LinuxGnu)?;
     let subset = |pool: &[u8], of: &[u8]| pool.iter().all(|r| of.contains(r));

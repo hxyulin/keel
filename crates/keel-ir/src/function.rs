@@ -350,6 +350,8 @@ pub struct Function {
     /// Visible only within its module, like C's `static`: not exported to
     /// the linker, so other modules may use the name for their own.
     pub local: bool,
+    /// ODR definition coalesced by the linker across translation units.
+    pub weak_odr: bool,
     /// The source-level return type, `dreturn dt0`, for debuggers; none
     /// for `void` or if unknown.
     pub debug_return: Option<crate::DebugType>,
@@ -405,6 +407,7 @@ impl fmt::Debug for Function {
             .field("layout", &self.layout)
             .field("personality", &self.personality)
             .field("local", &self.local)
+            .field("weak_odr", &self.weak_odr)
             .field("debug_return", &self.debug_return)
             .field("debug_loc", &self.debug_loc)
             .field("debug_scopes", &self.debug_scopes)
@@ -431,6 +434,7 @@ impl Function {
             layout: Vec::new(),
             personality: None,
             local: false,
+            weak_odr: false,
             debug_return: None,
             debug_loc: None,
             debug_scopes: Vec::new(),
@@ -876,6 +880,9 @@ impl fmt::Display for Function {
         }
         if self.local {
             f.write_str(" local")?;
+        }
+        if self.weak_odr {
+            f.write_str(" weak_odr")?;
         }
         if let Some(personality) = &self.personality {
             write!(f, " personality @{personality}")?;
