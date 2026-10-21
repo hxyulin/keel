@@ -708,32 +708,12 @@ impl Verifier<'_> {
                     }
                 });
                 for &value in &operands {
-                    if !self.is_defined(value) {
-                        self.inst_error(
-                            inst,
-                            format!("uses {value}, whose definition was removed"),
-                        );
-                    } else {
-                        self.check_dominance(inst, block, visit, value);
-                    }
+                    self.check_dominance(inst, block, visit, value);
                 }
                 self.scratch.visited[inst.index()] = visit;
             }
         }
         self.scratch.operands = operands;
-    }
-
-    /// [`Function::is_value_defined`] for a resolved value, with the
-    /// layout's blocks already known.
-    fn is_defined(&self, value: Value) -> bool {
-        match self.func.value_def(value) {
-            ValueDef::Result(inst, _) => !self.func.is_removed(inst),
-            ValueDef::Param(block, n) => {
-                self.scratch.inserted[block.index()]
-                    && self.func.block_params(block).get(n as usize) == Some(&value)
-            }
-            ValueDef::Alias(_) => unreachable!("resolved"),
-        }
     }
 
     /// An atomic access of a `value` type through an `addr`: integers up
@@ -842,8 +822,9 @@ impl Verifier<'_> {
         let func = self.func;
         let ty = |v: Value| func.value_type(func.resolve(v));
         let mut expected = 0;
+        let results = func.inst_results(inst);
         func.for_each_result_type(func.inst_data(inst), |expected_ty| {
-            if let Some(&value) = func.inst_results(inst).get(expected)
+            if let Some(&value) = results.get(expected)
                 && func.value_type(value) != expected_ty
             {
                 self.inst_error(
@@ -856,12 +837,12 @@ impl Verifier<'_> {
             }
             expected += 1;
         });
-        if func.inst_results(inst).len() != expected {
+        if results.len() != expected {
             self.inst_error(
                 inst,
                 format!(
                     "instruction must have {expected} result(s), got {}",
-                    func.inst_results(inst).len()
+                    results.len()
                 ),
             );
         }
@@ -1426,36 +1407,47 @@ impl Verifier<'_> {
         }
     }
 
-    /// Checks that defined, resolved `value` dominates its use by `inst`, the
-    /// `visit`th block in the layout, if that block is reachable.
+    /// Checks that resolved `value` is still defined (as
+    /// [`Function::is_value_defined`], with the layout's blocks already
+    /// known) and dominates its use by `inst`, the `visit`th block in the
+    /// layout, if that block is reachable.
     fn check_dominance(&mut self, inst: Inst, use_block: Block, visit: u32, value: Value) {
         let func = self.func;
-        let entry = func.entry_block();
+        let removed = |this: &mut Self| {
+            this.inst_error(inst, format!("uses {value}, whose definition was removed"));
+        };
         // A definition in the entry block dominates every reachable block,
         // and one in the use's own block does if it came first. Only the
         // rest need the dominator tree.
         let (def_block, earlier) = match func.value_def(value) {
-            ValueDef::Param(def_block, _) => (def_block, true),
-            // An invoke's results exist only once it returns normally.
-            ValueDef::Result(def_inst, _)
-                if let InstData::Invoke { dests, .. } = func.inst_data(def_inst) =>
-            {
-                let normal = dests[0].block;
-                let def_block = func.inst_block(def_inst);
-                let (_, domtree) = self.dom();
-                let ok = !domtree.is_reachable(use_block)
-                    || domtree.dominates(normal, use_block) && def_block != use_block;
-                if !ok {
-                    self.dominance_error(inst, value);
+            ValueDef::Param(def_block, n) => {
+                let defined = self.scratch.inserted[def_block.index()]
+                    && func.block_params(def_block).get(n as usize) == Some(&value);
+                if !defined {
+                    return removed(self);
                 }
-                return;
+                (def_block, true)
             }
-            ValueDef::Result(def_inst, _) => (
-                func.inst_block(def_inst),
-                self.scratch.visited[def_inst.index()] == visit,
-            ),
+            ValueDef::Result(def_inst, _) => {
+                let Some(def_block) = func.inst_block_if_placed(def_inst) else {
+                    return removed(self);
+                };
+                // An invoke's results exist only once it returns normally.
+                if let InstData::Invoke { dests, .. } = func.inst_data(def_inst) {
+                    let normal = dests[0].block;
+                    let (_, domtree) = self.dom();
+                    let ok = !domtree.is_reachable(use_block)
+                        || domtree.dominates(normal, use_block) && def_block != use_block;
+                    if !ok {
+                        self.dominance_error(inst, value);
+                    }
+                    return;
+                }
+                (def_block, self.scratch.visited[def_inst.index()] == visit)
+            }
             ValueDef::Alias(_) => unreachable!("resolved values are never aliases"),
         };
+        let entry = func.entry_block();
         let ok = if def_block == use_block {
             earlier
         } else {

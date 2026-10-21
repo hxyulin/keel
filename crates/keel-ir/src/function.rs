@@ -1016,6 +1016,12 @@ impl Function {
         self.insts[inst].block().expect("instruction was removed")
     }
 
+    /// The block containing `inst`, unless it was removed.
+    #[inline]
+    pub(crate) fn inst_block_if_placed(&self, inst: Inst) -> Option<Block> {
+        self.insts[inst].block()
+    }
+
     /// Every instruction in the layout, block by block.
     #[inline]
     pub fn layout_insts(&self) -> impl Iterator<Item = (Block, Inst)> + '_ {
