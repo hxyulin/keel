@@ -37,6 +37,7 @@ class RunnerTests(unittest.TestCase):
             canonical = canonical_runtime(a, root)
             self.assertEqual(canonical_runtime(a, root), canonical)
             self.assertFalse((root / 'run.next').exists())
+
             first_inode = canonical.stat().st_ino
             self.assertEqual(canonical.read_bytes(), b'first')
             self.assertEqual(canonical_runtime(b, root), canonical)
@@ -46,6 +47,15 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(a.read_bytes(), b'first')
             self.assertEqual(b.read_bytes(), b'second')
             self.assertFalse((root / 'run.next').exists())
+
+    def test_baseline_pipeline_is_independent_and_requires_baseline(self):
+        configs = compiler_configurations(include_baseline=True, full_passes='dce', baseline_passes='adjacent-diff,dce')
+        self.assertEqual(configs['keel-full'][1][-2:], ['-p', 'dce'])
+        self.assertEqual(configs['baseline-full'][1][-2:], ['-p', 'adjacent-diff,dce'])
+        for name in ['keel-fast', 'keel-none', 'clang-O2']:
+            self.assertNotIn('-p', configs[name][1])
+        with self.assertRaises(ValueError):
+            compiler_configurations(baseline_passes='dce')
 
 
 if __name__ == '__main__':
