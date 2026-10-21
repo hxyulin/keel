@@ -371,6 +371,8 @@ pub struct Function {
     signatures: Arena<SigRef, Signature>,
     /// Block order. The first block is the entry.
     layout: Vec<Block>,
+    /// Whether each block is in `layout`.
+    in_layout: Vec<bool>,
     /// The function that interprets this function's landing pads while
     /// an exception unwinds, such as C++'s `__gxx_personality_v0`. Needed
     /// for `invoke`.
@@ -458,6 +460,7 @@ impl Function {
             data_symbols: Arena::new(),
             signatures: Arena::new(),
             layout: Vec::new(),
+            in_layout: Vec::new(),
             personality: None,
             local: false,
             weak_odr: false,
@@ -554,6 +557,7 @@ impl Function {
     pub fn create_block(&mut self) -> Block {
         let block = self.blocks.push(BlockData::default());
         self.layout.push(block);
+        self.in_layout.push(true);
         block
     }
 
@@ -819,11 +823,12 @@ impl Function {
             self.insts[inst].block = NO_BLOCK;
         }
         self.layout.retain(|&b| b != block);
+        self.in_layout[block.index()] = false;
     }
 
     /// Whether `block` is in the layout.
     pub fn is_block_inserted(&self, block: Block) -> bool {
-        self.layout.contains(&block)
+        self.in_layout[block.index()]
     }
 
     /// Removes parameter `index` of `block` and returns its value, which
