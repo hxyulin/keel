@@ -2806,6 +2806,21 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
             }
             declared = Some(g);
         }
+        // Arguments have already been evaluated exactly once. Interpret the
+        // canonical size_t operands as unsigned, including SIZE_MAX (-1 in
+        // the constant evaluator). A maximal bound covers every runtime size.
+        let bound = crate::eval::eval_int(&args[3]).map(|n| n as u64);
+        let length = crate::eval::eval_int(&args[2]).map(|n| n as u64);
+        if bound
+            .is_some_and(|bound| bound == u64::MAX || length.is_some_and(|length| length <= bound))
+        {
+            let mut ordinary = vals[..3].to_vec();
+            if id == Intrinsic::Memset {
+                ordinary[1] = self.b.ins().trunc(Type::I8, ordinary[1]);
+            }
+            self.b.ins().intrinsic(id, &ordinary);
+            return Ok(vals[0]);
+        }
         let sig = Signature::new(&params.iter().map(Ty::ir).collect::<Vec<_>>(), &[Type::Ptr]);
         let symbol = if let Some(g) = declared {
             self.g.use_global(g);

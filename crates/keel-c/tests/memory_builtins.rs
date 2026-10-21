@@ -391,7 +391,7 @@ fn checked_memory_calls_preserve_bound_and_prototype_checks() {
     for target in Target::ALL {
         for name in ["memcpy", "memmove", "memset"] {
             let second = if name == "memset" { "257" } else { "s" };
-            for bound in ["3", "bound()", "__builtin_object_size(d,0)"] {
+            for bound in ["3", "bound()"] {
                 let source = format!(
                     "unsigned long bound(void); void *f(void *d, const void *s) {{ return __builtin___{name}_chk(d,{second},7,{bound}); }}"
                 );
