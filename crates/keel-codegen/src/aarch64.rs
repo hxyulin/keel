@@ -1384,15 +1384,15 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
+            InstData::VectorSelect { args } => self.vector_select(args, result),
             InstData::VectorBinary { op, args } => self.vector_binary(op, args, result),
             InstData::VectorUnary { op, arg } => self.vector_unary(op, arg, result),
             InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
             InstData::VectorExtract { arg, lane } => self.vector_extract(arg, lane, result),
             InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
-            | InstData::VectorIcmp { .. }
-            | InstData::VectorFcmp { .. }
-            | InstData::VectorSelect { .. } => unreachable!("legalized vector operation"),
+            | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {
                     self.folded_values.contains(&r)

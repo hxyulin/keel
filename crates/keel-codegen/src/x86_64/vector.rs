@@ -79,9 +79,90 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorBinary { op, args } => {
             packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
         }
+        InstData::VectorSelect { .. } => true,
+        InstData::VectorIcmp { cond, args } => {
+            packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
+        }
         InstData::VectorUnary {
             op: UnaryOp::Fsqrt, ..
         } => true,
         _ => false,
     })
+}
+
+// SSE2 handles equality at every integer width and signed ordering through i32.
+// Keep wider/unsigned ordering on the existing scalar legalization path.
+pub(super) fn packed_compare(cond: IntCC, shape: VectorType) -> Option<Opcode> {
+    use VectorType::*;
+    Some(match (cond, shape) {
+        (IntCC::Eq | IntCC::Ne, I8x16) => Opcode::Pcmpeqb,
+        (IntCC::Eq | IntCC::Ne, I16x8) => Opcode::Pcmpeqw,
+        (IntCC::Eq | IntCC::Ne, I32x4 | I64x2) => Opcode::Pcmpeqd,
+        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I8x16) => Opcode::Pcmpgtb,
+        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I16x8) => Opcode::Pcmpgtw,
+        (IntCC::Slt | IntCC::Sle | IntCC::Sgt | IntCC::Sge, I32x4) => Opcode::Pcmpgtd,
+        _ => return None,
+    })
+}
+impl FunctionCompiler<'_> {
+    // Always stage before defining the result: all operands may spill, alias,
+    // or remain live, and a spilled result itself uses FS0.
+    fn vector_stage(&mut self, value: Value, scratch: u8) {
+        let r = self.use_freg(value, scratch);
+        if r != scratch {
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(scratch)), asm_arg(&xmm(r))]);
+        }
+    }
+    fn vector_publish(&mut self, result: Option<Value>) {
+        let d = self.def_freg(result);
+        if d != FS0 {
+            self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(FS0))]);
+        }
+        self.def_done(result, d);
+    }
+    pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
+        let shape = self.ty(args[0]).vector().unwrap();
+        let swap = matches!(cond, IntCC::Slt | IntCC::Sge);
+        self.vector_stage(args[usize::from(swap)], FS0);
+        self.vector_stage(args[usize::from(!swap)], FS1);
+        self.emit(
+            packed_compare(cond, shape).unwrap(),
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+        );
+        if shape == VectorType::I64x2 {
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+            );
+            self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        }
+        if matches!(cond, IntCC::Ne | IntCC::Sle | IntCC::Sge) {
+            self.emit(Opcode::Pcmpeqd, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+            self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        }
+        self.vector_publish(result);
+    }
+    pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
+        let shape = self.ty(args[0]).vector().unwrap();
+        self.vector_stage(args[0], FS0);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1))]);
+        self.emit(
+            packed_compare(IntCC::Eq, shape).unwrap(),
+            [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))],
+        );
+        if shape == VectorType::I64x2 {
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS0)), asm_arg(&0xb1i64)],
+            );
+            self.emit(Opcode::Andps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        }
+        self.vector_stage(args[1], FS1);
+        self.vector_stage(args[2], FS2);
+        // b ^ ((a ^ b) & !is_zero(mask)); masks need not be canonical.
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS2))]);
+        self.emit(Opcode::Andnps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS2))]);
+        self.vector_publish(result);
+    }
 }

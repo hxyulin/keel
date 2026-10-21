@@ -1004,6 +1004,8 @@ impl<'a> FunctionCompiler<'a> {
             return;
         }
         match func.inst_data(inst).clone() {
+            InstData::VectorIcmp { cond, args } => self.vector_compare(cond, args, result),
+            InstData::VectorSelect { args } => self.vector_select(args, result),
             InstData::VectorBinary { op, args } => {
                 let d = self.def_freg(result);
                 let a = self.use_freg(args[0], FS0);
@@ -1067,9 +1069,7 @@ impl<'a> FunctionCompiler<'a> {
             | InstData::VectorUnary { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
-            | InstData::VectorIcmp { .. }
-            | InstData::VectorFcmp { .. }
-            | InstData::VectorSelect { .. } => unreachable!("legalized vector operation"),
+            | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),
             InstData::StackAddr { .. } | InstData::Iconst { .. }
                 if result.is_some_and(|r| {
                     self.folded_values.contains(&r)

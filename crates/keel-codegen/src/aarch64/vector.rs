@@ -99,7 +99,9 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorUnary { op, arg } => {
             unary(*op, f.value_type(*arg).vector().unwrap()).is_some()
         }
-        InstData::VectorSplat { .. } => true,
+        InstData::VectorSplat { .. }
+        | InstData::VectorSelect { .. }
+        | InstData::VectorIcmp { .. } => true,
         _ => false,
     })
 }
@@ -201,6 +203,110 @@ impl FunctionCompiler<'_> {
         } else {
             self.native(spec.opcode, base, text);
         }
+        self.def_done(result, d);
+    }
+    pub(super) fn vector_compare(&mut self, cond: IntCC, args: [Value; 2], result: Option<Value>) {
+        let (op, name, swap) = match cond {
+            IntCC::Eq | IntCC::Ne => (Opcode::CMEQ_asimdsame_only, "cmeq", false),
+            IntCC::Sgt => (Opcode::CMGT_asimdsame_only, "cmgt", false),
+            IntCC::Slt => (Opcode::CMGT_asimdsame_only, "cmgt", true),
+            IntCC::Sge => (Opcode::CMGE_asimdsame_only, "cmge", false),
+            IntCC::Sle => (Opcode::CMGE_asimdsame_only, "cmge", true),
+            IntCC::Ugt => (Opcode::CMHI_asimdsame_only, "cmhi", false),
+            IntCC::Ult => (Opcode::CMHI_asimdsame_only, "cmhi", true),
+            IntCC::Uge => (Opcode::CMHS_asimdsame_only, "cmhs", false),
+            IntCC::Ule => (Opcode::CMHS_asimdsame_only, "cmhs", true),
+        };
+        let shape = self.ty(args[0]).vector().unwrap();
+        let a = self.use_freg(args[usize::from(swap)], FS0);
+        let b = self.use_freg(args[usize::from(!swap)], FS1);
+        let d = self.def_freg(result);
+        self.native(
+            op,
+            [
+                (FieldId::Q, 1),
+                (
+                    FieldId::size,
+                    shape.lane_type().bytes().unwrap().trailing_zeros(),
+                ),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+                (FieldId::Rm, b.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "{name}\tv{d}.{}, v{a}.{}, v{b}.{}",
+                    arrangement(shape),
+                    arrangement(shape),
+                    arrangement(shape)
+                )
+            },
+        );
+        if cond == IntCC::Ne {
+            self.native(
+                Opcode::NOT_asimdmisc_R,
+                [
+                    (FieldId::Q, 1),
+                    (FieldId::Rd, d.into()),
+                    (FieldId::Rn, d.into()),
+                ],
+                |out| write!(out, "mvn\tv{d}.16b, v{d}.16b"),
+            );
+        }
+        self.def_done(result, d);
+    }
+    pub(super) fn vector_select(&mut self, args: [Value; 3], result: Option<Value>) {
+        let shape = self.ty(args[0]).vector().unwrap();
+        let mask = self.use_freg(args[0], FS0);
+        self.move_vector(FS0, mask);
+        self.native(
+            Opcode::EOR_asimdsame_only,
+            [
+                (FieldId::Q, 1),
+                (FieldId::Rd, FS1.into()),
+                (FieldId::Rn, FS1.into()),
+                (FieldId::Rm, FS1.into()),
+            ],
+            |out| write!(out, "eor\tv{FS1}.16b, v{FS1}.16b, v{FS1}.16b"),
+        );
+        self.native(
+            Opcode::CMEQ_asimdsame_only,
+            [
+                (FieldId::Q, 1),
+                (
+                    FieldId::size,
+                    shape.lane_type().bytes().unwrap().trailing_zeros(),
+                ),
+                (FieldId::Rd, FS0.into()),
+                (FieldId::Rn, FS0.into()),
+                (FieldId::Rm, FS1.into()),
+            ],
+            |out| {
+                write!(
+                    out,
+                    "cmeq\tv{FS0}.{}, v{FS0}.{}, v{FS1}.{}",
+                    arrangement(shape),
+                    arrangement(shape),
+                    arrangement(shape)
+                )
+            },
+        );
+        let a = self.use_freg(args[1], FS1);
+        let b = self.use_freg(args[2], FS2);
+        // Select the false arm where mask == 0, preserving arbitrary mask bits.
+        self.native(
+            Opcode::BSL_asimdsame_only,
+            [
+                (FieldId::Q, 1),
+                (FieldId::Rd, FS0.into()),
+                (FieldId::Rn, b.into()),
+                (FieldId::Rm, a.into()),
+            ],
+            |out| write!(out, "bsl\tv{FS0}.16b, v{b}.16b, v{a}.16b"),
+        );
+        let d = self.def_freg(result);
+        self.move_vector(d, FS0);
         self.def_done(result, d);
     }
     pub(super) fn move_vector(&mut self, d: u8, s: u8) {

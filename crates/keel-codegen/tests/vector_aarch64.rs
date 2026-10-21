@@ -60,6 +60,12 @@ fn neon_operations_emit_zero_text_and_identical_objects() {
     ] {
         let (text, _) = compile(&source, selection, allocation, tiny);
         for instruction in [
+            "cmeq\tv",
+            "cmgt\tv",
+            "cmge\tv",
+            "cmhi\tv",
+            "cmhs\tv",
+            "bsl\tv",
             "fadd\tv",
             "dup\tv",
             "fmul\tv",

@@ -65,7 +65,7 @@ fn all_vector_operations_emit_zero_text_and_identical_typed_objects() {
         let (text, _) = compile(&source, s, a, t, Features::default());
         for opcode in [
             "paddb", "paddw", "paddd", "paddq", "psubb", "psubq", "pmullw", "addps", "addpd",
-            "sqrtps", "sqrtpd",
+            "sqrtps", "sqrtpd", "pcmpeqd", "pcmpgtd", "pshufd", "andnps",
         ] {
             assert!(text.contains(opcode), "missing {opcode}");
         }

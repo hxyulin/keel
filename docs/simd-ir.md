@@ -319,3 +319,16 @@ The profiling evidence identifies this scan as an opportunity, not a dominant
 application cost. Short inputs pay an additional range check; benchmark long
 ASCII runs and early failures separately before attributing application gains
 to this transformation.
+
+## Packed integer predicates and lane selection
+
+NEON emits native comparisons for every integer shape and predicate. Baseline
+SSE2 emits packed equality/inequality for all integer shapes (i64 equality combines
+both dword halves), and signed ordering for i8/i16/i32. Unsigned ordering and i64
+signed ordering retain scalar legalization on SSE2. No newer CPU feature is assumed.
+
+Both backends lower lane selection with packed operations. Each mask lane is
+normalized by comparison with zero: a nonzero mask selects the entire true lane,
+including masks with only one bit set. Float arms are selected bitwise, preserving
+NaN payloads and signed zero. Sources are captured before publishing the result,
+including spilled operands and results; allocated inputs may remain live.
