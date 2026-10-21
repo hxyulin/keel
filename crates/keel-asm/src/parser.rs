@@ -532,7 +532,8 @@ fn assemble_pass(
     let mut symbolic_leb = false;
     let mut has_build_version = false;
     let mut leb_differences = BumpVec::new_in(&arena);
-    let (label_count, branch_count) = source.reservations();
+    let reservations = source.reservations();
+    let (label_count, branch_count) = (reservations.labels, reservations.branches);
     let mut label_order = BumpVec::with_capacity_in(label_count, &arena);
     let mut result = Assembly {
         build_version: crate::BuildVersion::default(),
@@ -552,7 +553,8 @@ fn assemble_pass(
     let mut aliases = BTreeMap::new();
     let mut current = 0;
     let mut labels: Labels = FxHashMap::default();
-    labels.reserve(label_count);
+    // Unwind tables add a label for each procedure after layout.
+    labels.reserve(label_count + reservations.frames);
     let mut globals: FxHashMap<&str, usize> = FxHashMap::default();
     let mut private_externs = FxHashMap::default();
     let mut weak_definitions = FxHashMap::default();
@@ -1840,17 +1842,23 @@ fn assemble_pass(
     // Label names are unique; dedupe the other (mostly repeated) references
     // here so that only distinct names are sorted.
     let mut names = if compact {
-        let relocated: FxHashSet<&str> = result
+        // Look up only the global and relocated names, not every label.
+        let mut names =
+            BumpVec::from_iter_in(labels.keys().copied().filter(|n| !n.starts_with('L')), &arena);
+        let mut kept = FxHashSet::default();
+        let referenced = result
             .relocations
             .iter()
-            .flat_map(|r| std::iter::once(r.symbol.as_str()).chain(r.subtract_symbol.as_deref()))
-            .collect();
-        BumpVec::from_iter_in(
-            labels.keys().copied().filter(|name| {
-                !name.starts_with('L') || globals.contains_key(name) || relocated.contains(name)
-            }),
-            &arena,
-        )
+            .flat_map(|r| std::iter::once(r.symbol.as_str()).chain(r.subtract_symbol.as_deref()));
+        for name in globals.keys().copied().chain(referenced) {
+            if name.starts_with('L')
+                && let Some((&label, _)) = labels.get_key_value(name)
+                && kept.insert(label)
+            {
+                names.push(label);
+            }
+        }
+        names
     } else {
         BumpVec::from_iter_in(labels.keys().copied(), &arena)
     };

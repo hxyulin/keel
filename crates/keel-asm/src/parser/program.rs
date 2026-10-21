@@ -84,24 +84,16 @@ impl<'a> Input<'a> {
             }
         }
     }
-    /// The labels and branches a structured input declares, so a pass can
-    /// reserve their tables at once rather than leave outgrown copies in its
-    /// arena. Text input reserves nothing.
-    pub(super) fn reservations(self) -> (usize, usize) {
-        use keel_asm_ir::SymbolicInstruction as S;
+    /// The labels, branches and CFI procedures a structured input declares,
+    /// so a pass can reserve their tables at once rather than regrow them or
+    /// leave outgrown copies in its arena. Text input reserves nothing.
+    pub(super) fn reservations(self) -> Reservations {
         if let Self::Compact(c) = self {
             return c.reservations;
         }
-        self.items()
-            .fold((0, 0), |(labels, branches), item| match item {
-                ItemRef::Label(_) | ItemRef::Directive(Directive::ZeroFill { .. }) => {
-                    (labels + 1, branches)
-                }
-                ItemRef::Branch(..) | ItemRef::Symbolic(S::Conditional { .. } | S::Compare { .. }) => {
-                    (labels, branches + 1)
-                }
-                _ => (labels, branches),
-            })
+        let mut r = Reservations::default();
+        self.items().for_each(|item| r.count(item));
+        r
     }
     pub(super) fn lines(self, arena: &'a Bump) -> Lines<'a> {
         match self {
@@ -155,10 +147,31 @@ pub(crate) struct Compact {
     directives: Vec<Directive>,
     other: Vec<Item>,
     /// [`Input::reservations`], counted as items arrive.
-    reservations: (usize, usize),
+    reservations: Reservations,
     features: crate::TargetFeatures,
 }
 const SEPARATOR: char = '\0';
+#[derive(Clone, Copy, Default)]
+pub(super) struct Reservations {
+    pub labels: usize,
+    pub branches: usize,
+    /// `.cfi_startproc` procedures: each gains at least one synthesized
+    /// unwind label.
+    pub frames: usize,
+}
+impl Reservations {
+    fn count(&mut self, item: ItemRef<'_>) {
+        use keel_asm_ir::{Cfi, SymbolicInstruction as S};
+        match item {
+            ItemRef::Label(_) | ItemRef::Directive(Directive::ZeroFill { .. }) => self.labels += 1,
+            ItemRef::Branch(..) | ItemRef::Symbolic(S::Conditional { .. } | S::Compare { .. }) => {
+                self.branches += 1
+            }
+            ItemRef::Directive(Directive::Cfi(Cfi::Start)) => self.frames += 1,
+            _ => {}
+        }
+    }
+}
 /// A [`Compact`] item in twelve bytes.
 enum Stored {
     /// `names[start..start + len]`.
@@ -182,7 +195,7 @@ impl Compact {
             symbolic: Vec::new(),
             directives: Vec::new(),
             other: Vec::new(),
-            reservations: (0, 0),
+            reservations: Reservations::default(),
             features,
         }
     }
@@ -225,16 +238,7 @@ impl Compact {
                 *self.gaps.last_mut().unwrap() += 1;
                 continue;
             }
-            use keel_asm_ir::SymbolicInstruction as S;
-            match &item {
-                Item::Label(_) | Item::Directive(Directive::ZeroFill { .. }) => {
-                    self.reservations.0 += 1
-                }
-                Item::Branch { .. } | Item::Symbolic(S::Conditional { .. } | S::Compare { .. }) => {
-                    self.reservations.1 += 1
-                }
-                _ => {}
-            }
+            self.reservations.count(ItemRef::of(&item));
             let stored = match item {
                 Item::Label(name) => {
                     let (start, len) = self.name(&name);
