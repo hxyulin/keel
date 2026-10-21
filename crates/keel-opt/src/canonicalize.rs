@@ -7,10 +7,10 @@
 use keel_ir::{BinaryOp, Function, InstData, Type, Value, ValueDef};
 
 fn order(func: &Function, value: Value) -> (bool, Value) {
-    let literal = matches!(
-        crate::const_fold::constant_data(func, value),
-        Some(InstData::Iconst { .. })
-    );
+    let literal = match func.value_def(func.resolve(value)) {
+        ValueDef::Result(inst, _) => matches!(func.inst_data(inst), InstData::Iconst { .. }),
+        _ => false,
+    };
     (literal, value)
 }
 
@@ -88,10 +88,38 @@ pub(crate) fn normalize(func: &Function, data: &mut InstData) {
     }
 }
 
+/// Whether `normalize` would change `data`. Most instructions are already
+/// normal, and checking first avoids copying them.
+fn needs_normalize(func: &Function, data: &InstData) -> bool {
+    let mut aliased = false;
+    data.for_each_operand(|v| aliased |= func.resolve(v) != v);
+    if aliased {
+        return true;
+    }
+    match *data {
+        InstData::Binary { op, args } => {
+            (op == BinaryOp::Or && rotate(func, args).is_some())
+                || (!op.is_float()
+                    && crate::gvn::is_commutative(op)
+                    && order(func, args[0]) > order(func, args[1]))
+        }
+        InstData::Overflow { op, args } => {
+            crate::gvn::is_commutative_overflow(op) && order(func, args[0]) > order(func, args[1])
+        }
+        InstData::Icmp { args, .. } => order(func, args[0]) > order(func, args[1]),
+        _ => false,
+    }
+}
+
 pub fn run(func: &mut Function) -> bool {
     let mut changed = false;
     for block in func.blocks().collect::<Vec<_>>() {
-        for inst in func.block_insts(block).to_vec() {
+        // Normalizing rewrites payloads in place; the layout does not change.
+        for i in 0..func.block_insts(block).len() {
+            let inst = func.block_insts(block)[i];
+            if !needs_normalize(func, func.inst_data(inst)) {
+                continue;
+            }
             let mut data = func.inst_data(inst).clone();
             normalize(func, &mut data);
             if data != *func.inst_data(inst) {
