@@ -1065,8 +1065,8 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(Opcode::Movq, [asm_arg(&r64(d)), asm_arg(&xmm(source))]);
                 self.def_done(result, d);
             }
-            InstData::VectorSplat { .. }
-            | InstData::VectorUnary { .. }
+            InstData::VectorSplat { ty, arg } => self.vector_splat(ty, arg, result),
+            InstData::VectorUnary { .. }
             | InstData::VectorInsert { .. }
             | InstData::VectorShuffle { .. }
             | InstData::VectorFcmp { .. } => unreachable!("legalized vector operation"),

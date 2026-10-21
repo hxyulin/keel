@@ -79,7 +79,7 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
         InstData::VectorBinary { op, args } => {
             packed(*op, func.value_type(args[0]).vector().unwrap()).is_some()
         }
-        InstData::VectorSelect { .. } => true,
+        InstData::VectorSelect { .. } | InstData::VectorSplat { .. } => true,
         InstData::VectorIcmp { cond, args } => {
             packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
         }
@@ -117,6 +117,39 @@ impl FunctionCompiler<'_> {
         let d = self.def_freg(result);
         if d != FS0 {
             self.emit(Opcode::Movaps, [asm_arg(&xmm(d)), asm_arg(&xmm(FS0))]);
+        }
+        self.def_done(result, d);
+    }
+    pub(super) fn vector_splat(&mut self, ty: Type, arg: Value, result: Option<Value>) {
+        let shape = ty.vector().unwrap();
+        let d = self.def_freg(result);
+        if shape.lane_type().is_float() {
+            let a = self.use_freg(arg, FS1);
+            // Duplicate the low scalar's bits without FP arithmetic (NaNs and
+            // signed zero included). pshufd also permits d to alias its source.
+            let shuffle = if shape == VectorType::F32x4 { 0 } else { 0x44 };
+            self.emit(
+                Opcode::Pshufd,
+                [asm_arg(&xmm(d)), asm_arg(&xmm(a)), asm_arg(&shuffle)],
+            );
+        } else {
+            let a = self.use_reg(arg, S0);
+            if shape == VectorType::I64x2 {
+                self.emit(Opcode::Movq, [asm_arg(&xmm(d)), asm_arg(&r64(a))]);
+                self.emit(Opcode::Punpcklqdq, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+            } else {
+                self.emit(Opcode::Movd, [asm_arg(&xmm(d)), asm_arg(&r32(a))]);
+                if shape == VectorType::I8x16 {
+                    self.emit(Opcode::Punpcklbw, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+                }
+                if matches!(shape, VectorType::I8x16 | VectorType::I16x8) {
+                    self.emit(Opcode::Punpcklwd, [asm_arg(&xmm(d)), asm_arg(&xmm(d))]);
+                }
+                self.emit(
+                    Opcode::Pshufd,
+                    [asm_arg(&xmm(d)), asm_arg(&xmm(d)), asm_arg(&0i64)],
+                );
+            }
         }
         self.def_done(result, d);
     }

@@ -18,11 +18,29 @@ const TINY: Pools = Pools {
     float_caller_saved: &[0, 1],
     float_callee_saved: &[],
 };
+const SPILLED: Pools = Pools {
+    float_caller_saved: &[],
+    ..TINY
+};
 fn compile(
     source: &str,
     selection: SelectionTier,
     allocation: AllocationTier,
     tiny: bool,
+    features: Features,
+) -> (String, keel_asm_ir::Program) {
+    let pools = if tiny {
+        &TINY
+    } else {
+        &keel_codegen::x86_64::REGISTERS
+    };
+    compile_with_pools(source, selection, allocation, pools, features)
+}
+fn compile_with_pools(
+    source: &str,
+    selection: SelectionTier,
+    allocation: AllocationTier,
+    pools: &Pools,
     features: Features,
 ) -> (String, keel_asm_ir::Program) {
     let mut m = keel_ir::parse(source).unwrap();
@@ -37,11 +55,6 @@ fn compile(
     let pipeline = CodegenPipeline {
         selector: &selector,
         allocator: &allocation,
-    };
-    let pools = if tiny {
-        &TINY
-    } else {
-        &keel_codegen::x86_64::REGISTERS
     };
     let text = keel_codegen::x86_64::compile_with_pipeline(&m, pools, &pipeline).unwrap();
     let program =
@@ -474,6 +487,26 @@ fn packed_integer_compare_oracle_emits_both_object_routes() {
             }
         }
     }
+    for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+        let (text, program) = compile_with_pools(
+            &source,
+            SelectionTier::Baseline,
+            allocation,
+            &SPILLED,
+            Features::default(),
+        );
+        assert!(text.contains("xmmword ptr [rbp"));
+        if let Some(dir) = &evidence {
+            let stem = format!("{allocation:?}-spilled");
+            fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+            fs::write(
+                dir.join(format!("{stem}.o")),
+                keel_asm::x86::assemble_program_object_with_features(&program, Features::default())
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+    }
     let dir = temp("packed-compare-syntax");
     let c = dir.join("oracle.c");
     fs::write(&c, harness).unwrap();
@@ -503,10 +536,14 @@ fn packed_integer_compare_boundaries_aliases_live_inputs_and_spills_execute() {
         SelectionTier::Full,
     ] {
         for allocation in [AllocationTier::Fast, AllocationTier::Full] {
-            for tiny in [false, true] {
-                println!("packed compare: {selection:?} {allocation:?} tiny={tiny}");
+            for (pool_name, pools) in [
+                ("normal", &keel_codegen::x86_64::REGISTERS),
+                ("tiny", &TINY),
+                ("spilled", &SPILLED),
+            ] {
+                println!("packed compare: {selection:?} {allocation:?} pool={pool_name}");
                 let (_, program) =
-                    compile(&source, selection, allocation, tiny, Features::default());
+                    compile_with_pools(&source, selection, allocation, pools, Features::default());
                 let object = dir.join("oracle.o");
                 fs::write(
                     &object,
@@ -534,7 +571,7 @@ fn packed_integer_compare_boundaries_aliases_live_inputs_and_spills_execute() {
 }
 
 #[test]
-fn packed_compare_recipe_encodings_match_clang_sse2() {
+fn packed_compare_and_splat_recipe_encodings_match_clang_sse2() {
     use object::{Object, ObjectSection};
     let (source, _) = x86_packed::fixture();
     let (text, _) = compile(
@@ -548,7 +585,7 @@ fn packed_compare_recipe_encodings_match_clang_sse2() {
     let mut comparison = false;
     for line in text.lines() {
         if line.trim_start().starts_with('#') {
-            comparison = line.contains(" = vicmp.");
+            comparison = line.contains(" = vicmp.") || line.contains(" = vsplat.");
         } else if comparison && !line.trim().is_empty() {
             assembly += line;
             assembly += "\n";
@@ -627,6 +664,44 @@ fn packed_compare_coalesces_result_without_staging_register_rhs() {
                     "{text}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn packed_splats_use_sse2_without_stack_staging() {
+    for (shape, lane) in [
+        ("i8x16", "i8"),
+        ("i16x8", "i16"),
+        ("i32x4", "i32"),
+        ("i64x2", "i64"),
+        ("f32x4", "f32"),
+        ("f64x2", "f64"),
+    ] {
+        let source = format!(
+            "func @splat({lane}) -> {shape} {{\nblock0(v0: {lane}):\n v1 = vsplat.{shape} v0\n return v1\n}}\n"
+        );
+        for allocation in [AllocationTier::Fast, AllocationTier::Full] {
+            let (text, _) = compile(
+                &source,
+                SelectionTier::Baseline,
+                allocation,
+                true,
+                Features::default(),
+            );
+            assert!(!text.contains("[rbp") && !text.contains("[rsp"), "{text}");
+            assert!(
+                !text.contains("vbroadcast") && !text.contains("vpbroadcast"),
+                "{text}"
+            );
+            assert!(
+                text.contains(if shape == "i64x2" {
+                    "punpcklqdq"
+                } else {
+                    "pshufd"
+                }),
+                "{text}"
+            );
         }
     }
 }
