@@ -37,14 +37,28 @@ const MAX_BLOCK_DESTINATIONS: usize = 1024;
 
 // CFG construction deduplicates destinations within a block. Bound both that
 // quadratic work and total syntactic edges before allocating or computing it.
-fn within_cfg_budget(f: &Function) -> bool {
+fn eligible_caller(f: &Function) -> bool {
     if f.num_blocks() > MAX_BLOCK_INDICES {
         return false;
     }
     let mut remaining = MAX_DESTINATIONS;
+    let mut instructions = 0;
+    let mut reads = 0;
     for b in f.blocks() {
         let mut block_remaining = MAX_BLOCK_DESTINATIONS;
         for &i in f.block_insts(b) {
+            instructions += 1;
+            if instructions > MAX_INSTS {
+                return false;
+            }
+            match f.inst_data(i) {
+                InstData::Intrinsic {
+                    id: Intrinsic::FrameAddress,
+                    ..
+                } => return false,
+                InstData::Load { flags, .. } if !flags.volatile => reads = (reads + 1).min(2),
+                _ => {}
+            }
             let count = f.inst_data(i).branch_dests().len();
             if count > remaining || count > block_remaining {
                 return false;
@@ -53,7 +67,9 @@ fn within_cfg_budget(f: &Function) -> bool {
             block_remaining -= count;
         }
     }
-    true
+    // Without two ordinary reads there can be no reusable successful read.
+    // Avoid CFG construction and availability snapshots for these callers.
+    reads == 2
 }
 
 // Whitelist excludes division, floating environment effects, frame observers,
@@ -123,20 +139,10 @@ fn run(module: &mut Module) -> bool {
             || f.sig.returns_twice
             || !f.debug_vars.is_empty()
             || f.debug_loc.is_some()
-            || f.layout_insts().take(MAX_INSTS + 1).count() > MAX_INSTS
-            || f.layout_insts().any(|(_, i)| {
-                matches!(
-                    f.inst_data(i),
-                    InstData::Intrinsic {
-                        id: Intrinsic::FrameAddress,
-                        ..
-                    }
-                )
-            })
         {
             continue;
         }
-        if !within_cfg_budget(f) {
+        if !eligible_caller(f) {
             continue;
         }
         let cfg = ControlFlowGraph::compute(f);

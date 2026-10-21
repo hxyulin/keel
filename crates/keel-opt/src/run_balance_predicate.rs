@@ -12,18 +12,23 @@ use std::collections::HashSet;
 
 pub fn run(f: &mut Function) -> bool {
     let mut changed = false;
+    let mut cfg = None;
     let heads: Vec<_> = f.blocks().collect();
     for head in heads {
-        changed |= convert(f, head);
+        if convert(f, head, &mut cfg) {
+            changed = true;
+            // Conversion removes private arms. Later candidates must see the
+            // new edges, while nonmatching heads can share one lazy snapshot.
+            cfg = None;
+        }
     }
     changed
 }
 
-fn convert(f: &mut Function, head: Block) -> bool {
+fn convert(f: &mut Function, head: Block, cfg: &mut Option<ControlFlowGraph>) -> bool {
     if !f.is_block_inserted(head) {
         return false;
     }
-    let cfg = ControlFlowGraph::compute(f);
     let Some(&term) = f.block_insts(head).last() else {
         return false;
     };
@@ -34,7 +39,7 @@ fn convert(f: &mut Function, head: Block) -> bool {
         return false;
     }
     let (positive, negative) = (dests[0].block, dests[1].block);
-    if positive == negative || cfg.preds(positive) != [head] || cfg.preds(negative) != [head] {
+    if positive == negative {
         return false;
     }
     let Some(input_cmp) = def(f, cond) else {
@@ -59,6 +64,12 @@ fn convert(f: &mut Function, head: Block) -> bool {
         return false;
     }
     if f.block_params(positive).len() != 0 || f.block_params(negative).len() != 0 {
+        return false;
+    }
+    // Reject ordinary branches using local instruction checks before paying
+    // for whole-function CFG construction.
+    let cfg = cfg.get_or_insert_with(|| ControlFlowGraph::compute(f));
+    if cfg.preds(positive) != [head] || cfg.preds(negative) != [head] {
         return false;
     }
 

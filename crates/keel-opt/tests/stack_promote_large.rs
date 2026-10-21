@@ -454,3 +454,22 @@ fn shared_covering_initializer_survives_later_field_cutoff() {
     assert_eq!(memory(&m.functions[0]), 0);
     assert_eq!(execute(&m.functions[0], &[0]), u64::from(u32::MAX));
 }
+
+#[test]
+fn wide_switch_is_bounded_before_cfg_construction() {
+    for (destinations, remaining_memory) in [(1024, 0), (1025, 2)] {
+        let cases = (0..destinations - 1)
+            .map(|n| format!("{n}: block1"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let src = format!(
+            "func @f(i64) -> i64 {{\n ss0 = stack_slot 8, align 8\nblock0(v0: i64):\n v1 = stack_addr ss0\n store v0,v1\n switch v0, block1, [{cases}]\nblock1:\n v2 = load.i64 v1\n return v2\n}}"
+        );
+        let original = keel_ir::parse(&src).unwrap();
+        let m = optimize(&src);
+        assert_eq!(memory(&m.functions[0]), remaining_memory);
+        if remaining_memory != 0 {
+            assert_eq!(m.to_string(), original.to_string());
+        }
+    }
+}

@@ -22,12 +22,21 @@ pub fn run_large(f: &mut Function) -> bool {
 }
 
 fn run_impl(f: &mut Function, large: bool) -> bool {
-    let blocks: Vec<_> = f.blocks().collect();
-    if blocks.is_empty() || blocks.len() > if large { 4096 } else { 256 } {
+    if f.stack_slots().next().is_none() {
         return false;
     }
-    let insts: Vec<_> = f.layout_insts().map(|(_, i)| i).collect();
-    if insts.len() > if large { 65536 } else { 8192 } {
+    let block_limit = if large { 4096 } else { 256 };
+    let blocks: Vec<_> = f.blocks().take(block_limit + 1).collect();
+    if blocks.is_empty() || blocks.len() > block_limit {
+        return false;
+    }
+    let inst_limit = if large { 65536 } else { 8192 };
+    let insts: Vec<_> = f
+        .layout_insts()
+        .take(inst_limit + 1)
+        .map(|(_, i)| i)
+        .collect();
+    if insts.len() > inst_limit {
         return false;
     }
     if insts.iter().any(|&i| match f.inst_data(i) {
@@ -51,6 +60,19 @@ fn run_impl(f: &mut Function, large: bool) -> bool {
         .map(|&i| f.inst_data(i).branch_dests().len())
         .sum();
     if large && (f.num_blocks() > 8192 || edge_count > 16384) {
+        return false;
+    }
+    // CFG construction deduplicates successors with a linear membership test.
+    // The total edge cap alone allows quadratic work in a single wide switch.
+    if large
+        && blocks.iter().any(|&b| {
+            f.block_insts(b)
+                .iter()
+                .map(|&i| f.inst_data(i).branch_dests().len())
+                .sum::<usize>()
+                > 1024
+        })
+    {
         return false;
     }
     let cfg = ControlFlowGraph::compute(f);
