@@ -311,7 +311,13 @@ impl RegisterAllocator for Controlled {
         };
         allocation.spill_slots = 4;
         allocation.locs[0][0] = Some(x);
-        allocation.locs[0][4] = Some(y);
+        // Sign mode tests the comparison itself; clamp modes test its root.
+        let result = if input.func.name.starts_with("controlled_sign_") {
+            3
+        } else {
+            4
+        };
+        allocation.locs[0][result] = Some(y);
         allocation
     }
 }
