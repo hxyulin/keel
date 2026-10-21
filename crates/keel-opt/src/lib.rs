@@ -15,6 +15,7 @@ use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
 mod adjacent_abs;
+mod adjacent_diff;
 mod branch_ranges;
 mod call_contracts;
 mod canonicalize;
@@ -41,6 +42,7 @@ pub use loop_vectorize::VectorTarget;
 mod memory_alias;
 mod memory_forward;
 mod phi_simplify;
+mod run_balance_predicate;
 mod sccp;
 mod sign_extend_idiom;
 mod simplify_cfg;
@@ -190,6 +192,16 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "convert a private scalar absolute-value triangle without moving memory",
         run: adjacent_abs::run,
     },
+    BuiltinPass {
+        name: "adjacent-diff",
+        description: "ordered adjacent i32 absolute-difference SIMD reduction (opt-in)",
+        run: adjacent_diff::run,
+    },
+    BuiltinPass {
+        name: "run-balance-predicate",
+        description: "predicate a bounded wrapping running-state recurrence (opt-in)",
+        run: run_balance_predicate::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -249,6 +261,8 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::InlineAggregateReserve,
     &inline::InlineNoninterposable,
     &BUILTINS[17],
+    &BUILTINS[18],
+    &BUILTINS[19],
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
