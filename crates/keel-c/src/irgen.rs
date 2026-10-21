@@ -472,6 +472,7 @@ impl<'p> Gen<'p> {
             breaks: Vec::new(),
             continues: Vec::new(),
             labels: HashMap::default(),
+            callees: HashMap::default(),
             dispatch: None,
             dispatch_table,
             cases: Vec::new(),
@@ -1273,6 +1274,9 @@ struct FnGen<'g, 'p, 'f> {
     breaks: Vec<Block>,
     continues: Vec<Block>,
     labels: HashMap<&'p str, Block>,
+    /// Functions already imported, by global: their signatures are fixed
+    /// by a prototype or definition.
+    callees: HashMap<usize, keel_ir::FuncRef>,
     /// All computed gotos share one switch, with the label number as its
     /// first parameter. Leave it unsealed until every dispatch edge exists.
     dispatch: Option<Block>,
@@ -2490,8 +2494,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
                 self.g.use_global(*g);
                 let global = &self.g.p.globals[*g];
                 let symbol = if let Ty::Func(fty) = &global.ty {
-                    let sig = self.callee_signature(*g, fty, &[])?;
-                    Symbol::Func(self.b.import_function(&global.symbol, sig))
+                    Symbol::Func(self.import_global(*g, fty, &[])?)
                 } else {
                     Symbol::Data(self.b.import_data(&global.symbol))
                 };
@@ -2521,6 +2524,22 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
     }
 
     /// The signature to call global function `g` with.
+    /// Function `g` (of type `fty`), imported into this function under its
+    /// symbol. Once imported, later imports find it by name, so a fixed
+    /// signature need not be built again.
+    fn import_global(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> R<keel_ir::FuncRef> {
+        let fixed = fty.prototyped || self.g.p.globals[g].func.is_some();
+        if fixed && let Some(&fref) = self.callees.get(&g) {
+            return Ok(fref);
+        }
+        let sig = self.callee_signature(g, fty, args)?;
+        let fref = self.b.import_function(self.g.p.globals[g].symbol, sig);
+        if fixed {
+            self.callees.insert(g, fref);
+        }
+        Ok(fref)
+    }
+
     fn callee_signature(&mut self, g: usize, fty: &FuncTy, args: &[Ty]) -> R<Signature> {
         if fty.prototyped || self.g.p.globals[g].func.is_some() {
             return self.g.signature(fty, g, &[]);
@@ -2633,9 +2652,7 @@ impl<'g, 'p, 'f> FnGen<'g, 'p, 'f> {
         let inst = match direct {
             Some(g) => {
                 self.g.use_global(g);
-                let sig = self.callee_signature(g, &fty, &extra)?;
-                let name = self.g.p.globals[g].symbol;
-                let fref = self.b.import_function(&name, sig);
+                let fref = self.import_global(g, &fty, &extra)?;
                 self.b.ins().call(fref, &vals)
             }
             None => {
