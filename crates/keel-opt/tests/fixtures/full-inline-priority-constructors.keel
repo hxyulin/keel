@@ -1,0 +1,27 @@
+; Exact retained constructors from quickjs-guarded.keel at base 8d756b0a.
+func @JS_NewInt32(ptr sret [2 x i64], ptr, i32) cc(c) inlinehint alwaysinline local {
+    ss0 = stack_slot 8, align 8
+    ss1 = stack_slot 16, align 8
+block0(v0: ptr, v1: ptr, v2: i32):
+    v4 = iconst.i64 0
+    v5 = iconst.i64 8
+    v22 = uext.i64 v2
+    store v22, v0
+    v20 = ptradd v0, v5
+    store v4, v20
+    return
+}
+func @JS_NewBool(ptr sret [2 x i64], ptr, i32) cc(c) inlinehint alwaysinline local {
+    ss0 = stack_slot 8, align 8
+    ss1 = stack_slot 16, align 8
+block0(v0: ptr, v1: ptr, v2: i32):
+    v5 = iconst.i64 8
+    v10 = iconst.i32 0
+    v11 = icmp.ne v2, v10
+    v25 = uext.i64 v11
+    v15 = iconst.i64 1
+    store v25, v0
+    v23 = ptradd v0, v5
+    store v15, v23
+    return
+}
