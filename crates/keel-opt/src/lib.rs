@@ -14,6 +14,7 @@
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
+mod adjacent_abs;
 mod branch_ranges;
 mod call_contracts;
 mod canonicalize;
@@ -184,6 +185,11 @@ const BUILTINS: &[BuiltinPass] = &[
         description: "convert bounded nontrapping scalar diamonds to selects (opt-in)",
         run: if_convert::run,
     },
+    BuiltinPass {
+        name: "adjacent-abs",
+        description: "convert a private scalar absolute-value triangle without moving memory",
+        run: adjacent_abs::run,
+    },
 ];
 
 impl Pass for BuiltinPass {
@@ -242,6 +248,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &inline::Inline,
     &inline::InlineAggregateReserve,
     &inline::InlineNoninterposable,
+    &BUILTINS[17],
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

@@ -1,4 +1,4 @@
-//! Bounded scalar absolute-value triangle conversion, intentionally unregistered.
+//! Bounded scalar absolute-value triangle conversion without moving memory.
 //!
 //! Only `x < 0 ? -x : x` with a private, single-ineg arm is accepted. Integer
 //! negation is nontrapping and wraps at its original width, including MIN.

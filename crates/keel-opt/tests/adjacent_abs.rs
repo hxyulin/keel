@@ -31,6 +31,13 @@ fn apply(src: &str, expected: bool) -> keel_ir::Module {
     m
 }
 #[test]
+fn named_pass_is_registered_without_replacing_existing_passes() {
+    let mut m = keel_ir::parse(&triangle(Type::I64)).unwrap();
+    keel_opt::run_passes(&mut m, &["adjacent-abs", "if-convert"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert!(!m.functions[0].layout_insts().any(|(_, i)| matches!(m.functions[0].inst_data(i), D::Brif { .. })));
+}
+#[test]
 fn exhaustive_i8_and_wide_wrapping_extremes() {
     for ty in [Type::I8, Type::I16, Type::I32, Type::I64] {
         let src = triangle(ty);
