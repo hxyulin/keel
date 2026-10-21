@@ -119,6 +119,7 @@ mod constant_plan;
 mod native;
 mod output;
 mod packed_load;
+mod packed_minmax;
 mod vector;
 use keel_asm_ir::{FieldId, Instruction as NativeInstruction, Opcode};
 use keel_asm_ir::{PageKind, SymbolicInstruction as Symbolic};
@@ -585,6 +586,7 @@ struct FunctionCompiler<'a> {
     replicate_loads: HashMap<Inst, Value>,
     packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
+    packed_minmax: HashMap<Inst, packed_minmax::MinMax>,
     absolute_values: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
     absolute_differences: HashMap<Inst, absolute_diff::ExactSabal>,
@@ -879,6 +881,7 @@ impl<'a> FunctionCompiler<'a> {
         let absolute_values = absolute::select(func, &mut selection);
         let absolute_differences = absolute_diff::select(func, &mut selection);
         let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
+        let packed_minmax = packed_minmax::select(func, &mut selection);
         selection.fuse_aarch64_selects(func, |data| {
             folded_imm(func, data).map(|(v, _)| v).into_iter().collect()
         });
@@ -969,6 +972,7 @@ impl<'a> FunctionCompiler<'a> {
             selection,
             replicate_loads,
             packed_low_loads,
+            packed_minmax,
             packed_absolute_values,
             absolute_values,
             widening_adds,
@@ -1436,6 +1440,10 @@ impl<'a> FunctionCompiler<'a> {
         }
         if let Some(&value) = self.packed_absolute_values.get(&inst) {
             self.vector_absolute(value, result);
+            return;
+        }
+        if let Some(&minmax) = self.packed_minmax.get(&inst) {
+            self.vector_minmax(minmax, result);
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {

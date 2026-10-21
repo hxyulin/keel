@@ -416,6 +416,26 @@ impl FunctionCompiler<'_> {
         }
         self.def_done(result, d);
     }
+    pub(super) fn vector_minmax(&mut self, minmax: packed_minmax::MinMax, result: Option<Value>) {
+        // Stage both reads before any destination write. Three-operand NEON
+        // permits the destination to alias either input, including spill scratch.
+        let a = self.use_freg(minmax.args[0], FS0);
+        let b = self.use_freg(minmax.args[1], FS1);
+        let d = self.def_freg(result);
+        let (opcode, mnemonic) = minmax.kind.encoding();
+        self.native(
+            opcode,
+            [
+                (FieldId::Q, 1),
+                (FieldId::size, 2),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+                (FieldId::Rm, b.into()),
+            ],
+            |out| write!(out, "{mnemonic}\tv{d}.4s, v{a}.4s, v{b}.4s"),
+        );
+        self.def_done(result, d);
+    }
     // Non-saturating ABS preserves the IR wrapping result for i64::MIN.
     pub(super) fn vector_absolute(&mut self, value: Value, result: Option<Value>) {
         let a = self.use_freg(value, FS0);
