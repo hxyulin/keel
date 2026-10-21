@@ -3,9 +3,10 @@
 //!
 //! Blocks are walked in dominator-tree preorder with a scoped hash table
 //! from instruction (with operands resolved) to the value it computes.
-//! Entering a block opens a scope; leaving it forgets what the block added,
-//! so a lookup only ever finds an instruction that dominates the current
-//! one, and the IR stays valid without moving anything.
+//! Entering a block opens a scope; leaving it closes the scope, and entries
+//! from closed blocks no longer match, so a lookup only ever finds an
+//! instruction that dominates the current one, and the IR stays valid
+//! without moving anything.
 //!
 //! Merging two identical computations in sibling branches (hoisting them to
 //! a common dominator) would need code motion first; that is GCM's job.
@@ -24,48 +25,49 @@ pub fn run(func: &mut Function) -> bool {
     };
     let children = domtree.children();
 
+    // Entries are never removed. One is in scope while its block is open on
+    // the walk, i.e. while that block dominates the current one; a stale
+    // entry from a closed sibling is simply overwritten.
     let mut table: FxHashMap<InstData, Inst> = FxHashMap::default();
-    // Keys added, in order, so a scope can be popped.
-    let mut added: Vec<InstData> = Vec::new();
-    // (block, scope start in `added`, whether its instructions were visited)
-    let mut stack = vec![(entry, 0, false)];
+    let mut open = vec![false; func.num_blocks()];
+    // (block, whether its instructions were visited)
+    let mut stack = vec![(entry, false)];
     let mut changed = false;
-    while let Some((block, scope, visited)) = stack.pop() {
+    while let Some((block, visited)) = stack.pop() {
         if visited {
-            for key in added.drain(scope..) {
-                table.remove(&key);
-            }
+            open[block.index()] = false;
             continue;
         }
-        stack.push((block, added.len(), true));
-        for inst in func.block_insts(block).to_vec() {
+        open[block.index()] = true;
+        stack.push((block, true));
+        let mut i = 0;
+        while let Some(&inst) = func.block_insts(block).get(i) {
             let data = func.inst_data(inst);
             if data.is_pinned() {
+                i += 1;
                 continue;
             }
             let key = canonical(func, data);
             match table.get(&key) {
-                Some(&existing) => {
-                    let pairs: Vec<_> = func
-                        .inst_results(inst)
-                        .iter()
-                        .copied()
-                        .zip(func.inst_results(existing).to_vec())
-                        .collect();
-                    for (result, existing) in pairs {
+                Some(&existing) if open[func.inst_block(existing).index()] => {
+                    let n = func.inst_results(inst).len();
+                    for k in 0..n.min(func.inst_results(existing).len()) {
+                        let result = func.inst_results(inst)[k];
+                        let existing = func.inst_results(existing)[k];
                         func.replace_all_uses(result, existing);
                     }
+                    // The next instruction moves into position `i`.
                     func.remove_inst(inst);
                     changed = true;
                 }
-                None => {
-                    table.insert(key.clone(), inst);
-                    added.push(key);
+                _ => {
+                    table.insert(key, inst);
+                    i += 1;
                 }
             }
         }
         for &child in children[block].iter().rev() {
-            stack.push((child, 0, false));
+            stack.push((child, false));
         }
     }
     changed
