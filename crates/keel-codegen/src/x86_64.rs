@@ -440,7 +440,7 @@ struct FunctionCompiler<'a> {
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
     /// `stack_addr` and `iconst` results folded into every use, which
     /// need no code.
-    folded_values: HashSet<Value>,
+    folded_values: fold::ValueSet,
     fused_compares: HashSet<Value>,
     /// Bytes at the bottom of the frame for outgoing stack arguments,
     /// rounded to 16; memory from `stack_alloc` starts just above.

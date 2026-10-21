@@ -653,7 +653,7 @@ struct FunctionCompiler<'a> {
     /// `stack_addr` results only used as the address of loads and stores
     /// that address the slot directly (`[sp, #offset]`): the address
     /// itself is never computed.
-    folded_values: HashSet<Value>,
+    folded_values: fold::ValueSet,
     fused_compares: HashSet<Value>,
     /// Inline assembly has no declared flag inputs. Preserve the old NZCV
     /// definitions throughout such functions, including across block edges.

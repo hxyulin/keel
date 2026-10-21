@@ -4,6 +4,7 @@
 //! a constant as an immediate); a value folded into every one of its uses
 //! needs no code of its own.
 
+#[cfg(test)]
 use keel_ir::fxhash::FxHashSet as HashSet;
 use keel_ir::{EntityRef, Function, InstData, Type, Value, ValueDef};
 
@@ -71,6 +72,23 @@ pub(crate) fn zero_extended_narrow(
         ))
 }
 
+/// A set of one function's values, as a dense membership table.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ValueSet {
+    members: Vec<bool>,
+}
+
+impl ValueSet {
+    pub(crate) fn contains(&self, value: &Value) -> bool {
+        self.members.get(value.index()).copied().unwrap_or(false)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn iter(&self) -> impl Iterator<Item = Value> + '_ {
+        (self.members.iter().enumerate()).filter_map(|(i, &m)| m.then(|| Value::new(i)))
+    }
+}
+
 /// The `stack_addr` and `iconst` results every use of which is folded
 /// into the instruction using it, by `folds`, which gives the operands an
 /// instruction folds (each once per operand position).
@@ -78,7 +96,7 @@ pub(crate) fn folded_values(
     func: &Function,
     selection: &crate::select::Selection,
     folds: impl Fn(&InstData) -> Vec<Value>,
-) -> HashSet<Value> {
+) -> ValueSet {
     let mut values = Vec::new();
     let mut unfolded = vec![false; func.num_values()];
     for (_, inst) in func.layout_insts() {
@@ -122,10 +140,11 @@ pub(crate) fn folded_values(
             });
         }
     }
-    values
-        .into_iter()
-        .filter(|v| !unfolded[v.index()])
-        .collect()
+    let mut members = vec![false; func.num_values()];
+    for v in values {
+        members[v.index()] = !unfolded[v.index()];
+    }
+    ValueSet { members }
 }
 
 /// The `icmp` and `fcmp` results only used as the condition of the
@@ -309,7 +328,9 @@ block0(v0: i64):
             for target in [crate::select::Target::Aarch64, crate::select::Target::X86] {
                 for selection in [Selection::default(), Selection::compute(&func, target)] {
                     assert_eq!(
-                        folded_values(&func, &selection, |data| immediates(&func, data)),
+                        folded_values(&func, &selection, |data| immediates(&func, data))
+                            .iter()
+                            .collect::<HashSet<_>>(),
                         reference_folded(&func, &selection)
                     );
                 }
@@ -342,7 +363,10 @@ block0:
                 InstData::Load { addr, .. } => vec![addr],
                 _ => immediates(&func, data),
             });
-            assert_eq!(folded, HashSet::from_iter([address]));
+            assert_eq!(
+                folded.iter().collect::<HashSet<_>>(),
+                HashSet::from_iter([address])
+            );
         }
     }
 
