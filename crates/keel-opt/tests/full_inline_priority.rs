@@ -437,3 +437,29 @@ fn debug_clone_scopes_and_site_reports_are_deterministic_after_reordering() {
         }
     }
 }
+
+#[test]
+fn priority_cfg_domain_is_small_and_acyclic() {
+    for (blocks, cyclic, expected) in [
+        (4, false, "inlined"),
+        (5, false, "caller_instruction_growth_budget"),
+        (2, true, "caller_instruction_growth_budget"),
+    ] {
+        let mut tiny = "func @tiny() alwaysinline local {\n".to_owned();
+        for i in 0..blocks {
+            tiny += &format!("block{i}:\n");
+            if i + 1 < blocks {
+                tiny += &format!(" jump block{}\n", i + 1);
+            } else if cyclic {
+                tiny += " jump block1\n";
+            } else {
+                tiny += " return\n";
+            }
+        }
+        tiny += "}\n";
+        let s = wrappers()
+            + &tiny
+            + &caller("caller", "wrap", 32).replace(" return\n}", " call @tiny()\n return\n}");
+        assert_eq!(outcomes(&run(&s, FULL).1, "caller", "tiny"), [expected]);
+    }
+}
