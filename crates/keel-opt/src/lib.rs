@@ -19,6 +19,7 @@ mod adjacent_diff;
 mod aggregate_return;
 mod branch_ranges;
 mod call_contracts;
+mod call_load_reuse;
 mod canonicalize;
 mod const_fold;
 mod dce;
@@ -294,6 +295,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &AggregateReturn,
     &inline::InlineCheapReserve,
     &BUILTINS[21],
+    &call_load_reuse::CallLoadReuse,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.
