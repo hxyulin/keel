@@ -1,4 +1,4 @@
-//! Canonical sign masks and closed positive64 clamps; portable Linux ELF+C oracles.
+//! Canonical sign masks, closed positive64 clamps and sign selects; Linux ELF+C oracles.
 use keel_asm::x86::{assemble_object, assemble_program_object};
 use keel_codegen::{
     CodegenPipeline, SelectionTier,
@@ -173,6 +173,20 @@ fn fixture() -> (String, String) {
         c += &format!("extern void {name}(const void*,void*);\n");
         calls += &format!("if(check({name},0,{mode}))return 4;\n");
     }
+    c += include_str!("x86_sign/select_oracle.c");
+    for cc in ["slt", "ugt"] {
+        for kind in 0..4 {
+            for observed in [false, true] {
+                let name = format!("select_{cc}_{kind}_{}", u8::from(observed));
+                ir += &select_source(&name, cc, kind, observed);
+                c += &format!("extern void {name}(const void*,void*);\n");
+                calls += &format!(
+                    "if(check_select({name},{kind},{}))return 5;\n",
+                    u8::from(observed)
+                );
+            }
+        }
+    }
     // Strict-positive observable masks retain canonical false at zero.
     ir += &source("strict", "sgt", 0, false, " v6 = vor v5,v5\n");
     c += "extern void strict(const void*,void*);\n";
@@ -196,6 +210,7 @@ fn export_linux_oracles() {
         .unwrap();
     }
     let mut count = 0;
+    let mut stems = Vec::new();
     for sel in [
         SelectionTier::Baseline,
         SelectionTier::Trees,
@@ -209,8 +224,12 @@ fn export_linux_oracles() {
             ] {
                 let m = keel_ir::parse(&ir).unwrap();
                 let (text, object) = compile(&m, &sel, alloc, pools);
+                assert_eq!(text.matches("psrad\t").count(), 32);
+                assert_eq!(text.matches("pcmpgtd\t").count(), 2);
+                assert_eq!(text.matches("andnps\t").count(), 4);
                 if let Some(dir) = &dir {
                     let stem = format!("{sel:?}-{alloc:?}-{pool}");
+                    stems.push(stem.clone());
                     fs::write(dir.join(format!("{stem}.s")), text).unwrap();
                     fs::write(dir.join(format!("{stem}.o")), object).unwrap();
                     fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
@@ -231,9 +250,34 @@ fn export_linux_oracles() {
         assert_eq!(text.matches("psrad\t").count(), 15);
         if let Some(dir) = &dir {
             let stem = format!("controlled-{sel:?}");
+            stems.push(stem.clone());
             fs::write(dir.join(format!("{stem}.s")), text).unwrap();
             fs::write(dir.join(format!("{stem}.o")), obj).unwrap();
             fs::write(dir.join(format!("{stem}.c")), &controlled_c).unwrap();
+        }
+        count += 1;
+    }
+    let (ir, c) = controlled_select_fixture();
+    let m = keel_ir::parse(&ir).unwrap();
+    for sel in [
+        SelectionTier::Baseline,
+        SelectionTier::Trees,
+        SelectionTier::Full,
+    ] {
+        let (text, obj) = compile_allocator(
+            &m,
+            &sel,
+            &ControlledSelect,
+            &keel_codegen::x86_64::REGISTERS,
+        );
+        assert_eq!(text.matches("psrad\t").count(), 2 * SELECT_LAYOUTS.len());
+        assert_eq!(text.matches("andnps\t").count(), 0);
+        if let Some(dir) = &dir {
+            let stem = format!("select-controlled-{sel:?}");
+            stems.push(stem.clone());
+            fs::write(dir.join(format!("{stem}.s")), text).unwrap();
+            fs::write(dir.join(format!("{stem}.o")), obj).unwrap();
+            fs::write(dir.join(format!("{stem}.c")), &c).unwrap();
         }
         count += 1;
     }
@@ -246,13 +290,26 @@ fn export_linux_oracles() {
             AllocationTier::Full,
             &keel_codegen::x86_64::REGISTERS,
         );
+        stems.push("kernel".to_string());
         fs::write(dir.join("kernel.s"), text).unwrap();
         fs::write(dir.join("kernel.o"), object).unwrap();
         fs::write(dir.join("kernel.c"), include_str!("x86_sign/kernel.c")).unwrap();
         count += 1;
     }
     if let Some(dir) = &dir {
+        assert_eq!(stems.len(), count);
         fs::write(dir.join("expected-count.json"), format!("{count}\n")).unwrap();
+        fs::write(dir.join("expected-stems.json"), format!("{:?}\n", stems)).unwrap();
+        fs::write(
+            dir.join("seal_export.py"),
+            include_str!("x86_sign/seal_export.py"),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("check_encodings.py"),
+            include_str!("x86_sign/check_encodings.py"),
+        )
+        .unwrap();
     }
 }
 
@@ -348,5 +405,137 @@ fn controlled_fixture() -> (String, String) {
         }
     }
     c += &format!("int main(void){{if(setup())return 1;{calls}munmap(region,2*page);return 0;}}\n");
+    (ir, c)
+}
+
+fn select_source(name: &str, cc: &str, kind: u32, observed: bool) -> String {
+    let k = if cc == "slt" { 0 } else { i64::MAX };
+    let leaf = match kind {
+        0 => " v20 = iconst.i64 16\n v21 = ptradd v0,v20\n v22 = load.i64x2 align 1 v21\n"
+            .to_string(),
+        1 | 2 => format!(
+            " v20 = iconst.i64 {}\n v22 = vsplat.i64x2 v20\n",
+            if kind == 1 { 13 } else { 3 }
+        ),
+        3 => String::new(),
+        _ => unreachable!(),
+    };
+    let f = if kind == 3 { "v4" } else { "v22" };
+    let mut src = source(name, cc, k, false, &format!(" v6 = vselect v5,v4,{f}\n"));
+    src = src.replace(" v5 =", &format!("{leaf} v5 ="));
+    src = src.replace(
+        " return",
+        &format!(" v23 = iconst.i64 32\n v24 = ptradd v1,v23\n store align 1 {f},v24\n return"),
+    );
+    if observed {
+        src = src.replace(
+            " return",
+            " v25 = iconst.i64 48\n v26 = ptradd v1,v25\n store align 1 v5,v26\n return",
+        );
+    }
+    src
+}
+
+#[test]
+fn closed_sign_select_across_tiers_and_observed_fallback() {
+    for sel in [
+        SelectionTier::Baseline,
+        SelectionTier::Trees,
+        SelectionTier::Full,
+    ] {
+        for alloc in [AllocationTier::Fast, AllocationTier::Full] {
+            for pools in [&keel_codegen::x86_64::REGISTERS, &TINY, &EMPTY] {
+                for cc in ["slt", "ugt"] {
+                    for kind in 0..4 {
+                        for observed in [false, true] {
+                            let src = select_source("select", cc, kind, observed);
+                            let text =
+                                compile(&keel_ir::parse(&src).unwrap(), &sel, alloc, pools).0;
+                            assert_eq!(text.matches("psrad\t").count(), 1, "{text}");
+                            assert_eq!(text.matches("pcmpgtd\t").count(), 0, "{text}");
+                            assert_eq!(text.matches("andnps\t").count(), 0, "{text}");
+                            let root = text.split(" = vselect ").nth(1).unwrap();
+                            let root = root.split("# store").next().unwrap();
+                            assert_eq!(root.contains("psrad\t"), !observed, "{text}");
+                            assert_eq!(
+                                text.contains("pshufd\txmm13, xmm14, 245"),
+                                !observed,
+                                "{text}"
+                            );
+                            assert_eq!(
+                                text.matches(" = load.i64x2 ").count(),
+                                if kind == 0 { 2 } else { 1 }
+                            );
+                            // Closed recipe: sign, two XORs, AND, one publish.
+                            if !observed {
+                                assert_eq!(text.matches("xorps\t").count(), 2, "{text}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+const SELECT_LAYOUTS: [&str; 8] = [
+    "aliasx",
+    "aliasf",
+    "distinct",
+    "spillx",
+    "spillf",
+    "spillresult",
+    "allspill",
+    "reverse",
+];
+struct ControlledSelect;
+impl RegisterAllocator for ControlledSelect {
+    fn name(&self) -> &'static str {
+        "sign-select-controlled"
+    }
+    fn allocate(&self, input: &AllocationInput<'_>) -> Allocation {
+        let mut a = AllocationTier::Full.allocate(input);
+        let r = |i| Loc::FReg(input.pools.float_caller_saved[i]);
+        let (x, f, d) = match input.func.name.rsplit('_').next().unwrap() {
+            "aliasx" => (r(0), r(1), r(0)),
+            "aliasf" => (r(0), r(1), r(1)),
+            "distinct" => (r(0), r(1), r(2)),
+            "spillx" => (Loc::Stack(0), r(1), r(2)),
+            "spillf" => (r(0), Loc::Stack(0), r(2)),
+            "spillresult" => (r(0), r(1), Loc::Stack(4)),
+            "allspill" => (Loc::Stack(0), Loc::Stack(2), Loc::Stack(4)),
+            "reverse" => (Loc::Stack(2), Loc::Stack(0), Loc::Stack(4)),
+            _ => unreachable!(),
+        };
+        a.spill_slots = 6;
+        a.locs[0][0] = Some(x);
+        a.locs[0][1] = Some(f);
+        a.locs[0][5] = Some(d);
+        a
+    }
+}
+fn controlled_select_fixture() -> (String, String) {
+    let mut ir = String::new();
+    let mut c = include_str!("x86_sign/oracle.c").to_string();
+    c += include_str!("x86_sign/select_oracle.c");
+    c += "typedef uint64_t V __attribute__((vector_size(16)));\n";
+    let mut calls = String::new();
+    for cc in ["slt", "ugt"] {
+        for layout in SELECT_LAYOUTS {
+            let name = format!("controlled_select_{cc}_{layout}");
+            let k = if cc == "slt" { 0 } else { i64::MAX };
+            ir += &format!(
+                "func @{name}(i64x2,i64x2) -> i64x2 {{\nblock0(v0:i64x2,v1:i64x2):\n v2 = iconst.i64 {k}\n v3 = vsplat.i64x2 v2\n v4 = vicmp.{cc} v0,v3\n v5 = vselect v4,v0,v1\n return v5\n}}\n"
+            );
+            c += &format!(
+                "extern V {name}(V,V); static void call_{name}(const void*p,void*out){{V x,f,y;memcpy(&x,p,16);memcpy(&f,(const char*)p+16,16);y={name}(x,f);memcpy(out,&y,16);memcpy((char*)out+16,&x,16);memcpy((char*)out+32,&f,16);}}\n"
+            );
+            calls += &format!("if(check_select(call_{name},0,0))return 2;\n");
+        }
+    }
+    // Keep the preexisting check helper exercised in this C translation unit.
+    c += &format!(
+        "int main(void){{if(setup())return 1;{calls}(void)check;munmap(region,2*page);return 0;}}\n"
+    );
     (ir, c)
 }

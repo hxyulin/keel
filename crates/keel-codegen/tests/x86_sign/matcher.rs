@@ -247,6 +247,35 @@ fn closed_sign_select_proofs_and_leaf_occurrences() {
                 "{rejected}"
             );
         }
+        for (predicate, k) in [
+            ("sge", 0),
+            ("uge", i64::MIN),
+            ("ult", i64::MIN),
+            ("ule", i64::MAX),
+        ] {
+            let unlisted = src
+                .replace(&format!("vicmp.{cc}"), &format!("vicmp.{predicate}"))
+                .replace(&format!("iconst.i64 {literal}"), &format!("iconst.i64 {k}"));
+            assert!(select(&function(&unlisted), &mut Selection::default()).is_empty());
+        }
+        let swapped = if cc == "slt" { "sgt" } else { "ult" };
+        let unlisted = src.replace(
+            &format!("vicmp.{cc} v4,v3"),
+            &format!("vicmp.{swapped} v3,v4"),
+        );
+        assert!(select(&function(&unlisted), &mut Selection::default()).is_empty());
+        let mut d = function(
+            &src.replace(&format!("vicmp.{cc} v4,v3"), &format!("vicmp.{cc} v21,v3"))
+                .replace("vselect v5,v4,v21", "vselect v5,v21,v4"),
+        );
+        let alias = d.block_params(d.entry_block().unwrap())[3];
+        d.replace_all_uses(alias, d.first_result(insts[2]));
+        assert_eq!(select(&d, &mut Selection::default()).len(), 1);
+        let mut d =
+            function(&src.replace(&format!("vicmp.{cc} v4,v3"), &format!("vicmp.{cc} v4,v21")));
+        let alias = d.block_params(d.entry_block().unwrap())[3];
+        d.replace_all_uses(alias, d.first_result(insts[1]));
+        assert_eq!(select(&d, &mut Selection::default()).len(), 1);
         // An extra mask occurrence hidden behind an SSA alias still escapes.
         let mut d = function(&src.replace(" return", " store v21,v1\n return"));
         let alias = d.block_params(d.entry_block().unwrap())[3];

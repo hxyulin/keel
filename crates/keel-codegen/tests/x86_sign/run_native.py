@@ -30,6 +30,21 @@ def main():
     missing = [str(obj.with_suffix(".c")) for obj in objects if not obj.with_suffix(".c").is_file()]
     if missing:
         raise SystemExit("missing matching C oracles: " + ", ".join(missing))
+    manifest = json.loads((root / "manifest.json").read_text())
+    if manifest.get("schema") != "keel.sign-select-oracles.v1":
+        raise SystemExit("unknown oracle manifest schema")
+    stems = manifest["stems"]
+    if len(stems) != expected or len(set(stems)) != expected or set(stems) != {p.stem for p in objects}:
+        raise SystemExit("oracle stems differ from manifest")
+    expected_files = {f"{stem}.{ext}" for stem in stems for ext in ("o", "c", "s")}
+    if set(manifest["sha256"]) != expected_files:
+        raise SystemExit("oracle file set differs from manifest")
+    for ext in ("o", "c", "s"):
+        if {p.name for p in root.glob(f"*.{ext}")} != {f"{stem}.{ext}" for stem in stems}:
+            raise SystemExit("extra or missing oracle files")
+    for name, digest in manifest["sha256"].items():
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
+            raise SystemExit(f"oracle hash mismatch: {name}")
     if platform.system() != "Linux" or platform.machine() not in ("x86_64", "amd64"):
         raise SystemExit("native oracle requires Linux x86_64")
     for obj in objects:
