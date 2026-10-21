@@ -64,28 +64,43 @@ pub(super) fn prepare(
     // summaries finalized in earlier rounds, so source order cannot affect the
     // depth limit. Cycles (and their callers) never become ready. A chain with
     // an unknown, mismatched, or ineligible callee also retains ABI clobbers.
-    const MAX_FUNCTIONS: usize = 512;
+    const MAX_CHAIN_FUNCTIONS: usize = 512;
     const MAX_DEPTH: usize = 16;
     const MAX_INSTRUCTIONS: usize = 65_536;
     const MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
     const MAX_OUTPUT_ITEMS: usize = 65_536;
     let mut budget = MAX_INSTRUCTIONS;
     let mut pending = Vec::new();
+    let mut chains = Vec::new();
     for (index, original) in module.functions.iter().enumerate() {
         let count = original.layout_insts().take(129).count();
         if !called.contains(original.name.as_str())
             || count > 128
-            || count > budget
             || original.blocks().take(17).count() > 16
             || !eligible(original, module)
         {
             continue;
         }
-        if pending.len() == MAX_FUNCTIONS {
-            break;
+        if original
+            .layout_insts()
+            .any(|(_, i)| matches!(original.inst_data(i), InstData::Call { .. }))
+        {
+            if chains.len() < MAX_CHAIN_FUNCTIONS {
+                chains.push((index, count));
+            }
+        } else if count <= budget {
+            // Preserve the previous leaf coverage before spending any budget
+            // on newly eligible non-leaves. A module-wide candidate cap used
+            // to drop late leaves and add saves to their existing callers.
+            budget -= count;
+            pending.push(index);
         }
-        budget -= count;
-        pending.push(index);
+    }
+    for (index, count) in chains {
+        if count <= budget {
+            budget -= count;
+            pending.push(index);
+        }
     }
     let caller_mask = REGISTERS
         .caller_saved
@@ -226,8 +241,32 @@ mod tests {
             "func @root(i64) -> i64 {{\nblock0(v0:i64):\n {calls} return v0\n}}"
         ));
         let (summaries, prepared) = proof(&source);
-        assert_eq!(summaries.len(), 512);
-        assert_eq!(prepared.len(), 512);
+        assert_eq!(summaries.len(), 513);
+        assert_eq!(prepared.len(), 513);
+
+        // New non-leaves must not crowd out old leaves, including leaves
+        // appearing late in the module. Only the extension has a 512 cap.
+        let mut source = String::new();
+        let mut calls = String::new();
+        for i in 0..513 {
+            source.push_str(&format!(
+                "func @wrapper{i}(i64) -> i64 cc(fast) local {{\nblock0(v0:i64):\n v1 = call @leaf{i}(v0)\n return v1\n}}\n"
+            ));
+            calls.push_str(&format!("v{} = call @wrapper{i}(v0)\n", i + 1));
+        }
+        for i in 0..513 {
+            source.push_str(&format!(
+                "func @leaf{i}(i64) -> i64 cc(fast) local {{\nblock0(v0:i64):\n return v0\n}}\n"
+            ));
+        }
+        source.push_str(&format!(
+            "func @root(i64) -> i64 {{\nblock0(v0:i64):\n {calls} return v0\n}}"
+        ));
+        let (summaries, prepared) = proof(&source);
+        assert_eq!(summaries.len(), 513 + 512);
+        assert_eq!(prepared.len(), summaries.len());
+        assert!(summaries.contains_key("leaf512"));
+        assert!(!summaries.contains_key("wrapper512"));
 
         let source = chain(3).replace(
             "return v0",
