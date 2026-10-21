@@ -883,6 +883,36 @@ fn select_mask(
         )
     }
 }
+
+/// Keep a select in the source ring when both arms are exactly representable
+/// by the same extension. In particular, a nested i32 clamp needs only one
+/// widening of its result, rather than widening each comparison mask to i64.
+/// Inspect generated SSA, so shared arms and their other wide users keep their
+/// original values. No arithmetic, predicates, or memory operations move.
+fn narrow_select_arm(
+    f: &Function,
+    value: Value,
+    op: ConvertOp,
+    constants: &HashMap<Value, (i64, Value)>,
+) -> Option<Value> {
+    let value = f.resolve(value);
+    if let Some(&(imm, narrow)) = constants.get(&value) {
+        let fits = if op == ConvertOp::SwidenLow {
+            i32::try_from(imm).is_ok()
+        } else {
+            u32::try_from(imm).is_ok()
+        };
+        return fits.then_some(narrow);
+    }
+    match *f.inst_data(def(f, value)?) {
+        D::Convert {
+            op: actual,
+            arg,
+            ty: Type::Vector(VectorType::I64x2),
+        } if actual == op && f.value_type(arg) == Type::Vector(VectorType::I32x4) => Some(arg),
+        _ => None,
+    }
+}
 fn emit(f: &mut Function, b: Block, d: D) -> Value {
     let i = f.append_inst(b, d);
     f.first_result(i)
@@ -987,6 +1017,10 @@ fn reduce_body(
         .map(|_| f.append_block_param(vector, Type::Vector(c.shape)))
         .collect();
     let mut invariants = HashMap::new();
+    let mut narrow_constants = HashMap::new();
+    let narrow_selects = matches!(target, VectorTarget::Aarch64Neon | VectorTarget::X86Sse2)
+        && c.shape == VectorType::I64x2
+        && c.widths.values().any(|&s| s == VectorType::I32x4);
     let mut values: Vec<_> = c.vectors.iter().copied().collect();
     values.sort();
     for v in values {
@@ -1006,6 +1040,22 @@ fn reduce_body(
             },
         );
         invariants.insert(v, splat);
+        if narrow_selects && f.value_type(scalar) == Type::I64 {
+            if let Some(imm) = constant(f, scalar) {
+                if i32::try_from(imm).is_ok() || u32::try_from(imm).is_ok() {
+                    let bits = iconst(f, setup, Type::I32, imm as i32 as i64);
+                    let narrow = emit(
+                        f,
+                        setup,
+                        D::VectorSplat {
+                            ty: Type::Vector(VectorType::I32x4),
+                            arg: bits,
+                        },
+                    );
+                    narrow_constants.insert(splat, (imm, narrow));
+                }
+            }
+        }
     }
     let mut cast_masks = HashMap::new();
     let mut casts: Vec<_> = c.casts.iter().collect();
@@ -1094,6 +1144,46 @@ fn reduce_body(
             let shape = result
                 .and_then(|v| c.widths.get(&v).copied())
                 .unwrap_or(c.shape);
+            if let D::Select { args } = *f.inst_data(i) {
+                let mask = f.resolve(args[0]);
+                if narrow_selects
+                    && shape == VectorType::I64x2
+                    && c.widths[&mask] == VectorType::I32x4
+                {
+                    let arms = [mapping[&f.resolve(args[1])], mapping[&f.resolve(args[2])]];
+                    let narrowed = [ConvertOp::SwidenLow, ConvertOp::UwidenLow]
+                        .into_iter()
+                        .find_map(|op| {
+                            Some((
+                                op,
+                                [
+                                    narrow_select_arm(f, arms[0], op, &narrow_constants)?,
+                                    narrow_select_arm(f, arms[1], op, &narrow_constants)?,
+                                ],
+                            ))
+                        });
+                    if let Some((op, arms)) = narrowed {
+                        let narrow = f.append_inst(
+                            vector,
+                            D::VectorSelect {
+                                args: [mapping[&mask], arms[0], arms[1]],
+                            },
+                        );
+                        f.set_inst_loc(narrow, f.inst_loc(i));
+                        let extended = f.append_inst(
+                            vector,
+                            D::Convert {
+                                op,
+                                ty: Type::Vector(shape),
+                                arg: f.first_result(narrow),
+                            },
+                        );
+                        f.set_inst_loc(extended, f.inst_loc(i));
+                        mapping.insert(result.unwrap(), f.first_result(extended));
+                        continue;
+                    }
+                }
+            }
             let data = match *f.inst_data(i) {
                 D::Load { flags, addr, ty } => {
                     let loaded = reduction_load(
