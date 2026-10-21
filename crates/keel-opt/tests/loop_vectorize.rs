@@ -510,8 +510,7 @@ fn conditional_reductions_use_packed_predicates_only_where_available() {
             keel_opt::run_passes_for_target(&mut m, &["loop-reduce-multi"], target).unwrap();
             keel_ir::verify_module(&m).unwrap();
             for (index, f) in m.functions.iter().enumerate() {
-                let supported = target == VectorTarget::Aarch64Neon
-                    || (target == VectorTarget::X86Sse2 && !predicate.starts_with('u'))
+                let supported = matches!(target, VectorTarget::Aarch64Neon | VectorTarget::X86Sse2)
                     || (index == 0 && !predicate.starts_with('u'))
                     || matches!(predicate, "eq" | "ne");
                 assert_eq!(

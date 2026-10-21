@@ -389,7 +389,7 @@ impl Analyze<'_> {
                             VectorTarget::Aarch64Neon | VectorTarget::X86Sse2
                         )
                         && !matches!(cond, IntCC::Eq | IntCC::Ne)
-                    || self.target != VectorTarget::Aarch64Neon
+                    || self.target == VectorTarget::Portable
                         && matches!(cond, IntCC::Ult | IntCC::Ule | IntCC::Ugt | IntCC::Uge)
                 {
                     return None;
