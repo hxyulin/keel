@@ -35,6 +35,15 @@ impl Pass for Inline {
     ) -> Option<bool> {
         Some(run_observed(module, Some(sites)).changed)
     }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report = run_observed(module, sites);
+        Some(report.changed_callers(module, changed))
+    }
 }
 /// Explicit research pass. Never included in an optimization tier.
 /// Uses the ordinary clone implementation and legality checks; only a separate
@@ -60,6 +69,15 @@ impl Pass for InlineAggregateReserve {
         sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
         Some(run_observed_policy(module, Some(sites), true, false, false).changed)
+    }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report = run_observed_policy(module, sites, true, false, false);
+        Some(report.changed_callers(module, changed))
     }
 }
 
@@ -87,6 +105,15 @@ impl Pass for InlineNoninterposable {
     ) -> Option<bool> {
         Some(run_observed_policy(module, Some(sites), false, true, false).changed)
     }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report = run_observed_policy(module, sites, false, true, false);
+        Some(report.changed_callers(module, changed))
+    }
 }
 
 /// Opt-in research policy: keep Full's scheduling and ordinary budgets, then
@@ -111,6 +138,15 @@ impl Pass for InlineCheapReserve {
         sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
         Some(run_observed_policy(module, Some(sites), false, true, true).changed)
+    }
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let report = run_observed_policy(module, sites, false, true, true);
+        Some(report.changed_callers(module, changed))
     }
 }
 
@@ -409,6 +445,20 @@ fn inline_cost(callee: &Function) -> (usize, u64) {
 pub struct InlineReport {
     pub changed: bool,
     pub skipped: Vec<InlineSkip>,
+    /// Indices of the functions that received an inlined body.
+    callers: Vec<usize>,
+}
+
+impl InlineReport {
+    /// Marks the callers that changed; nothing else in the module does.
+    fn changed_callers(&self, module: &Module, changed: &mut Vec<bool>) -> bool {
+        changed.clear();
+        changed.resize(module.functions.len(), false);
+        for &index in &self.callers {
+            changed[index] = true;
+        }
+        self.changed
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 pub struct InlineSkip {
@@ -977,6 +1027,7 @@ fn run_observed_policy(
         count += 1;
         stack_growth += stack_cost;
         report.changed = true;
+        report.callers.push(index);
         ledgers[index] = (growth, reserve_sites, count, stack_growth);
     }
     report

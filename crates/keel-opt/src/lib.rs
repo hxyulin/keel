@@ -11,6 +11,7 @@
 //! or the `verify-each` feature. Scoped options can override that default.
 //! Callers must validate input modules before optimization; the CLI always does.
 
+use keel_ir::fxhash::FxHashMap;
 use keel_ir::{Function, Module, VerifierError, verify};
 use std::fmt;
 
@@ -73,6 +74,32 @@ pub trait Pass: Sync {
         _sites: &mut Vec<InlineSite>,
     ) -> Option<bool> {
         self.run_module(module)
+    }
+
+    /// Runs a module pass (observed when `sites` is given) and sets
+    /// `changed[i]` for each function it may have changed, indexed after the
+    /// pass. The default marks every function whenever the module changed.
+    fn run_module_tracked(
+        &self,
+        module: &mut Module,
+        sites: Option<&mut Vec<InlineSite>>,
+        changed: &mut Vec<bool>,
+    ) -> Option<bool> {
+        let result = match sites {
+            Some(sites) => self.run_module_with_report(module, sites),
+            None => self.run_module(module),
+        }?;
+        changed.clear();
+        changed.resize(module.functions.len(), result);
+        Some(result)
+    }
+
+    /// Whether this function pass depends only on the function and target.
+    /// The manager then skips a run on a function that its previous run left
+    /// unchanged and that nothing has changed since: by determinism and the
+    /// `run` contract, that run would change nothing either.
+    fn deterministic(&self) -> bool {
+        false
     }
 
     /// Target-aware passes may override this; ordinary passes ignore it.
@@ -232,6 +259,9 @@ impl Pass for BuiltinPass {
     }
     fn produces_canonical_form(&self) -> bool {
         self.name == "canonicalize"
+    }
+    fn deterministic(&self) -> bool {
+        true
     }
 }
 
@@ -521,6 +551,58 @@ pub fn run_pipeline_for_target(
     run_pipeline_for_target_with_options(module, passes, target, OptimizeOptions::default())
 }
 
+/// Per-function change tracking. A function's version is renewed whenever
+/// a pass changes it; a deterministic pass that left a function unchanged
+/// records that version and is skipped while it still holds.
+struct Versions {
+    version: Vec<u64>,
+    next: u64,
+    clean: FxHashMap<(&'static str, usize), u64>,
+    changed: Vec<bool>,
+}
+
+impl Versions {
+    fn new(functions: usize) -> Self {
+        Self {
+            version: (0..functions as u64).collect(),
+            next: functions as u64,
+            clean: FxHashMap::default(),
+            changed: Vec::new(),
+        }
+    }
+
+    fn renew(&mut self, index: usize) {
+        self.version[index] = self.next;
+        self.next += 1;
+    }
+
+    /// After a module pass filled `self.changed`; new functions are fresh.
+    fn module_changed(&mut self, canonical: &mut Vec<bool>) {
+        let functions = self.changed.len();
+        canonical.resize(functions, false);
+        let old = self.version.len();
+        self.version.resize(functions, 0);
+        for index in 0..functions {
+            if self.changed[index] || index >= old {
+                self.renew(index);
+                canonical[index] = false;
+            }
+        }
+    }
+
+    fn is_clean(&self, pass: &dyn Pass, index: usize) -> bool {
+        pass.deterministic() && self.clean.get(&(pass.name(), index)) == Some(&self.version[index])
+    }
+
+    fn record(&mut self, pass: &dyn Pass, index: usize, changed: bool) {
+        if changed {
+            self.renew(index);
+        } else if pass.deterministic() {
+            self.clean.insert((pass.name(), index), self.version[index]);
+        }
+    }
+}
+
 /// Custom pipeline with scoped options; canonical restoration always runs.
 pub fn run_pipeline_for_target_with_options(
     module: &mut Module,
@@ -531,24 +613,36 @@ pub fn run_pipeline_for_target_with_options(
     let verification_enabled = options.verification.enabled();
     profiling::scope!("optimization");
     let mut canonical = vec![false; module.functions.len()];
-    for pass in passes {
+    let mut versions = Versions::new(module.functions.len());
+    for &pass in passes {
         profiling::scope!("pass", pass.name());
-        if pass.run_module(module).is_some() {
-            canonical.resize(module.functions.len(), false);
-            canonical.fill(false);
+        if pass
+            .run_module_tracked(module, None, &mut versions.changed)
+            .is_some()
+        {
+            versions.module_changed(&mut canonical);
             for func in &module.functions {
                 verify_after(func, pass.name(), verification_enabled)?;
             }
             continue;
         }
         for (index, func) in module.functions.iter_mut().enumerate() {
+            // A skipped run's input was canonical when the pass required it.
+            if versions.is_clean(pass, index) {
+                canonical[index] |= pass.requires_canonical_form();
+                canonical[index] |= pass.produces_canonical_form();
+                continue;
+            }
             if pass.requires_canonical_form() && !canonical[index] {
-                canonicalize::run(func);
+                if canonicalize::run(func) {
+                    versions.renew(index);
+                }
                 verify_after(func, "canonicalize", verification_enabled)?;
                 canonical[index] = true;
             }
             let changed = pass.run_for_target(func, target);
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
+            versions.record(pass, index, changed);
             verify_after(func, pass.name(), verification_enabled)?;
         }
     }
@@ -621,16 +715,17 @@ pub fn run_pipeline_for_target_with_report_and_options(
     use std::time::Instant;
     profiling::scope!("optimization");
     let mut canonical = vec![false; module.functions.len()];
-    for (pipeline_index, pass) in passes.iter().enumerate() {
+    let mut versions = Versions::new(module.functions.len());
+    for (pipeline_index, &pass) in passes.iter().enumerate() {
         profiling::scope!("pass", pass.name());
         let before = IrCounts::module(module);
         let mut inline_sites = Vec::new();
         let start = Instant::now();
-        let module_changed = pass.run_module_with_report(module, &mut inline_sites);
+        let module_changed =
+            pass.run_module_tracked(module, Some(&mut inline_sites), &mut versions.changed);
         let pass_ns = start.elapsed().as_nanos();
         if let Some(changed) = module_changed {
-            canonical.resize(module.functions.len(), false);
-            canonical.fill(false);
+            versions.module_changed(&mut canonical);
             let (result, verification_ns) = observe_verification(verification_enabled, || {
                 module
                     .functions
@@ -658,12 +753,37 @@ pub fn run_pipeline_for_target_with_report_and_options(
         }
         for (index, func) in module.functions.iter_mut().enumerate() {
             let before = IrCounts::function(func);
+            if versions.is_clean(pass, index) {
+                canonical[index] |= pass.requires_canonical_form();
+                canonical[index] |= pass.produces_canonical_form();
+                report.invocations.push(PassObservation {
+                    pipeline_index,
+                    pass: pass.name(),
+                    target,
+                    function: Some(func.name.clone()),
+                    changed: false,
+                    pass_ns: 0,
+                    verification_enabled,
+                    verification_ns: 0,
+                    restoration_ns: 0,
+                    restoration_verification_ns: 0,
+                    restoration_changed: None,
+                    after: before.clone(),
+                    before,
+                    inline_sites: Vec::new(),
+                });
+                continue;
+            }
             let mut restoration_ns = 0;
             let mut restoration_verification_ns = 0;
             let mut restoration_changed = None;
             if pass.requires_canonical_form() && !canonical[index] {
                 let start = Instant::now();
-                restoration_changed = Some(canonicalize::run(func));
+                let restored = canonicalize::run(func);
+                if restored {
+                    versions.renew(index);
+                }
+                restoration_changed = Some(restored);
                 restoration_ns = start.elapsed().as_nanos();
                 let (result, ns) = observe_verification(verification_enabled, || {
                     verify_after(func, "canonicalize", verification_enabled)
@@ -678,6 +798,7 @@ pub fn run_pipeline_for_target_with_report_and_options(
             let changed = pass.run_for_target(func, target);
             let pass_ns = start.elapsed().as_nanos();
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
+            versions.record(pass, index, changed);
             let (result, verification_ns) = observe_verification(verification_enabled, || {
                 verify_after(func, pass.name(), verification_enabled)
             });

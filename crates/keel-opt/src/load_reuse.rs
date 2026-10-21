@@ -28,6 +28,9 @@ impl crate::Pass for LoadReuse {
     fn run(&self, func: &mut Function) -> bool {
         run(func)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 const MAX_EDGES: usize = 8;

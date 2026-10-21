@@ -18,6 +18,9 @@ impl crate::Pass for LoopStrengthReduce {
     fn run(&self, f: &mut Function) -> bool {
         run(f)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 fn def(f: &Function, v: Value) -> Option<Inst> {

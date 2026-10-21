@@ -24,6 +24,9 @@ impl crate::Pass for LoopUnroll {
     fn run(&self, f: &mut Function) -> bool {
         run(f)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 struct Candidate {

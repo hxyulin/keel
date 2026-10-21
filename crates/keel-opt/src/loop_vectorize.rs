@@ -59,6 +59,9 @@ impl crate::Pass for LoopVectorize {
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
         run(f, target)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) struct LoopReduce;
@@ -75,6 +78,9 @@ impl crate::Pass for LoopReduce {
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
         let changed = run_candidates(f, target, true);
         normalize_conditional_loop(f, target) || changed
+    }
+    fn deterministic(&self) -> bool {
+        true
     }
 }
 
@@ -127,6 +133,9 @@ impl crate::Pass for MultiLoopReduce {
     fn run_for_target(&self, f: &mut Function, target: VectorTarget) -> bool {
         run_extended(f, target, true, true)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) struct FastLoopReduce;
@@ -148,6 +157,9 @@ impl crate::Pass for FastLoopReduce {
             return false;
         }
         run_candidates_with_budget(f, target, true, true)
+    }
+    fn deterministic(&self) -> bool {
+        true
     }
 }
 

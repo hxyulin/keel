@@ -66,6 +66,9 @@ impl Pass for Cfg {
         }
         changed | simplify_cfg::merge_small_blocks(func, MERGED_INSTRUCTIONS)
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 
 pub struct Local;
@@ -115,5 +118,8 @@ impl Pass for Local {
             }
         }
         changed
+    }
+    fn deterministic(&self) -> bool {
+        true
     }
 }

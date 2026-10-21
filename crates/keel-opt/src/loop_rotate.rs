@@ -30,6 +30,9 @@ impl crate::Pass for LoopRotate {
         }
         changed
     }
+    fn deterministic(&self) -> bool {
+        true
+    }
 }
 fn rotate(f: &mut Function, h: Block) -> bool {
     let cfg = ControlFlowGraph::compute(f);
