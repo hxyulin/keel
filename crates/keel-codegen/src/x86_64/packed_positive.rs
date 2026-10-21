@@ -80,8 +80,16 @@ pub(super) fn select(func: &Function, plan: &mut crate::select::Selection) -> Ha
             else {
                 continue;
             };
-            let values =
-                [load, splat, cast, compare, and].map(|i| func.resolve(func.first_result(i)));
+            // A retained definition may have had its result replaced by an
+            // unrelated value. Resolving operands is valid; treating that old
+            // producer as the replacement's definition is not.
+            if chain.iter().any(|&i| {
+                let value = func.first_result(i);
+                func.resolve(value) != value
+            }) {
+                continue;
+            }
+            let values = [load, splat, cast, compare, and].map(|i| func.first_result(i));
             let [lv, sv, xv, mv, pv] = values;
             let args = args.map(|v| func.resolve(v));
             if flags.volatile
@@ -142,6 +150,32 @@ mod tests {
     use super::*;
     use crate::select::Selection;
     const SOURCE: &str = "func @positive(ptr,ptr,i32x4) {\nblock0(v0:ptr,v1:ptr,v20:i32x4):\n v2 = iconst.i32 0\n v3 = vsplat.i32x4 v2\n v4 = load.i64 v0\n v5 = vsplat.i64x2 v4\n v6 = bitcast.i32x4 v5\n v7 = vicmp.sgt v6,v3\n v8 = vand v7,v6\n v9 = uwiden_low.i64x2 v8\n store v9,v1\n return\n}\n";
+    #[test]
+    fn aliased_producer_results_are_not_definitions_of_their_replacements() {
+        let source = SOURCE
+            .replace("ptr,ptr,i32x4)", "ptr,ptr,i32x4,i64,i64x2)")
+            .replace("v20:i32x4):", "v20:i32x4,v21:i64,v22:i64x2):");
+        let original = keel_ir::parse(&source).unwrap().functions.remove(0);
+        let chain: Vec<_> = original
+            .layout_insts()
+            .skip(2)
+            .take(6)
+            .map(|(_, i)| i)
+            .collect();
+        assert_eq!(select(&original, &mut Selection::default()).len(), 1);
+        let params = original.block_params(original.entry_block().unwrap());
+        for (&inst, param) in chain.iter().zip([
+            params[3], params[4], params[2], params[2], params[2], params[4],
+        ]) {
+            let mut f = original.clone();
+            let value = f.first_result(inst);
+            f.replace_all_uses(value, param);
+            assert!(
+                select(&f, &mut Selection::default()).is_empty(),
+                "aliased {inst:?}"
+            );
+        }
+    }
     #[test]
     fn inline_assembly_is_a_boundary() {
         let source = SOURCE.replace(" return", " v30 = asm \"\", \"=r\"() -> i32\n return");
