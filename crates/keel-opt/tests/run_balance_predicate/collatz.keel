@@ -1,0 +1,39 @@
+func @k_collatz(i64, i64) -> i64 cc(c) {
+block0(v0: i64, v1: i64):
+    v2 = iconst.i64 0
+    v6 = iadd v0, v1
+    jump block1(v0, v2)
+block1(v3: i64, v23: i64):
+    v7 = icmp.ult v3, v6
+    brif v7, block5, block4
+block3(v47: i64):
+    v39 = iconst.i64 1
+    v26 = iadd v3, v39
+    jump block1(v26, v47)
+block4:
+    return v23
+block5:
+    v9 = iconst.i64 1
+    v10 = icmp.ne v3, v9
+    brif v10, block6(v3, v23), block3(v23)
+block6(v44: i64, v45: i64):
+    v40 = iconst.i64 1
+    v12 = and v44, v40
+    brif v12, block8, block9
+block8:
+    v13 = iconst.i64 3
+    v14 = imul v44, v13
+    v42 = iconst.i64 1
+    v16 = iadd v14, v42
+    jump block10(v16)
+block9:
+    v41 = iconst.i64 1
+    v18 = ushr v44, v41
+    jump block10(v18)
+block10(v19: i64):
+    v43 = iconst.i64 1
+    v22 = iadd v45, v43
+    v48 = iconst.i64 1
+    v49 = icmp.ne v19, v48
+    brif v49, block6(v19, v22), block3(v22)
+}
