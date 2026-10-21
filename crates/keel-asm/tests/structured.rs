@@ -362,3 +362,115 @@ fn partial_cfa_updates_are_typed_for_both_targets() {
         }
     }
 }
+
+/// Assembling consecutive chunks must equal assembling their concatenation,
+/// including the statement positions reported for errors.
+fn chunked(
+    program: &Program,
+    x86: bool,
+    split: impl Fn(usize) -> bool,
+) -> Result<Vec<u8>, keel_asm::Error> {
+    let mut aarch64 = keel_asm::ProgramAssembler::new(TargetFeatures::default());
+    let mut x86_64 = keel_asm::x86::ProgramAssembler::new(Default::default());
+    let mut chunk = Program::new();
+    for (index, item) in program.items.iter().enumerate() {
+        chunk.items.push(item.clone());
+        if split(index) {
+            let chunk = std::mem::take(&mut chunk);
+            if x86 {
+                x86_64.push(chunk)
+            } else {
+                aarch64.push(chunk)
+            }
+        }
+    }
+    if x86 {
+        x86_64.push(chunk);
+        x86_64.finish()
+    } else {
+        aarch64.push(chunk);
+        aarch64.finish()
+    }
+}
+
+#[test]
+fn incremental_assembly_matches_whole_programs_and_diagnostics() {
+    let source = "static const char *names[] = {\"a\", \"bc\"};\nint counter = 3;\n\
+        int pick(int i) { switch (i) { case 0: return 7; case 1: return 9; case 2: return 11; case 3: return 2; default: return names[i & 1][0]; } }\n\
+        long sum(long *p, int n) { long s = 0; for (int i = 0; i < n; i++) s += p[i] * counter; return s; }\n\
+        int main(void) { long v[4] = {1, 2, 3, 4}; return pick((int)sum(v, 4)) + counter; }\n";
+    for target in [
+        keel_codegen::Target::Aarch64AppleDarwin,
+        keel_codegen::Target::X86_64LinuxGnu,
+    ] {
+        let x86 = target == keel_codegen::Target::X86_64LinuxGnu;
+        let options = keel_c::Options {
+            target,
+            ..Default::default()
+        };
+        let module = keel_c::compile(source, "chunks.c", options).unwrap();
+        let program = keel_codegen::compile_program(&module, target).unwrap();
+        let whole = if x86 {
+            keel_asm::x86::assemble_program_object(&program).unwrap()
+        } else {
+            assemble_program_object(&program, TargetFeatures::default()).unwrap()
+        };
+        let mut streamed = Vec::new();
+        let pipeline = keel_codegen::CodegenPipeline {
+            selector: &keel_codegen::SelectionTier::Baseline,
+            allocator: &keel_codegen::regalloc::AllocationTier::Full,
+        };
+        keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, &mut |p| {
+            streamed.push(p)
+        })
+        .unwrap();
+        assert!(streamed.len() > 3);
+        let mut joined = Program::new();
+        streamed.into_iter().for_each(|p| joined.append(p));
+        assert_eq!(joined, program);
+        for every in [1, 2, 7, usize::MAX] {
+            assert_eq!(chunked(&program, x86, |i| i % every == 0).unwrap(), whole);
+        }
+        // An instruction after data cannot be aligned: report the same item.
+        let mut bad = program.clone();
+        let at = bad.items.len() / 2;
+        bad.items.insert(
+            at,
+            keel_asm_ir::Item::Directive(keel_asm_ir::Directive::Bytes(vec![0])),
+        );
+        bad.items
+            .insert(at + 1, keel_asm_ir::Item::Label("Lkeel_misaligned".into()));
+        let expected = if x86 {
+            bad.items
+                .insert(at + 2, keel_asm_ir::Item::Label("Lkeel_misaligned".into()));
+            keel_asm::x86::assemble_program_object(&bad).unwrap_err()
+        } else {
+            bad.items.insert(
+                at + 2,
+                keel_asm_ir::Item::Instruction(Instruction::new(Opcode::NOP_HI_hints, [])),
+            );
+            assemble_program_object(&bad, TargetFeatures::default()).unwrap_err()
+        };
+        for every in [1, 3, usize::MAX] {
+            let error = chunked(&bad, x86, |i| i % every == 0).unwrap_err();
+            assert_eq!(
+                (error.line, &error.message),
+                (expected.line, &expected.message)
+            );
+        }
+    }
+}
+
+#[test]
+fn incremental_macro_fallback_preserves_encoded_words() {
+    let mut program = Program::new();
+    program.instruction(Instruction::new(Opcode::NOP_HI_hints, []));
+    program.text(".macro extra\nret\n.endm\nextra\n");
+    program.instruction(Instruction::new(Opcode::NOP_HI_hints, []));
+    for every in [1, usize::MAX] {
+        assert_eq!(
+            chunked(&program, false, |i| i % every == 0).unwrap(),
+            assemble_object("nop\nret\nnop\n").unwrap()
+        );
+    }
+}

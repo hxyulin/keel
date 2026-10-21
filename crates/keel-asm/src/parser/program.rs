@@ -7,11 +7,14 @@ use keel_asm_ir::{Instruction, Item, Program};
 pub(super) enum Input<'a> {
     Text(&'a str),
     Program(&'a Program),
+    Compact(&'a Compact),
 }
 pub(super) enum Entry<'a> {
     Text(&'a str),
     Label(&'a str),
     Instruction(&'a Instruction),
+    /// An instruction encoded when it entered a [`Compact`] program.
+    Word(u32),
     Directive(&'a keel_asm_ir::Directive),
     Symbolic(&'a keel_asm_ir::SymbolicInstruction),
     Branch(bool, &'a str),
@@ -20,14 +23,16 @@ impl<'a> Input<'a> {
     pub(super) fn contains(self, needle: &str) -> bool {
         match self {
             Self::Text(s) => s.contains(needle),
-            Self::Program(p) => p.items.iter().any(|item| match item {
-                Item::Text(s) | Item::Label(s) | Item::Branch { target: s, .. } => {
-                    s.contains(needle)
-                }
-                Item::Instruction(_) | Item::X86Instruction(_) => false,
-                Item::Directive(d) => d.contains(needle),
-                Item::Symbolic(s) => s.target().contains(needle),
-            }),
+            Self::Program(Program { items }) | Self::Compact(Compact { items, .. }) => {
+                items.iter().any(|item| match item {
+                    Item::Text(s) | Item::Label(s) | Item::Branch { target: s, .. } => {
+                        s.contains(needle)
+                    }
+                    Item::Instruction(_) | Item::X86Instruction(_) => false,
+                    Item::Directive(d) => d.contains(needle),
+                    Item::Symbolic(s) => s.target().contains(needle),
+                })
+            }
         }
     }
     pub(super) fn lines(self, arena: &'a Bump) -> Lines<'a> {
@@ -35,21 +40,83 @@ impl<'a> Input<'a> {
             Self::Text(s) => Lines {
                 current: Some((0, scanning::Lines::new(s, arena))),
                 items: [].iter(),
+                gaps: [].iter(),
+                words: [].iter(),
+                pending: 0,
                 arena,
                 next_line: 1,
             },
             Self::Program(p) => Lines {
                 current: None,
                 items: p.items.iter(),
+                gaps: [].iter(),
+                words: [].iter(),
+                pending: 0,
                 arena,
                 next_line: 1,
             },
+            Self::Compact(c) => {
+                let mut gaps = c.gaps.iter();
+                Lines {
+                    current: None,
+                    items: c.items.iter(),
+                    pending: gaps.next().copied().unwrap_or(0),
+                    gaps,
+                    words: c.words.iter(),
+                    arena,
+                    next_line: 1,
+                }
+            }
         }
     }
 }
+
+/// A structured program whose plain instructions were encoded as they arrived,
+/// retaining four bytes instead of a whole item for each. Every other item is
+/// kept unchanged, as is every statement position used by diagnostics.
+pub(crate) struct Compact {
+    items: Vec<Item>,
+    /// `gaps[i]` words precede `items[i]`; the last entry counts trailing words.
+    gaps: Vec<u32>,
+    words: Vec<u32>,
+    features: crate::TargetFeatures,
+}
+impl Compact {
+    pub(crate) fn new(features: crate::TargetFeatures) -> Self {
+        Self {
+            items: Vec::new(),
+            gaps: vec![0],
+            words: Vec::new(),
+            features,
+        }
+    }
+    pub(crate) fn features(&self) -> crate::TargetFeatures {
+        self.features
+    }
+    /// Encoding failures keep their item, to be diagnosed at its position.
+    pub(crate) fn push(&mut self, program: Program) {
+        for item in program.items {
+            if let Item::Instruction(i) = &item
+                && let Ok(word) = crate::encode_instruction(i, self.features)
+            {
+                self.words.push(word);
+                *self.gaps.last_mut().unwrap() += 1;
+                continue;
+            }
+            self.items.push(item);
+            self.gaps.push(0);
+        }
+    }
+}
+
 pub(super) struct Lines<'a> {
     current: Option<(usize, scanning::Lines<'a>)>,
     items: std::slice::Iter<'a, Item>,
+    /// Compact input: the word count following each remaining item.
+    gaps: std::slice::Iter<'a, u32>,
+    words: std::slice::Iter<'a, u32>,
+    /// Words to yield before the next item.
+    pending: u32,
     arena: &'a Bump,
     next_line: usize,
 }
@@ -70,8 +137,14 @@ impl<'a> Iterator for Lines<'a> {
                 }
                 self.current = None;
             }
-            let item = self.items.next()?;
             let line = self.next_line;
+            if self.pending > 0 {
+                self.pending -= 1;
+                self.next_line += 1;
+                return Some(Ok((line, Entry::Word(*self.words.next()?))));
+            }
+            let item = self.items.next()?;
+            self.pending = self.gaps.next().copied().unwrap_or(0);
             self.next_line += 1;
             match item {
                 Item::X86Instruction(_) => {
@@ -101,12 +174,27 @@ impl<'a> Iterator for Lines<'a> {
 }
 
 pub(super) fn materialize(
-    program: &Program,
+    input: Input<'_>,
     features: crate::TargetFeatures,
 ) -> Result<String, Error> {
     use std::fmt::Write;
+    let (items, gaps, mut words): (&[Item], &[u32], &[u32]) = match input {
+        Input::Text(_) => unreachable!("only structured programs are materialized"),
+        Input::Program(p) => (&p.items, &[], &[]),
+        Input::Compact(c) => (&c.items, &c.gaps, &c.words),
+    };
     let mut text = String::new();
-    for item in &program.items {
+    let mut gaps = gaps.iter();
+    for index in 0..=items.len() {
+        // Encoded words keep the spelling of an instruction item below.
+        let (before, rest) = words.split_at(gaps.next().map_or(0, |&n| n as usize));
+        for word in before {
+            writeln!(text, ".long {word}").unwrap();
+        }
+        words = rest;
+        let Some(item) = items.get(index) else {
+            break;
+        };
         match item {
             Item::X86Instruction(_) => {
                 return Err(Error::new(0, "x86 instruction in AArch64 program"));

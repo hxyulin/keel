@@ -475,6 +475,23 @@ pub fn assemble_program_object(
     assemble_program(program, features)?.to_macho()
 }
 
+/// Incremental form of [`assemble_program_object`]: programs pushed in order
+/// assemble exactly like their concatenation, including diagnostic positions.
+/// Plain instructions are encoded as they arrive and retain only their word,
+/// so a whole module's structured program never needs to be resident at once.
+pub struct ProgramAssembler(parser::Compact);
+impl ProgramAssembler {
+    pub fn new(features: TargetFeatures) -> Self {
+        Self(parser::Compact::new(features))
+    }
+    pub fn push(&mut self, program: keel_asm_ir::Program) {
+        self.0.push(program)
+    }
+    pub fn finish(self) -> Result<Vec<u8>, Error> {
+        parser::assemble_compact(&self.0)?.to_macho()
+    }
+}
+
 struct Field {
     id: FieldId,
     name: &'static str,

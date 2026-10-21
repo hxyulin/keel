@@ -89,7 +89,12 @@ impl Program {
         }
     }
     pub fn append(&mut self, other: Self) {
-        self.items.extend(other.items);
+        if self.items.is_empty() {
+            // Adopt the buffer, rather than copying every item into this one.
+            self.items = other.items;
+        } else {
+            self.items.extend(other.items);
+        }
     }
     pub fn stats(&self) -> ProgramStats {
         let mut stats = ProgramStats::default();

@@ -194,7 +194,7 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    match compile_output(module, pools, pipeline, false)? {
+    match compile_output(module, pools, pipeline, false, None)? {
         Output::Text(text) => Ok(text),
         _ => unreachable!(),
     }
@@ -207,10 +207,24 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    match compile_output(module, pools, pipeline, true)? {
+    match compile_output(module, pools, pipeline, true, None)? {
         Output::Structured(program) => Ok(program),
         _ => unreachable!(),
     }
+}
+
+/// Hand the program to `sink` in order, at least once per function.
+pub fn compile_program_chunks_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), CodegenError> {
+    match compile_output(module, pools, pipeline, true, Some(&mut *sink))? {
+        Output::Structured(program) => sink(program),
+        _ => unreachable!(),
+    }
+    Ok(())
 }
 
 fn compile_output(
@@ -218,6 +232,7 @@ fn compile_output(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
+    mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
     crate::validate_odr(module, crate::Target::Aarch64AppleDarwin)?;
     backend_scope!(Module);
@@ -251,6 +266,7 @@ fn compile_output(
                 slots: Vec::new(),
                 scope_marks,
             });
+            out.flush(&mut sink);
             continue;
         }
         #[cfg(feature = "backend-profile")]
@@ -266,6 +282,7 @@ fn compile_output(
         };
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
+        out.flush(&mut sink);
     }
     {
         backend_scope!(Data);

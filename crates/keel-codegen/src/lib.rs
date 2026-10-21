@@ -301,6 +301,28 @@ pub fn compile_program_with_pipeline(
     }
 }
 
+/// [`compile_program_with_pipeline`] in pieces: `sink` receives consecutive
+/// parts of the same program, at least one per function, so an incremental
+/// assembler need not hold the whole module's program at once.
+pub fn compile_program_chunks_with_pipeline(
+    module: &Module,
+    target: Target,
+    pipeline: &CodegenPipeline<'_>,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), CodegenError> {
+    match target {
+        Target::Aarch64AppleDarwin => aarch64::compile_program_chunks_with_pipeline(
+            module,
+            &aarch64::REGISTERS,
+            pipeline,
+            sink,
+        ),
+        Target::X86_64LinuxGnu => {
+            x86_64::compile_program_chunks_with_pipeline(module, &x86_64::REGISTERS, pipeline, sink)
+        }
+    }
+}
+
 use std::fmt;
 
 /// An object file format's conventions for names and sections, for the

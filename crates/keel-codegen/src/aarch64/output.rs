@@ -77,6 +77,12 @@ impl Output {
             _ => unreachable!("structured output cannot be implicitly serialized"),
         }
     }
+    /// Hand everything structured so far to an incremental consumer.
+    pub(super) fn flush(&mut self, sink: &mut Option<&mut dyn FnMut(Program)>) {
+        if let (Some(sink), Self::Structured(program)) = (sink, self) {
+            sink(std::mem::take(program));
+        }
+    }
     pub(super) fn relax(&mut self, name: &str) {
         if let Self::Text(text) = self {
             super::relax_branches(text, name);

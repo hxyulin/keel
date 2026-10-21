@@ -158,7 +158,7 @@ pub fn compile_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<String, CodegenError> {
-    let Output::Text(text) = compile_output(module, pools, pipeline, false)? else {
+    let Output::Text(text) = compile_output(module, pools, pipeline, false, None)? else {
         unreachable!()
     };
     Ok(text)
@@ -168,16 +168,32 @@ pub fn compile_program_with_pipeline(
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
 ) -> Result<keel_asm_ir::Program, CodegenError> {
-    let Output::Structured(program) = compile_output(module, pools, pipeline, true)? else {
+    let Output::Structured(program) = compile_output(module, pools, pipeline, true, None)? else {
         unreachable!()
     };
     Ok(program)
+}
+/// Hand the program to `sink` in order, at least once per function.
+pub fn compile_program_chunks_with_pipeline(
+    module: &Module,
+    pools: &Pools,
+    pipeline: &crate::CodegenPipeline<'_>,
+    sink: &mut dyn FnMut(keel_asm_ir::Program),
+) -> Result<(), CodegenError> {
+    let Output::Structured(program) =
+        compile_output(module, pools, pipeline, true, Some(&mut *sink))?
+    else {
+        unreachable!()
+    };
+    sink(program);
+    Ok(())
 }
 fn compile_output(
     module: &Module,
     pools: &Pools,
     pipeline: &crate::CodegenPipeline<'_>,
     structured: bool,
+    mut sink: Option<&mut dyn FnMut(keel_asm_ir::Program)>,
 ) -> Result<Output, CodegenError> {
     crate::validate_odr(module, crate::Target::X86_64LinuxGnu)?;
     validate_vector_abi(module)?;
@@ -215,6 +231,9 @@ fn compile_output(
         };
         let scope_marks = compiler.compile(&mut out);
         frames.push(FrameDebug { slots, scope_marks });
+        if let (Some(sink), Output::Structured(program)) = (&mut sink, &mut out) {
+            sink(std::mem::take(program));
+        }
     }
     for data in &module.data {
         if let Some(init) = &data.init {

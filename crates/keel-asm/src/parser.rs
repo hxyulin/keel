@@ -43,6 +43,7 @@ mod float;
 mod memory;
 mod preprocess;
 mod program;
+pub(crate) use program::Compact;
 mod relocate;
 mod scalable;
 mod scanning;
@@ -442,7 +443,18 @@ pub(super) fn assemble_program(
     source: &keel_asm_ir::Program,
     features: crate::TargetFeatures,
 ) -> Result<Assembly, Error> {
-    match assemble_plain(program::Input::Program(source), false, features) {
+    assemble_structured(program::Input::Program(source), features)
+}
+
+pub(super) fn assemble_compact(source: &program::Compact) -> Result<Assembly, Error> {
+    assemble_structured(program::Input::Compact(source), source.features())
+}
+
+fn assemble_structured(
+    source: program::Input<'_>,
+    features: crate::TargetFeatures,
+) -> Result<Assembly, Error> {
+    match assemble_plain(source, false, features) {
         Err(e) if preprocess::required(&e) => {
             // Rare inline-assembly macro fallback, explicit and fully validated.
             let text = program::materialize(source, features)?;
@@ -878,6 +890,24 @@ fn assemble_pass(
                     ));
                 }
                 let word = crate::encode_instruction(instruction, features).map_err(err)?;
+                if metrics {
+                    locations.push(InstructionLocation {
+                        section: current,
+                        line,
+                        offset: data::position(&result, current) as usize,
+                    });
+                }
+                data::instruction(&mut result, current, &word.to_le_bytes()).map_err(err)?;
+                continue;
+            }
+            program::Entry::Word(word) => {
+                if !data::is_code(&result, current)
+                    || !data::position(&result, current).is_multiple_of(4)
+                {
+                    return Err(err(
+                        "instructions require a four-byte-aligned executable section".into(),
+                    ));
+                }
                 if metrics {
                     locations.push(InstructionLocation {
                         section: current,

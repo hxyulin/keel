@@ -139,6 +139,63 @@ pub fn assemble_program_object_with_features(
     assemble_items(items.finish()?)
 }
 
+/// Incremental form of [`assemble_program_object_with_features`]: programs
+/// pushed in order assemble exactly like their concatenation, with the same
+/// item positions in diagnostics. Each chunk is consumed as it arrives, so a
+/// whole module's structured program never needs to be resident at once.
+pub struct ProgramAssembler {
+    items: Items<'static>,
+    next_line: usize,
+    error: Option<Error>,
+}
+impl ProgramAssembler {
+    pub fn new(features: x86::Features) -> Self {
+        Self {
+            items: Items::new(features),
+            next_line: 1,
+            error: None,
+        }
+    }
+    pub fn push(&mut self, program: Program) {
+        if self.error.is_some() {
+            return;
+        }
+        let items = &mut self.items;
+        for item in program.items {
+            let line = self.next_line;
+            self.next_line += 1;
+            match item {
+                Item::Text(source) => {
+                    if let Err(e) = items.parse(&source, line) {
+                        self.error = Some(e);
+                        return;
+                    }
+                }
+                Item::X86Instruction(i) => {
+                    if !items.encode(&i, line) {
+                        items.instruction(Ref::Owned(Box::new(i)), line)
+                    }
+                }
+                // Equivalent to the borrowed label item, without its box.
+                Item::Label(name) => items.push(Entry::Label {
+                    name: name.into_boxed_str(),
+                    line,
+                }),
+                item => items.push(Entry::Item {
+                    item: Ref::Owned(Box::new(item)),
+                    line,
+                }),
+            }
+        }
+    }
+    pub fn finish(self) -> Result<Vec<u8>, Error> {
+        match self.error {
+            Some(e) => Err(e),
+            None => assemble_items(self.items.finish()?),
+        }
+    }
+}
+
 /// Borrowed from a caller's program, or owned after parsing explicit text.
 enum Ref<'a, T> {
     Borrowed(&'a T),

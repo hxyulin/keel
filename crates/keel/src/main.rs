@@ -569,7 +569,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             let (input, mut module) = load(&opts)?;
             opts.optimize_with_output(&mut module)
                 .map_err(|e| format!("{input}: {e}"))?;
-            emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
+            emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "cc" => {
             let opts = parse_options(
@@ -663,7 +663,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             if opts.emit_ir {
                 return write_output(&opts, &module.to_string());
             }
-            emit_module(&opts, &module).map_err(|e| format!("{input}: {e}"))
+            emit_module(&opts, module).map_err(|e| format!("{input}: {e}"))
         }
         "opt" => {
             let opts = parse_options(
@@ -713,7 +713,8 @@ fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 /// Produce source or an object without crossing a process or filesystem boundary.
-fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
+/// The module is released as soon as code generation no longer needs it.
+fn emit_module(opts: &Options, module: Module) -> Result<(), String> {
     let target = opts.target()?;
     let selector = keel_codegen::tuning::TunedSelector {
         options: opts.selection,
@@ -744,21 +745,27 @@ fn emit_module(opts: &Options, module: &Module) -> Result<(), String> {
             .output
             .as_ref()
             .ok_or("`--emit-object` requires `-o <output.o>`")?;
-        let program = keel_codegen::compile_program_with_pipeline(module, target, &pipeline)
+        // Assemble each function's program as codegen produces it, so the
+        // whole module's structured program is never resident at once.
+        let mut aarch64 = keel_asm::ProgramAssembler::new(keel_asm::TargetFeatures::default());
+        let mut x86 = keel_asm::x86::ProgramAssembler::new(opts.x86_features);
+        let mut sink = |program| match target {
+            Target::Aarch64AppleDarwin => aarch64.push(program),
+            Target::X86_64LinuxGnu => x86.push(program),
+        };
+        keel_codegen::compile_program_chunks_with_pipeline(&module, target, &pipeline, &mut sink)
             .map_err(|e| e.to_string())?;
+        drop(module);
         let object = match target {
-            Target::Aarch64AppleDarwin => {
-                keel_asm::assemble_program_object(&program, keel_asm::TargetFeatures::default())
-            }
-            Target::X86_64LinuxGnu => {
-                keel_asm::x86::assemble_program_object_with_features(&program, opts.x86_features)
-            }
+            Target::Aarch64AppleDarwin => aarch64.finish(),
+            Target::X86_64LinuxGnu => x86.finish(),
         }
         .map_err(|e| e.to_string())?;
         std::fs::write(output, object).map_err(|e| format!("{output}: {e}"))
     } else {
-        let source = keel_codegen::compile_with_pipeline(module, target, &pipeline)
+        let source = keel_codegen::compile_with_pipeline(&module, target, &pipeline)
             .map_err(|e| e.to_string())?;
+        drop(module);
         write_output(opts, &source)
     }
 }
