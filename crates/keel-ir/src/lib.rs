@@ -8,6 +8,7 @@ pub mod debug;
 pub mod dominators;
 pub mod entity;
 pub mod function;
+pub mod fxhash;
 pub mod inst;
 pub mod intrinsic;
 pub mod layout;
