@@ -316,15 +316,39 @@ pub(crate) struct ListPool<T> {
     items: Vec<T>,
 }
 
-/// A list in a [`ListPool`]: `len` items at `start`, with room for `cap`.
-#[derive(Copy, Clone, Default)]
-pub(crate) struct ListRange {
+/// A list in a [`ListPool`] of `T`s: `len` items at `start`, with room for
+/// `cap`. Only the pool makes room, so `start + cap` is within its buffer,
+/// which never shrinks; typed, so a range cannot be used with another kind
+/// of pool.
+pub(crate) struct ListRange<T> {
     start: u32,
     len: u32,
     cap: u32,
+    _item: PhantomData<fn() -> T>,
 }
 
-impl ListRange {
+impl<T> Clone for ListRange<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for ListRange<T> {}
+
+impl<T> Default for ListRange<T> {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            start: 0,
+            len: 0,
+            cap: 0,
+            _item: PhantomData,
+        }
+    }
+}
+
+impl<T> ListRange<T> {
     #[inline]
     pub(crate) fn len(self) -> usize {
         self.len as usize
@@ -344,14 +368,21 @@ impl<T> Default for ListPool<T> {
 }
 
 impl<T: EntityRef> ListPool<T> {
+    /// The items of `list`, which must be one of this pool's (an empty
+    /// default one is everyone's).
     #[inline]
-    pub(crate) fn get(&self, list: ListRange) -> &[T] {
+    pub(crate) fn get(&self, list: ListRange<T>) -> &[T] {
         let start = list.start as usize;
-        &self.items[start..start + list.len as usize]
+        let end = start + list.len as usize;
+        debug_assert!(end <= self.items.len(), "list from another pool");
+        // SAFETY: `len <= cap`, and `grow` gave the list `start + cap`
+        // within `items`, which only ever grows. Block lists are hot enough
+        // in the optimizer that the bounds check shows up (~0.4% of -O).
+        unsafe { self.items.get_unchecked(start..end) }
     }
 
     #[inline]
-    pub(crate) fn push(&mut self, list: &mut ListRange, item: T) {
+    pub(crate) fn push(&mut self, list: &mut ListRange<T>, item: T) {
         if list.len == list.cap {
             self.grow(list);
         }
@@ -360,7 +391,7 @@ impl<T: EntityRef> ListPool<T> {
     }
 
     /// Inserts `item` at `index`, shifting the items after it.
-    pub(crate) fn insert(&mut self, list: &mut ListRange, index: usize, item: T) {
+    pub(crate) fn insert(&mut self, list: &mut ListRange<T>, index: usize, item: T) {
         assert!(index <= list.len as usize, "list index out of bounds");
         if list.len == list.cap {
             self.grow(list);
@@ -374,7 +405,7 @@ impl<T: EntityRef> ListPool<T> {
     }
 
     /// Removes and returns the item at `index`, shifting the items after it.
-    pub(crate) fn remove(&mut self, list: &mut ListRange, index: usize) -> T {
+    pub(crate) fn remove(&mut self, list: &mut ListRange<T>, index: usize) -> T {
         assert!(index < list.len as usize, "list index out of bounds");
         let start = list.start as usize;
         let end = start + list.len as usize;
@@ -387,23 +418,25 @@ impl<T: EntityRef> ListPool<T> {
 
     /// Makes room for at least one more item in `list`.
     #[cold]
-    fn grow(&mut self, list: &mut ListRange) {
+    fn grow(&mut self, list: &mut ListRange<T>) {
         let extra = list.cap.max(4) as usize;
         let end = list.start as usize + list.cap as usize;
-        if list.cap > 0 && end == self.items.len() {
-            // Last in the buffer: grow in place.
-            self.items.resize(end + extra, T::new(0));
+        let in_place = list.cap > 0 && end == self.items.len();
+        let start = if in_place {
+            list.start as usize
         } else {
-            let start = self.items.len();
-            let len = list.len as usize;
-            self.items.reserve(len + extra);
-            self.items
-                .extend_from_within(list.start as usize..list.start as usize + len);
-            self.items
-                .resize(start + list.cap as usize + extra, T::new(0));
-            list.start = start as u32;
+            self.items.len()
+        };
+        let new_end = start + list.cap as usize + extra;
+        // Checked before anything changes, so ranges stay within `items`.
+        u32::try_from(new_end).expect("list pool overflow");
+        if !in_place {
+            let old = list.start as usize..list.start as usize + list.len as usize;
+            self.items.reserve(new_end - start);
+            self.items.extend_from_within(old);
         }
-        u32::try_from(self.items.len()).expect("list pool overflow");
+        self.items.resize(new_end, T::new(0));
+        list.start = start as u32;
         list.cap += extra as u32;
     }
 }

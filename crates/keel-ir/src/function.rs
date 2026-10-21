@@ -283,8 +283,8 @@ impl fmt::Display for SourceLoc {
 /// [`Function::block_insts`].
 #[derive(Copy, Clone, Default)]
 struct BlockData {
-    params: ListRange,
-    insts: ListRange,
+    params: ListRange<Value>,
+    insts: ListRange<Inst>,
     /// Whether the block is in [`Function::layout`].
     in_layout: bool,
 }
