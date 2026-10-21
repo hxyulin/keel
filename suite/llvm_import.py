@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 
+from llvm_import_globals import Globals
+
 
 P, U = C.c_void_p, C.c_uint
 ABI_UNSUPPORTED = ('sret', 'byval', 'byref', 'inalloca', 'preallocated',
@@ -309,7 +311,10 @@ class Importer:
         if l.IsAConstantPointerNull(value):
             zero = self.emit('iconst.i64 0')
             return self.emit(f'inttoptr.ptr {zero}')
-        raise Unsupported('unsupported operand (including undef, poison, constant expressions or globals): ' + l.printed(value)[:160])
+        symbolic = self.globals.operand(value)
+        if symbolic is not None:
+            return symbolic
+        raise Unsupported('unsupported operand (including undef, poison or constant expressions): ' + l.printed(value)[:160])
 
     def layout_type(self, ty):
         """Validate before asking LLVM for a size (unsized types can abort LLVM)."""
@@ -577,13 +582,14 @@ class Importer:
         l.GetModuleInlineAsm(module, C.byref(size))
         if size.value:
             raise Unsupported('module inline assembly')
-        if l.GetFirstGlobal(module) or l.GetFirstGlobalAlias(module) or l.GetFirstGlobalIFunc(module):
-            raise Unsupported('global data, aliases and ifuncs are not in the initial subset')
+        if l.GetFirstGlobalAlias(module) or l.GetFirstGlobalIFunc(module):
+            raise Unsupported('aliases and ifuncs are unsupported')
         if l.GetNamedMetadata(module, b'llvm.linker.options', len(b'llvm.linker.options')):
             raise Unsupported('module autolink requests (llvm.linker.options)')
         functions = list(sequence(l.GetFirstFunction, l.GetNextFunction, module))
         self.signatures = {fn: self.signature(fn) for fn in functions}
-        output = []
+        self.globals = Globals(self, module, functions, Unsupported)
+        output = self.globals.definitions()
         for fn in functions:
             ret, params = self.signatures[fn]
             name = self.symbol(fn)
