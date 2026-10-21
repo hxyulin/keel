@@ -401,7 +401,7 @@ fn inactive_interference_blocks_an_otherwise_available_consensus_register() {
     let iv = |n, ranges| Interval {
         value: Value::new(n),
         half: 0,
-        ranges,
+        ranges: Ranges::from(ranges),
         crosses_call: false,
         preserved_gprs: 0,
         float: false,

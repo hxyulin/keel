@@ -251,7 +251,7 @@ fn range_intersections_match_pairwise_inclusive_overlap() {
     let make = |ranges| Interval {
         value: Value::new(0),
         half: 0,
-        ranges,
+        ranges: Ranges::from(ranges),
         crosses_call: false,
         preserved_gprs: 0,
         float: false,

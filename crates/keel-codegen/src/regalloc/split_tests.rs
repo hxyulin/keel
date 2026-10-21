@@ -166,7 +166,7 @@ fn cache_from<'a>(
                 }
             }
             Some(loc) => {
-                for (from, to) in iv.ranges {
+                for &(from, to) in iv.ranges.iter() {
                     events.extend([(from, true, loc), (to + 1, false, loc)]);
                 }
             }

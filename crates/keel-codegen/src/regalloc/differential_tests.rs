@@ -291,7 +291,7 @@ fn assert_reference_equivalence(
     let fast = build_fast_intervals(func, &cfg, &order, &is_call, &returns_twice, selection);
     let mut collapsed = full.clone();
     for iv in &mut collapsed {
-        iv.ranges = vec![(iv.start(), iv.end())];
+        iv.ranges = vec![(iv.start(), iv.end())].into();
     }
     assert_eq!(fast.len(), collapsed.len());
     for (a, b) in fast.iter().zip(&collapsed) {

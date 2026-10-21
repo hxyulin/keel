@@ -441,12 +441,72 @@ struct Interval {
     /// 1 for the high half of an `i128`.
     half: usize,
     /// Sorted, disjoint `[from, to]` ranges of points where it is live.
-    ranges: Vec<(u32, u32)>,
+    ranges: Ranges,
     crosses_call: bool,
     preserved_gprs: u64,
     /// Whether it needs an FP register rather than a general-purpose one.
     float: bool,
     vector: bool,
+}
+
+/// Live ranges of one value. Most values live within one contiguous range,
+/// which is stored inline instead of in its own heap allocation.
+#[derive(Clone, Debug)]
+enum Ranges {
+    One((u32, u32)),
+    Many(Vec<(u32, u32)>),
+}
+
+impl Default for Ranges {
+    fn default() -> Self {
+        Self::Many(Vec::new())
+    }
+}
+
+impl Ranges {
+    fn push(&mut self, range: (u32, u32)) {
+        match self {
+            Self::Many(list) if list.is_empty() => *self = Self::One(range),
+            Self::One(first) => *self = Self::Many(vec![*first, range]),
+            Self::Many(list) => list.push(range),
+        }
+    }
+
+    fn last_mut(&mut self) -> Option<&mut (u32, u32)> {
+        match self {
+            Self::One(range) => Some(range),
+            Self::Many(list) => list.last_mut(),
+        }
+    }
+}
+
+impl std::ops::Deref for Ranges {
+    type Target = [(u32, u32)];
+
+    fn deref(&self) -> &[(u32, u32)] {
+        match self {
+            Self::One(range) => std::slice::from_ref(range),
+            Self::Many(list) => list,
+        }
+    }
+}
+
+impl From<Vec<(u32, u32)>> for Ranges {
+    fn from(list: Vec<(u32, u32)>) -> Self {
+        match *list {
+            [range] => Self::One(range),
+            _ => Self::Many(list),
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Ranges {
+    type Item = &'a (u32, u32);
+    type IntoIter = std::slice::Iter<'a, (u32, u32)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl Interval {
@@ -801,11 +861,53 @@ fn assign_fast_spill_slots(spilled: &mut [&FastInterval], locs: &mut [Vec<Option
 
 /// Live-in and live-out sets, indexed by block.
 struct Liveness {
-    live_in: Vec<Vec<Value>>,
-    live_out: Vec<Vec<Value>>,
+    live_in: BlockSets,
+    live_out: BlockSets,
 }
 
-/// The classic backward dataflow:
+/// Sorted value sets for every block, packed into one array.
+struct BlockSets {
+    start: Vec<u32>,
+    values: Vec<Value>,
+}
+
+impl BlockSets {
+    fn empty(blocks: usize) -> Self {
+        Self {
+            start: vec![0; blocks + 1],
+            values: Vec::new(),
+        }
+    }
+
+    /// Groups `(block, value)` entries by block, keeping their order.
+    fn from_entries(blocks: usize, entries: &[(u32, Value)]) -> Self {
+        let mut start = vec![0u32; blocks + 1];
+        for &(b, _) in entries {
+            start[b as usize + 1] += 1;
+        }
+        for b in 0..blocks {
+            start[b + 1] += start[b];
+        }
+        let mut fill = start.clone();
+        let mut values = vec![Value::new(0); entries.len()];
+        for &(b, v) in entries {
+            let slot = &mut fill[b as usize];
+            values[*slot as usize] = v;
+            *slot += 1;
+        }
+        Self { start, values }
+    }
+}
+
+impl std::ops::Index<usize> for BlockSets {
+    type Output = [Value];
+
+    fn index(&self, block: usize) -> &[Value] {
+        &self.values[self.start[block] as usize..self.start[block + 1] as usize]
+    }
+}
+
+/// The least solution of the classic backward dataflow:
 ///
 /// ```text
 /// live_out(B) = union of live_in(S) over successors S
@@ -815,30 +917,13 @@ struct Liveness {
 /// `uses(B)` are values read in `B` before any definition in `B`; `defs(B)`
 /// are `B`'s parameters and results. Block arguments are ordinary operands
 /// of the predecessor's terminator, and parameters are definitions, so
-/// block arguments need no special case (phi nodes would). The worklist
-/// starts in postorder and revisits predecessors only when a live-in set
-/// changes; loops iterate until the fixed point.
-/// Union two sorted sparse sets into a reusable output buffer.
-fn union_live(a: &[Value], b: &[Value], out: &mut Vec<Value>) {
-    out.clear();
-    let (mut i, mut j) = (0, 0);
-    while i < a.len() && j < b.len() {
-        if a[i] < b[j] {
-            out.push(a[i]);
-            i += 1;
-        } else if a[i] > b[j] {
-            out.push(b[j]);
-            j += 1;
-        } else {
-            out.push(a[i]);
-            i += 1;
-            j += 1;
-        }
-    }
-    out.extend_from_slice(&a[i..]);
-    out.extend_from_slice(&b[j..]);
-}
-
+/// block arguments need no special case (phi nodes would).
+///
+/// Rather than iterating set unions to a fixed point, each value is walked
+/// backwards from its upward-exposed uses until its definition: a value is
+/// live into exactly the blocks from which a use is reachable without passing
+/// its definition. Every set entry is produced once, and visiting values in
+/// increasing order leaves each set sorted without merging.
 fn liveness(
     func: &Function,
     cfg: &ControlFlowGraph,
@@ -851,26 +936,29 @@ fn liveness(
     // In verified SSA, every operand in the only reachable block is defined
     // there (parameters included). Even a self edge introduces no live-in
     // value: edge arguments are explicit reads and parameters are definitions.
-    // The exact fixed point is empty, so avoid the worklist and use/def tables.
+    // The exact fixed point is empty, so avoid the use/def walk.
     if order.len() <= 1 {
         return Liveness {
-            live_in: vec![vec![]; n],
-            live_out: vec![vec![]; n],
+            live_in: BlockSets::empty(n),
+            live_out: BlockSets::empty(n),
         };
     }
-    let mut uses = vec![Vec::new(); n];
-    let mut defs = vec![Vec::new(); n];
+    let num_values = func.num_values();
+    // Upward-exposed uses as (value, block) occurrences, at most one per pair.
+    let mut exposed: Vec<(u32, u32)> = Vec::new();
     // Block stamps avoid trees and clearing a value-sized set per block.
-    let mut defined = vec![0; func.num_values()];
-    let mut used = vec![0; func.num_values()];
+    let mut defined = vec![0u32; num_values];
+    let mut used = vec![0u32; num_values];
+    // The reachable block holding each value's (non-covered) definition.
+    let mut def_block = vec![u32::MAX; num_values];
     let mut reachable = vec![false; n];
     for &block in order {
-        let b = block.index();
+        let b = block.index() as u32;
         let stamp = b + 1;
-        reachable[b] = true;
+        reachable[block.index()] = true;
         for &param in func.block_params(block) {
             defined[param.index()] = stamp;
-            defs[b].push(param);
+            def_block[param.index()] = b;
         }
         for &inst in func.block_insts(block) {
             if selection.covered(inst) {
@@ -879,64 +967,79 @@ fn liveness(
             selection.for_each_operand(func, inst, |v| {
                 let i = v.index();
                 if defined[i] != stamp && used[i] != stamp {
-                    uses[b].push(v);
+                    exposed.push((i as u32, b));
                     used[i] = stamp;
                 }
             });
             for &v in func.inst_results(inst) {
                 defined[v.index()] = stamp;
-                defs[b].push(v);
+                def_block[v.index()] = b;
             }
         }
-        uses[b].sort_unstable();
-        defs[b].sort_unstable();
-        defs[b].dedup();
     }
-    let mut live = Liveness {
-        live_in: vec![Vec::new(); n],
-        live_out: vec![Vec::new(); n],
-    };
-    // Seed in postorder; changes only revisit predecessors, including
-    // irreducible backedges. Sparse vectors scale with actual live values,
-    // not the product of all blocks and all values.
-    let mut work: std::collections::VecDeque<Block> = order.iter().rev().copied().collect();
-    let mut queued = reachable.clone();
-    let mut out = Vec::new();
-    let mut merged = Vec::new();
-    let mut inherited = Vec::new();
+    drop(defined);
+    drop(used);
+    // Group the use blocks by value (a counting sort keeps block order).
+    let mut start = vec![0u32; num_values + 1];
+    for &(v, _) in &exposed {
+        start[v as usize + 1] += 1;
+    }
+    for i in 0..num_values {
+        start[i + 1] += start[i];
+    }
+    let mut fill = start.clone();
+    let mut use_blocks = vec![0u32; exposed.len()];
+    for &(v, b) in &exposed {
+        let slot = &mut fill[v as usize];
+        use_blocks[*slot as usize] = b;
+        *slot += 1;
+    }
+    drop(exposed);
+    drop(fill);
+
+    // (block, value) entries, produced in increasing value order.
     let mut live_in = Vec::new();
-    while let Some(block) = work.pop_front() {
-        let b = block.index();
-        queued[b] = false;
-        out.clear();
-        for &succ in cfg.succs(block) {
-            union_live(&out, &live.live_in[succ.index()], &mut merged);
-            std::mem::swap(&mut out, &mut merged);
+    let mut live_out = Vec::new();
+    // The last value entered into each block's live-in and live-out set.
+    let mut in_mark = vec![u32::MAX; n];
+    let mut out_mark = vec![u32::MAX; n];
+    let mut stack = Vec::new();
+    for v in 0..num_values {
+        let blocks = &use_blocks[start[v] as usize..start[v + 1] as usize];
+        if blocks.is_empty() {
+            continue;
         }
-        inherited.clear();
-        let mut d = 0;
-        for &v in &out {
-            while d < defs[b].len() && defs[b][d] < v {
-                d += 1;
-            }
-            if defs[b].get(d) != Some(&v) {
-                inherited.push(v);
+        let value = Value::new(v);
+        let mark = v as u32;
+        for &b in blocks {
+            if in_mark[b as usize] != mark {
+                in_mark[b as usize] = mark;
+                live_in.push((b, value));
+                stack.push(b);
             }
         }
-        union_live(&uses[b], &inherited, &mut live_in);
-        std::mem::swap(&mut live.live_out[b], &mut out);
-        if live_in != live.live_in[b] {
-            std::mem::swap(&mut live.live_in[b], &mut live_in);
-            for &pred in cfg.preds(block) {
+        while let Some(b) = stack.pop() {
+            for &pred in cfg.preds(Block::new(b as usize)) {
                 let p = pred.index();
-                if reachable[p] && !queued[p] {
-                    queued[p] = true;
-                    work.push_back(pred);
+                if !reachable[p] {
+                    continue;
+                }
+                if out_mark[p] != mark {
+                    out_mark[p] = mark;
+                    live_out.push((p as u32, value));
+                }
+                if def_block[v] != p as u32 && in_mark[p] != mark {
+                    in_mark[p] = mark;
+                    live_in.push((p as u32, value));
+                    stack.push(p as u32);
                 }
             }
         }
     }
-    live
+    Liveness {
+        live_in: BlockSets::from_entries(n, &live_in),
+        live_out: BlockSets::from_entries(n, &live_out),
+    }
 }
 
 /// Numbers the program points (see the module docs) and builds one interval
@@ -956,7 +1059,8 @@ fn build_intervals(
 
     // Each value's ranges, built block by block: `open` is the range in
     // the current block, from the first point to the last seen there.
-    let mut ranges: Vec<Vec<(u32, u32)>> = vec![Vec::new(); func.num_values()];
+    let mut ranges: Vec<Ranges> = Vec::new();
+    ranges.resize_with(func.num_values(), Ranges::default);
     let mut open: Vec<Option<(u32, u32)>> = vec![None; func.num_values()];
     let mut touched: Vec<Value> = Vec::new();
     fn extend(open: &mut [Option<(u32, u32)>], v: Value, point: u32, touched: &mut Vec<Value>) {
@@ -1060,7 +1164,7 @@ fn build_intervals(
             call_preserves(&preserved_calls, &list)
         };
         if crosses(&twice, &list) {
-            list = vec![(0, slot * 2)];
+            list = Ranges::One((0, slot * 2));
         }
         let value = Value::new(i);
         let ty = func.value_type(value);
@@ -1489,7 +1593,7 @@ mod tests {
             Interval {
                 value: Value::new(0),
                 half: 0,
-                ranges: vec![(0, 5)],
+                ranges: vec![(0, 5)].into(),
                 crosses_call: false,
                 preserved_gprs: 0,
                 float: false,
@@ -1498,7 +1602,7 @@ mod tests {
             Interval {
                 value: Value::new(1),
                 half: 0,
-                ranges: vec![(2, 9)],
+                ranges: vec![(2, 9)].into(),
                 crosses_call: false,
                 preserved_gprs: 0,
                 float: false,
@@ -1637,7 +1741,7 @@ mod tests {
         .map(|(value, half, vector, start, end)| Interval {
             value: Value::new(value),
             half,
-            ranges: vec![(start, end)],
+            ranges: vec![(start, end)].into(),
             crosses_call: false,
             preserved_gprs: 0,
             float: vector,
