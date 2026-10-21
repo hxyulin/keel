@@ -4,7 +4,9 @@
 //! parameter gets its own fresh, naturally aligned callee home: arbitrary
 //! mutation, address comparisons, forwarding and capture retain byval semantics.
 //! This is deliberately not pointer substitution or a nocapture inference.
-//! Sret is preserved verbatim; result transport optimization is out of scope.
+//! Mixed ARM register/stack byval signatures are excluded to preserve source
+//! read/fault order on both supported targets. Sret is preserved verbatim;
+//! result transport optimization is out of scope.
 use keel_ir::{
     AbiParam, BinaryOp, DataItem, Function, InsertPoint, InstData, Layout, MemoryEffects,
     MemoryFlags, Module, Purpose, Signature, Symbol, Type, Value, ValueDef,
@@ -43,6 +45,40 @@ fn pair(l: &Layout) -> bool {
     // Match structural shapes without expanding arbitrary layouts/leaves.
     matches!(l, Layout::Array(t, 2) if **t == Layout::Scalar(Type::I64))
         || matches!(l, Layout::Struct(fs) if fs.as_slice() == [Layout::Scalar(Type::I64), Layout::Scalar(Type::I64)])
+}
+// Restricted projection of Apple ARM64 arg_locs, only for signatures whose
+// byval layouts have already been checked as exact two-i64 pairs. Keep this
+// local to avoid an opt -> codegen dependency. Normal FP/vector arguments use
+// a separate bank; sret uses result registers or x8, never argument GPRs.
+// ARM move_args reads OnStack pairs first, then deferred InRegs pairs. SysV
+// move_args reads both kinds immediately in parameter order (including when
+// sret consumes rdi or register exhaustion rolls an aggregate onto the stack).
+// Thus a register pair followed by a stack pair is the only source-order
+// inversion in this restricted domain. Reject the whole signature on *both*
+// targets; do not redefine the IR's potentially trapping read semantics.
+fn source_order_preserved(sig: &Signature) -> bool {
+    let mut ints = 0usize;
+    let mut register_pair = false;
+    for p in &sig.params {
+        match &p.purpose {
+            Purpose::ByVal(_) => {
+                if ints + 2 <= 8 {
+                    ints += 2;
+                    register_pair = true;
+                } else {
+                    ints = 8;
+                    if register_pair {
+                        return false;
+                    }
+                }
+            }
+            Purpose::Normal if !p.ty.is_float() && !p.ty.is_vector() => {
+                ints = (ints + if p.ty == Type::I128 { 2 } else { 1 }).min(8);
+            }
+            _ => {}
+        }
+    }
+    true
 }
 fn plan(f: &Function) -> Option<Plan> {
     if !f.local
@@ -97,6 +133,9 @@ fn plan(f: &Function) -> Option<Plan> {
     {
         return None;
     }
+    if !source_order_preserved(&f.sig) {
+        return None;
+    }
     let mut new = f.sig.clone();
     new.params = f
         .sig
@@ -149,6 +188,11 @@ fn flags() -> MemoryFlags {
 /// Input must be verified whole-module IR. Returns rewritten definitions.
 /// Run before stack-forward/stack-promote/DCE; callers may subsequently opt in
 /// to internal-fast-calls. No defaults or calling conventions change here.
+/// Only exact [2 x i64] / {i64,i64} byval layouts qualify. Reject the entire
+/// definition if its ARM placement mixes register and stack byval sources,
+/// even when compiling for x86. All-register and all-stack sources retain
+/// parameter order, with the low word read before the high word. Normal scalar
+/// arguments may still span registers/stack; sret is not a byval source read.
 pub fn run(m: &mut Module) -> usize {
     if !m.files.is_empty() || !m.debug_types.is_empty() || !m.debug_globals.is_empty() {
         return 0;

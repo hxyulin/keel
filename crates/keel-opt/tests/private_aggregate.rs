@@ -179,3 +179,40 @@ fn explicit_custom_pipeline_verifies_module_rewrite() {
     verify_module(&m).unwrap();
     assert_eq!(m.functions[0].sig.params.len(), 5);
 }
+
+// Probe the restricted ARM argument-register projection, including scalar
+// exhaustion between pairs. SysV's six GPRs do not impose this exclusion:
+// both its register and stack aggregate reads already follow parameter order.
+#[test]
+fn source_order_eligibility_accounts_for_scalar_banks_and_sret() {
+    fn signature(params: &[&str]) -> String {
+        let args = params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("v{i}:{}", p.split_whitespace().next().unwrap()))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "func @probe({}) noinline local {{\nblock0({args}):\n return\n}}",
+            params.join(",")
+        )
+    }
+    let pair = "ptr byval [2 x i64]";
+    for (params, expected) in [
+        (vec![pair; 4], 1), // x86 mixed register/stack; ARM all-register
+        (vec![pair; 5], 0),
+        (vec![pair; 10], 0),
+        ([vec!["i64"; 8], vec![pair; 3]].concat(), 1), // all-stack
+        ([vec!["i64"; 7], vec![pair; 2]].concat(), 1), // closes ARM GPR bank
+        ([vec!["i64"; 6], vec![pair; 2]].concat(), 0),
+        ([vec!["f64"; 8], vec![pair; 4]].concat(), 1),
+        ([vec!["f64"; 8], vec![pair; 5]].concat(), 0),
+        ([vec!["i128"; 3], vec![pair; 2]].concat(), 0),
+        ([vec!["i128"; 4], vec![pair; 2]].concat(), 1),
+        ([vec![pair], vec!["i128"; 3], vec![pair]].concat(), 0),
+        ([vec!["ptr sret [3 x i64]"], vec![pair; 4]].concat(), 1),
+        ([vec!["ptr sret [3 x i64]"], vec![pair; 5]].concat(), 0),
+    ] {
+        check(&signature(&params), expected);
+    }
+}
