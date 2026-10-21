@@ -22,6 +22,7 @@ pub enum Type {
 }
 
 impl Type {
+    #[inline]
     pub fn is_int(self) -> bool {
         matches!(
             self,
@@ -29,14 +30,17 @@ impl Type {
         )
     }
 
+    #[inline]
     pub fn is_float(self) -> bool {
         matches!(self, Type::F32 | Type::F64)
     }
 
+    #[inline]
     pub fn is_vector(self) -> bool {
         matches!(self, Self::Vector(_))
     }
 
+    #[inline]
     pub fn vector(self) -> Option<VectorType> {
         match self {
             Self::Vector(v) => Some(v),
@@ -45,6 +49,7 @@ impl Type {
     }
 
     /// Size in bytes, or `None` for `Ptr` whose size depends on the target.
+    #[inline]
     pub fn bytes(self) -> Option<u32> {
         match self {
             Type::I8 => Some(1),

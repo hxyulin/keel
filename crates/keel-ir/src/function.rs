@@ -12,7 +12,9 @@
 
 use crate::inst::{BlockCall, Clause, InstData, Symbol};
 use crate::layout::Layout;
-use crate::{Arena, Block, DataRef, EntityRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value};
+use crate::{
+    Arena, Block, DataRef, EntityRef, FuncRef, Inst, SigRef, SourceFile, StackSlot, Type, Value,
+};
 use std::fmt;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -73,6 +75,7 @@ impl AbiParam {
     }
 
     /// The layout of the struct a `byval` or `sret` parameter points to.
+    #[inline]
     pub fn layout(&self) -> Option<&Layout> {
         match &self.purpose {
             Purpose::Normal => None,
@@ -310,6 +313,7 @@ impl ResultRange {
         }
     }
 
+    #[inline]
     fn as_range(self) -> std::ops::Range<usize> {
         let start = self.start as usize;
         start..start + self.len as usize
@@ -317,6 +321,7 @@ impl ResultRange {
 }
 
 impl InstNode {
+    #[inline]
     fn block(&self) -> Option<Block> {
         (self.block != NO_BLOCK).then(|| Block::new(self.block as usize))
     }
@@ -405,12 +410,7 @@ impl fmt::Debug for Function {
         impl fmt::Debug for Nodes<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.debug_map()
-                    .entries(
-                        self.0
-                            .insts
-                            .iter()
-                            .map(|(i, _)| (i, Node(self.0, i))),
-                    )
+                    .entries(self.0.insts.iter().map(|(i, _)| (i, Node(self.0, i))))
                     .finish()
             }
         }
@@ -469,10 +469,12 @@ impl Function {
         self.stack_slots.push(StackSlotData { size, align })
     }
 
+    #[inline]
     pub fn stack_slots(&self) -> impl Iterator<Item = (StackSlot, StackSlotData)> + '_ {
         self.stack_slots.iter().map(|(ss, data)| (ss, *data))
     }
 
+    #[inline]
     pub fn num_stack_slots(&self) -> usize {
         self.stack_slots.len()
     }
@@ -489,14 +491,17 @@ impl Function {
         })
     }
 
+    #[inline]
     pub fn callee_mut(&mut self, func_ref: FuncRef) -> &mut FuncDecl {
         &mut self.callees[func_ref]
     }
 
+    #[inline]
     pub fn callee(&self, func_ref: FuncRef) -> &FuncDecl {
         &self.callees[func_ref]
     }
 
+    #[inline]
     pub fn callees(&self) -> impl Iterator<Item = (FuncRef, &FuncDecl)> {
         self.callees.iter()
     }
@@ -509,6 +514,7 @@ impl Function {
         self.data_symbols.push(name.to_string())
     }
 
+    #[inline]
     pub fn data_symbols(&self) -> impl Iterator<Item = (DataRef, &str)> {
         self.data_symbols.iter().map(|(r, name)| (r, name.as_str()))
     }
@@ -522,15 +528,18 @@ impl Function {
         self.signatures.push(sig)
     }
 
+    #[inline]
     pub fn signature(&self, sig_ref: SigRef) -> &Signature {
         &self.signatures[sig_ref]
     }
 
+    #[inline]
     pub fn signatures(&self) -> impl Iterator<Item = (SigRef, &Signature)> {
         self.signatures.iter()
     }
 
     /// The linker name of `symbol`.
+    #[inline]
     pub fn symbol_name(&self, symbol: Symbol) -> &str {
         match symbol {
             Symbol::Func(func_ref) => &self.callees[func_ref].name,
@@ -744,6 +753,7 @@ impl Function {
     }
 
     /// Whether `inst` has been removed from the layout.
+    #[inline]
     pub fn is_removed(&self, inst: Inst) -> bool {
         self.insts[inst].block == NO_BLOCK
     }
@@ -754,11 +764,13 @@ impl Function {
     /// Rewriting data must preserve the result count and types. To change
     /// the result signature, insert a new instruction, replace its uses and
     /// remove the old one. The verifier checks this contract after passes.
+    #[inline]
     pub fn inst_data_mut(&mut self, inst: Inst) -> &mut InstData {
         &mut self.insts[inst].data
     }
 
     /// The source location `inst` was compiled from, if known.
+    #[inline]
     pub fn inst_loc(&self, inst: Inst) -> Option<SourceLoc> {
         match self.insts[inst].loc {
             0 => None,
@@ -822,6 +834,7 @@ impl Function {
     }
 
     /// Follows aliases to the value that is actually defined.
+    #[inline]
     pub fn resolve(&self, mut value: Value) -> Value {
         while let ValueDef::Alias(next) = self.values[value].def {
             value = next;
@@ -830,51 +843,62 @@ impl Function {
     }
 
     /// Number of values ever created; value indices are below this.
+    #[inline]
     pub fn num_values(&self) -> usize {
         self.values.len()
     }
 
     /// Number of instructions ever created; instruction indices are below
     /// this.
+    #[inline]
     pub fn num_insts(&self) -> usize {
         self.insts.len()
     }
 
     /// Number of blocks ever created; block indices are below this.
+    #[inline]
     pub fn num_blocks(&self) -> usize {
         self.blocks.len()
     }
 
+    #[inline]
     pub fn entry_block(&self) -> Option<Block> {
         self.layout.first().copied()
     }
 
+    #[inline]
     pub fn blocks(&self) -> impl Iterator<Item = Block> + '_ {
         self.layout.iter().copied()
     }
 
+    #[inline]
     pub fn block_params(&self, block: Block) -> &[Value] {
         &self.blocks[block].params
     }
 
+    #[inline]
     pub fn block_insts(&self, block: Block) -> &[Inst] {
         &self.blocks[block].insts
     }
 
+    #[inline]
     pub fn inst_data(&self, inst: Inst) -> &InstData {
         &self.insts[inst].data
     }
 
+    #[inline]
     pub fn inst_results(&self, inst: Inst) -> &[Value] {
         &self.result_pool[self.insts[inst].results.as_range()]
     }
 
     /// The block containing `inst`. Panics if it was removed.
+    #[inline]
     pub fn inst_block(&self, inst: Inst) -> Block {
         self.insts[inst].block().expect("instruction was removed")
     }
 
     /// Every instruction in the layout, block by block.
+    #[inline]
     pub fn layout_insts(&self) -> impl Iterator<Item = (Block, Inst)> + '_ {
         self.blocks()
             .flat_map(move |b| self.block_insts(b).iter().map(move |&i| (b, i)))
@@ -894,14 +918,17 @@ impl Function {
     }
 
     /// The single result of `inst`. Panics if it has none.
+    #[inline]
     pub fn first_result(&self, inst: Inst) -> Value {
         self.inst_results(inst)[0]
     }
 
+    #[inline]
     pub fn value_type(&self, value: Value) -> Type {
         self.values[value].ty
     }
 
+    #[inline]
     pub fn value_def(&self, value: Value) -> ValueDef {
         self.values[value].def
     }

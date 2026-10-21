@@ -23,10 +23,12 @@ macro_rules! entity {
         pub struct $name(u32);
 
         impl $crate::entity::EntityRef for $name {
+            #[inline]
             fn new(index: usize) -> Self {
                 Self(u32::try_from(index).expect("entity index overflow"))
             }
 
+            #[inline]
             fn index(self) -> usize {
                 self.0 as usize
             }
@@ -54,6 +56,7 @@ pub struct Arena<K, V> {
 }
 
 impl<K: EntityRef, V> Arena<K, V> {
+    #[inline]
     pub fn new() -> Self {
         Self {
             items: Vec::new(),
@@ -61,24 +64,29 @@ impl<K: EntityRef, V> Arena<K, V> {
         }
     }
 
+    #[inline]
     pub fn push(&mut self, value: V) -> K {
         let key = K::new(self.items.len());
         self.items.push(value);
         key
     }
 
+    #[inline]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
+    #[inline]
     pub fn keys(&self) -> impl Iterator<Item = K> + use<K, V> {
         (0..self.items.len()).map(K::new)
     }
 
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (K, &V)> {
         self.items.iter().enumerate().map(|(i, v)| (K::new(i), v))
     }
@@ -102,12 +110,14 @@ impl<K: EntityRef, V> Default for Arena<K, V> {
 impl<K: EntityRef, V> Index<K> for Arena<K, V> {
     type Output = V;
 
+    #[inline]
     fn index(&self, key: K) -> &V {
         &self.items[key.index()]
     }
 }
 
 impl<K: EntityRef, V> IndexMut<K> for Arena<K, V> {
+    #[inline]
     fn index_mut(&mut self, key: K) -> &mut V {
         &mut self.items[key.index()]
     }

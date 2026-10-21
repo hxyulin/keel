@@ -445,6 +445,7 @@ pub enum FloatCC {
 }
 
 impl BinaryOp {
+    #[inline]
     pub fn is_float(self) -> bool {
         matches!(
             self,
@@ -459,6 +460,7 @@ impl BinaryOp {
     }
 
     /// Division and remainder trap on a zero divisor (and `sdiv` on overflow).
+    #[inline]
     pub fn can_trap(self) -> bool {
         matches!(
             self,
@@ -468,6 +470,7 @@ impl BinaryOp {
 }
 
 impl UnaryOp {
+    #[inline]
     pub fn is_float(self) -> bool {
         matches!(
             self,
@@ -483,6 +486,7 @@ impl UnaryOp {
 }
 
 impl InstData {
+    #[inline]
     pub fn is_vector_instruction(&self) -> bool {
         matches!(
             self,
@@ -503,6 +507,7 @@ impl InstData {
 
     /// Pinned instructions keep their position; the rest are pure and float,
     /// placed only by the scheduler.
+    #[inline]
     pub fn is_pinned(&self) -> bool {
         match self {
             InstData::Binary { op, .. } => op.can_trap(),
@@ -554,6 +559,7 @@ impl InstData {
     /// Memory effects are distinct from scheduling: even a non-trapping,
     /// ordinary load remains pinned until a memory-aware pass proves a move.
     /// Keep classification exhaustive: new opcodes must declare their effects.
+    #[inline]
     pub fn memory_effects(&self) -> MemoryEffects {
         use MemoryEffects::*;
         match self {
@@ -617,6 +623,7 @@ impl InstData {
     /// Conservative possibility of a fault, trap, or exceptional exit.
     /// `false` alone permits neither deletion of side effects nor motion
     /// across memory writes, barriers, or lifetime changes.
+    #[inline]
     pub fn may_trap(&self) -> bool {
         match self {
             Self::Binary { op, .. } => op.can_trap(),
@@ -666,6 +673,7 @@ impl InstData {
         }
     }
 
+    #[inline]
     pub fn is_terminator(&self) -> bool {
         matches!(
             self,
@@ -680,6 +688,7 @@ impl InstData {
         )
     }
 
+    #[inline]
     pub fn branch_dests(&self) -> &[BlockCall] {
         match self {
             InstData::Jump { dest } => std::slice::from_ref(dest),
@@ -690,6 +699,7 @@ impl InstData {
         }
     }
 
+    #[inline]
     pub fn branch_dests_mut(&mut self) -> &mut [BlockCall] {
         match self {
             InstData::Jump { dest } => std::slice::from_mut(dest),

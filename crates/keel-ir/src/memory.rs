@@ -53,9 +53,11 @@ pub enum MemoryEffects {
 }
 
 impl MemoryEffects {
+    #[inline]
     pub fn may_read(self) -> bool {
         matches!(self, Self::Read | Self::ReadWrite | Self::Barrier)
     }
+    #[inline]
     pub fn may_write(self) -> bool {
         matches!(self, Self::Write | Self::ReadWrite | Self::Barrier)
     }
