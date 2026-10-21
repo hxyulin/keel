@@ -277,3 +277,52 @@ fn resolved_pointer_aliases_match_but_frame_observers_disable_the_function() {
     );
     assert_eq!(loads(&optimize(&src)), 2);
 }
+
+fn switch_budget_fixture(blocks: usize, destinations: usize) -> String {
+    let mut s = "func @f(ptr, i64) -> i64 {\nblock0(v0: ptr, v1: i64):\n v2 = load.i64 v0\n v3 = load.i64 v0\n".to_string();
+    for b in 0..blocks {
+        if b != 0 {
+            s.push_str(&format!("block{b}:\n"));
+        }
+        let cases = (0..destinations - 1)
+            .map(|n| format!("{n}: block{}", b + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        s.push_str(&format!(" switch v1, block{}, [{cases}]\n", b + 1));
+    }
+    s.push_str(&format!("block{blocks}:\n return v3\n}}"));
+    s
+}
+
+#[test]
+fn switch_destination_budgets_reject_whole_caller_before_mutation() {
+    // Default destination counts even when every case shares that target.
+    for (destinations, expected) in [(1024, 1), (1025, 2)] {
+        assert_eq!(
+            loads(&optimize(&switch_budget_fixture(1, destinations))),
+            expected
+        );
+    }
+    for (blocks, expected) in [(16, 1), (17, 2)] {
+        assert_eq!(
+            loads(&optimize(&switch_budget_fixture(blocks, 1024))),
+            expected
+        );
+    }
+}
+
+#[test]
+fn removed_block_indices_still_spend_cfg_allocation_budget() {
+    let mut m = keel_ir::parse(&source(LEAF, "v4 = call @leaf(v0, v1)")).unwrap();
+    let f = m.functions.iter_mut().find(|f| f.name == "f").unwrap();
+    for _ in 0..8192 {
+        let b = f.create_block();
+        f.remove_block(b);
+    }
+    keel_ir::verify_module(&m).unwrap();
+    let before = m.to_string();
+    keel_opt::run_passes(&mut m, &["call-load-reuse"]).unwrap();
+    keel_ir::verify_module(&m).unwrap();
+    assert_eq!(before, m.to_string());
+    assert_eq!(loads(&m), 2);
+}

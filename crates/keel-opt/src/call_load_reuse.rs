@@ -31,6 +31,30 @@ const MAX_INSTS: usize = 50_000;
 const MAX_VALUES: usize = 100_000;
 const MAX_FACTS: usize = 128;
 const MAX_EDGES: usize = 8;
+const MAX_BLOCK_INDICES: usize = 8192;
+const MAX_DESTINATIONS: usize = 16_384;
+const MAX_BLOCK_DESTINATIONS: usize = 1024;
+
+// CFG construction deduplicates destinations within a block. Bound both that
+// quadratic work and total syntactic edges before allocating or computing it.
+fn within_cfg_budget(f: &Function) -> bool {
+    if f.num_blocks() > MAX_BLOCK_INDICES {
+        return false;
+    }
+    let mut remaining = MAX_DESTINATIONS;
+    for b in f.blocks() {
+        let mut block_remaining = MAX_BLOCK_DESTINATIONS;
+        for &i in f.block_insts(b) {
+            let count = f.inst_data(i).branch_dests().len();
+            if count > remaining || count > block_remaining {
+                return false;
+            }
+            remaining -= count;
+            block_remaining -= count;
+        }
+    }
+    true
+}
 
 // Whitelist excludes division, floating environment effects, frame observers,
 // stack lifetime operations, nonlocal control, calls, assembly and all memory.
@@ -110,6 +134,9 @@ fn run(module: &mut Module) -> bool {
                 )
             })
         {
+            continue;
+        }
+        if !within_cfg_budget(f) {
             continue;
         }
         let cfg = ControlFlowGraph::compute(f);
