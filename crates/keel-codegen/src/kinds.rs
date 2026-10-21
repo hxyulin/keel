@@ -1,7 +1,7 @@
 //! Which kinds of instruction a function contains, found in one walk. Most
 //! target covers and frame checks look for rare instructions; testing this
 //! summary first skips their own whole-function scans.
-use keel_ir::{BinaryOp, ConvertOp, Function, InstData, OverflowOp};
+use keel_ir::{BinaryOp, ConvertOp, EntityRef, Function, InstData, OverflowOp};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct InstKinds {
@@ -28,10 +28,18 @@ pub(crate) struct InstKinds {
 }
 
 impl InstKinds {
-    pub(crate) fn of(func: &Function) -> Self {
+    /// The kinds, and in the same walk the raw IR use counts of
+    /// [`crate::fold::use_counts`].
+    pub(crate) fn with_uses(func: &Function) -> (Self, Vec<u8>) {
         let mut kinds = Self::default();
+        let mut uses = vec![0u8; func.num_values()];
         for (_, inst) in func.layout_insts() {
-            match func.inst_data(inst) {
+            let data = func.inst_data(inst);
+            data.for_each_operand(|v| {
+                let count = &mut uses[func.resolve(v).index()];
+                *count = (*count + 1).min(2);
+            });
+            match data {
                 InstData::InlineAsm { .. } => kinds.inline_asm = true,
                 InstData::LandingPad { .. } => kinds.landing_pad = true,
                 InstData::Call { .. } | InstData::CallIndirect { .. } => kinds.call = true,
@@ -65,6 +73,6 @@ impl InstKinds {
                 _ => {}
             }
         }
-        kinds
+        (kinds, uses)
     }
 }

@@ -772,8 +772,9 @@ impl<'a> FunctionCompiler<'a> {
             check_call_signature(|| format!("indirect call {sig}"), sig, true).map_err(err)?;
         }
         // One walk finds which (mostly rare) instruction kinds occur, so the
-        // checks and covers below only scan functions that can match.
-        let present = crate::kinds::InstKinds::of(func);
+        // checks and covers below only scan functions that can match. Raw IR
+        // use counts never change while selecting this function.
+        let (present, uses) = crate::kinds::InstKinds::with_uses(func);
         for (_, inst) in func.layout_insts().filter(|_| present.high_multiply) {
             if let InstData::Binary {
                 op: op @ (BinaryOp::Umulhi | BinaryOp::Smulhi),
@@ -994,8 +995,6 @@ impl<'a> FunctionCompiler<'a> {
                         .collect()
                 })
         };
-        // Raw IR use counts never change while selecting this function.
-        let uses = fold::use_counts(func);
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let absolute_values = if present.select {
@@ -1018,7 +1017,8 @@ impl<'a> FunctionCompiler<'a> {
         } else {
             HashMap::default()
         };
-        let extended_adds = if present.ptradd {
+        // Inline assembly may observe the leaves; such functions keep them.
+        let extended_adds = if present.ptradd && !present.inline_asm {
             extended_add::select(func, &mut selection, &uses)
         } else {
             HashMap::default()

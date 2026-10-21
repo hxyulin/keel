@@ -558,7 +558,7 @@ impl<'a> FunctionCompiler<'a> {
         let byval_on_stack = named.locs.iter().any(|l| matches!(l, ArgLoc::OnStack(_)));
         // One walk finds which (mostly rare) instruction kinds occur, so the
         // checks and covers below only scan functions that can match.
-        let present = crate::kinds::InstKinds::of(func);
+        let (present, uses) = crate::kinds::InstKinds::with_uses(func);
         for (_, inst) in func.layout_insts().filter(|_| present.return_call) {
             let (args, sig) = match func.inst_data(inst) {
                 InstData::ReturnCall { func: callee, args } => (args, &func.callee(*callee).sig),
@@ -636,7 +636,6 @@ impl<'a> FunctionCompiler<'a> {
         let mut selection = pipeline
             .selector
             .select(func, crate::select::Target::X86, &|data| folds(func, data));
-        let uses = fold::use_counts(func);
         // Each cover is anchored at an instruction kind; without one it
         // selects nothing and leaves the selection untouched.
         let fused_compares = if present.compare && present.brif {

@@ -163,6 +163,8 @@ pub(crate) fn fused_compares(func: &Function) -> HashSet<Value> {
 
 /// Raw IR operand occurrences of every resolved value, saturated at 2: the
 /// selection passes only distinguish a single use from none or several.
+/// Targets count them while finding [`crate::kinds::InstKinds`].
+#[cfg(test)]
 pub(crate) fn use_counts(func: &Function) -> Vec<u8> {
     let mut uses = vec![0u8; func.num_values()];
     for (_, inst) in func.layout_insts() {

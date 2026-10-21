@@ -19,18 +19,14 @@ fn producer(f: &Function, v: Value) -> Option<Inst> {
     (f.inst_results(i) == [v] && !f.is_removed(i)).then_some(i)
 }
 
-/// `uses` are [`crate::fold::use_counts`] of `f`.
+/// `uses` are [`crate::fold::use_counts`] of `f`, which must have no inline
+/// assembly.
 pub(super) fn select(
     f: &Function,
     plan: &mut crate::select::Selection,
     uses: &[u8],
 ) -> HashMap<Inst, ExtendedAdd> {
     let mut out = HashMap::default();
-    if f.layout_insts()
-        .any(|(_, i)| matches!(f.inst_data(i), InstData::InlineAsm { .. }))
-    {
-        return out;
-    }
     for (block, root) in f.layout_insts() {
         let InstData::Binary {
             op: BinaryOp::Ptradd,
