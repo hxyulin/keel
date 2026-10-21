@@ -1777,10 +1777,7 @@ impl<'a> FunctionCompiler<'a> {
                 let a = self.use_reg(args[1], S1);
                 let b = self.use_reg(args[2], S2);
                 let (a, b, rd) = (reg(a, ty), reg(b, ty), reg(d, ty));
-                self.mach(
-                    "csel",
-                    [(rd).into(), (a).into(), (b).into(), Arg::from(cc)],
-                );
+                self.mach("csel", [(rd).into(), (a).into(), (b).into(), Arg::from(cc)]);
                 self.def_done(result, d);
             }
             InstData::Convert {

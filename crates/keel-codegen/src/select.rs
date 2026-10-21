@@ -357,17 +357,24 @@ impl Selection {
                 {
                     continue;
                 }
-                let Some(start) = insts[..end]
+                let begin = end.saturating_sub(5);
+                let Some(start) = insts[begin..end]
                     .iter()
-                    .rposition(|&i| i == compare)
-                    .filter(|&start| end - start <= 5)
+                    .position(|&i| i == compare)
+                    .map(|offset| begin + offset)
                 else {
                     continue;
                 };
                 let location = func.inst_loc(select).map(|l| (l.file, l.line));
                 if insts[start..=end].iter().any(|&i| {
                     func.is_removed(i)
-                        || self.covered(i)
+                        // An immediate-only constant may already be covered
+                        // by operand folding (e.g. the 17 in balance's SUB).
+                        // It has no emission or allocation boundary to move.
+                        || (self.covered(i)
+                            && (i == compare
+                                || i == select
+                                || !matches!(func.inst_data(i), InstData::Iconst { .. })))
                         || self.matches.contains_key(&i)
                         || self.conditions.contains_key(&i)
                         || self.constraints.keys().any(|&(at, _, _)| at == i)
@@ -377,10 +384,7 @@ impl Selection {
                 }
                 if !insts[start + 1..end].iter().all(|&i| {
                     let small = func.inst_results(i).len() == 1
-                        && matches!(
-                            func.value_type(func.first_result(i)),
-                            Type::I32 | Type::I64
-                        );
+                        && matches!(func.value_type(func.first_result(i)), Type::I32 | Type::I64);
                     small
                         && matches!(
                             func.inst_data(i),
