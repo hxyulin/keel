@@ -357,6 +357,8 @@ pub struct Function {
     /// Instruction locations, shared by runs of instructions with the same
     /// one; see [`InstNode::loc`].
     locs: Vec<SourceLoc>,
+    /// Scratch for [`Function::insert_inst`]; empty between calls.
+    result_tys: Vec<Type>,
     stack_slots: Arena<StackSlot, StackSlotData>,
     /// Functions this one calls. Keeping their signatures here makes a
     /// function self-contained: result types and verification of calls need
@@ -450,6 +452,7 @@ impl Function {
             values: Arena::new(),
             result_pool: Vec::new(),
             locs: Vec::new(),
+            result_tys: Vec::new(),
             stack_slots: Arena::new(),
             callees: Arena::new(),
             data_symbols: Arena::new(),
@@ -651,7 +654,12 @@ impl Function {
     /// Inserts an instruction at `at` and creates its result values, typed
     /// from its operands.
     pub fn insert_inst(&mut self, at: InsertPoint, data: InstData) -> Inst {
-        self.insert_inst_with_scratch(at, data, &mut Vec::new())
+        // A panicking inference loses only the buffer.
+        let mut result_tys = std::mem::take(&mut self.result_tys);
+        let inst = self.insert_inst_with_scratch(at, data, &mut result_tys);
+        result_tys.clear();
+        self.result_tys = result_tys;
+        inst
     }
 
     /// Inserts using caller-owned reusable result-type storage. Type inference
