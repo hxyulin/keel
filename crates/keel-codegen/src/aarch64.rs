@@ -582,6 +582,7 @@ struct FunctionCompiler<'a> {
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
     replicate_loads: HashMap<Inst, Value>,
+    packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: HashMap<Inst, Value>,
     absolute_values: HashMap<Inst, Value>,
     widening_adds: HashMap<Inst, vector::WideningAdd>,
@@ -874,6 +875,7 @@ impl<'a> FunctionCompiler<'a> {
                 })
         };
         let absolute_values = absolute::select(func, &mut selection);
+        let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         let packed_low_loads = packed_load::select(func, &mut selection);
         let replicate_loads = vector::select_replicate_loads(func, &mut selection);
         let widening_adds = vector::select_widening_adds(func, &mut selection);
@@ -961,6 +963,7 @@ impl<'a> FunctionCompiler<'a> {
             selection,
             replicate_loads,
             packed_low_loads,
+            packed_absolute_values,
             absolute_values,
             widening_adds,
             stack_slot_offsets,
@@ -1418,6 +1421,10 @@ impl<'a> FunctionCompiler<'a> {
                 },
             );
             self.def_done(result, d);
+            return;
+        }
+        if let Some(&value) = self.packed_absolute_values.get(&inst) {
+            self.vector_absolute(value, result);
             return;
         }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {

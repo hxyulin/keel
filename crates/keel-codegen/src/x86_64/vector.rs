@@ -101,6 +101,10 @@ pub(super) fn lower(func: &Function) -> Cow<'_, Function> {
             packed_compare(*cond, func.value_type(args[0]).vector().unwrap()).is_some()
         }
         InstData::VectorUnary {
+            op: UnaryOp::Ineg,
+            arg,
+        } => func.value_type(*arg) == Type::Vector(VectorType::I64x2),
+        InstData::VectorUnary {
             op: UnaryOp::Fsqrt, ..
         } => true,
         _ => false,
@@ -166,6 +170,26 @@ impl FunctionCompiler<'_> {
         if r != scratch {
             self.emit(Opcode::Movaps, [asm_arg(&xmm(scratch)), asm_arg(&xmm(r))]);
         }
+    }
+    // Each qword sign comes from its high dword. Copy before destructive shifts:
+    // x can remain live, alias the result, or occupy a spill slot.
+    pub(super) fn vector_absolute(&mut self, value: Value, result: Option<Value>) {
+        self.vector_stage(value, FS1);
+        self.emit(Opcode::Movaps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Psrad, [asm_arg(&xmm(FS1)), asm_arg(&31i64)]);
+        self.emit(
+            Opcode::Pshufd,
+            [asm_arg(&xmm(FS1)), asm_arg(&xmm(FS1)), asm_arg(&0xf5i64)],
+        );
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.emit(Opcode::Psubq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.vector_publish(result);
+    }
+    pub(super) fn vector_ineg(&mut self, value: Value, result: Option<Value>) {
+        self.vector_stage(value, FS1);
+        self.emit(Opcode::Xorps, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS0))]);
+        self.emit(Opcode::Psubq, [asm_arg(&xmm(FS0)), asm_arg(&xmm(FS1))]);
+        self.vector_publish(result);
     }
     fn vector_publish(&mut self, result: Option<Value>) {
         let d = self.def_freg(result);

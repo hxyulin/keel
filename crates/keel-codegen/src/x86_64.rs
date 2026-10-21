@@ -409,6 +409,7 @@ struct FunctionCompiler<'a> {
     current_inst: Option<Inst>,
     allocation_index: Option<usize>,
     selection: crate::select::Selection,
+    packed_absolute_values: std::collections::HashMap<Inst, Value>,
     packed_low_loads: std::collections::HashMap<Inst, Value>,
     /// Offset from `rsp` of each IR stack slot.
     stack_slot_offsets: crate::stack_frame::SlotOffsets,
@@ -603,6 +604,7 @@ impl<'a> FunctionCompiler<'a> {
             selection.fuse_compares(func, |data| folds(func, data))
         };
         selection.fuse_x86_selects(func, |data| folds(func, data));
+        let packed_absolute_values = crate::packed_absolute::select(func, &mut selection);
         let packed_low_loads = packed_load::select(func, &mut selection);
         let is_call = |data: &InstData| is_call(func, data);
         let returns_twice = |data: &InstData| returns_twice(func, data);
@@ -655,6 +657,7 @@ impl<'a> FunctionCompiler<'a> {
             folded_values: fold::folded_values(func, &selection, |data| folds(func, data)),
             fused_compares,
             packed_low_loads,
+            packed_absolute_values,
             selection,
             stack_slot_offsets,
             outgoing,
@@ -1000,6 +1003,10 @@ impl<'a> FunctionCompiler<'a> {
         if self.selection.covered(inst) {
             return;
         }
+        if let Some(&value) = self.packed_absolute_values.get(&inst) {
+            self.vector_absolute(value, result);
+            return;
+        }
         if let Some(&addr) = self.packed_low_loads.get(&inst) {
             let at = self.mem(addr, S0, Type::I64);
             let d = self.def_freg(result);
@@ -1063,6 +1070,10 @@ impl<'a> FunctionCompiler<'a> {
                 self.emit(op, [asm_arg(&xmm(d)), asm_arg(&xmm(a))]);
                 self.def_done(result, d);
             }
+            InstData::VectorUnary {
+                op: UnaryOp::Ineg,
+                arg,
+            } => self.vector_ineg(arg, result),
             InstData::VectorShuffle { args, .. } => self.vector_shuffle_window(args, result),
             InstData::VectorExtract { arg, lane } => {
                 let source = self.use_freg(arg, FS0);

@@ -357,6 +357,22 @@ impl FunctionCompiler<'_> {
         }
         self.def_done(result, d);
     }
+    // Non-saturating ABS preserves the IR wrapping result for i64::MIN.
+    pub(super) fn vector_absolute(&mut self, value: Value, result: Option<Value>) {
+        let a = self.use_freg(value, FS0);
+        let d = self.def_freg(result);
+        self.native(
+            Opcode::ABS_asimdmisc_R,
+            [
+                (FieldId::Q, 1),
+                (FieldId::size, 3),
+                (FieldId::Rd, d.into()),
+                (FieldId::Rn, a.into()),
+            ],
+            |out| write!(out, "abs\tv{d}.2d, v{a}.2d"),
+        );
+        self.def_done(result, d);
+    }
     pub(super) fn vector_unary(&mut self, op: UnaryOp, arg: Value, result: Option<Value>) {
         let spec = unary(op, self.ty(arg).vector().unwrap()).expect("legalized NEON unary");
         let d = self.def_freg(result);
