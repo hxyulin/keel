@@ -734,7 +734,9 @@ fn select(func: &Function, cond: Value, a: Value, b: Value, ty: Type, full: bool
     None
 }
 
-fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
+/// `canonical` promises that `inst` is in canonical form, which spares the
+/// normalization check.
+fn simplify(func: &mut Function, inst: Inst, uses: Uses, canonical: bool) -> Option<Fold> {
     let result = *func.inst_results(inst).first()?;
     // A stale layout instruction can remain after its result was aliased.
     // Never let a later fold overwrite that existing replacement.
@@ -745,7 +747,8 @@ fn simplify(func: &mut Function, inst: Inst, uses: Uses) -> Option<Fold> {
     }
     // Other opcodes have no rules here; at most canonicalization changes them.
     let data = func.inst_data(inst);
-    let normalize = crate::canonicalize::needs_normalize(func, data);
+    debug_assert!(!canonical || !crate::canonicalize::needs_normalize(func, data));
+    let normalize = !canonical && crate::canonicalize::needs_normalize(func, data);
     if !normalize
         && !matches!(
             data,
@@ -1144,11 +1147,25 @@ pub(crate) fn reuse_quotient(func: &mut Function, inst: Inst, quotients: &mut Qu
 }
 
 pub fn run(func: &mut Function) -> bool {
+    run_from(func, false)
+}
+
+/// `run` on a function whose every instruction is in canonical form, as the
+/// pass manager guarantees on entry.
+pub(crate) fn run_canonical(func: &mut Function) -> bool {
+    run_from(func, true)
+}
+
+fn run_from(func: &mut Function, canonical: bool) -> bool {
     let reused_quotients = reuse_quotients(func);
+    // Until the function first changes, every instruction is still canonical.
+    let mut canonical = canonical && !reused_quotients;
     let mut lazy = LazyUsers::new(func);
     let layout: usize = func.blocks().map(|b| func.block_insts(b).len()).sum();
     let mut work: Vec<Inst> = Vec::with_capacity(layout);
-    work.extend(func.layout_insts().map(|(_, i)| i));
+    for block in func.blocks() {
+        work.extend_from_slice(func.block_insts(block));
+    }
     // Start with definitions first within the usual layout; dependency
     // notifications make the final result independent of layout order.
     work.reverse();
@@ -1171,10 +1188,15 @@ pub fn run(func: &mut Function) -> bool {
                 func.inst_data(inst)
                     .for_each_operand(|v| users.push(func.resolve(v), inst));
                 changed = true;
+                canonical = false;
             }
             continue;
         }
-        let Some(fold) = simplify(func, inst, Uses::Users(&lazy)) else {
+        let insts = func.num_insts();
+        let fold = simplify(func, inst, Uses::Users(&lazy), canonical);
+        // New instructions need not be canonical, even without a fold.
+        canonical &= fold.is_none() && func.num_insts() == insts;
+        let Some(fold) = fold else {
             continue;
         };
         let users = lazy.get_mut(func);
@@ -1235,7 +1257,7 @@ pub(crate) fn simplify_once(func: &mut Function, inst: Inst) -> bool {
     if func.inst_results(inst).is_empty() {
         return false;
     }
-    let Some(fold) = simplify(func, inst, Uses::Unknown) else {
+    let Some(fold) = simplify(func, inst, Uses::Unknown, false) else {
         return false;
     };
     match fold {

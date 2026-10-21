@@ -108,6 +108,12 @@ pub trait Pass: Sync {
         self.run(func)
     }
 
+    /// The manager runs a pass that requires canonical form with this, once
+    /// every instruction is canonical. Passes may rely on that to skip checks.
+    fn run_canonical(&self, func: &mut Function, target: VectorTarget) -> bool {
+        self.run_for_target(func, target)
+    }
+
     /// Request the structural form documented in `docs/simplification.md`.
     /// The manager restores it on entry when an earlier pass changed the IR.
     fn requires_canonical_form(&self) -> bool {
@@ -257,6 +263,13 @@ impl Pass for BuiltinPass {
     }
     fn requires_canonical_form(&self) -> bool {
         self.name == "instcombine"
+    }
+    fn run_canonical(&self, func: &mut Function, target: VectorTarget) -> bool {
+        if self.name == "instcombine" {
+            instcombine::run_canonical(func)
+        } else {
+            self.run_for_target(func, target)
+        }
     }
     fn produces_canonical_form(&self) -> bool {
         self.name == "canonicalize"
@@ -651,7 +664,11 @@ pub fn run_pipeline_for_target_with_options(
                 verify_after(func, "canonicalize", verification_enabled)?;
                 canonical[index] = true;
             }
-            let changed = pass.run_for_target(func, target);
+            let changed = if pass.requires_canonical_form() {
+                pass.run_canonical(func, target)
+            } else {
+                pass.run_for_target(func, target)
+            };
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, index, changed);
             verify_after(func, pass.name(), verification_enabled)?;
@@ -807,7 +824,11 @@ pub fn run_pipeline_for_target_with_report_and_options(
                 canonical[index] = true;
             }
             let start = Instant::now();
-            let changed = pass.run_for_target(func, target);
+            let changed = if pass.requires_canonical_form() {
+                pass.run_canonical(func, target)
+            } else {
+                pass.run_for_target(func, target)
+            };
             let pass_ns = start.elapsed().as_nanos();
             canonical[index] = pass.produces_canonical_form() || (canonical[index] && !changed);
             versions.record(pass, index, changed);
