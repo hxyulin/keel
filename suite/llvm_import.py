@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 from llvm_import_globals import Globals
+from llvm_import_linkage import local_copies
 
 
 P, U = C.c_void_p, C.c_uint
@@ -179,8 +180,10 @@ class Importer:
     CMP = {32: 'eq', 33: 'ne', 34: 'ugt', 35: 'uge', 36: 'ult',
            37: 'ule', 38: 'sgt', 39: 'sge', 40: 'slt', 41: 'sle'}
 
-    def __init__(self, llvm):
+    def __init__(self, llvm, localize_odr=False):
         self.l = llvm
+        self.localize_odr = localize_odr
+        self.local_copies = set()
 
     def symbol(self, value):
         name = self.l.name(value)
@@ -213,7 +216,8 @@ class Importer:
         fty = l.GlobalGetValueType(fn)
         if l.IsFunctionVarArg(fty):
             raise Unsupported(f'{self.symbol(fn)}: variadic signature')
-        if l.GetLinkage(fn) not in (0, 8, 9) or l.GetVisibility(fn) != 0:
+        if ((l.GetLinkage(fn) not in (0, 8, 9) and fn not in self.local_copies)
+                or l.GetVisibility(fn) != 0):
             raise Unsupported(f'{self.symbol(fn)}: unsupported linkage/visibility')
         if l.HasPersonalityFn(fn) or l.GetAlignment(fn) > 4:
             raise Unsupported(f'{self.symbol(fn)}: personality or explicit function alignment')
@@ -587,6 +591,8 @@ class Importer:
         if l.GetNamedMetadata(module, b'llvm.linker.options', len(b'llvm.linker.options')):
             raise Unsupported('module autolink requests (llvm.linker.options)')
         functions = list(sequence(l.GetFirstFunction, l.GetNextFunction, module))
+        if self.localize_odr:
+            self.local_copies = local_copies(self, module, functions, Unsupported)
         self.signatures = {fn: self.signature(fn) for fn in functions}
         self.globals = Globals(self, module, functions, Unsupported)
         output = self.globals.definitions()
@@ -600,7 +606,7 @@ class Importer:
             if not blocks:
                 output.append('decl ' + signature + ' cc(c)')
                 continue
-            local = ' local' if l.GetLinkage(fn) in (8, 9) else ''
+            local = ' local' if l.GetLinkage(fn) in (8, 9) or fn in self.local_copies else ''
             self.lines = ['func ' + signature + ' cc(c)' + local + ' {']
             self.values = {l.GetParam(fn, i): f'v{i}' for i in range(l.CountParams(fn))}
             self.next_value = len(params)
@@ -668,7 +674,7 @@ class Importer:
         return '\n\n'.join(output) + '\n'
 
 
-def import_module(l, source):
+def import_module(l, source, localize_odr=False):
     context, module = l.ContextCreate(), P()
     error = P()
     try:
@@ -681,7 +687,7 @@ def import_module(l, source):
         if error.value:
             l.DisposeMessage(error)
             error = P()
-        return Importer(l).translate(module)
+        return Importer(l, localize_odr=localize_odr).translate(module)
     finally:
         if error.value:
             l.DisposeMessage(error)
@@ -694,11 +700,15 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--libllvm', required=True, help='path to LLVM 23 shared library')
     p.add_argument('--keel', required=True, help='Keel executable used to verify output')
+    p.add_argument('--localize-odr-functions', action='store_true',
+                   help='assert no outside-TU references to linkonce_odr/available_externally '
+                        'definitions; retain direct-only bodies without named storage as local copies '
+                        '(no exported/coalesced symbol contract)')
     p.add_argument('input', help='LLVM .ll file, or - for stdin')
     p.add_argument('-o', '--output', default='-', help='Keel IR output, default stdout')
     args = p.parse_args()
     source = sys.stdin.buffer.read() if args.input == '-' else Path(args.input).read_bytes()
-    result = import_module(LLVM(args.libllvm), source)
+    result = import_module(LLVM(args.libllvm), source, localize_odr=args.localize_odr_functions)
     with tempfile.TemporaryDirectory(prefix='keel-llvm-import-') as tmp:
         path = Path(tmp) / 'verify.keel'
         path.write_text(result)
