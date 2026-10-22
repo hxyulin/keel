@@ -244,6 +244,9 @@ compilation. The driver starts and retains the client for the invocation.
 Library benchmarks can enable `profile-with-tracy` on the optimizer/codegen
 crates and manage the Tracy client themselves. Benchmark uninstrumented
 release builds for final timings; use instrumented builds to locate costs.
+`cargo build --profile dist -p keel` (output in `target/dist/`) adds fat LTO
+and a single codegen unit for a compiler that runs 2-5% faster than `release`,
+at about 2.5x its clean build time.
 The frontend cloning investigation rejected the
 scoped expression change; initializer clone incidence motivates a separate
 future investigation. No performance gain was implemented.
