@@ -395,6 +395,16 @@ fn switch_default_skips_case_landing_pads() {
 }
 
 #[test]
+fn option_switch_default_from_callee_preserves_none_and_some() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs/option_switch_default.keel");
+    for (pools, optimize, suffix, selection, allocation) in &CONFIGS {
+        let suffix = format!("{suffix}-option-switch-focused");
+        run_program(&path, pools, *optimize, &suffix, *selection, allocation).unwrap();
+    }
+}
+
+#[test]
 fn programs() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/programs");
     let mut paths: Vec<_> = std::fs::read_dir(&dir)
