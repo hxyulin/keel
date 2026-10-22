@@ -30,6 +30,38 @@ impl crate::Pass for PrivateAggregate {
     }
 }
 
+/// Keep cleanup coupled to transport: modules without a rewritten signature
+/// must not acquire another, unrelated round of scalar/stack optimization.
+pub struct PrivateAggregateCleanup;
+impl crate::Pass for PrivateAggregateCleanup {
+    fn name(&self) -> &'static str {
+        "private-aggregate-cleanup"
+    }
+    fn description(&self) -> &'static str {
+        "scalarize private two-word transport and clean up only changed modules"
+    }
+    fn run(&self, _: &mut Function) -> bool {
+        false
+    }
+    fn run_module(&self, module: &mut Module) -> Option<bool> {
+        Some(run_with_cleanup(module))
+    }
+}
+
+pub fn run_with_cleanup(module: &mut Module) -> bool {
+    if run(module) == 0 {
+        return false;
+    }
+    for f in &mut module.functions {
+        crate::stack_forward::run(f);
+        crate::stack_promote::run(f);
+        crate::canonicalize::run(f);
+        crate::instcombine::run(f);
+        crate::dce::run(f);
+    }
+    true
+}
+
 const MAX_FUNCTION_INSTS: usize = 50_000;
 const MAX_VALUES: usize = 100_000;
 const MAX_MODULE_WORK: usize = 2_000_000;

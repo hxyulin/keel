@@ -282,6 +282,7 @@ pub const PASSES: &[&dyn Pass] = &[
     &call_load_reuse::CallLoadReuse,
     &internal_fast_calls::InternalFastCalls,
     &private_aggregate::PrivateAggregate,
+    &private_aggregate::PrivateAggregateCleanup,
 ];
 
 /// Controls repeated checks after passes and canonical restoration only.

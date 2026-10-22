@@ -129,7 +129,10 @@ block2:
 }
 #[test]
 fn named_registration_is_appended_and_does_not_change_default_schedules() {
-    assert_eq!(keel_opt::PASSES.last().unwrap().name(), "private-aggregate");
+    assert_eq!(
+        keel_opt::PASSES.last().unwrap().name(),
+        "private-aggregate-cleanup"
+    );
     for tier in [
         keel_opt::OptimizationTier::None,
         keel_opt::OptimizationTier::Fast,
@@ -148,6 +151,35 @@ fn named_registration_is_appended_and_does_not_change_default_schedules() {
             .iter()
             .all(|p| p.purpose == Purpose::Normal)
     );
+}
+
+#[test]
+fn conditional_cleanup_matches_the_explicit_pipeline_and_skips_unrelated_modules() {
+    let mut expected = parse(SOURCE).unwrap();
+    keel_opt::run_passes(
+        &mut expected,
+        &[
+            "private-aggregate",
+            "stack-forward",
+            "stack-promote",
+            "canonicalize",
+            "instcombine",
+            "dce",
+        ],
+    )
+    .unwrap();
+    let mut actual = parse(SOURCE).unwrap();
+    keel_opt::run_passes(&mut actual, &["private-aggregate-cleanup"]).unwrap();
+    verify_module(&actual).unwrap();
+    assert_eq!(actual.to_string(), expected.to_string());
+
+    let mut unrelated = parse("func @plain(i64) -> i64 {\nblock0(v0:i64):\n v1 = iconst.i64 0\n v2 = iadd v0,v1\n return v2\n}").unwrap();
+    let before = unrelated.to_string();
+    assert!(!private_aggregate::run_with_cleanup(&mut unrelated));
+    assert_eq!(unrelated.to_string(), before);
+    // Demonstrate that an unconditional cleanup would alter this module.
+    keel_opt::run_passes(&mut unrelated, &["canonicalize", "instcombine", "dce"]).unwrap();
+    assert_ne!(unrelated.to_string(), before);
 }
 
 #[test]
