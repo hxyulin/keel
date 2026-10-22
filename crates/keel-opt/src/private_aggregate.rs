@@ -1,4 +1,5 @@
-//! Opt-in, bounded private two-word byval transport. No default pipeline change.
+//! Bounded private two-word byval transport. Full uses the conditional cleanup
+//! entry point; the standalone transport pass remains explicitly selectable.
 //!
 //! Each call snapshots both words immediately before the call. Each byval
 //! parameter gets its own fresh, naturally aligned callee home: arbitrary

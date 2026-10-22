@@ -51,7 +51,14 @@ fn real_c_both_object_routes_and_native_oracle() {
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
-        keel_opt::optimize(&mut module).unwrap();
+        // Keep this result-home prototype's coverage independent of Full's
+        // private parameter transport, which already eliminates one candidate.
+        let baseline: Vec<_> = keel_opt::DEFAULT_PIPELINE
+            .iter()
+            .copied()
+            .filter(|&p| p != "private-aggregate-cleanup")
+            .collect();
+        keel_opt::run_passes(&mut module, &baseline).unwrap();
         let before = module.to_string();
         let load_counts = |m: &keel_ir::Module| -> Vec<usize> {
             ["aggregate_snapshot", "aggregate_capture", "aggregate_large"]

@@ -70,7 +70,14 @@ fn real_c_private_transport_both_routes_native_and_debug() {
         )
         .unwrap();
         keel_ir::verify_module(&module).unwrap();
-        keel_opt::optimize(&mut module).unwrap();
+        // Keep the standalone transport oracle independent of its Full
+        // placement. The separate `full` route below exercises the default.
+        let baseline: Vec<_> = keel_opt::DEFAULT_PIPELINE
+            .iter()
+            .copied()
+            .filter(|&p| p != "private-aggregate-cleanup")
+            .collect();
+        keel_opt::run_passes(&mut module, &baseline).unwrap();
         let before = module.to_string();
         let sigs: Vec<_> = ["addressed", "public_pair", "pressure"]
             .iter()
@@ -131,9 +138,21 @@ fn real_c_private_transport_both_routes_native_and_debug() {
         assert_eq!(keel_opt::private_aggregate::run(&mut debug), 0);
         assert_eq!(debug_before, debug.to_string());
         let stem = target.triple();
+        let mut full = keel_c::compile(
+            source,
+            "fixture.c",
+            keel_c::Options {
+                target,
+                debug_info: false,
+            },
+        )
+        .unwrap();
+        keel_opt::optimize(&mut full).unwrap();
+        keel_ir::verify_module(&full).unwrap();
+        fs::write(dir.join(format!("{stem}-full.keel")), full.to_string()).unwrap();
         fs::write(dir.join(format!("{stem}-before.keel")), before).unwrap();
         fs::write(dir.join(format!("{stem}-after.keel")), module.to_string()).unwrap();
-        for stage in ["transport", "after"] {
+        for stage in ["transport", "after", "full"] {
             let input = format!("{stem}-{stage}.keel");
             let direct = format!("{stem}-{stage}-direct.o");
             let assembly = format!("{stem}-{stage}.s");

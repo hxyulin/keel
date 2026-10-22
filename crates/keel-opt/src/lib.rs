@@ -395,7 +395,7 @@ const FULL_ROUND: [&str; 16] = [
 
 const FULL_ROUNDS: usize = 3;
 
-const FULL_EPILOGUE: [&str; 15] = [
+const FULL_EPILOGUE: [&str; 16] = [
     "load-reuse",
     "stack-promote",
     "phi-simplify",
@@ -410,6 +410,7 @@ const FULL_EPILOGUE: [&str; 15] = [
     "loop-rotate",
     "phi-simplify",
     "dce",
+    "private-aggregate-cleanup",
     "internal-fast-calls",
 ];
 
@@ -424,6 +425,8 @@ const FULL_EPILOGUE: [&str; 15] = [
 // omit an extra GCM: broader schedules regressed Lua fib in app screening.
 // Finalize private call transport only after IR rewrites. Physical preservation
 // summaries are built by codegen from the final selected/allocated leaf bodies.
+// Scalarize bounded private pairs before finalizing calling conventions, and
+// run the associated cleanup only if transport actually changed the module.
 const fn full_pipeline() -> [&'static str; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()] {
     let mut passes = [""; FULL_ROUND.len() * FULL_ROUNDS + FULL_EPILOGUE.len()];
     let mut i = 0;

@@ -128,7 +128,7 @@ block2:
     assert_eq!(m.functions[0].sig.params.len(), 4);
 }
 #[test]
-fn named_registration_is_appended_and_does_not_change_default_schedules() {
+fn named_registration_is_appended_and_cleanup_is_full_only() {
     assert_eq!(
         keel_opt::PASSES.last().unwrap().name(),
         "private-aggregate-cleanup"
@@ -140,7 +140,21 @@ fn named_registration_is_appended_and_does_not_change_default_schedules() {
         keel_opt::OptimizationTier::Full,
     ] {
         assert!(!tier.pipeline().contains(&"private-aggregate"));
+        assert_eq!(
+            tier.pipeline().contains(&"private-aggregate-cleanup"),
+            tier == keel_opt::OptimizationTier::Full
+        );
     }
+    assert_eq!(
+        keel_opt::OptimizationTier::Full
+            .pipeline()
+            .iter()
+            .rev()
+            .take(2)
+            .copied()
+            .collect::<Vec<_>>(),
+        ["internal-fast-calls", "private-aggregate-cleanup"]
+    );
     let mut m = parse(SOURCE).unwrap();
     keel_opt::run_passes(&mut m, &["private-aggregate"]).unwrap();
     verify_module(&m).unwrap();
