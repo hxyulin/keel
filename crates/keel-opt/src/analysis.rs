@@ -123,3 +123,32 @@ pub(crate) fn clear() {
     let entries = CACHE.with(|cache| std::mem::take(&mut *cache.borrow_mut()));
     drop(entries);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keel_ir::{BlockCall, InsertPoint, InstData, Signature};
+
+    #[test]
+    fn appended_terminator_invalidates_cached_cfg() {
+        clear();
+        let mut function = Function::new("append", Signature::new(&[], &[]));
+        let entry = function.create_block();
+        let exit = function.create_block();
+        let before = get(&function);
+        assert!(before.cfg.succs(entry).is_empty());
+        function.insert_inst(
+            InsertPoint::End(entry),
+            InstData::Jump {
+                dest: BlockCall {
+                    block: exit,
+                    args: vec![],
+                },
+            },
+        );
+        let after = get(&function);
+        assert_eq!(after.cfg.succs(entry), &[exit]);
+        assert_eq!(after.cfg.preds(exit), &[entry]);
+        clear();
+    }
+}

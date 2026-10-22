@@ -800,6 +800,9 @@ impl Function {
         debug_assert!(self.is_removed(inst));
         let (block, index) = match at {
             InsertPoint::End(block) => {
+                // Cached CFGs read the last instruction, including an
+                // appended terminator in an already existing block.
+                self.cfg_stamp = fresh_cfg_stamp();
                 let data = &mut self.blocks[block];
                 self.block_insts.push(&mut data.insts, inst);
                 self.layout_len += usize::from(data.in_layout);
