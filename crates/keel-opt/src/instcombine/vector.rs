@@ -177,6 +177,17 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
             arg: scalar,
         }));
     }
+    // Eliminate a written identity before inspecting its producer: the selected
+    // input may itself be a permutation that must retain its native recipe.
+    for (slot, &arg) in args.iter().enumerate() {
+        if lanes
+            .iter()
+            .copied()
+            .eq(slot as u8 * n..(slot as u8 + 1) * n)
+        {
+            return Some(Fold::Value(arg));
+        }
+    }
     // Flatten exactly one level, only through unshared shuffles. This cannot
     // duplicate a live permutation. At most two source vectors are expressible.
     // Fixed-width IR has at most 32 lanes. Do not allocate scratch vectors on
@@ -213,31 +224,12 @@ fn shuffle(f: &Function, args: [Value; 2], lanes: &[u8], uses: Uses<'_>) -> Opti
     if indices.iter().copied().eq(0..n) {
         return Some(Fold::Value(sources[0]));
     }
-    // Preserve the written order of genuine two-source shuffles unless a
-    // composition removed an intermediate permutation (ZIP/window selectors).
-    if !composed && source_count == 2 {
+    // Only use composition when it eliminates the permutation entirely above.
+    // Fewer IR shuffles can lose packed ZIP/SHUFPS recipes and scalarize. Keep
+    // every nontrivial chain until target cost feedback can justify rewriting it.
+    // Uncomposed two-source forms also retain their written operand order.
+    if composed || source_count == 2 {
         return None;
-    }
-    if composed && source_count == 2 {
-        // Retain source order from the written producer operands, rather than
-        // ordering by the first selected lane. Backend two-source recipes can
-        // depend on which input supplies the low and high groups.
-        let first = args.into_iter().find_map(|arg| {
-            let candidates = match producer(f, arg) {
-                Some(D::VectorShuffle { args, .. }) if uses.single(f, arg) => *args,
-                _ => [arg, arg],
-            };
-            candidates
-                .into_iter()
-                .map(|v| f.resolve(v))
-                .find(|v| sources.contains(v))
-        });
-        if first == Some(sources[1]) {
-            sources.swap(0, 1);
-            for i in indices.iter_mut() {
-                *i = if *i < n { *i + n } else { *i - n };
-            }
-        }
     }
     let new_args = [sources[0], sources[source_count - 1]];
     if new_args == args && indices == lanes {

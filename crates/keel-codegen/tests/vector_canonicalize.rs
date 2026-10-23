@@ -79,10 +79,9 @@ fn canonical_forms_compile_and_preserve_bits() {
     check_forms(SOURCE, ORACLE, "canonical", true);
 }
 
-// These are semantic regressions and retained cost counterexamples. Fewer IR
-// shuffles need not mean fewer target instructions, even after packed selection.
+// Nontrivial composition must preserve these packed native recipes.
 #[test]
-fn composed_shuffle_selector_boundaries_preserve_bits() {
+fn nested_shuffle_selector_boundaries_preserve_native_patterns() {
     check_forms(
         "func @PREFIXbytes(ptr,ptr,ptr) {
 block0(v0: ptr,v1: ptr,v2: ptr):
@@ -137,6 +136,12 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
     let mut after = keel_ir::parse(&source.replace("PREFIX", "after_")).unwrap();
     keel_opt::run_passes(&mut after, &["instcombine", "gvn", "instcombine", "dce"]).unwrap();
     keel_ir::verify_module(&after).unwrap();
+    if evidence == "boundaries" {
+        assert_eq!(
+            before.to_string().replace("before_", "after_"),
+            after.to_string()
+        );
+    }
     let root = std::env::var_os("KEEL_VECTOR_CANONICAL_EVIDENCE")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| {
@@ -202,7 +207,7 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
                     if !arm && evidence == "canonical" && label == "after" {
                         assert!(text.contains("shufpd"), "combined qword selection: {text}");
                     }
-                    if evidence == "boundaries" && label == "before" {
+                    if evidence == "boundaries" {
                         assert!(text.contains(if arm { "zip1" } else { "shufps" }));
                     }
                     let parsed = object::File::parse(obj.as_slice()).unwrap();
@@ -231,6 +236,9 @@ fn check_forms(source: &str, oracle: &str, evidence: &str, shrinks: bool) {
                             .arg(name.with_extension("clang.o")),
                     );
                     objects.push(name.with_extension("o"));
+                }
+                if evidence == "boundaries" {
+                    assert_eq!(sizes[0], sizes[1], "native recipes must retain their size");
                 }
                 assert!(
                     !shrinks || sizes[1] < sizes[0],

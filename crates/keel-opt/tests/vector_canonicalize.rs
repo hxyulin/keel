@@ -260,8 +260,35 @@ fn shuffle_composition_matches_lane_oracle() {
             "{source}\n{optimized}"
         );
         assert!(
-            optimized.functions[0].layout_insts().count() <= 2,
+            optimized.functions[0].layout_insts().count() <= 4,
             "{optimized}"
+        );
+    }
+}
+
+#[test]
+fn nested_shuffles_only_compose_to_existing_sources() {
+    for ty in VectorType::ALL {
+        let n = ty.lanes();
+        let reverse = (0..n).rev().collect::<Vec<_>>();
+        let m = clean(&body(
+            &ty.to_string(),
+            &ty.to_string(),
+            &format!("v0: {ty}"),
+            &format!("v1 = vshuffle v0,v0,{reverse:?}\nv2 = vshuffle v1,v0,{reverse:?}\nreturn v2"),
+        ));
+        assert!(m.to_string().contains("return v0"), "{m}");
+        assert_eq!(m.functions[0].layout_insts().count(), 1);
+    }
+    // Preserve both one-source and two-source nontrivial compositions.
+    for ops in [
+        "v2 = vshuffle v0,v0,[3,2,1,0]\nv3 = vshuffle v2,v0,[0,0,1,1]\nreturn v3",
+        "v2 = vshuffle v0,v1,[0,1,4,5]\nv3 = vshuffle v0,v1,[2,3,6,7]\nv4 = vshuffle v2,v3,[0,2,4,6]\nreturn v4",
+    ] {
+        let source = body("i32x4,i32x4", "i32x4", "v0: i32x4,v1: i32x4", ops);
+        assert_eq!(
+            keel_ir::parse(&source).unwrap().to_string(),
+            clean(&source).to_string()
         );
     }
 }
@@ -336,7 +363,7 @@ fn fast_local_reuses_bounded_rules_without_composing_shared_shuffles() {
 }
 
 #[test]
-fn composed_shuffle_keeps_written_source_order() {
+fn identity_of_shuffle_keeps_written_source_order() {
     let m = clean(&body(
         "i32x4,i32x4",
         "i32x4",

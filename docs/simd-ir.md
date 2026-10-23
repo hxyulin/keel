@@ -89,31 +89,26 @@ as described below; general vector arithmetic constant folding is separate.
 through shuffles and unaffected inserted lanes, removes insertion of the same
 extracted lane or splatted scalar, and bypasses immediately overwritten inserts.
 Identity shuffles become their selected input. Shuffles selecting only one
-splatted scalar become a splat. Equal-input and other single-source shuffles use
-`vshuffle x, x` with indices in the first input's lane range.
+splatted scalar become a splat. Unnested equal-input and other single-source
+shuffles use `vshuffle x, x` with indices in the first input's lane range.
 
-Composition inspects one shuffle producer level per worklist visit, requires
-unshared intermediate shuffles and at most two original source vectors, and
-creates no instructions. The existing dependency worklist revisits rewritten
-instructions and consumers. Genuine two-source shuffles retain their written
-operand order; composed forms retain source order from the written producer
-operands. This contract was coordinated with the x86 instruction-selection
-owner. Uncomposed forms keep the established ZIP/UZP/TRN/window operand order.
-It is an IR simplification, not a target cost model: composing packed
-permutations can still produce a permutation a backend scalarizes. Shared
-intermediates and compositions requiring three sources remain unchanged.
+Nested shuffle inspection is bounded to one producer level per worklist visit,
+unshared intermediate shuffles and at most two original source vectors. It only
+replaces a chain when the composed output is an existing original source:
+identity/inverse permutations disappear without creating a new permutation.
+Written identity shuffles are removed before inspecting their producers. If the
+composed output still requires any permutation, the original chain is preserved.
+General composition is deferred until target cost feedback can justify it.
+Uncomposed genuine two-source shuffles retain their written operand order.
 
-Review on combined base `e35da377` confirms a profitability limitation with
-concrete counterexamples in `composed_shuffle_selector_boundaries_preserve_bits`.
-Two i8x16 ZIP1 shuffles compose into
-`[0,0,16,1,1,2,17,3,2,4,18,5,3,6,19,7]`, which ARM lowers with lane inserts.
-Three SSE2 SHUFPS shuffles (`[0,1,4,5]`, `[2,3,6,7]`, then `[0,2,4,6]`)
-compose into `[0,4,2,6]`, which even the combined x86 selector scalarizes.
-The latter preserves aligned dword groups but alternates sources, outside that
-selector's two-source half-group recipe. Thus a byte/word-only safeguard would
-not cover the full issue. Composition remains a target-independent IR-count
-simplification; preserving packed profitability needs a target-aware cost gate
-or additional selector recipes as follow-up. No runtime improvement is claimed.
+The regression `nested_shuffle_selector_boundaries_preserve_native_patterns`
+checks two i8x16 ZIP1 shuffles and three SSE2 SHUFPS shuffles (`[0,1,4,5]`,
+`[2,3,6,7]`, then `[0,2,4,6]`). General composition previously produced masks
+that ARM or x86 scalarized. These chains now retain identical IR and text size,
+and packed ZIP1/SHUFPS instructions, before and after cleanup across all three
+selection tiers and both allocators. Preserving every nontrivial chain covers
+both byte and dword counterexamples without target-specific tables or selector
+changes. This is a conservative boundary, not a general profitability model.
 
 Shuffle inspection uses two stack source slots and at most 32 stack lane
 indices, allocating an output map only when it rewrites a shuffle. Source
@@ -142,7 +137,7 @@ vectorization are unchanged.
 
 ### Correctness evidence (2026-10-23)
 
-`cargo test -p keel-opt --offline --locked` passes. The dedicated
+`cargo test -p keel-opt --offline --locked -j2` passes. The dedicated
 `vector_canonicalize` integration test checks positive and negative rules,
 all 18 shapes, noncanonical nonzero masks, signedness boundaries, effect order,
 out-of-layout consumers, Fast cleanup and both instruction-combiner and cleanup
@@ -151,7 +146,8 @@ outer shuffle maps over two inner maps.
 
 `cargo test -p keel-codegen --lib --test vector_ir --test vector_widen_aarch64
 --test vector_widen_x86 --test vector_mask_proofs --test vector_canonicalize
---offline --locked` passes. The new codegen test checks three selection tiers and
+--test vector_shuffle_window --test vector_x86 --test vector_aarch64
+--offline --locked -j2` passes. The new codegen test checks three selection tiers and
 two allocation tiers, exact text/direct object equality and independent Clang
 assembly on x86 Linux and Apple AArch64. On the native Apple AArch64 host, both
 original and optimized objects pass 256 bit-pattern cases per configuration,
@@ -159,64 +155,59 @@ including infinities, signed zeros, signaling/quiet NaN payloads and all byte
 values for unsigned-then-signed widening. x86 execution was not performed in
 this track. This is finite evidence, not exhaustive FP or memory validation.
 
-Review validation rebased onto `e35da377` passes the full optimizer suite and
-the targeted codegen suites, including the combined x86 shuffle and unsigned
-byte comparison tests. The dedicated canonicalization test also asserts packed
-SHUFPD output from the optimized qword sample. A newly built combined `keel`
-CLI passes 24 sample/target/selector/allocator configurations with text/direct
-object equality, including strict x86 v1 compilation and 12 native Apple ARM
-oracle executions. Cross-generated x86 objects were not executed. Review logs,
-the external CLI harness, compiler hash and generated captures are retained at
-`/tmp/keel-canonical-review-20261023-*`.
-Final validation includes main through `9265dcf9`: 574 optimizer tests and 131
-targeted codegen tests pass (two opt-in tests ignored in each group). The newly
-built release compiler also completes the checked-in SIMD comparison harness:
-224 rows across four profiles, eight passing capability probes, and native
-Apple ARM checks. The report is
-`/tmp/keel-canonical-review-20261023-simd-final/report.json`; this run requests
-no compilation/runtime timing measurements. The release compiler repeats the
-24-configuration CLI oracle matrix successfully.
+Round 2 on main through `9265dcf9` passes 575 optimizer tests (two opt-in
+tests ignored) and 144 targeted codegen tests. A rebuilt release CLI passes 48
+sample/target/selector/allocator configurations: both samples, x86 v1/v2/v3 and
+baseline Apple ARM, all three selectors and both allocators, with text/direct
+object equality. Twelve ARM configurations execute the native bit-pattern
+oracle; x86 output is cross-generated and is not executed. The maintained
+`suite/simd-compare/run.py` also completes 224 rows across all four profiles,
+with eight passing capability probes and native Apple ARM correctness checks.
+This harness run requests no timing measurements. Earlier general-composition
+measurements do not describe the final supported scope.
 
-### Applicability evidence
+### Revised applicability and compilation-cost evidence
 
-The four-function codegen sample covers lane/bitcast copies, composed qword
-shuffles, a nonzero splat mask and a widening chain. Its 100-copy synthetic
-corpus (400 functions) falls from 2,500 to 1,600 IR instructions after
-`instcombine,gvn,instcombine,dce`. The sample's total text shrinks from 435 to
-233 bytes on x86 Baseline, 403 to 217 on x86 Trees/Full, and 248 to 200 on
-AArch64; both allocators give the same sizes. These are output-size results,
-not runtime speedup measurements or evidence of general application wins.
+The four-function codegen sample covers lane/bitcast copies, a preserved qword
+shuffle chain, a nonzero splat mask and a widening chain. Its 100-copy synthetic
+corpus (400 functions) falls from 2,500 to 1,700 IR instructions under
+`instcombine,gvn,instcombine,dce`. With the current combined SSE2 selectors, the
+sample's text shrinks from 387 to 201 bytes on x86 Baseline, 371 to 201 on x86
+Trees/Full, and 248 to 204 on ARM; both allocators give the same sizes. The
+counterexample sample stays at 808 bytes on x86 Baseline, 440 on Trees/Full and
+148 on ARM. These are compact synthetic output-size observations, not runtime
+speedup or general application claims.
 
-Four checked-in scalar helper fixtures (198 input instructions) and 34 retained
-Lua IR files (81,220 input instructions) produce identical output before/after
-this change, with 193 and 51,442 output instructions respectively. The retained
-Lua captures are diagnostic application IR, not a versioned application corpus.
-No concrete new loop-vectorization missed case was established by these probes.
+The retained external release-mode cost driver parses once, then measures
+module cloning, the four-pass cleanup pipeline and destruction. Each process
+collects nine samples of 50 complete corpus cleanups, discards the first sample
+and reports the median. Parsing, backend compilation and Rust builds are
+excluded. Runs are serialized with `suite/fast_opt_locked.py` in
+baseline/revised/revised/baseline order. The comparator is the retained
+pre-feature `9ffab6bcdb610b74f9ac0fd92bfd6b1a4dd848a0` binary, whose SHA-256
+matches the original provenance. This comparison spans other main changes; it
+does not isolate the cost of this round's profitability gate.
 
-### Compilation-cost evidence
+Median time per cleanup is 0.02018 versus 0.02104 ms for four scalar fixtures
+(+4.25%), 11.617 versus 11.698 ms for 34 retained Lua IR files (+0.70%), and
+0.3076 versus 0.4095 ms for the synthetic vector corpus (+33.1%). The two
+process medians for the vector corpus span 0.3063–0.3090 ms before and
+0.3970–0.4221 ms revised. Scalar output counts remain 193 of 198 input
+instructions and 51,442 of 81,220 respectively. The Lua captures are diagnostic
+application IR, not a versioned application corpus. Host load and the historical
+comparator limit causal interpretation; the vector-heavy synthetic corpus
+still pays measurable cleanup overhead. No end-to-end compiler-throughput or
+runtime benefit is claimed.
 
-An external release-mode driver compares baseline
-`9ffab6bcdb610b74f9ac0fd92bfd6b1a4dd848a0` with this change on MacHost. It parses
-once, then times module cloning, the four-pass cleanup pipeline and destruction;
-parsing, backend compilation and Rust build time are excluded. Each sample runs
-50 corpus cleanups; each process takes nine samples and discards the first.
-The order is baseline/change/change/baseline, under the shared
-`suite/fast_opt_locked.py` lock. Each checkout has its own cargo-managed target.
-
-Median time per complete corpus cleanup is about 0.0198 ms for both scalar
-helper variants (+0.16%), 10.503 versus 10.553 ms for Lua (+0.48%), and 0.265
-versus 0.401 ms for the synthetic vector corpus (+51.2%). The two process
-medians span 10.481–10.524 ms before and 10.508–10.597 ms after for Lua. These
-wall-clock probes do not establish a scalar regression or improvement; the
-vector-heavy synthetic corpus clearly pays extra work for the new rewrites.
-There is no end-to-end compiler-throughput or runtime claim.
-
-Build metadata, external benchmark driver/source snapshots, corpus hashes,
-raw timings, test logs, generated IR/assembly/objects and the native oracle are
-outside Git at `/tmp/keel-vector-canonical-20261023/`. To reproduce the retained
-cost probe, run `python3 suite/fast_opt_locked.py /tmp/vector-cost.jsonl python3
-/tmp/keel-vector-canonical-20261023/measure.py`. To retain new codegen captures,
-set `KEEL_VECTOR_CANONICAL_EVIDENCE` when running its dedicated test.
+Artifacts remain outside Git: `/tmp/keel-canonical-r2-evidence/` contains IR,
+assembly, objects, oracles and the 48-configuration CLI report;
+`/tmp/keel-canonical-r2-simd/report.json` contains the maintained harness results;
+`/tmp/keel-canonical-r2-cost/` contains the driver, corpus hashes, raw timings
+and binary provenance. Test/build/measurement commands and lock metadata are
+in `/tmp/keel-canonical-r2-unique.jsonl`. Reproduce the retained cleanup cost
+probe with `python3 suite/fast_opt_locked.py /tmp/vector-r2-cost.jsonl python3
+/tmp/keel-canonical-r2-cost/measure.py`. Set `KEEL_VECTOR_CANONICAL_EVIDENCE`
+when rerunning the dedicated codegen test to retain its generated captures.
 
 ## x86 lowering and calling convention
 
