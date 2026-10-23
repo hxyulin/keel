@@ -1,6 +1,9 @@
 # AVX2 signed m128 widening load pilot
 
-This backend-only pilot starts at `6ff8911b975a7d18007d1416c9c40abfa457b67f`.
+This backend-only pilot originally started at
+`6ff8911b975a7d18007d1416c9c40abfa457b67f`; review rebased it onto
+`96a1fad9eac3e9aa24dc42760ae3706aa6c5c14d`, including the reviewed conservative
+context and default 128-bit policy.
 It emits `vpmovsxdq ymmResult,xmmword ptr [address]` for an existing native
 `load.i32x4` immediately followed by `swiden_low.i64x4`. The optimizer,
 capability context, CLI, ABI, and default 128-bit reduction policy are unchanged.
@@ -109,8 +112,41 @@ a subsequent check found that **round-tripping main128 through textual IR does
 not reproduce that object** (the symbol becomes 305 bytes). Consequently the
 observed 12.4% lower time than the main128 reference is not a controlled
 same-input-path width-policy comparison. No controlled profitability claim
-against main128 is made, and no second timing probe was run. The latest context
-candidate has not been combined or assessed by this task.
+against main128 is made, and no second timing probe was run. These historical
+timings predate the conservative-context rebase; no runtime profitability probe
+of the combined context and cover has been performed.
+
+## Independent review after rebase, 2026-10-23
+
+At rebased cover commit `309bd8af`, the dedicated suite again passes all six
+tests in debug and release, including the independent Clang encoding oracle.
+The 114 library tests and focused baseline widening, m64 signed-load, PMULLD,
+generic AVX256, explicit-feature, wide-conversion and wide-transport suites
+also pass (the two existing PMULLD measurement tests stay ignored).
+Commands are recorded in `/tmp/keel-wide-load-review-unique.jsonl`, serialized
+through `suite/fast_opt_locked.py`, using cargo with `--offline --locked -j2` and
+`CARGO_CACHE_LINKS=0`.
+
+A fresh LinuxHost run of all 72 exported configurations passes the 18 AVX2 cases
+and fails all 54 AVX-without-AVX2 cases with exit 2. All 72 ELF objects and C
+harnesses are byte-identical to the original pilot exports; all 54 negative
+ELF objects and harnesses are also byte-identical to the frozen `6ff8911b`
+baseline exports. The local report is
+`/tmp/keel-wide-load-review-native-results.json`; fresh exports are in
+`/tmp/keel-wide-load-review-20261023` locally and on LinuxHost. This rerun is a
+correctness oracle, not another timing probe.
+
+Fresh m64 and PMULLD control exports are byte-identical to their previously
+passing native controls (108 objects per suite, plus their C harnesses).
+Those control suites were rerun locally; their native executions were not
+repeated during review. Exports are in
+`/tmp/keel-wide-load-review-{m64,pmulld}-20261023`.
+
+No cover-path correctness blocker was found. The AVX-only numerical gate is
+still **failing**, pending the separately owned fallback correction. Parent
+integration must rebase onto that correction and rerun the negative numerical
+oracles before final approval. This review does not change `vector.rs`,
+fallback tests, optimizer policy, or defaults.
 
 ## Evidence outside Git
 
