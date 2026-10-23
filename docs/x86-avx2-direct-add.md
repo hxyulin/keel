@@ -137,3 +137,67 @@ discarded. Raw LinuxHost stage samples and lock metadata are in
 `compile-{base,candidate}/measure/compile-ns.csv` and `compile-lock.jsonl`
 beneath the native evidence directory. Rust build wall times depend on cache
 state and are not compared.
+
+## Independent review on current main
+
+Candidate `82cc18e7989a00f6cb3f80e2f8c3ca49322a98a6` was reapplied as
+`d091624417ece9e15cf73a34d6a80cd183a6be35` onto main `e410b213` in the
+isolated `review/avx2-direct-add` worktree. That main adds only the controlled
+width runner and its documentation above the original base. Review found no
+implementation blocker. The production change remains confined to the generic
+wide integer-add branch in `avx256.rs`; no frontend, optimizer, context, default
+width, address folding or FP selection change was needed.
+
+The review traced physical register-pool filtering (including XMM/YMM alias
+views), resolved operand locations, distinct FS0/FS1 reloads, result aliases,
+live sources and full-width spill completion through the existing helpers.
+The controlled test now additionally asserts the all-spilled instruction
+window for every integer shape and selector: two 256-bit reloads, the add,
+then the immediate 256-bit result store. Equal/resolved-alias sources must
+reload the same home; distinct sources must reload different homes. This
+guards against a narrow transfer, scratch clobber or omitted spill completion
+being hidden by an otherwise correct add-register assertion.
+
+Fresh MacHost debug and release runs passed the three dedicated tests, three
+existing generic/ABI tests, wide conversion test and signed-sum test. Both
+debug and release emission-guard runs passed. The dedicated matrix retains
+text/typed/chunk parity, typed feature requirements, v1/v2 rejection and AVX-only
+fallback checks. Focused Clippy completed with existing library warnings and
+none in the owned test; the owned file passes rustfmt. Workspace-wide formatting
+still reports unrelated existing differences, which were left untouched.
+
+Fresh exports passed all 47 dedicated native oracles on LinuxHost with both
+Clang 23.1.1 and GCC 16.2.0, including all four modular integer shapes, aliases,
+live sources across `vzeroall`, constrained/empty pools, controlled spills,
+unaligned pointers, guard boundaries, canaries and unchanged MXCSR. All 36
+fresh generic, wide SysV ABI and conversion oracles also passed with Clang.
+The temporary ABI runner initially put its unused-parameter exemption before
+`-Wextra`, causing 12 harness compilation failures; correcting the flag order
+produced the passing 36-oracle run. No generated program failed execution.
+All native runs held the shared investigation lock. Native object/C hashes
+match the local release exports; all 47 dedicated debug/release objects also
+match each other and the original candidate exports.
+
+The current ignored fixed-width gate reproduced the candidate's saved IR,
+assembly and object bytes exactly, including 102 instructions and 350 text
+bytes. Independent comparison confirmed all ten memory instructions in order
+and assembler metadata are identical to base. Review recalculated the documented
+kernel and compiler-stage medians from the retained raw samples and inspected
+the frozen input, explicit wide context, flags, driver, affinity and lock/load
+records. No native timing campaign was repeated; local stage samples from the
+byte-reproduction run are not performance evidence. The original bounded
+measurement interpretation and absence of an application speedup claim remain.
+
+Review logs, audit JSON and exports are under
+`/tmp/keel-direct-add-review-*` on MacHost. LinuxHost evidence is under
+`/tmp/keel-direct-add-review-588c27f8`, including independent GNU disassembly
+of the all-spilled controlled object. Native report SHA-256 values are
+`0b1478a63114d709cb0264e7b45128996b01a0ffcd4a873bbb9b1f810fc306af`
+(47 Clang),
+`2b22c97ae860de99a34f3dc0b3b02c43f720fb080422d5fbf93551d6803430bd`
+(47 GCC), and
+`0505a106fa25ab510a5677dec125af92fdb9598ef8bf552a6caaa211797ba5f3`
+(36 regression). This remains finite backend/encoding/native validation on
+AVX2 hardware, not exhaustive ISA certification, a frontend expansion or
+execution on an AVX-only/v1/v2 CPU. FP behavior beyond the unchanged paths and
+MXCSR checks is not newly established.

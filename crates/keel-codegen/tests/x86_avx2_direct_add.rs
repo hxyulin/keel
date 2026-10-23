@@ -327,6 +327,29 @@ fn add_controlled_register_aliases_and_spills() {
                         add.ends_with(&format!("ymm{d}, ymm{a}, ymm{b}")),
                         "{label}: {add}"
                     );
+                    if layout == 4 {
+                        // Both reloads must finish before FS0 is overwritten,
+                        // and the complete result must reach its spill home
+                        // immediately. Check the instruction window so neither
+                        // a narrow XMM transfer nor extra staging can hide
+                        // behind the correct add-register assertion above.
+                        let instructions: Vec<_> = body
+                            .lines()
+                            .filter(|l| l.starts_with('\t') && !l.starts_with("\t#"))
+                            .collect();
+                        let index = instructions.iter().position(|l| *l == add).unwrap();
+                        assert!(
+                            instructions[index - 2].starts_with("\tvmovups\tymm13, ymmword ptr [")
+                        );
+                        assert!(
+                            instructions[index - 1].starts_with("\tvmovups\tymm14, ymmword ptr [")
+                        );
+                        assert!(instructions[index + 1].starts_with("\tvmovups\tymmword ptr ["));
+                        assert!(instructions[index + 1].ends_with(", ymm13"));
+                        let left = instructions[index - 2].split_once("ptr ").unwrap().1;
+                        let right = instructions[index - 1].split_once("ptr ").unwrap().1;
+                        assert_eq!(left == right, mode == 1 || mode == 2);
+                    }
                 }
             }
             let stem = format!("controlled-{s:?}-{layout}");
